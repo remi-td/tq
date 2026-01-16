@@ -1,0 +1,29 @@
+[package]
+name = "tq"
+version = "0.1.0"
+edition = "2021"
+authors = ["Teradata Query Contributors"]
+description = "A lightweight Rust command line client for Teradata databases"
+license = "MIT"
+readme = "Readme.md"
+repository = "https://github.com/remi-td/tq"
+keywords = ["teradata", "database", "cli", "sql"]
+categories = ["command-line-utilities", "database"]
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+anyhow = "1.0"
+thiserror = "1.0"
+teradatarustapi = { git = "https://github.com/Teradata/teradatarustapi" }
+once_cell = "1.19"
+serde_json = "1.0"
+secrecy = { version = "0.8", features = ["serde"] }
+log = "0.4"
+env_logger = "0.11"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
