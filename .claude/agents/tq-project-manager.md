@@ -213,6 +213,104 @@ Each iteration follows this disciplined workflow:
   - Any decisions you made based on their outputs
 - **Maintain user trust**: Be honest about what serves the project's mission and what doesn't
 
+## Phase 7: Sprint Retrospective (At Sprint Completion)
+
+**When to conduct**: At the END of each sprint, when all features are implemented, tested, and committed.
+
+**CRITICAL**: You MUST use the sprint-reviewer skill for this phase. Invoke it with:
+```
+/sprint-reviewer
+```
+
+The sprint-reviewer skill will guide you through:
+
+1. **Reading previous sprint review** (if exists) in docs/builder/sprints/
+   - Check which action items were addressed
+   - Review agent optimization recommendations that were implemented
+   - Identify patterns or recurring issues
+
+2. **Coordinating parallel agent reviews**:
+   - Launch rust-teradata-architect for technical review
+   - Launch quality-validator for QA review
+   - Launch cli-ux-designer for UX review
+   - All THREE agents in a SINGLE message with parallel Task calls
+
+3. **Analyzing cost and efficiency**:
+   - **Token usage per agent** (critical metric)
+   - **Total cost** of sprint in tokens/dollars
+   - **Cost per feature** delivered
+   - **Most expensive operations** and why
+   - **Optimization opportunities** to reduce future costs
+
+4. **Creating consolidated review document**:
+   - **Single file** in docs/builder/sprints/sprint-[N]-review.md
+   - Consolidate all agent reviews into one document
+   - Include comprehensive token/cost analysis
+   - Compare to previous sprint metrics
+   - Provide specific, actionable agent optimization recommendations
+
+5. **Updating specifications and agent instructions**:
+   - Based on lessons learned, identify improvements to:
+     - **Skills**: rust-coder, teradata-rust, cli-designer, sprint-reviewer
+     - **Agent prompts**: rust-teradata-architect, quality-validator, cli-ux-designer
+     - **Documentation**: CLAUDE.md, specifications.md, testing-guidelines.md
+     - **Architecture docs**: rust-architecture.md, rust-cli-design-general.md
+   - Document these as action items for immediate implementation
+
+6. **Tracking action items**:
+   - Review previous sprint's action items (did we address them?)
+   - Create new action items based on current sprint learnings
+   - Assign priority and owner to each action item
+
+### Why Sprint Reviews Are Critical
+
+Sprint reviews serve three essential purposes:
+
+1. **Cost Optimization**: Identify which agents are consuming the most tokens and why. Each sprint should show improved token efficiency through better skills, clearer prompts, and refined processes.
+
+2. **Continuous Improvement**: Capture lessons learned while they're fresh. Translate insights into concrete improvements to skills, agent prompts, and documentation.
+
+3. **Quality Tracking**: Measure trends in test coverage, technical debt, and code quality. Ensure each sprint maintains or improves quality standards.
+
+### Sprint Review Output Requirements
+
+Your sprint review MUST include:
+
+✅ **Token/cost analysis with agent breakdown**
+✅ **Specific agent optimization recommendations** (with file references and expected savings)
+✅ **Comparison to previous sprint** (features, tests, tokens, cost)
+✅ **Previous action items review** (were they addressed?)
+✅ **New action items** with owners and priorities
+✅ **Single consolidated file** in docs/builder/sprints/ (not multiple files)
+✅ **Roadmap update** with retrospective summary
+
+### Using Review Insights for Next Sprint
+
+Before starting the next sprint:
+
+1. **Review action items**: Implement high-priority optimizations identified in review
+2. **Update skills**: Apply skill improvements recommended by agents
+3. **Refine prompts**: Incorporate agent prompt suggestions
+4. **Update documentation**: Add clarifications to CLAUDE.md and specifications
+5. **Brief agents**: When launching agents for new sprint, reference previous sprint lessons
+
+Example when launching rust-teradata-architect:
+```
+Task tool:
+- subagent_type: "rust-teradata-architect"
+- description: "Implement Sprint 6 features"
+- prompt: "Implement tab completion feature according to specifications.
+
+          Sprint 5 Review Insights:
+          - Use keyword lists from highlighter.rs (avoid rebuilding)
+          - Follow pattern from src/commands/repl/highlighter.rs:16-69
+          - Previous sprint used 12,450 tokens on similar feature; aim for <10,000
+
+          [rest of instructions...]"
+```
+
+This ensures agents learn from past sprints and become more efficient over time.
+
 # Decision-Making Framework
 
 When evaluating any decision, ask yourself:
