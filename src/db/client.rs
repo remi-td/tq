@@ -186,8 +186,11 @@ impl DatabaseClient {
             teradatarustapi::rustgo_create_rows_wrapper(u_log, conn_handle, sql, bind_values)
                 .map_err(|e| self.map_query_error(&e, sql))?;
 
-        // Fetch all rows
-        let (columns, rows) = self.fetch_all_rows(u_log, rows_handle)?;
+        // Get column metadata from the API
+        let columns = self.fetch_column_metadata(u_log, rows_handle)?;
+
+        // Fetch all rows with known column metadata
+        let rows = self.fetch_all_rows(u_log, rows_handle, &columns)?;
 
         // Close result set
         teradatarustapi::go_close_rows_wrapper(u_log, rows_handle)
@@ -214,8 +217,11 @@ impl DatabaseClient {
             teradatarustapi::rustgo_create_rows_wrapper(u_log, conn_handle, sql, bind_values)
                 .map_err(|e| self.map_query_error(&e, sql))?;
 
-        // Fetch rows up to limit
-        let (columns, rows) = self.fetch_rows_limited(u_log, rows_handle, limit)?;
+        // Get column metadata from the API
+        let columns = self.fetch_column_metadata(u_log, rows_handle)?;
+
+        // Fetch rows up to limit with known column metadata
+        let rows = self.fetch_rows_limited(u_log, rows_handle, limit, &columns)?;
 
         // Close result set
         teradatarustapi::go_close_rows_wrapper(u_log, rows_handle)
@@ -226,15 +232,91 @@ impl DatabaseClient {
         Ok(QueryResult::new(columns, rows, start.elapsed()))
     }
 
-    /// Fetch all rows from result set
+    /// Fetch column metadata from the result set
+    ///
+    /// Uses rustgo_result_metadata_wrapper to get actual column names and types
+    fn fetch_column_metadata(&self, u_log: u64, rows_handle: u64) -> Result<Vec<ColumnMetadata>> {
+        let (_, _, _, column_metadata_json) =
+            teradatarustapi::rustgo_result_metadata_wrapper(u_log, rows_handle)
+                .map_err(|e| TqError::MetadataFetch(e.to_string()))?;
+
+        log::debug!("Column metadata JSON: {}", column_metadata_json);
+
+        self.parse_column_metadata(&column_metadata_json)
+    }
+
+    /// Parse column metadata JSON from teradatarustapi
+    ///
+    /// The Teradata API returns column-oriented data (map of arrays):
+    /// ```json
+    /// {
+    ///   "ColumnName": ["test_col", "another_col"],
+    ///   "TypeName": ["BYTEINT", "VARCHAR"],
+    ///   "Nullable": [false, true],
+    ///   "Precision": [3, 100],
+    ///   "Scale": [0, 0],
+    ///   "MaxByteCount": [1, 100]
+    /// }
+    /// ```
+    fn parse_column_metadata(&self, metadata_json: &str) -> Result<Vec<ColumnMetadata>> {
+        // Handle empty metadata (e.g., for DDL statements)
+        if metadata_json.is_empty() || metadata_json == "null" || metadata_json == "{}" {
+            return Ok(Vec::new());
+        }
+
+        // Teradata API returns column-oriented data (map of arrays)
+        #[derive(serde::Deserialize)]
+        struct MetadataMap {
+            #[serde(rename = "ColumnName")]
+            column_names: Vec<String>,
+            #[serde(rename = "TypeName")]
+            type_names: Vec<String>,
+            #[serde(rename = "Nullable", default)]
+            nullable: Vec<bool>,
+        }
+
+        let metadata_map: MetadataMap =
+            serde_json::from_str(metadata_json).map_err(|e| TqError::MetadataParsing {
+                message: format!("Failed to parse column metadata: {}", e),
+            })?;
+
+        // Verify array lengths match
+        let num_columns = metadata_map.column_names.len();
+        if metadata_map.type_names.len() != num_columns {
+            return Err(TqError::MetadataParsing {
+                message: format!(
+                    "Metadata array length mismatch: {} column names but {} type names",
+                    num_columns,
+                    metadata_map.type_names.len()
+                ),
+            });
+        }
+
+        // Transpose from column-oriented to row-oriented format
+        let columns: Vec<ColumnMetadata> = metadata_map
+            .column_names
+            .into_iter()
+            .zip(metadata_map.type_names)
+            .enumerate()
+            .map(|(i, (name, type_name))| {
+                let nullable = metadata_map.nullable.get(i).copied().unwrap_or(true);
+                let data_type = map_type_name_to_teradata_type(&type_name);
+                ColumnMetadata::new(name, data_type, nullable)
+            })
+            .collect();
+
+        Ok(columns)
+    }
+
+    /// Fetch all rows from result set using pre-fetched column metadata
     fn fetch_all_rows(
         &self,
         u_log: u64,
         rows_handle: u64,
-    ) -> Result<(Vec<ColumnMetadata>, Vec<Row>)> {
+        columns: &[ColumnMetadata],
+    ) -> Result<Vec<Row>> {
         let mut rows = Vec::new();
         let mut row_num = 0;
-        let mut columns: Option<Vec<ColumnMetadata>> = None;
 
         while let Some(row_json) = teradatarustapi::rustgo_fetch_row_wrapper(u_log, rows_handle)
             .map_err(|e| TqError::RowFetch {
@@ -249,30 +331,25 @@ impl DatabaseClient {
                     message: e.to_string(),
                 })?;
 
-            // Extract column metadata from first row
-            if columns.is_none() {
-                columns = Some(self.infer_columns(&values));
-            }
-
-            // Convert to typed values
-            let row = self.convert_row(&values, columns.as_ref().unwrap())?;
+            // Convert to typed values using actual column metadata
+            let row = self.convert_row(&values, columns)?;
             rows.push(row);
             row_num += 1;
         }
 
-        Ok((columns.unwrap_or_default(), rows))
+        Ok(rows)
     }
 
-    /// Fetch rows up to limit
+    /// Fetch rows up to limit using pre-fetched column metadata
     fn fetch_rows_limited(
         &self,
         u_log: u64,
         rows_handle: u64,
         limit: usize,
-    ) -> Result<(Vec<ColumnMetadata>, Vec<Row>)> {
+        columns: &[ColumnMetadata],
+    ) -> Result<Vec<Row>> {
         let mut rows = Vec::new();
         let mut row_num = 0;
-        let mut columns: Option<Vec<ColumnMetadata>> = None;
 
         while rows.len() < limit {
             match teradatarustapi::rustgo_fetch_row_wrapper(u_log, rows_handle) {
@@ -283,11 +360,7 @@ impl DatabaseClient {
                             message: e.to_string(),
                         })?;
 
-                    if columns.is_none() {
-                        columns = Some(self.infer_columns(&values));
-                    }
-
-                    let row = self.convert_row(&values, columns.as_ref().unwrap())?;
+                    let row = self.convert_row(&values, columns)?;
                     rows.push(row);
                     row_num += 1;
                 }
@@ -301,33 +374,7 @@ impl DatabaseClient {
             }
         }
 
-        Ok((columns.unwrap_or_default(), rows))
-    }
-
-    /// Infer column metadata from JSON values
-    ///
-    /// Since teradatarustapi returns JSON, we infer types from values
-    fn infer_columns(&self, values: &[serde_json::Value]) -> Vec<ColumnMetadata> {
-        values
-            .iter()
-            .enumerate()
-            .map(|(i, v)| {
-                let data_type = match v {
-                    serde_json::Value::Null => TeradataType::Unknown,
-                    serde_json::Value::Bool(_) => TeradataType::Boolean,
-                    serde_json::Value::Number(n) => {
-                        if n.is_i64() {
-                            TeradataType::Integer
-                        } else {
-                            TeradataType::Decimal
-                        }
-                    }
-                    serde_json::Value::String(_) => TeradataType::Varchar,
-                    _ => TeradataType::Unknown,
-                };
-                ColumnMetadata::new(format!("col{}", i + 1), data_type, true)
-            })
-            .collect()
+        Ok(rows)
     }
 
     /// Convert JSON values to typed Row
@@ -433,6 +480,43 @@ impl DatabaseClient {
     }
 }
 
+/// Map Teradata type name string to TeradataType enum
+fn map_type_name_to_teradata_type(type_name: &str) -> TeradataType {
+    // Remove any length/precision info in parentheses, e.g., "VARCHAR(100)" -> "VARCHAR"
+    let base_type = type_name
+        .split('(')
+        .next()
+        .unwrap_or(type_name)
+        .trim()
+        .to_uppercase();
+
+    match base_type.as_str() {
+        "INTEGER" | "INT" | "I" => TeradataType::Integer,
+        "BIGINT" | "I8" => TeradataType::BigInt,
+        "SMALLINT" | "I2" => TeradataType::SmallInt,
+        "BYTEINT" | "I1" => TeradataType::SmallInt, // Map BYTEINT to SmallInt
+        "DECIMAL" | "NUMERIC" | "NUMBER" | "D" => TeradataType::Decimal,
+        "FLOAT" | "DOUBLE" | "DOUBLE PRECISION" | "REAL" | "F" => TeradataType::Float,
+        "CHAR" | "CHARACTER" | "CF" | "CV" => TeradataType::Char,
+        "VARCHAR" | "CHARACTER VARYING" | "LONG VARCHAR" => TeradataType::Varchar,
+        "DATE" | "DA" => TeradataType::Date,
+        "TIME" | "AT" => TeradataType::Time,
+        "TIMESTAMP" | "TS" | "TIMESTAMP WITH TIME ZONE" | "TIMESTAMP WITH ZONE" | "TZ" | "SZ" => {
+            TeradataType::Timestamp
+        }
+        "BOOLEAN" | "BOOL" => TeradataType::Boolean,
+        "BLOB" | "BINARY LARGE OBJECT" | "BF" | "BV" => TeradataType::Blob,
+        "CLOB" | "CHARACTER LARGE OBJECT" => TeradataType::Clob,
+        "JSON" | "JN" => TeradataType::Varchar, // JSON mapped to Varchar for display
+        "XML" => TeradataType::Varchar,         // XML mapped to Varchar for display
+        "INTERVAL" => TeradataType::Varchar,    // Intervals displayed as strings
+        _ => {
+            log::debug!("Unknown Teradata type: {}, defaulting to Varchar", type_name);
+            TeradataType::Unknown
+        }
+    }
+}
+
 /// Try to extract table name from SQL for error messages
 fn extract_table_name(sql: &str) -> Option<String> {
     let sql_upper = sql.to_uppercase();
@@ -486,5 +570,210 @@ mod tests {
             extract_table_name("UPDATE orders SET status = 'done'"),
             Some("orders".to_string())
         );
+    }
+
+    #[test]
+    fn test_map_type_name_to_teradata_type_integer_types() {
+        assert!(matches!(
+            map_type_name_to_teradata_type("INTEGER"),
+            TeradataType::Integer
+        ));
+        assert!(matches!(
+            map_type_name_to_teradata_type("INT"),
+            TeradataType::Integer
+        ));
+        assert!(matches!(
+            map_type_name_to_teradata_type("BIGINT"),
+            TeradataType::BigInt
+        ));
+        assert!(matches!(
+            map_type_name_to_teradata_type("SMALLINT"),
+            TeradataType::SmallInt
+        ));
+    }
+
+    #[test]
+    fn test_map_type_name_to_teradata_type_string_types() {
+        assert!(matches!(
+            map_type_name_to_teradata_type("VARCHAR"),
+            TeradataType::Varchar
+        ));
+        assert!(matches!(
+            map_type_name_to_teradata_type("VARCHAR(100)"),
+            TeradataType::Varchar
+        ));
+        assert!(matches!(
+            map_type_name_to_teradata_type("CHAR"),
+            TeradataType::Char
+        ));
+        assert!(matches!(
+            map_type_name_to_teradata_type("CHAR(10)"),
+            TeradataType::Char
+        ));
+    }
+
+    #[test]
+    fn test_map_type_name_to_teradata_type_date_time_types() {
+        assert!(matches!(
+            map_type_name_to_teradata_type("DATE"),
+            TeradataType::Date
+        ));
+        assert!(matches!(
+            map_type_name_to_teradata_type("TIME"),
+            TeradataType::Time
+        ));
+        assert!(matches!(
+            map_type_name_to_teradata_type("TIMESTAMP"),
+            TeradataType::Timestamp
+        ));
+    }
+
+    #[test]
+    fn test_map_type_name_to_teradata_type_case_insensitive() {
+        assert!(matches!(
+            map_type_name_to_teradata_type("integer"),
+            TeradataType::Integer
+        ));
+        assert!(matches!(
+            map_type_name_to_teradata_type("Integer"),
+            TeradataType::Integer
+        ));
+        assert!(matches!(
+            map_type_name_to_teradata_type("VARCHAR"),
+            TeradataType::Varchar
+        ));
+    }
+
+    #[test]
+    fn test_map_type_name_to_teradata_type_unknown() {
+        assert!(matches!(
+            map_type_name_to_teradata_type("CUSTOM_TYPE"),
+            TeradataType::Unknown
+        ));
+    }
+
+    // Helper to create a mock DatabaseClient for testing parse_column_metadata
+    fn create_test_client() -> DatabaseClient {
+        let config = ConnectionConfig {
+            host: "test".to_string(),
+            port: 1025,
+            user: "test".to_string(),
+            password: None,
+            database: "test".to_string(),
+            logmech: crate::cli::LogonMechanism::Td2,
+            timeout: std::time::Duration::from_secs(30),
+        };
+        // Skip driver loading for unit tests
+        DatabaseClient {
+            config,
+            driver_lib_dir: ".".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_parse_column_metadata_map_of_arrays_format() {
+        let client = create_test_client();
+
+        // This is the actual format returned by the Teradata API
+        let metadata_json = r#"{
+            "ColumnName": ["test_col", "text_col"],
+            "TypeName": ["BYTEINT", "VARCHAR"],
+            "Nullable": [false, true]
+        }"#;
+
+        let columns = client.parse_column_metadata(metadata_json).unwrap();
+
+        assert_eq!(columns.len(), 2);
+        assert_eq!(columns[0].name, "test_col");
+        assert!(matches!(columns[0].data_type, TeradataType::SmallInt)); // BYTEINT maps to SmallInt
+        assert!(!columns[0].nullable);
+
+        assert_eq!(columns[1].name, "text_col");
+        assert!(matches!(columns[1].data_type, TeradataType::Varchar));
+        assert!(columns[1].nullable);
+    }
+
+    #[test]
+    fn test_parse_column_metadata_empty_cases() {
+        let client = create_test_client();
+
+        // Empty string
+        let columns = client.parse_column_metadata("").unwrap();
+        assert!(columns.is_empty());
+
+        // Null
+        let columns = client.parse_column_metadata("null").unwrap();
+        assert!(columns.is_empty());
+
+        // Empty object
+        let columns = client.parse_column_metadata("{}").unwrap();
+        assert!(columns.is_empty());
+    }
+
+    #[test]
+    fn test_parse_column_metadata_missing_nullable() {
+        let client = create_test_client();
+
+        // Nullable field is optional and should default to true
+        let metadata_json = r#"{
+            "ColumnName": ["col1"],
+            "TypeName": ["INTEGER"]
+        }"#;
+
+        let columns = client.parse_column_metadata(metadata_json).unwrap();
+
+        assert_eq!(columns.len(), 1);
+        assert_eq!(columns[0].name, "col1");
+        assert!(columns[0].nullable); // Default to true when not specified
+    }
+
+    #[test]
+    fn test_parse_column_metadata_multiple_columns() {
+        let client = create_test_client();
+
+        let metadata_json = r#"{
+            "ColumnName": ["id", "name", "created_at", "amount"],
+            "TypeName": ["INTEGER", "VARCHAR", "TIMESTAMP", "DECIMAL"],
+            "Nullable": [false, true, true, true]
+        }"#;
+
+        let columns = client.parse_column_metadata(metadata_json).unwrap();
+
+        assert_eq!(columns.len(), 4);
+
+        assert_eq!(columns[0].name, "id");
+        assert!(matches!(columns[0].data_type, TeradataType::Integer));
+        assert!(!columns[0].nullable);
+
+        assert_eq!(columns[1].name, "name");
+        assert!(matches!(columns[1].data_type, TeradataType::Varchar));
+        assert!(columns[1].nullable);
+
+        assert_eq!(columns[2].name, "created_at");
+        assert!(matches!(columns[2].data_type, TeradataType::Timestamp));
+        assert!(columns[2].nullable);
+
+        assert_eq!(columns[3].name, "amount");
+        assert!(matches!(columns[3].data_type, TeradataType::Decimal));
+        assert!(columns[3].nullable);
+    }
+
+    #[test]
+    fn test_parse_column_metadata_mismatched_array_lengths() {
+        let client = create_test_client();
+
+        let metadata_json = r#"{
+            "ColumnName": ["col1", "col2"],
+            "TypeName": ["INTEGER"]
+        }"#;
+
+        let result = client.parse_column_metadata(metadata_json);
+        assert!(result.is_err());
+
+        if let Err(TqError::MetadataParsing { message }) = result {
+            assert!(message.contains("mismatch"));
+        } else {
+            panic!("Expected MetadataParsing error");
+        }
     }
 }

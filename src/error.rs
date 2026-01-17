@@ -77,6 +77,14 @@ pub enum TqError {
     #[error("Ping failed: {0}")]
     PingFailed(String),
 
+    /// Failed to fetch column metadata
+    #[error("Failed to fetch column metadata: {0}")]
+    MetadataFetch(String),
+
+    /// Failed to parse column metadata
+    #[error("Failed to parse column metadata: {message}")]
+    MetadataParsing { message: String },
+
     // ========================================================================
     // Configuration Errors
     // ========================================================================

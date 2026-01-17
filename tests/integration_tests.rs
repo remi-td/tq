@@ -536,3 +536,82 @@ fn test_format_options_with_builder() {
     assert!(opts.table.use_color);
     assert!(opts.json.pretty);
 }
+
+// =============================================================================
+// Live Database Integration Tests (require TQ_LOGON environment variable)
+// =============================================================================
+
+/// Test that actual column names are returned from query metadata
+///
+/// This test validates the fix for the metadata parsing bug where the Teradata
+/// API returns map-of-arrays format instead of array-of-objects format.
+///
+/// Run with: cargo test test_actual_column_names_from_metadata -- --ignored
+#[test]
+#[ignore] // Requires live database connection
+fn test_actual_column_names_from_metadata() {
+    use tq::db::DatabaseClient;
+
+    // Load from .env file
+    dotenvy::dotenv().ok();
+    let logon = std::env::var("TQ_LOGON").expect("TQ_LOGON must be set for live database tests");
+
+    let config = ConnectionConfig::from_connection_string(
+        &logon,
+        LogonMechanism::Td2,
+        Duration::from_secs(30),
+        None,
+    )
+    .unwrap();
+    let client = DatabaseClient::new(config, None).unwrap();
+
+    // Execute query with known column names
+    let result = client
+        .execute("SELECT 1 AS test_col, 'hello' AS text_col, NULL AS null_col")
+        .unwrap();
+
+    // Verify actual column names are used (not generic col1, col2, col3)
+    assert_eq!(result.columns.len(), 3, "Expected 3 columns");
+    assert_eq!(result.columns[0].name, "test_col", "First column should be 'test_col'");
+    assert_eq!(result.columns[1].name, "text_col", "Second column should be 'text_col'");
+    assert_eq!(result.columns[2].name, "null_col", "Third column should be 'null_col'");
+
+    // Verify row data
+    assert_eq!(result.rows.len(), 1, "Expected 1 row");
+    assert_eq!(result.rows[0].len(), 3, "Expected 3 columns in row");
+}
+
+/// Test querying multiple columns with different data types
+///
+/// Run with: cargo test test_live_multi_column_query -- --ignored
+#[test]
+#[ignore] // Requires live database connection
+fn test_live_multi_column_query() {
+    use tq::db::DatabaseClient;
+
+    dotenvy::dotenv().ok();
+    let logon = std::env::var("TQ_LOGON").expect("TQ_LOGON must be set for live database tests");
+
+    let config = ConnectionConfig::from_connection_string(
+        &logon,
+        LogonMechanism::Td2,
+        Duration::from_secs(30),
+        None,
+    )
+    .unwrap();
+    let client = DatabaseClient::new(config, None).unwrap();
+
+    // Query with multiple columns named a, b, c
+    let result = client.execute("SELECT 1 AS a, 2 AS b, 3 AS c").unwrap();
+
+    assert_eq!(result.columns.len(), 3);
+    assert_eq!(result.columns[0].name, "a");
+    assert_eq!(result.columns[1].name, "b");
+    assert_eq!(result.columns[2].name, "c");
+
+    // Verify values
+    assert_eq!(result.rows.len(), 1);
+    assert!(matches!(result.rows[0][0], Value::Integer(1)));
+    assert!(matches!(result.rows[0][1], Value::Integer(2)));
+    assert!(matches!(result.rows[0][2], Value::Integer(3)));
+}

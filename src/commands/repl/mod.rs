@@ -35,7 +35,7 @@ pub fn execute<W: Write>(
     let mut state = ReplState::new(client.config().clone());
 
     // Show startup banner
-    print_banner(client, writer)?;
+    print_banner(client, args, writer)?;
 
     // Initialize reedline editor
     let mut editor = create_editor(args)?;
@@ -44,7 +44,15 @@ pub fn execute<W: Write>(
     let prompt = TqPrompt::new();
 
     // Main REPL loop
-    repl_loop(&mut editor, client, &mut state, &prompt, writer, use_color)?;
+    repl_loop(
+        &mut editor,
+        client,
+        &mut state,
+        &prompt,
+        writer,
+        use_color,
+        args.default_limit,
+    )?;
 
     // Clean exit
     writeln!(writer, "Goodbye!")?;
@@ -66,7 +74,11 @@ fn create_editor(args: &ReplArgs) -> Result<Reedline> {
 }
 
 /// Print the startup banner with connection information
-fn print_banner<W: Write>(client: &DatabaseClient, writer: &mut W) -> Result<()> {
+fn print_banner<W: Write>(
+    client: &DatabaseClient,
+    args: &ReplArgs,
+    writer: &mut W,
+) -> Result<()> {
     let config = client.config();
 
     writeln!(writer)?;
@@ -78,6 +90,9 @@ fn print_banner<W: Write>(client: &DatabaseClient, writer: &mut W) -> Result<()>
     writeln!(writer, "Database: {}", config.database)?;
     writeln!(writer, "User: {}", config.user)?;
     writeln!(writer, "Logon Mechanism: {}", config.logmech)?;
+    if args.default_limit > 0 {
+        writeln!(writer, "Default row limit: {}", args.default_limit)?;
+    }
     writeln!(writer)?;
     writeln!(writer, "Type /help for commands, /quit to exit.")?;
     writeln!(writer)?;
@@ -93,6 +108,7 @@ fn repl_loop<W: Write>(
     prompt: &TqPrompt,
     writer: &mut W,
     use_color: bool,
+    default_limit: usize,
 ) -> Result<()> {
     loop {
         // Get the appropriate prompt based on state
@@ -129,8 +145,8 @@ fn repl_loop<W: Write>(
                 if state.input_buffer().trim_end().ends_with(';') {
                     let sql = state.take_input();
 
-                    // Execute the SQL
-                    match execute_sql(client, &sql, writer, use_color) {
+                    // Execute the SQL with default limit for SELECT queries
+                    match execute_sql(client, &sql, writer, use_color, default_limit) {
                         Ok(row_count) => {
                             state.record_query(row_count);
                         }

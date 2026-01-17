@@ -239,7 +239,7 @@ pub struct QueryArgs {
     pub limit: Option<usize>,
 }
 
-/// Arguments for the REPL command (future)
+/// Arguments for the REPL command
 #[derive(Parser, Debug)]
 pub struct ReplArgs {
     /// Disable command history
@@ -257,6 +257,16 @@ pub struct ReplArgs {
     /// Editor mode for key bindings
     #[arg(long, default_value = "emacs", value_name = "MODE")]
     pub editor_mode: EditorMode,
+
+    /// Default row limit for SELECT queries (0 = unlimited)
+    ///
+    /// In REPL mode, SELECT queries without an explicit LIMIT clause will
+    /// be limited to this many rows by default. This prevents accidentally
+    /// flooding the terminal with millions of rows.
+    ///
+    /// Use 0 to disable the default limit (fetch all rows).
+    #[arg(long, default_value = "100", value_name = "N", env = "TQ_REPL_LIMIT")]
+    pub default_limit: usize,
 }
 
 /// Authentication mechanism for Teradata
