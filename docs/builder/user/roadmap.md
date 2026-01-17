@@ -1,19 +1,49 @@
 # tq Roadmap
 
-**Last Updated:** 2026-01-17
-**Version:** 1.3.0
+**Last Updated:** 2026-01-18
+**Version:** 1.4.0
 
 ---
 
-## Current Sprint: Sprint 6 (Interactive Mode Phase 3 - Bug Fixes & Advanced Features)
+## Latest Release: Sprint 6 (Interactive Mode Phase 3 - Bug Fixes & Advanced Features)
 
-**Completed:** Sprint 5
-**In Progress:** Sprint 6
-**Target Completion:** 2026-01-27
+**Status:** COMPLETED
+**Release Date:** 2026-01-18
+**Version:** v1.4.0
 
-Sprint 6 focuses on fixing critical table formatting bug and adding tab completion and export functionality.
+Sprint 6 successfully delivered all P0, P1, and P2 features for advanced REPL functionality.
 
-**Critical Priority:** Address table formatting/padding bug affecting all table output.
+### What's New in v1.4.0
+
+**Tab Completion for SQL Keywords (P1)**
+- Press Tab while typing SQL to auto-complete keywords
+- 50+ SQL keywords supported (SELECT, FROM, WHERE, JOIN, INSERT, UPDATE, etc.)
+- Case-insensitive prefix matching preserves user input casing
+- Multiple matches show as list, Tab cycles through options
+
+**Export Results Command - `/export <format> [file]` (P1)**
+- Export last query results to CSV, JSON, or SQL INSERT format
+- CSV exports with proper RFC 4180 quoting and headers
+- JSON exports with typed values (null, number, string, boolean)
+- SQL exports generate ready-to-execute INSERT statements
+- Can output to file or stdout
+
+**Runtime Pager Control - `/pager on|off` (P2)**
+- Toggle result pagination on/off during session
+- Useful for exploring output without interruption
+- Default: enabled
+- Session-only (resets on REPL restart)
+
+**Syntax Highlighting Toggle - `/colors on|off` (P2)**
+- Disable syntax highlighting for accessibility or preference
+- Affects both SQL editor and result output
+- Auto-detects TTY mode for smart defaults
+- Session-only setting
+
+**Table Formatting Infrastructure (P0)**
+- Enhanced table formatting via comfy-table library
+- Proper column alignment and padding
+- Type-aware column alignment (numeric right, text left)
 
 ### Released Features
 
@@ -48,6 +78,10 @@ Sprint 6 focuses on fixing critical table formatting bug and adding tab completi
 | Enhanced timing display | Detailed query timing breakdown with rows/second | Shipped |
 | Vertical result paging | Navigate long result sets with j/k, PageUp/Down | Shipped |
 | Horizontal result paging | Scroll wide tables with h/l, arrow keys | Shipped |
+| Tab completion | SQL keyword auto-completion with Tab key | Shipped (v1.4.0) |
+| `/export` command | Export results to CSV, JSON, or SQL formats | Shipped (v1.4.0) |
+| `/pager` command | Runtime pagination control (on/off) | Shipped (v1.4.0) |
+| `/colors` command | Runtime syntax highlighting control (on/off) | Shipped (v1.4.0) |
 
 ### Technical Notes
 
