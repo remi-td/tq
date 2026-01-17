@@ -4,126 +4,171 @@ A fast, lightweight command-line client for Teradata databases written in Rust.
 
 ## Features
 
-- Simple one-shot query execution
-- Multiple authentication mechanisms (TD2, LDAP, Kerberos)
-- Multiple output formats (table, JSON, CSV)
-- Secure credential handling
-- Cross-platform support (Linux, macOS, Windows)
-- Zero runtime dependencies (static binary)
+- **One-shot execution model**: connect, execute, close - designed for scripts and CLI usage
+- **Multiple authentication mechanisms**: TD2, LDAP, Kerberos, TDNEGO
+- **Multiple output formats**: table (human-readable), JSON (scripting), CSV (data export)
+- **Secure credential handling**: password files, environment variables, never in shell history
+- **Configuration hierarchy**: CLI args, environment, project config, user config, defaults
+- **Type preservation**: proper handling of numbers, booleans, dates, and NULL values
+- **Streaming support**: efficient handling of large result sets
 
 ## Installation
 
-### From crates.io (once published)
-```bash
-cargo install tq
-```
+### Prerequisites
+
+The Teradata GoSQL driver library is required. The build script automatically handles this.
 
 ### From source
+
 ```bash
 git clone <repository-url>
 cd tq
 cargo install --path .
 ```
 
-### Pre-built binaries
-Download from the [releases page](releases) for your platform.
+### Development
+
+```bash
+cargo build          # Development build
+cargo build --release # Optimized release build
+cargo test           # Run all tests
+```
 
 ## Quick Start
 
 ```bash
-# Basic query with connection string
-tq -l "user:password@host:1025/database" "SELECT * FROM dbc.dbcinfo"
+# Option 1: Set connection details using environment file (recommended for development)
+cp .env.example .env
+# Edit .env and set TQ_LOGON=myuser:mypassword@myteradata:1025/mydatabase
 
-# Using environment variables
+# Option 2: Set connection details in your shell
+export TQ_LOGON="myuser:mypassword@myteradata:1025/mydatabase"
 
-```
-export TQ_HOST=myteradata.company.com
-export TQ_PORT=1025
-export TQ_USER=myuser
-export TQ_PASSWORD=mypassword
-export TQ_DATABASE=mydatabase
-```
-or
-```
-export TQ_LOGON="myuser:mypassword@myteradata.company.com:1025/mydatabase"
-```
+# Test connectivity
+tq ping
 
-tq "SELECT COUNT(*) FROM my_table"
+# Run a query
+tq query "SELECT * FROM dbc.dbcinfo"
 
-# JSON output for scripting
-tq --format json "SELECT user_id, username FROM users" | jq '.[] | .username'
+# Export to JSON
+tq query --format json "SELECT * FROM employees" > employees.json
 
-# CSV export
-tq --format csv "SELECT * FROM sales_data" > sales.csv
+# Export to CSV
+tq query --format csv "SELECT * FROM sales" --output sales.csv
 ```
 
 ## Usage
 
 ```
-Usage: tq [OPTIONS] <QUERY>
+tq is a fast, lightweight command-line client for Teradata databases.
+
+Usage: tq [OPTIONS] <COMMAND>
+
+Commands:
+  ping   Test database connectivity
+  query  Execute a SQL query
+  help   Print this message or the help of the given subcommand(s)
+
+Global Options:
+  -l, --logon <LOGON>        Connection string: user:password@host:port/database
+      --password-file <FILE> Read password from file (recommended for security)
+      --logmech <MECH>       Authentication mechanism [default: TD2]
+  -t, --timeout <DURATION>   Connection timeout [default: 30s]
+  -v, --verbose...           Verbose output (repeat for more: -v, -vv, -vvv)
+  -q, --quiet                Suppress non-essential output
+      --color <WHEN>         Color output control [default: auto]
+  -h, --help                 Print help
+  -V, --version              Print version
+```
+
+### Query Command
+
+```bash
+tq query [OPTIONS] [QUERY]
 
 Arguments:
-  <QUERY>  The SQL query to execute
+  [QUERY]  SQL query to execute (or use --file or stdin)
 
 Options:
-  -l, --logon <STRING>
-          Database logon string in the format "user:password@host:port/database"
+  -f, --format <FORMAT>   Output format: table, json, csv [default: table]
+  -o, --output <FILE>     Write output to file instead of stdout
+      --file <FILE>       Read SQL from file
+      --no-header         Omit column headers in output
+      --timing            Show query execution time
+  -n, --limit <N>         Limit number of rows returned
+```
 
-  --logmech <MECHANISM>
-          Logon mechanism to use [default: TD2]
-          Supported: TD2, LDAP, KRB5, TDNEGO
+### Ping Command
 
-  --format <FORMAT>
-          Output format [default: table]
-          [possible values: table, json, csv]
+```bash
+tq ping [OPTIONS]
 
-  --color <WHEN>
-          When to use colored output
-          [possible values: always, auto, never]
-          [default: auto]
-
-  -p, --ping
-          Simple connection test to the database
-
-  -h, --help
-          Print help information
-
-  -V, --version
-          Print version information
+Options:
+  -c, --count <N>         Number of ping attempts [default: 1]
+  -i, --interval <DURATION> Interval between pings [default: 1s]
 ```
 
 ## Configuration
 
-`tq` supports multiple configuration methods with the following precedence (highest to lowest):
+Configuration follows this precedence (highest to lowest):
 
 1. Command-line arguments
 2. Environment variables
-3. Project config file (`.tq.toml`)
+3. Project config file (`.tq.toml` in current directory)
 4. User config file (`~/.config/tq/config.toml`)
-5. Built-in defaults
+5. System config file (`/etc/tq/config.toml`)
+6. Built-in defaults
 
 ### Environment Variables
 
-- `TQ_HOST` - Database host
-- `TQ_PORT` - Database port (default: 1025)
-- `TQ_USER` - Database username
-- `TQ_PASSWORD` - Database password
-- `TQ_DATABASE` - Default database/schema
-- `TQ_LOGMECH` - Logon mechanism (default: TD2)
-- `TQ_FORMAT` - Default output format (table, json, csv)
-- `TQ_LOGON` - Database logon string in the format "user:password@host:port/database"
+| Variable | Description |
+|----------|-------------|
+| `TQ_LOGON` | Connection string: `user:password@host:port/database` |
+| `TQ_LOGMECH` | Authentication mechanism (TD2, LDAP, KRB5, TDNEGO) |
+| `TQ_TIMEOUT` | Connection timeout (e.g., `30s`, `5m`) |
+| `TQ_FORMAT` | Default output format (table, json, csv) |
+| `TQ_COLOR` | Color output (auto, always, never) |
+
+### Environment File (.env)
+
+For convenience, you can store environment variables in a `.env` file in your project directory. This is especially useful for development and testing.
+
+1. Copy the example file:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Edit `.env` with your connection details:
+   ```bash
+   # .env file
+   TQ_LOGON=myuser:mypassword@myteradata:1025/mydatabase
+   ```
+
+3. Run tq commands without specifying connection details:
+   ```bash
+   tq ping
+   tq query "SELECT 1"
+   ```
+
+**Security notes:**
+- The `.env` file is automatically excluded from git (listed in `.gitignore`)
+- Use `.env.example` as a template to share configuration structure without secrets
+- Ensure `.env` has appropriate permissions: `chmod 0600 .env`
 
 ### Configuration File
 
 Create `~/.config/tq/config.toml`:
 
 ```toml
+[connection]
 host = "myteradata.company.com"
 port = 1025
 user = "myuser"
 database = "mydatabase"
-logmech = "TD2"
+
+[output]
 format = "table"
+color = "auto"
 ```
 
 ## Examples
@@ -131,86 +176,97 @@ format = "table"
 ### Basic Queries
 
 ```bash
+# Set logon string once
+export TQ_LOGON="user:password@host:1025/database"
+
 # Simple SELECT
-tq "SELECT * FROM dbc.dbcinfo"
+tq query "SELECT * FROM dbc.dbcinfo"
 
 # With WHERE clause
-tq "SELECT * FROM employees WHERE department = 'IT'"
+tq query "SELECT * FROM employees WHERE department = 'IT'"
 
-# Multiple statements (use semicolons)
-tq "CREATE TABLE test (id INT); INSERT INTO test VALUES (1);"
+# Query from file
+tq query --file report.sql
+
+# Query from stdin
+echo "SELECT COUNT(*) FROM orders" | tq query
 ```
 
 ### Output Formats
 
 ```bash
 # Human-readable table (default)
-tq "SELECT * FROM products LIMIT 5"
+tq query "SELECT * FROM products LIMIT 5"
 
 # JSON for scripting
-tq --format json "SELECT product_id, name, price FROM products" | jq '.'
+tq query --format json "SELECT product_id, name, price FROM products" | jq '.'
 
 # CSV for data export
-tq --format csv "SELECT * FROM sales_2024" > sales_2024.csv
+tq query --format csv "SELECT * FROM sales_2024" > sales_2024.csv
+
+# With timing information
+tq query --timing "SELECT COUNT(*) FROM large_table"
 ```
 
 ### Secure Password Handling
 
 ```bash
-# Read password from file (recommended)
+# Method 1: Password file (recommended)
 echo "mypassword" > ~/.tq_password
 chmod 0600 ~/.tq_password
-tq -l "user:@host:1025/db" --password-file ~/.tq_password "SELECT 1"
+tq -l "user@host:1025/db" --password-file ~/.tq_password query "SELECT 1"
 
-# Read password from stdin
-echo "mypassword" | tq -l "user:@host:1025/db" --password-file - "SELECT 1"
-
-# Using environment variable (less secure - visible in process list briefly)
-TQ_PASSWORD=mypassword tq "SELECT 1"
-```
-
-### Connection Testing
-
-```bash
-# Test connection without running a query
-tq --ping
-
-# Test connection with specific credentials
-tq -l "testuser:testpass@host:1025/testdb" --ping
+# Method 2: Connection string without password + password file
+export TQ_LOGON="user@host:1025/db"
+tq --password-file ~/.tq_password query "SELECT 1"
 ```
 
 ### Different Authentication Methods
 
 ```bash
 # TD2 (default - username/password)
-tq --logmech TD2 "SELECT SESSION"
+tq --logmech TD2 query "SELECT SESSION"
 
 # LDAP authentication
-tq --logmech LDAP "SELECT SESSION"
+tq --logmech LDAP query "SELECT SESSION"
 
 # Kerberos authentication
-tq --logmech KRB5 "SELECT SESSION"
+tq --logmech KRB5 query "SELECT SESSION"
+
+# Teradata negotiation
+tq --logmech TDNEGO query "SELECT SESSION"
 ```
 
-## Security Best Practices
+### Scripting Examples
 
-1. **Never use passwords in command-line arguments** - they appear in process lists and shell history
-2. **Use `--password-file` or environment variables** for password handling
-3. **Protect credential files** with `chmod 0600`
-4. **Use project/user config files** in secure locations
-5. **Consider keyring integration** for production environments
+```bash
+# Get user count as JSON
+count=$(tq query --format json "SELECT COUNT(*) AS cnt FROM users" | jq -r '.[0].cnt')
+echo "User count: $count"
+
+# Export all tables to CSV
+for table in customers orders products; do
+  tq query --format csv "SELECT * FROM $table" > "${table}.csv"
+done
+
+# Conditional query based on result
+if tq query "SELECT 1 FROM table WHERE condition" | grep -q .; then
+  echo "Condition met"
+fi
+```
 
 ## Output Format Details
 
 ### Table Format (default for interactive use)
 
 ```
-┌─────────┬──────────┬─────────┐
-│ user_id │ username │ active  │
-├─────────┼──────────┼─────────┤
-│ 1       │ alice    │ true    │
-│ 2       │ bob      │ false   │
-└─────────┴──────────┴─────────┘
++---------+----------+---------+
+| user_id | username | active  |
++---------+----------+---------+
+|       1 | alice    | true    |
+|       2 | bob      | false   |
++---------+----------+---------+
+2 row(s) in set (0.045s)
 ```
 
 ### JSON Format (for scripting)
@@ -222,7 +278,13 @@ tq --logmech KRB5 "SELECT SESSION"
 ]
 ```
 
-### CSV Format (for data export)
+Type preservation:
+- Numbers are JSON numbers (not strings)
+- Booleans are JSON booleans
+- NULL values are JSON null
+- Dates and timestamps are ISO 8601 strings
+
+### CSV Format (RFC 4180 compliant)
 
 ```csv
 user_id,username,active
@@ -230,26 +292,72 @@ user_id,username,active
 2,bob,false
 ```
 
+Features:
+- Proper quoting of fields containing commas, quotes, or newlines
+- NULL values become empty fields
+- Unix line endings for compatibility
+
+## Security Best Practices
+
+1. **Never use passwords in command-line arguments** - they appear in process lists and shell history
+2. **Use `--password-file` or environment variables** for password handling
+3. **Protect credential files** with `chmod 0600`
+4. **Use project/user config files** in secure locations
+5. **tq warns** if password files have insecure permissions
+
 ## Exit Codes
 
-- `0` - Success
-- `1` - General error (connection failed, query error)
-- `2` - Usage error (invalid arguments)
+| Code | Description |
+|------|-------------|
+| 0 | Success |
+| 1 | Runtime error (connection failed, query error, etc.) |
+| 2 | Usage error (invalid arguments, missing required options) |
 
 ## Building from Source
 
 ```bash
+# Clone repository
+git clone <repository-url>
+cd tq
+
 # Development build
 cargo build
 
 # Optimized release build
 cargo build --release
 
-# Run tests
+# Run tests (101+ tests)
 cargo test
 
-# Run with logging
-RUST_LOG=debug cargo run -- "SELECT 1"
+# Run with debug logging
+RUST_LOG=debug cargo run -- ping
+
+# Install to ~/.cargo/bin
+cargo install --path .
+```
+
+## Architecture
+
+tq follows a library-first design:
+
+```
+src/
+  lib.rs        # Public library API
+  main.rs       # CLI entry point
+  cli.rs        # Command-line interface (Clap)
+  config.rs     # Configuration management (Figment)
+  error.rs      # Error types (thiserror)
+  db/           # Database connectivity
+    connection.rs   # Connection management
+    client.rs       # Query execution
+    types.rs        # Type conversions
+  format/       # Output formatters
+    table.rs    # Table format (comfy-table)
+    json.rs     # JSON format (serde_json)
+    csv.rs      # CSV format (csv crate)
+  commands/     # Command implementations
+    ping.rs     # Ping command
+    query.rs    # Query command
 ```
 
 ## Contributing

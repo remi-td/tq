@@ -90,7 +90,7 @@ For **table formatting**, `tabled` offers derive macros for struct-based tables 
 
 **Connection pooling** matters less for CLI tools than servers, but still valuable for REPL sessions. Use small pool sizes (**2-4 connections**), configure appropriate timeouts (30s wait, 30s create, 5s recycle), and implement health checks on retrieval. The `deadpool` crate provides async pooling with configurable recycling methods. For synchronous needs, `r2d2` remains reliable.
 
-**Query execution patterns** must handle: single queries (`-c "SELECT ..."`) and script files (`-f script.sql`), single-transaction mode (`--single-transaction`) for atomicity, parameter binding for SQL injection prevention, streaming large result sets with async streams, and query cancellation on Ctrl-C. Use `sqlx` with compile-time query validation when possible—it catches type mismatches before runtime.
+**Query execution patterns** must handle: single queries (`-c "SELECT ..."`) and script files (`-f script.sql`)) for atomicity, parameter binding for SQL injection prevention, streaming large result sets with async streams, and query cancellation on Ctrl-C. 
 
 ## REPL implementation powers interactive use
 

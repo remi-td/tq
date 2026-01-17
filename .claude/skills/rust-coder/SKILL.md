@@ -1,6 +1,6 @@
 ---
 name: rust-coder
-description: Guides Claude in writing idiomatic, efficient, well-structured Rust code using proper data modeling, traits, impl organization, macros, and build-speed best practices based on official Rust style guide principles.
+description: Guides Claude in writing idiomatic, efficient, well-structured Rust code using proper data modeling, traits, impl organization, macros, and build-speed best practices based on official Rust style guide principles. Includes comprehensive CLI application development guidance with clap, anyhow, testing, and distribution strategies.
 ---
 
 # Rust Coder
@@ -99,7 +99,7 @@ Identify key constraints such as mutability needs, ownership flow, async context
 
 ### 7. Apply rigorous documentation and code-style best practices
 - Use triple-slash (`///`) doc comments for public structs, enums, fields, and methods
-- Use inner doc comments (`//!`) for module-level documentation explaining design or architecture
+- Use inner doc comments (two slashes followed by exclamation mark) for module-level documentation explaining design or architecture
 - Include examples in docs where valuable, especially for public APIs
 - Run `cargo fmt` and `cargo clippy --all-targets --all-features` to maintain consistency
 - Reserve blank lines between logically separate methods and sections
@@ -118,7 +118,51 @@ Identify key constraints such as mutability needs, ownership flow, async context
 - Split crates into lightweight workspaces to avoid monolithic rebuilds
 - Use `cargo profile` settings for tuned dev/release defaults
 
-### 10. Provide explanations and alternatives
+### 10. Apply CLI-specific patterns when building command-line applications
+
+When developing CLI tools, follow these key principles:
+
+**Project structure:**
+- Separate `src/lib.rs` (business logic, testable) from `src/main.rs` (CLI interface, argument parsing)
+- Make core functions accept `impl std::io::Write` for testability instead of printing directly
+
+**Argument parsing:**
+- Use `clap` with derive macros for robust argument handling
+- Document arguments with triple-slash comments (becomes help text)
+- Use `PathBuf` for file paths, appropriate types for domain concepts
+
+**Error handling:**
+- Use `anyhow::Result<T>` for applications (with `.context()` for helpful messages)
+- Use `thiserror` for library error types
+- Write errors to stderr with `eprintln!`
+- Provide actionable error messages with context
+
+**Output and logging:**
+- Use `println!` for normal output, `eprintln!` for errors
+- Add structured logging with `log` + `env_logger`
+- Use `indicatif` for progress bars on long operations
+- Buffer output with `BufWriter` or `stdout().lock()` in loops
+
+**Testing:**
+- Write unit tests for business logic in `src/lib.rs`
+- Use `assert_cmd` + `predicates` + `assert_fs` for integration tests
+- Test error cases and edge conditions
+- Keep tests fast and independent
+
+**Distribution:**
+- Add proper metadata to `Cargo.toml` for `cargo publish`
+- Generate shell completions and man pages with clap
+- Support multiple installation methods (cargo, binaries, package managers)
+
+**For comprehensive guidance, reference:**
+- [references/cli/setup.md](references/cli/setup.md) - Project initialization
+- [references/cli/cli-args.md](references/cli/cli-args.md) - Argument parsing with clap
+- [references/cli/errors.md](references/cli/errors.md) - Error handling strategies
+- [references/cli/output.md](references/cli/output.md) - Output formatting and logging
+- [references/cli/testing.md](references/cli/testing.md) - Testing approaches
+- [references/cli/packaging.md](references/cli/packaging.md) - Distribution methods
+
+### 11. Provide explanations and alternatives
 For every code design, explain why a certain pattern is chosen and propose alternatives when relevant:
 - Builder pattern vs simple constructor
 - Enum-based state machine vs multiple booleans
@@ -127,5 +171,5 @@ For every code design, explain why a certain pattern is chosen and propose alter
 - Deriving traits vs manual implementations for custom logic
 - Expression-oriented vs statement-based approaches
 
-### 11. Maintain clarity, safety, and idiomatic style at all times
+### 12. Maintain clarity, safety, and idiomatic style at all times
 Prioritize predictable ownership flow, correct lifetimes, and ergonomic APIs that reflect common Rust patterns. Code should be readable in plain-text contexts without syntax highlighting, produce clean diffs for version control, and follow the principle that "humans comprehend information through pattern matching."

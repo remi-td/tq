@@ -1,167 +1,151 @@
-use anyhow::{Context, Result};
-use clap::Parser;
-use std::fs;
-use tq::cli::{Cli, OutputFormat};
-use tq::connection::ConnectionConfig;
-use tq::db::{DatabaseClient, QueryResults};
+//! tq - Teradata Query CLI
+//!
+//! Entry point for the tq command-line tool.
+//! This binary provides a fast, lightweight interface to Teradata databases.
 
-fn main() -> Result<()> {
-    // Initialize logger
+use clap::Parser;
+use std::io::{self};
+use std::process::ExitCode;
+
+use tq::cli::{Cli, Command, GlobalOpts};
+use tq::config::Config;
+use tq::db::{parse_duration, ConnectionConfig, DatabaseClient};
+use tq::error::TqError;
+use tq::{commands, Result};
+
+fn main() -> ExitCode {
+    // Load environment variables from .env file if present
+    // This allows users to store connection details and other config in .env
+    // Silently ignore if .env doesn't exist
+    let _ = dotenvy::dotenv();
+
+    // Initialize logger from environment
+    // TQ_LOG=debug tq ping will show debug logs
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
-    // Parse command line arguments
+    // Parse CLI arguments
     let cli = Cli::parse();
 
-    // Read password from file if provided
-    let password_override = if let Some(password_file) = &cli.password_file {
-        let password = fs::read_to_string(password_file)
-            .with_context(|| format!("Failed to read password from file: {:?}", password_file))?
-            .trim()
-            .to_string();
+    // Run the application
+    match run(cli) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            // Print user-friendly error message
+            eprintln!("{}", e.user_message());
 
-        // Validate file permissions on Unix systems
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let metadata = fs::metadata(password_file)
-                .with_context(|| format!("Failed to read file metadata: {:?}", password_file))?;
-            let permissions = metadata.permissions();
-            let mode = permissions.mode() & 0o777;
-
-            if mode & 0o077 != 0 {
-                log::warn!(
-                    "Password file {:?} has insecure permissions {:o}. Recommended: 0600",
-                    password_file,
-                    mode
-                );
+            // Return appropriate exit code
+            match e.exit_code() {
+                2 => ExitCode::from(2), // Usage error
+                _ => ExitCode::FAILURE, // Runtime error
             }
         }
+    }
+}
 
-        Some(password)
-    } else {
-        None
-    };
+/// Main application logic
+fn run(cli: Cli) -> Result<()> {
+    // Load configuration from files and environment
+    let config = Config::load().unwrap_or_else(|e| {
+        log::warn!("Failed to load config: {}. Using defaults.", e);
+        Config::default()
+    });
 
-    // Parse the connection string
-    let config = ConnectionConfig::parse(&cli.logon, &cli.logmech, password_override)
-        .context("Failed to parse connection string")?;
+    // Build connection configuration
+    let password_override = read_password_if_needed(&cli.global)?;
+    let conn_config = build_connection_config(&cli.global, &config, password_override)?;
 
     // Create database client
-    let client = DatabaseClient::new(config.clone(), cli.driver_lib_dir)
-        .context("Failed to create database client")?;
+    let client = DatabaseClient::new(conn_config, cli.global.driver_lib_dir.clone())?;
 
-    // Handle the ping command
-    if cli.ping {
-        println!(
-            "Pinging Teradata database at {}:{}...",
-            config.host, config.port
-        );
+    // Determine output settings
+    let use_color = cli.global.color.should_use_color();
+    let verbose = cli.global.verbose > 0;
 
-        let latency = client.ping().context("Ping failed")?;
-
-        println!("Success! Database is reachable.");
-        println!("  Host: {}", config.host);
-        println!("  Port: {}", config.port);
-        println!("  User: {}", config.user);
-        println!("  Database: {}", config.database);
-        println!("  Logon Mechanism: {}", config.logmech);
-        println!("  Latency: {:.2}ms", latency.as_secs_f64() * 1000.0);
-
-        return Ok(());
-    }
-
-    // Handle query execution
-    if let Some(query) = cli.query {
-        let results = client
-            .execute_query(&query)
-            .context("Query execution failed")?;
-
-        // Format and display results
-        format_results(&results, cli.format)?;
-    } else {
-        anyhow::bail!(
-            "No command specified. Either use --ping to test connectivity or provide a SQL query."
-        );
-    }
-
-    Ok(())
-}
-
-/// Format and display query results based on the specified format
-fn format_results(results: &QueryResults, format: OutputFormat) -> Result<()> {
-    match format {
-        OutputFormat::Table => format_table(results),
-        OutputFormat::Json => format_json(results),
-        OutputFormat::Csv => format_csv(results),
-    }
-}
-
-/// Format results as a simple table
-fn format_table(results: &QueryResults) -> Result<()> {
-    if results.is_empty() {
-        println!("No results returned.");
-        return Ok(());
-    }
-
-    let rows = &results.rows;
-
-    // Find column widths
-    let num_cols = rows[0].len();
-    let mut widths = vec![0; num_cols];
-
-    for row in rows {
-        for (i, col) in row.iter().enumerate() {
-            widths[i] = widths[i].max(col.len());
+    // Execute command
+    match cli.command {
+        Command::Ping(args) => {
+            let mut stdout = io::stdout();
+            commands::ping(&client, &args, &mut stdout, verbose)?;
+        }
+        Command::Query(args) => {
+            if args.output.is_some() {
+                // Write to file
+                let mut stderr = io::stderr();
+                commands::query::execute_to_file(&client, &args, &mut stderr, use_color, verbose)?;
+            } else {
+                // Write to stdout
+                let mut stdout = io::stdout();
+                commands::query(&client, &args, &mut stdout, use_color, verbose)?;
+            }
+        }
+        Command::Repl(args) => {
+            let mut stdout = io::stdout();
+            commands::repl(&client, &args, &mut stdout, use_color, verbose)?;
         }
     }
 
-    // Print separator
-    let separator: String = widths
-        .iter()
-        .map(|w| "-".repeat(w + 2))
-        .collect::<Vec<_>>()
-        .join("+");
-    println!("+{}+", separator);
+    Ok(())
+}
 
-    // Print rows
-    for row in rows {
-        print!("|");
-        for (i, col) in row.iter().enumerate() {
-            print!(" {:width$} |", col, width = widths[i]);
-        }
-        println!();
+/// Read password from file if --password-file is specified
+fn read_password_if_needed(global: &GlobalOpts) -> Result<Option<String>> {
+    let Some(ref password_file) = global.password_file else {
+        return Ok(None);
+    };
+
+    // Read password from file
+    let password = std::fs::read_to_string(password_file).map_err(|e| TqError::FileReadError {
+        path: password_file.clone(),
+        source: e,
+    })?;
+
+    // Validate file permissions on Unix
+    #[cfg(unix)]
+    validate_password_file_permissions(password_file)?;
+
+    Ok(Some(password.trim().to_string()))
+}
+
+/// Validate password file has secure permissions on Unix
+#[cfg(unix)]
+fn validate_password_file_permissions(path: &std::path::Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata = std::fs::metadata(path).map_err(|e| TqError::FileReadError {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+
+    let mode = metadata.permissions().mode() & 0o777;
+
+    if mode & 0o077 != 0 {
+        log::warn!(
+            "Password file '{}' has insecure permissions {:o}. Recommended: 0600",
+            path.display(),
+            mode
+        );
     }
-
-    // Print separator
-    println!("+{}+", separator);
-    println!("\n{} row(s) returned.", results.row_count());
 
     Ok(())
 }
 
-/// Format results as JSON
-fn format_json(results: &QueryResults) -> Result<()> {
-    let json = serde_json::to_string_pretty(&results.rows)
-        .context("Failed to serialize results to JSON")?;
-    println!("{}", json);
-    Ok(())
-}
-
-/// Format results as CSV
-fn format_csv(results: &QueryResults) -> Result<()> {
-    for row in &results.rows {
-        let csv_row = row
-            .iter()
-            .map(|col| {
-                if col.contains(',') || col.contains('"') || col.contains('\n') {
-                    format!("\"{}\"", col.replace('"', "\"\""))
-                } else {
-                    col.clone()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        println!("{}", csv_row);
+/// Build connection configuration from CLI args and config file
+fn build_connection_config(
+    global: &GlobalOpts,
+    config: &Config,
+    password_override: Option<String>,
+) -> Result<ConnectionConfig> {
+    // Try to build from CLI --logon option first
+    if let Some(ref logon) = global.logon {
+        let timeout = parse_duration(&global.timeout)?;
+        return ConnectionConfig::from_connection_string(
+            logon,
+            global.logmech,
+            timeout,
+            password_override,
+        );
     }
-    Ok(())
+
+    // Otherwise, try to build from config file
+    config.build_connection_config(global, password_override)
 }

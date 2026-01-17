@@ -1,0 +1,1 @@
+This directory is used to store incoming user requirements that need to be considered for the project.

@@ -233,6 +233,7 @@ Test the skill and improve:
 - Keep instructions focused and actionable
 - Reference external resources when they save tokens
 - Test the skill before finalizing
+- Load the skill after creation to verify it works
 
 ### Don't:
 - Include information Claude already knows
@@ -241,6 +242,57 @@ Test the skill and improve:
 - Write overly long instructions
 - Make the description too brief or vague
 - Include untested code or examples
+
+### Markdown Safety: Avoid Shell-Sensitive Characters in Backticks
+
+**CRITICAL**: When documenting shell operators or special characters in skill files, avoid wrapping them in inline code backticks in ways that could be interpreted as bash commands.
+
+**Shell-sensitive characters to watch:**
+- Exclamation marks (bash history expansion)
+- Dollar signs (variable expansion)
+- Ampersands, pipes, semicolons (command chaining)
+- Backticks within backticks (command substitution)
+
+**Common problematic patterns:**
+- Documenting comment syntax like slash-slash-bang
+- Showing shell variables with dollar signs
+- Demonstrating command operators like double-ampersand
+- Any inline code containing exclamation mark followed by closing backtick and parenthesis
+
+**Safe documentation strategies:**
+
+1. **Describe instead of showing in inline code:**
+   - GOOD: "Use inner doc comments (two slashes followed by exclamation mark)"
+   - GOOD: "Use the dollar sign for shell variables"
+   - GOOD: "Chain commands with double ampersand operator"
+
+2. **Use code blocks instead of inline backticks for shell syntax:**
+   - Fenced code blocks are safer than inline backticks
+   - Use language tags for proper rendering (bash, rust, etc.)
+
+3. **Separate special characters from surrounding backticks:**
+   - GOOD: "Use two forward slashes followed by exclamation mark for module docs"
+   - GOOD: "The ampersand-ampersand operator chains commands"
+
+4. **Use descriptive names:**
+   - "slash-slash-bang syntax"
+   - "dollar-sign variable syntax"
+   - "double-ampersand operator"
+
+**Why this matters:**
+Claude Code's skill loader performs bash command safety checks on skill content. When inline backticks surround shell-sensitive characters, the parser may interpret the content as a bash command pattern, causing skill loading to fail with permission errors.
+
+**Error example:**
+If you see "Bash command permission check failed" when loading a skill, look for inline backticks containing exclamation marks, dollar signs, or shell operators. Rewrite those sections using plain descriptions.
+
+**Testing requirement:**
+Always test loading your skill immediately after creation or modification:
+
+1. Create or modify the skill file
+2. Invoke the Skill tool with the skill name to test loading
+3. If loading fails with bash permission errors, search for shell-sensitive characters in backticks
+4. Rewrite using plain descriptions or code blocks
+5. Test loading again to confirm the fix
 
 ## Quality Checklist
 
@@ -257,12 +309,18 @@ Before finalizing a skill, verify:
 - [ ] Length is under 500 lines
 - [ ] No redundant or obvious information
 - [ ] Imperative/infinitive form used consistently
+- [ ] No shell-sensitive characters wrapped in backticks (!, $, &&, etc.)
 
 **Resources:**
 - [ ] Only necessary resources included
 - [ ] Scripts are tested and documented
 - [ ] References are clearly structured
 - [ ] Assets are reusable and documented
+
+**Testing:**
+- [ ] Skill loads successfully without errors (test with Skill tool)
+- [ ] No bash command permission errors
+- [ ] Skill behaves as expected in test scenarios
 
 **Overall:**
 - [ ] Skill justifies its token cost

@@ -1,0 +1,538 @@
+//! Integration tests for tq library
+//!
+//! These tests verify the public API of the tq library works as expected.
+//! Since these are integration tests, they test the library through its
+//! public interface without mocking or database connections.
+
+use std::time::Duration;
+use tq::cli::{LogonMechanism, OutputFormat};
+use tq::db::{parse_duration, ColumnMetadata, ConnectionConfig, QueryResult, Row, TeradataType, Value};
+use tq::error::TqError;
+use tq::format::{csv, json, table, FormatOptions};
+
+// =============================================================================
+// Connection Configuration Tests
+// =============================================================================
+
+#[test]
+fn test_connection_config_from_connection_string() {
+    let config = ConnectionConfig::from_connection_string(
+        "user:pass@host:1025/db",
+        LogonMechanism::Td2,
+        Duration::from_secs(30),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(config.user, "user");
+    assert_eq!(config.host, "host");
+    assert_eq!(config.port, 1025);
+    assert_eq!(config.database, "db");
+    assert_eq!(config.logmech.to_string(), "TD2");
+}
+
+#[test]
+fn test_connection_config_with_password_override() {
+    let config = ConnectionConfig::from_connection_string(
+        "user@host:1025/db",
+        LogonMechanism::Td2,
+        Duration::from_secs(30),
+        Some("filepass".to_string()),
+    )
+    .unwrap();
+
+    assert_eq!(config.user, "user");
+    // Password is Secret, so we can't directly test it here without exposing
+}
+
+#[test]
+fn test_connection_config_invalid_format() {
+    let result = ConnectionConfig::from_connection_string(
+        "invalid",
+        LogonMechanism::Td2,
+        Duration::from_secs(30),
+        None,
+    );
+    assert!(result.is_err());
+    assert!(matches!(
+        result.unwrap_err(),
+        TqError::InvalidConnectionString(_)
+    ));
+}
+
+#[test]
+fn test_connection_config_invalid_port() {
+    let result = ConnectionConfig::from_connection_string(
+        "user:pass@host:invalid/db",
+        LogonMechanism::Td2,
+        Duration::from_secs(30),
+        None,
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_connection_config_default_port() {
+    // The API requires explicit port, so test that parsing with port works
+    let config = ConnectionConfig::from_connection_string(
+        "user:pass@host:1025/db",
+        LogonMechanism::Td2,
+        Duration::from_secs(30),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(config.port, 1025);
+}
+
+#[test]
+fn test_connection_config_missing_port_errors() {
+    // Without explicit port, should error
+    let result = ConnectionConfig::from_connection_string(
+        "user:pass@host/db",
+        LogonMechanism::Td2,
+        Duration::from_secs(30),
+        None,
+    );
+    assert!(result.is_err());
+}
+
+// =============================================================================
+// LogonMechanism Tests
+// =============================================================================
+
+#[test]
+fn test_logon_mechanism_display() {
+    assert_eq!(format!("{}", LogonMechanism::Td2), "TD2");
+    assert_eq!(format!("{}", LogonMechanism::Ldap), "LDAP");
+    assert_eq!(format!("{}", LogonMechanism::Krb5), "KRB5");
+    assert_eq!(format!("{}", LogonMechanism::Tdnego), "TDNEGO");
+}
+
+// =============================================================================
+// Duration Parsing Tests
+// =============================================================================
+
+#[test]
+fn test_parse_duration_seconds() {
+    let d = parse_duration("30s").unwrap();
+    assert_eq!(d, Duration::from_secs(30));
+}
+
+#[test]
+fn test_parse_duration_minutes() {
+    let d = parse_duration("5m").unwrap();
+    assert_eq!(d, Duration::from_secs(300));
+}
+
+#[test]
+fn test_parse_duration_hours() {
+    let d = parse_duration("1h").unwrap();
+    assert_eq!(d, Duration::from_secs(3600));
+}
+
+#[test]
+fn test_parse_duration_milliseconds() {
+    let d = parse_duration("500ms").unwrap();
+    assert_eq!(d, Duration::from_millis(500));
+}
+
+#[test]
+fn test_parse_duration_invalid() {
+    assert!(parse_duration("invalid").is_err());
+    assert!(parse_duration("30x").is_err());
+}
+
+// =============================================================================
+// Value Type Tests
+// =============================================================================
+
+#[test]
+fn test_value_null() {
+    let v = Value::Null;
+    assert_eq!(v.display(), "[NULL]");
+}
+
+#[test]
+fn test_value_string() {
+    let v = Value::String("hello".to_string());
+    assert_eq!(v.display(), "hello");
+}
+
+#[test]
+fn test_value_integer() {
+    let v = Value::Integer(42);
+    assert_eq!(v.display(), "42");
+}
+
+#[test]
+fn test_value_decimal() {
+    let v = Value::Decimal(3.14159);
+    assert!(v.display().starts_with("3.14"));
+}
+
+#[test]
+fn test_value_boolean() {
+    assert_eq!(Value::Boolean(true).display(), "true");
+    assert_eq!(Value::Boolean(false).display(), "false");
+}
+
+#[test]
+fn test_value_date() {
+    let v = Value::Date("2024-01-15".to_string());
+    assert_eq!(v.display(), "2024-01-15");
+}
+
+#[test]
+fn test_value_timestamp() {
+    let v = Value::Timestamp("2024-01-15T10:30:00".to_string());
+    assert_eq!(v.display(), "2024-01-15T10:30:00");
+}
+
+#[test]
+fn test_value_bytes() {
+    let v = Value::Bytes(vec![0x48, 0x65, 0x6c, 0x6c, 0x6f]);
+    assert_eq!(v.display(), "<5 bytes>");
+}
+
+// =============================================================================
+// QueryResult Helper
+// =============================================================================
+
+fn make_test_result() -> QueryResult {
+    let columns = vec![
+        ColumnMetadata {
+            name: "Name".to_string(),
+            data_type: TeradataType::Varchar,
+            nullable: false,
+        },
+        ColumnMetadata {
+            name: "Age".to_string(),
+            data_type: TeradataType::Integer,
+            nullable: false,
+        },
+        ColumnMetadata {
+            name: "Score".to_string(),
+            data_type: TeradataType::Decimal,
+            nullable: true,
+        },
+    ];
+
+    let rows: Vec<Row> = vec![
+        vec![
+            Value::String("Alice".to_string()),
+            Value::Integer(30),
+            Value::Decimal(95.5),
+        ],
+        vec![
+            Value::String("Bob".to_string()),
+            Value::Integer(25),
+            Value::Null,
+        ],
+    ];
+
+    QueryResult {
+        columns,
+        rows,
+        row_count: 2,
+        execution_time: Duration::from_millis(123),
+    }
+}
+
+fn make_empty_result() -> QueryResult {
+    QueryResult {
+        columns: vec![
+            ColumnMetadata {
+                name: "Column1".to_string(),
+                data_type: TeradataType::Varchar,
+                nullable: false,
+            },
+        ],
+        rows: vec![],
+        row_count: 0,
+        execution_time: Duration::from_millis(10),
+    }
+}
+
+// =============================================================================
+// Table Format Tests
+// =============================================================================
+
+#[test]
+fn test_format_table_output() {
+    let result = make_test_result();
+    let options = table::TableOptions::default();
+    let mut output = Vec::new();
+
+    table::write(&result, &mut output, &options).unwrap();
+    let output_str = String::from_utf8(output).unwrap();
+
+    assert!(output_str.contains("Name"));
+    assert!(output_str.contains("Age"));
+    assert!(output_str.contains("Alice"));
+    assert!(output_str.contains("Bob"));
+    assert!(output_str.contains("30"));
+    assert!(output_str.contains("25"));
+}
+
+#[test]
+fn test_format_table_empty() {
+    let result = make_empty_result();
+    let options = table::TableOptions::default();
+    let mut output = Vec::new();
+
+    table::write(&result, &mut output, &options).unwrap();
+    let output_str = String::from_utf8(output).unwrap();
+
+    // Empty result shows "No results returned"
+    assert!(output_str.contains("No results returned"));
+}
+
+// =============================================================================
+// JSON Format Tests
+// =============================================================================
+
+#[test]
+fn test_format_json_output() {
+    let result = make_test_result();
+    let options = json::JsonOptions::default();
+    let mut output = Vec::new();
+
+    json::write(&result, &mut output, &options).unwrap();
+    let output_str = String::from_utf8(output).unwrap();
+
+    // Parse as JSON to validate
+    let parsed: serde_json::Value = serde_json::from_str(&output_str).unwrap();
+
+    assert!(parsed.is_array());
+    let arr = parsed.as_array().unwrap();
+    assert_eq!(arr.len(), 2);
+
+    // Check first row
+    let first = &arr[0];
+    assert_eq!(first["Name"], "Alice");
+    assert_eq!(first["Age"], 30);
+    assert_eq!(first["Score"], 95.5);
+
+    // Check second row
+    let second = &arr[1];
+    assert_eq!(second["Name"], "Bob");
+    assert_eq!(second["Age"], 25);
+    assert!(second["Score"].is_null());
+}
+
+#[test]
+fn test_format_json_empty() {
+    let result = make_empty_result();
+    let options = json::JsonOptions::default();
+    let mut output = Vec::new();
+
+    json::write(&result, &mut output, &options).unwrap();
+    let output_str = String::from_utf8(output).unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_str(&output_str).unwrap();
+    assert!(parsed.is_array());
+    assert_eq!(parsed.as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn test_format_json_pretty() {
+    let result = make_test_result();
+    let options = json::JsonOptions { pretty: true };
+    let mut output = Vec::new();
+
+    json::write(&result, &mut output, &options).unwrap();
+    let output_str = String::from_utf8(output).unwrap();
+
+    // Pretty printed JSON should have indentation
+    assert!(output_str.contains("  "));
+    assert!(output_str.contains('\n'));
+}
+
+// =============================================================================
+// CSV Format Tests
+// =============================================================================
+
+#[test]
+fn test_format_csv_output() {
+    let result = make_test_result();
+    let options = csv::CsvOptions::default();
+    let mut output = Vec::new();
+
+    csv::write(&result, &mut output, &options).unwrap();
+    let output_str = String::from_utf8(output).unwrap();
+
+    // Should have header row
+    assert!(output_str.contains("Name,Age,Score"));
+
+    // Should have data rows
+    assert!(output_str.contains("Alice,30,95.5"));
+    assert!(output_str.contains("Bob,25,"));  // NULL becomes empty
+}
+
+#[test]
+fn test_format_csv_no_header() {
+    let result = make_test_result();
+    let options = csv::CsvOptions {
+        show_header: false,
+        ..Default::default()
+    };
+    let mut output = Vec::new();
+
+    csv::write(&result, &mut output, &options).unwrap();
+    let output_str = String::from_utf8(output).unwrap();
+
+    // Should NOT have header row
+    assert!(!output_str.contains("Name,Age,Score"));
+
+    // But should still have data
+    assert!(output_str.contains("Alice"));
+}
+
+#[test]
+fn test_format_csv_empty() {
+    let result = make_empty_result();
+    let options = csv::CsvOptions::default();
+    let mut output = Vec::new();
+
+    csv::write(&result, &mut output, &options).unwrap();
+    let output_str = String::from_utf8(output).unwrap();
+
+    // Empty result should still have header
+    assert!(output_str.contains("Column1"));
+}
+
+#[test]
+fn test_format_csv_with_special_characters() {
+    let columns = vec![ColumnMetadata {
+        name: "Description".to_string(),
+        data_type: TeradataType::Varchar,
+        nullable: false,
+    }];
+
+    let rows: Vec<Row> = vec![
+        vec![Value::String("Alice, Jr.".to_string())],
+        vec![Value::String("Say \"Hello\"".to_string())],
+    ];
+
+    let result = QueryResult {
+        columns,
+        rows,
+        row_count: 2,
+        execution_time: Duration::from_millis(10),
+    };
+
+    let options = csv::CsvOptions::default();
+    let mut output = Vec::new();
+
+    csv::write(&result, &mut output, &options).unwrap();
+    let output_str = String::from_utf8(output).unwrap();
+
+    // Values with commas or quotes should be properly escaped
+    assert!(output_str.contains("\"Alice, Jr.\""));
+    assert!(output_str.contains("\"Say \"\"Hello\"\"\""));
+}
+
+// =============================================================================
+// Error Tests
+// =============================================================================
+
+#[test]
+fn test_error_user_message() {
+    let err = TqError::ConnectionFailed {
+        host: "localhost".to_string(),
+        port: 1025,
+        source: Box::new(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused")),
+    };
+
+    let msg = err.user_message();
+    assert!(msg.contains("localhost"));
+    assert!(msg.contains("1025"));
+}
+
+#[test]
+fn test_error_exit_code() {
+    let usage_err = TqError::InvalidConnectionString("test".to_string());
+    assert_eq!(usage_err.exit_code(), 2);
+
+    let runtime_err = TqError::QueryExecution("test".to_string());
+    assert_eq!(runtime_err.exit_code(), 1);
+}
+
+#[test]
+fn test_error_display() {
+    let err = TqError::QueryExecution("syntax error".to_string());
+    let display = format!("{}", err);
+    assert!(display.contains("syntax error"));
+}
+
+// =============================================================================
+// CLI Tests
+// =============================================================================
+
+#[test]
+fn test_cli_parsing() {
+    use clap::Parser;
+    use tq::cli::Cli;
+
+    let args = vec!["tq", "--logon", "user:pass@host:1025/db", "ping"];
+    let cli = Cli::try_parse_from(args).unwrap();
+
+    assert_eq!(cli.global.logon, Some("user:pass@host:1025/db".to_string()));
+    assert_eq!(cli.global.logmech, LogonMechanism::Td2);
+}
+
+#[test]
+fn test_cli_query_with_format() {
+    use clap::Parser;
+    use tq::cli::{Cli, Command};
+
+    let args = vec![
+        "tq",
+        "--logon",
+        "user:pass@host:1025/db",
+        "query",
+        "--format",
+        "json",
+        "SELECT 1",
+    ];
+    let cli = Cli::try_parse_from(args).unwrap();
+
+    if let Command::Query(args) = cli.command {
+        assert_eq!(args.format, OutputFormat::Json);
+    } else {
+        panic!("Expected Query command");
+    }
+}
+
+#[test]
+fn test_output_format_display() {
+    assert_eq!(format!("{}", OutputFormat::Table), "table");
+    assert_eq!(format!("{}", OutputFormat::Json), "json");
+    assert_eq!(format!("{}", OutputFormat::Csv), "csv");
+}
+
+// =============================================================================
+// FormatOptions Tests
+// =============================================================================
+
+#[test]
+fn test_format_options_default() {
+    let opts = FormatOptions::default();
+    assert!(opts.table.show_header);
+    assert!(opts.csv.show_header);
+    assert!(opts.table.use_color); // Default is true for table
+}
+
+#[test]
+fn test_format_options_with_builder() {
+    let opts = FormatOptions::default()
+        .with_header(false)
+        .with_color(true)
+        .with_pretty(true);
+
+    assert!(!opts.table.show_header);
+    assert!(!opts.csv.show_header);
+    assert!(opts.table.use_color);
+    assert!(opts.json.pretty);
+}

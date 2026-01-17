@@ -425,6 +425,6 @@ pub struct Rectangle {
 
 **Rules**:
 - Use `///` for item documentation
-- Use `//!` for module-level documentation
+- Use two slashes followed by exclamation mark for module-level documentation
 - Include examples in doc comments for public APIs
 - Use markdown formatting in doc comments

@@ -2,14 +2,14 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get the output directory (where the binary will be built)
-    let out_dir = env::var("OUT_DIR").unwrap();
+    let out_dir = env::var("OUT_DIR")?;
     let target_dir = PathBuf::from(&out_dir)
         .parent()
         .and_then(|p| p.parent())
         .and_then(|p| p.parent())
-        .unwrap()
+        .ok_or("Failed to determine target directory from OUT_DIR")?
         .to_path_buf();
 
     // Determine the library name based on platform
@@ -24,7 +24,7 @@ fn main() {
     // Find the teradatarustapi checkout in cargo cache
     let home = env::var("HOME")
         .or_else(|_| env::var("USERPROFILE"))
-        .unwrap();
+        .map_err(|_| "Could not determine home directory (HOME or USERPROFILE not set)")?;
     let cargo_home = env::var("CARGO_HOME").unwrap_or_else(|_| format!("{}/.cargo", home));
     let git_checkouts = PathBuf::from(cargo_home).join("git/checkouts");
 
@@ -69,7 +69,7 @@ fn main() {
                                     target_dir.display()
                                 );
                                 println!("cargo:rerun-if-changed=build.rs");
-                                return;
+                                return Ok(());
                             }
                         }
                     }
@@ -83,4 +83,6 @@ fn main() {
         "cargo:warning=You may need to manually copy {} to your project directory",
         lib_name
     );
+
+    Ok(())
 }
