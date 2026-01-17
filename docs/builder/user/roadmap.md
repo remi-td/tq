@@ -1,13 +1,16 @@
 # tq Roadmap
 
 **Last Updated:** 2026-01-17
-**Version:** 1.0.0
+**Version:** 1.1.0
 
 ---
 
-## Current Release: v1.0.0 (MVP)
+## Current Sprint: Sprint 4 (Interactive Mode Phase 2 - Foundation)
 
-The initial release provides core functionality for executing SQL queries against Teradata databases.
+**In Progress:** Sprint 4
+**Target Completion:** Q1 2026
+
+Building on the Interactive Mode MVP, Sprint 4 adds essential metacommands and quality-of-life improvements.
 
 ### Released Features
 
@@ -15,6 +18,7 @@ The initial release provides core functionality for executing SQL queries agains
 |---------|-------------|--------|
 | `tq ping` | Test database connectivity with timing | Shipped |
 | `tq query` | Execute SQL queries from argument, file, or stdin | Shipped |
+| `tq repl` | Interactive REPL mode for database exploration | Shipped |
 | Table output | Human-readable table formatting | Shipped |
 | JSON output | Machine-parseable JSON format | Shipped |
 | CSV output | RFC 4180 compliant CSV format | Shipped |
@@ -25,25 +29,14 @@ The initial release provides core functionality for executing SQL queries agains
 | Environment variables | `TQ_LOGON`, `TQ_LOGMECH`, etc. | Shipped |
 | Password file support | Secure credential storage | Shipped |
 | Configuration file | TOML-based user configuration | Shipped |
-
----
-
-## In Progress: Interactive Mode (Phase 1)
-
-**Sprint:** 2026-01-17
-**Status:** Implementation Complete, Testing Pending
-
-### Features Being Delivered
-
-| Feature | Description | Status |
-|---------|-------------|--------|
-| `tq repl` | Interactive REPL mode | Implementation Complete |
-| Multi-line SQL input | Statements accumulate until semicolon | Implementation Complete |
-| Command history | In-memory history with arrow key navigation | Implementation Complete |
-| `/help` command | Display help within REPL | Implementation Complete |
-| `/quit` command | Exit REPL cleanly | Implementation Complete |
-| `/session` command | Display session information | Implementation Complete |
-| Ctrl-C handling | Cancel current input gracefully | Implementation Complete |
+| Multi-line SQL input | Statements accumulate until semicolon | Shipped |
+| Command history | In-memory history with arrow key navigation | Shipped |
+| `/help` command | Display help within REPL | Shipped |
+| `/quit` command | Exit REPL cleanly | Shipped |
+| `/session` command | Display session information | Shipped |
+| Ctrl-C handling | Cancel current input gracefully | Shipped |
+| Default 100-row limit | REPL auto-limits SELECT queries (configurable) | Shipped |
+| Actual column names | Query results show real column names from database | Shipped |
 
 ### Technical Notes
 
@@ -51,28 +44,45 @@ The initial release provides core functionality for executing SQL queries agains
 - In-memory history (persistent history in Phase 2)
 - Table output format for results
 - Shows timing for each query
-
-### Testing Status
-
-- Unit tests: All passing (78 tests)
-- Integration tests: All passing (37 tests)
-- Manual testing: Pending live database connection
+- Column metadata fetched from Teradata API for accurate column names
+- Default 100-row limit for SELECT queries without explicit LIMIT (configurable via `--default-limit`)
 
 ---
 
-## Next Up: Interactive Mode (Phase 2)
+## Sprint 4: Interactive Mode Phase 2 - Foundation Features
 
-**Planned:** Q1 2026
+**Status:** In Progress
+**Target:** Q1 2026
+
+### Goals
+
+| Feature | Priority | Status | Description |
+|---------|----------|--------|-------------|
+| `/describe` metacommand | P0 | Planning | Describe table structure (columns, types, nullable) |
+| `/ping` metacommand | P0 | Planning | Test connection within REPL with latency display |
+| Persistent history | P1 | Planning | Save command history to `~/.tq_history` |
+| Vim/Emacs keybindings | P1 | Planning | Configurable editor modes (--editor-mode flag) |
+
+### Sprint 4 Success Criteria
+1. `/describe <table>` shows table structure with column names, types, and nullable status
+2. `/ping` tests database connection and displays latency
+3. Command history persists across REPL sessions
+4. Users can switch between vim and emacs keybinding modes
+5. All existing tests continue to pass
+6. New unit and integration tests added for new features
+
+---
+
+## Next Up: Interactive Mode (Phase 2 - Advanced)
+
+**Planned:** Q1-Q2 2026
 
 | Feature | Priority | Description |
 |---------|----------|-------------|
-| Persistent history | P1 | Save history to `~/.tq_history` |
 | SQL syntax highlighting | P1 | Color syntax in SQL input |
-| Vim/Emacs keybindings | P1 | Configurable editor modes |
-| `/describe` command | P0 | Describe table structure |
-| `/ping` command | P0 | Test connection within REPL |
 | Query timing display | P1 | Enhanced timing information |
-| Result paging | P1 | Scroll through large result sets |
+| Result paging (horizontal) | P2 | Scroll through wide result sets |
+| Result paging (vertical) | P2 | Scroll through long result sets |
 
 ---
 
@@ -123,6 +133,24 @@ Features that have been considered and rejected:
 ---
 
 ## Release History
+
+### v1.1.0 (2026-01-17) - Interactive Mode MVP
+
+**Sprint 3 Highlights:**
+- Fixed critical column naming bug: Query results now display actual column names from the database instead of generic "col1", "col2"
+- Fixed REPL default row limit: SELECT queries in REPL mode now default to 100 rows (configurable via `--default-limit`)
+- Added live database integration tests to prevent future regressions
+
+**Technical Debt Paid:**
+- Added 5 new unit tests for metadata parsing (map-of-arrays format)
+- Added 2 live database integration tests for column name validation
+- Comprehensive validation reports generated in tests/results/
+
+**Bug Fix Journey:**
+- Initial implementation had incorrect metadata parsing (expected array-of-objects, API returns map-of-arrays)
+- quality-validator caught the regression during validation (0% live query success rate)
+- rust-teradata-architect fixed metadata parsing with proper format handling
+- Revalidation confirmed all tests pass and column names display correctly
 
 ### v1.0.0 (2026-01-16)
 - Initial MVP release
