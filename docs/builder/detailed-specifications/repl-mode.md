@@ -483,17 +483,71 @@ tq> SELECT COUNT(*) FROM employees WHERE dept = 'IT';
 
 ## 5.6 Tab Completion
 
-### 5.6.1 Keyword Completion
+### 5.6.1 Keyword Completion (Sprint 6)
 
+**Purpose**: Enable fast SQL writing with auto-completion of SQL keywords.
+
+**Trigger**: Press Tab key after typing partial SQL keyword.
+
+**Supported Keywords** (complete list):
+- SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, TRUNCATE
+- FROM, WHERE, JOIN, INNER JOIN, LEFT JOIN, RIGHT JOIN, FULL JOIN, CROSS JOIN
+- GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET
+- AND, OR, NOT, IN, EXISTS, BETWEEN, LIKE, IS NULL
+- DISTINCT, ALL, TOP, UNION, INTERSECT, EXCEPT
+- AS, ON, USING, CASE, WHEN, THEN, ELSE, END
+- VALUES, SET, WITH
+- PRIMARY KEY, FOREIGN KEY, UNIQUE, INDEX
+- DATABASE, TABLE, VIEW, SCHEMA, PROCEDURE, FUNCTION
+- BEGIN, COMMIT, ROLLBACK, TRANSACTION
+- GRANT, REVOKE, CONSTRAINT
+
+**Behavior**:
+
+Single match - auto-complete:
 ```sql
 tq> SEL<TAB>
-    SELECT
-
-tq> SELECT * FROM emp<TAB>
-                  employees
+tq> SELECT
 ```
 
-### 5.6.2 Context-Aware Completion
+Multiple matches - show options:
+```sql
+tq> UPD<TAB>
+    UPDATE    UPDATEXML (if supported)
+```
+
+Cycle through completions:
+```sql
+tq> ORD<TAB>
+tq> ORDER BY
+
+tq> ORD<TAB><TAB>
+(cycles through other matches starting with ORD)
+```
+
+Case-insensitive matching:
+```sql
+tq> sel<TAB> → SELECT
+tq> SEL<TAB> → SELECT
+tq> Sel<TAB> → SELECT
+```
+
+**Examples**:
+```sql
+tq> SEL<TAB>
+    SELECT * FROM emp<TAB>
+                  employees WHERE dept<TAB>
+                                 department = 'IT'
+```
+
+**Implementation Notes**:
+- Keywords are matched by prefix (typed text must match start of keyword)
+- Completion does not change case (preserves what user typed)
+- Tab key completes if single match, shows list if multiple matches
+- Second Tab cycles through alternatives
+- Keywords are case-insensitive internally but match user's casing
+
+### 5.6.2 Context-Aware Completion (Sprint 7)
 
 **After FROM**:
 ```sql
@@ -513,7 +567,7 @@ tq> SELECT emp<TAB>
            employee_id    employee_name    employee_dept
 ```
 
-### 5.6.3 Metacommand Completion
+### 5.6.3 Metacommand Completion (Future)
 
 ```sql
 tq> \d<TAB>
@@ -805,12 +859,125 @@ Random sample of 5 rows from employees:
 [Results displayed in table format]
 ```
 
-### 5.8.4 Export Commands
+### 5.8.4 Export Commands (Sprint 6)
+
+**Purpose**: Save the results of the last executed query to a file in multiple formats (JSON, CSV, SQL INSERT statements).
+
+**Syntax**:
+```
+/export <format> [file]
+/export <format> --append        (append to file instead of overwrite)
+/export <format>                 (output to stdout if no file specified)
+```
+
+**Supported Formats**:
+
+1. **CSV Format** (`csv`)
+   - Standard CSV format with comma delimiters
+   - Double quotes for fields containing special characters
+   - Header row with column names
+   - Example: `/export csv employees.csv`
+
+2. **JSON Format** (`json`)
+   - Array of objects, one object per row
+   - Column names as object keys
+   - Proper JSON type handling (numbers, booleans, nulls)
+   - Pretty-printed by default
+   - Example: `/export json data.json`
+
+3. **SQL Format** (`sql`)
+   - INSERT statements for data reload
+   - Generates: `INSERT INTO table_name (col1, col2) VALUES (val1, val2);`
+   - Requires knowledge of table name (prompts user if not obvious)
+   - Example: `/export sql inserts.sql`
+
+**Behavior**:
+
+**With file specified**:
+```sql
+tq> SELECT * FROM employees WHERE dept = 'IT';
+[10 rows returned]
+
+tq> /export csv employees_it.csv
+Exported 10 rows to employees_it.csv
+
+tq> /export json employees_it.json
+Exported 10 rows to employees_it.json (1.2 KB)
+```
+
+**Without file specified (stdout)**:
+```sql
+tq> /export csv
+id,name,email
+1,Alice,alice@example.com
+2,Bob,bob@example.com
+```
+
+**File already exists - confirmation prompt**:
+```sql
+tq> /export csv employees.csv
+File already exists: employees.csv
+Overwrite? [y/n/a (append)]: y
+Exported 10 rows to employees.csv
+```
+
+**Using --append flag**:
+```sql
+tq> /export csv --append employees.csv
+Appended 10 rows to employees.csv (no header in append mode)
+```
+
+**Error Handling**:
+
+**No query executed yet**:
+```sql
+tq> /export csv data.csv
+Error: No query results to export. Execute a query first.
+```
+
+**Invalid format**:
+```sql
+tq> /export xml data.xml
+Error: Unknown format 'xml'. Supported formats: csv, json, sql
+```
+
+**Permission denied writing file**:
+```sql
+tq> /export csv /readonly/data.csv
+Error: Permission denied writing to /readonly/data.csv
+Check file permissions or choose different location.
+```
+
+**Disk full**:
+```sql
+tq> /export csv large_export.csv
+Error: Disk full - cannot write to large_export.csv
+Freed 10.2 KB written before error (file truncated).
+```
+
+**Large result handling**:
+```sql
+tq> SELECT * FROM huge_table;
+[1,000,000 rows returned - streaming to pager]
+
+tq> /export csv huge_data.csv
+Exporting 1,000,000 rows...
+Exported 1,000,000 rows to huge_data.csv (245 MB)
+```
+
+**Implementation Notes**:
+- Export only the most recent query results
+- Clear result cache after export (optional - for cleanup)
+- Support path expansion (~/, relative paths)
+- Atomic writes: write to temp file, rename on success
+- Include row count in success message
+- For SQL format, store table name in session or prompt if ambiguous
 
 | Command | Description | Example |
 |---------|-------------|---------|
 | `/export csv <file>` | Export last result to CSV | `/export csv employees.csv` |
 | `/export json <file>` | Export last result to JSON | `/export json data.json` |
+| `/export sql <file>` | Export as SQL INSERT statements | `/export sql inserts.sql` |
 
 ### 5.8.5 Session Commands
 
@@ -820,7 +987,109 @@ Random sample of 5 rows from employees:
 | `/timing on` | `\t` | Enable query timing | `/timing on` |
 | `/timing off` | `\t` | Disable query timing | `/timing off` |
 | `/set format <fmt>` | - | Set output format | `/set format json` |
-| `/set pager on` | - | Enable result paging | `/set pager on` |
+| `/pager on\|off` | - | Enable/disable result paging | `/pager on` |
+| `/colors on\|off` | - | Enable/disable syntax highlighting | `/colors on` |
+
+**`/pager on\|off` Metacommand Specification** (Sprint 6)
+
+**Purpose**: Control whether large result sets are paginated (scrollable) or displayed all at once.
+
+**Syntax**:
+```
+/pager on       (enable result paging)
+/pager off      (disable paging, show all results)
+```
+
+**Behavior**:
+
+**Pager enabled (default)**:
+```sql
+tq> /pager on
+Result paging enabled
+
+tq> SELECT * FROM huge_table;
+[Shows first screen, allows scrolling with j/k/arrows]
+Rows 1-50 of 5,234 | Space: next | b: prev | q: quit | /: search
+```
+
+**Pager disabled**:
+```sql
+tq> /pager off
+Result paging disabled
+
+tq> SELECT * FROM huge_table;
+[Displays all 5,234 rows without pagination]
+```
+
+**Current setting**:
+```sql
+tq> /pager
+Pager: on (enabled for results > 50 rows)
+```
+
+**Persistence**:
+- Setting persists for current REPL session
+- Does not affect config files (session-only)
+- Resets to default (on) when REPL restarts
+
+**Error Handling**:
+```sql
+tq> /pager maybe
+Error: Invalid pager setting 'maybe'. Use 'on' or 'off'.
+```
+
+**`/colors on\|off` Metacommand Specification** (Sprint 6)
+
+**Purpose**: Control SQL syntax highlighting and colored output in the REPL.
+
+**Syntax**:
+```
+/colors on      (enable syntax highlighting)
+/colors off     (disable colors, plain text output)
+```
+
+**Behavior**:
+
+**Colors enabled (default in TTY)**:
+```sql
+tq> /colors on
+Syntax highlighting enabled
+
+tq> SELECT * FROM employees;
+[SQL keywords displayed in cyan, strings in green, etc.]
+[Results with colored NULL values]
+```
+
+**Colors disabled**:
+```sql
+tq> /colors off
+Syntax highlighting disabled
+
+tq> SELECT * FROM employees;
+[All text in plain white, no colors]
+```
+
+**Current setting**:
+```sql
+tq> /colors
+Colors: on (in TTY mode)
+```
+
+**Scope**:
+- Affects SQL syntax highlighting in input editor
+- Affects colored table output (NULL indicators, column separators)
+- Does not affect exported data (always plain)
+
+**Persistence**:
+- Setting persists for current REPL session
+- Does not affect config files (session-only)
+- Auto-disables when output is redirected (pipe/redirect)
+
+**Error Handling**:
+```sql
+tq> /colors maybe
+Error: Invalid color setting 'maybe'. Use 'on' or 'off'.
+```
 
 **Session Info Output**:
 ```sql

@@ -1,7 +1,7 @@
 # tq (Teradata Query) - Specifications
 
-**Version:** 1.3.0
-**Status:** Active Development - Sprint 6 (Planning)
+**Version:** 1.4.0
+**Status:** Active Development - Sprint 6 (In Progress)
 **Last Updated:** 2026-01-18
 
 ---
@@ -100,9 +100,9 @@
 | Tab completion (tables) | 📋 Sprint 7 | Tab key | 7 | P1 |
 | Tab completion (columns) | 📋 Sprint 7 | Tab key | 7 | P2 |
 | `/export` metacommand | 🚧 Sprint 6 | `/export [format] [file]` | 6 | P1 |
+| `/pager on\|off` metacommand | 🚧 Sprint 6 | `/pager on\|off` | 6 | P2 |
+| `/colors` metacommand | 🚧 Sprint 6 | `/colors on\|off` | 6 | P2 |
 | `/logon` metacommand | 📋 Sprint 7 | `/logon [connection-string]` | 7 | P1 |
-| `/colors` metacommand | 📋 Sprint 7 | `/colors` | 7 | P2 |
-| Result pagination control | 📋 Sprint 7 | `/pager on\|off` | 7 | P2 |
 
 ### Batch Mode 📋 Planned
 
@@ -174,16 +174,17 @@
 **Sprint Review:** [Sprint 5 Complete Review](../sprints/sprint-5-review.md)
 
 ### Sprint 6: Interactive Mode Phase 3 - Bug Fixes & Advanced Features 🚧 Current Sprint
-**Goal:** Fix critical formatting bug and add tab completion and export functionality
+**Goal:** Fix critical formatting bug and add tab completion, export, and display control features
 
-**Target Features:**
-1. **Critical Fix (P0):** Table formatting/padding bug (columns not aligned)
-2. **Tab Completion (P1):** Auto-complete SQL keywords
-3. **Export Command (P1):** `/export [format] [file]` to save results
-4. **Enhancements (P2):** Runtime pager control, color display
+**Delivered Features:**
+1. **Critical Fix (P0):** Table formatting/padding bug fix (columns properly aligned)
+2. **Tab Completion (P1):** SQL keyword auto-completion with Tab key
+3. **Export Command (P1):** `/export [format] [file]` metacommand (JSON, CSV, SQL formats)
+4. **Pager Control (P2):** `/pager on|off` metacommand for runtime pagination control
+5. **Color Control (P2):** `/colors on|off` metacommand for syntax highlighting toggle
 
-**Expected Start:** 2026-01-18
-**Expected Completion:** 2026-01-27
+**Status:** In Progress
+**Expected Completion:** 2026-01-18
 
 ### Sprint 7+: Batch Mode & Configuration 📋 Future
 **Goals:**
