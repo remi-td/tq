@@ -3,8 +3,9 @@
 //! Provides an interactive SQL shell for Teradata databases.
 //! Features:
 //! - Multi-line SQL input with semicolon termination
-//! - In-memory command history with arrow key navigation
-//! - Metacommands for session management (/quit, /help, /session)
+//! - Persistent command history (saved to ~/.tq_history)
+//! - Vim and Emacs keybinding modes
+//! - Metacommands for session management (/quit, /help, /session, /ping, /describe)
 //! - Graceful Ctrl-C handling
 
 mod executor;
@@ -12,11 +13,12 @@ mod metacommands;
 mod prompt;
 mod state;
 
-use crate::cli::ReplArgs;
+use crate::cli::{EditorMode, ReplArgs};
 use crate::db::DatabaseClient;
 use crate::error::Result;
-use reedline::{Reedline, Signal};
+use reedline::{EditMode, Emacs, FileBackedHistory, Reedline, Signal, Vi};
 use std::io::Write;
+use std::path::PathBuf;
 
 pub use executor::execute_sql;
 pub use metacommands::handle_metacommand;
@@ -37,8 +39,8 @@ pub fn execute<W: Write>(
     // Show startup banner
     print_banner(client, args, writer)?;
 
-    // Initialize reedline editor
-    let mut editor = create_editor(args)?;
+    // Initialize reedline editor with persistent history and editor mode
+    let mut editor = create_editor(args, writer)?;
 
     // Create prompt
     let prompt = TqPrompt::new();
@@ -60,17 +62,80 @@ pub fn execute<W: Write>(
 }
 
 /// Create and configure the reedline editor
-fn create_editor(args: &ReplArgs) -> Result<Reedline> {
+fn create_editor(args: &ReplArgs, writer: &mut impl Write) -> Result<Reedline> {
     let mut editor = Reedline::create();
 
-    // Configure history if enabled
+    // Configure persistent history if enabled
     if !args.no_history {
-        // For MVP, we use in-memory history only
-        // Persistent history will be added in Phase 2
+        let history_path = resolve_history_path(&args.history_file);
+
+        match FileBackedHistory::with_file(10000, history_path.clone()) {
+            Ok(history) => {
+                editor = editor.with_history(Box::new(history));
+                log::debug!("History file loaded: {}", history_path.display());
+            }
+            Err(e) => {
+                // Warn but continue without persistent history
+                let _ = writeln!(
+                    writer,
+                    "Warning: Cannot load history from {}: {}",
+                    history_path.display(),
+                    e
+                );
+                let _ = writeln!(writer, "History will be stored in memory only for this session.");
+                log::warn!("Failed to load history file: {}", e);
+            }
+        }
+
+        // Exclude metacommands from history
         editor = editor.with_history_exclusion_prefix(Some("/".to_string()));
     }
 
+    // Configure editor mode (Vim or Emacs keybindings)
+    let edit_mode: Box<dyn EditMode> = match args.editor_mode {
+        EditorMode::Vi => Box::new(Vi::default()),
+        EditorMode::Emacs => Box::new(Emacs::default()),
+    };
+    editor = editor.with_edit_mode(edit_mode);
+
     Ok(editor)
+}
+
+/// Resolve the history file path
+///
+/// Handles ~ expansion and environment variables
+fn resolve_history_path(path: &PathBuf) -> PathBuf {
+    // Check for environment variable override first
+    if let Ok(env_path) = std::env::var("TQ_HISTORY_FILE") {
+        return expand_tilde(&PathBuf::from(env_path));
+    }
+
+    expand_tilde(path)
+}
+
+/// Expand ~ to the user's home directory
+fn expand_tilde(path: &PathBuf) -> PathBuf {
+    let path_str = path.to_string_lossy();
+
+    if path_str.starts_with("~/") || path_str == "~" {
+        if let Some(home) = dirs::home_dir() {
+            if path_str == "~" {
+                return home;
+            }
+            return home.join(&path_str[2..]);
+        }
+    }
+
+    path.clone()
+}
+
+/// Home directory helper using the directories crate
+mod dirs {
+    use std::path::PathBuf;
+
+    pub fn home_dir() -> Option<PathBuf> {
+        directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf())
+    }
 }
 
 /// Print the startup banner with connection information
@@ -93,6 +158,12 @@ fn print_banner<W: Write>(
     if args.default_limit > 0 {
         writeln!(writer, "Default row limit: {}", args.default_limit)?;
     }
+    // Show editor mode
+    let editor_mode_str = match args.editor_mode {
+        EditorMode::Emacs => "emacs",
+        EditorMode::Vi => "vi",
+    };
+    writeln!(writer, "Editor mode: {}", editor_mode_str)?;
     writeln!(writer)?;
     writeln!(writer, "Type /help for commands, /quit to exit.")?;
     writeln!(writer)?;

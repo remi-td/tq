@@ -1,16 +1,17 @@
 # tq Roadmap
 
 **Last Updated:** 2026-01-17
-**Version:** 1.1.0
+**Version:** 1.2.0
 
 ---
 
-## Current Sprint: Sprint 4 (Interactive Mode Phase 2 - Foundation)
+## Current Sprint: Sprint 5 (Interactive Mode Phase 2 - Advanced)
 
-**In Progress:** Sprint 4
-**Target Completion:** Q1 2026
+**Completed:** Sprint 4
+**In Progress:** Sprint 5
+**Target Completion:** Q1-Q2 2026
 
-Building on the Interactive Mode MVP, Sprint 4 adds essential metacommands and quality-of-life improvements.
+Sprint 5 focuses on advanced REPL features including syntax highlighting and result paging.
 
 ### Released Features
 
@@ -37,11 +38,16 @@ Building on the Interactive Mode MVP, Sprint 4 adds essential metacommands and q
 | Ctrl-C handling | Cancel current input gracefully | Shipped |
 | Default 100-row limit | REPL auto-limits SELECT queries (configurable) | Shipped |
 | Actual column names | Query results show real column names from database | Shipped |
+| `/describe` metacommand | Show table structure (columns, types, nullable) | Shipped |
+| `/ping` metacommand | Test connection within REPL with latency display | Shipped |
+| Persistent history | Save command history to `~/.tq_history` | Shipped |
+| Vim/Emacs keybindings | Configurable editor modes (--editor-mode flag) | Shipped |
 
 ### Technical Notes
 
 - Uses `reedline` crate for line editing (same as Nushell)
-- In-memory history (persistent history in Phase 2)
+- Persistent history saved to `~/.tq_history` with FileBackedHistory
+- Editor mode configurable via `--editor-mode` flag or `TQ_EDITOR_MODE` env var
 - Table output format for results
 - Shows timing for each query
 - Column metadata fetched from Teradata API for accurate column names
@@ -49,26 +55,26 @@ Building on the Interactive Mode MVP, Sprint 4 adds essential metacommands and q
 
 ---
 
-## Sprint 4: Interactive Mode Phase 2 - Foundation Features
+## Sprint 4: Interactive Mode Phase 2 - Foundation Features (COMPLETED)
 
-**Status:** In Progress
-**Target:** Q1 2026
+**Status:** Completed
+**Completed:** 2026-01-17
 
 ### Goals
 
 | Feature | Priority | Status | Description |
 |---------|----------|--------|-------------|
-| `/describe` metacommand | P0 | Planning | Describe table structure (columns, types, nullable) |
-| `/ping` metacommand | P0 | Planning | Test connection within REPL with latency display |
-| Persistent history | P1 | Planning | Save command history to `~/.tq_history` |
-| Vim/Emacs keybindings | P1 | Planning | Configurable editor modes (--editor-mode flag) |
+| `/describe` metacommand | P0 | Completed | Describe table structure (columns, types, nullable) |
+| `/ping` metacommand | P0 | Completed | Test connection within REPL with latency display |
+| Persistent history | P1 | Completed | Save command history to `~/.tq_history` |
+| Vim/Emacs keybindings | P1 | Completed | Configurable editor modes (--editor-mode flag) |
 
-### Sprint 4 Success Criteria
+### Sprint 4 Success Criteria (All Met)
 1. `/describe <table>` shows table structure with column names, types, and nullable status
 2. `/ping` tests database connection and displays latency
 3. Command history persists across REPL sessions
 4. Users can switch between vim and emacs keybinding modes
-5. All existing tests continue to pass
+5. All existing tests continue to pass (104 unit tests)
 6. New unit and integration tests added for new features
 
 ---
@@ -133,6 +139,32 @@ Features that have been considered and rejected:
 ---
 
 ## Release History
+
+### v1.2.0 (2026-01-17) - Interactive Mode Phase 2 Foundation
+
+**Sprint 4 Highlights:**
+- **`/describe <table>` metacommand**: Inspect table structure without writing SQL queries
+  - Shows column names, data types, nullable status, and default values
+  - Supports qualified names (database.table) and unqualified names
+  - Queries DBC.ColumnsV for comprehensive column information
+- **`/ping` metacommand**: Test database connection within REPL
+  - Displays connection latency in milliseconds
+  - Shows session duration and connection details
+  - Provides helpful suggestions on connection failure
+- **Persistent command history**: Command history saved across sessions
+  - Default location: `~/.tq_history` (10,000 entries)
+  - Custom location via `--history-file` or `TQ_HISTORY_FILE` env var
+  - Disable with `--no-history` flag
+  - Metacommands (starting with `/`) excluded from history
+- **Vim/Emacs keybinding modes**: Configurable editor modes
+  - Emacs mode (default): Standard readline-style keybindings
+  - Vi mode: Modal editing with insert/normal modes
+  - Configure via `--editor-mode` flag or `TQ_EDITOR_MODE` env var
+
+**New Tests:**
+- 5 new unit tests for Sprint 4 functionality
+- Tests for escape_sql_string, format_nullable, truncate_string
+- CLI tests for editor mode and history options
 
 ### v1.1.0 (2026-01-17) - Interactive Mode MVP
 

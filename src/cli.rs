@@ -255,7 +255,11 @@ pub struct ReplArgs {
     pub no_syntax_highlight: bool,
 
     /// Editor mode for key bindings
-    #[arg(long, default_value = "emacs", value_name = "MODE")]
+    ///
+    /// Choose between emacs (default) or vi keybindings.
+    /// emacs: Standard readline-style keybindings
+    /// vi: Modal editing with insert/normal modes
+    #[arg(long, default_value = "emacs", value_name = "MODE", env = "TQ_EDITOR_MODE")]
     pub editor_mode: EditorMode,
 
     /// Default row limit for SELECT queries (0 = unlimited)
@@ -512,5 +516,61 @@ mod tests {
         assert_eq!(format!("{}", LogonMechanism::Ldap), "LDAP");
         assert_eq!(format!("{}", LogonMechanism::Krb5), "KRB5");
         assert_eq!(format!("{}", LogonMechanism::Tdnego), "TDNEGO");
+    }
+
+    #[test]
+    fn test_cli_repl_with_vi_mode() {
+        let args = vec!["tq", "repl", "--editor-mode", "vi"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Repl(args) = cli.command {
+            assert_eq!(args.editor_mode, EditorMode::Vi);
+        } else {
+            panic!("Expected Repl command");
+        }
+    }
+
+    #[test]
+    fn test_cli_repl_with_emacs_mode() {
+        let args = vec!["tq", "repl", "--editor-mode", "emacs"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Repl(args) = cli.command {
+            assert_eq!(args.editor_mode, EditorMode::Emacs);
+        } else {
+            panic!("Expected Repl command");
+        }
+    }
+
+    #[test]
+    fn test_cli_repl_default_editor_mode() {
+        let args = vec!["tq", "repl"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Repl(args) = cli.command {
+            // Default should be emacs
+            assert_eq!(args.editor_mode, EditorMode::Emacs);
+        } else {
+            panic!("Expected Repl command");
+        }
+    }
+
+    #[test]
+    fn test_cli_repl_with_custom_history_file() {
+        let args = vec!["tq", "repl", "--history-file", "/tmp/my_history"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Repl(args) = cli.command {
+            assert_eq!(args.history_file, PathBuf::from("/tmp/my_history"));
+        } else {
+            panic!("Expected Repl command");
+        }
+    }
+
+    #[test]
+    fn test_cli_repl_with_no_history() {
+        let args = vec!["tq", "repl", "--no-history"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Repl(args) = cli.command {
+            assert!(args.no_history);
+        } else {
+            panic!("Expected Repl command");
+        }
     }
 }
