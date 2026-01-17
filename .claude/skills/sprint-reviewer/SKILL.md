@@ -138,7 +138,7 @@ Task tool:
 
           Provide specific recommendations for:
           - UX improvements for next sprint
-          - specifications.md clarifications
+          - specifications.md and detailed-specifications/ clarifications
           - cli-ux-designer agent enhancements
           - Documentation updates needed"
 ```

@@ -19,24 +19,45 @@ This project is developed exclusively by Claude Code using the skills and agents
 
 ### Master specification documents
 
-The project is governed by three authoritative specification documents located in `docs/builder/`:
+The project is governed by authoritative specification documents located in `docs/builder/`:
 
-1. **`specifications.md`** - Master specifications
-   - Documents all current and future features for the tool
+#### Main Specifications
+
+1. **`specifications.md`** - Main specifications dashboard
+   - High-level feature status dashboard with visual indicators (✅ 🚧 📋 🔲)
+   - Sprint roadmap showing delivered, current, and planned work
+   - Quick navigation to detailed specifications
+   - Owned by the `cli-ux-designer` agent
+   - Shows WHAT is implemented and WHAT is planned
+
+2. **`detailed-specifications/*.md`** - Detailed technical specifications
+   - Comprehensive specifications organized by domain
+   - Each file is self-contained and covers a specific area:
+     - `user-personas.md` - Target users and use cases
+     - `cli-interface.md` - Command structure, flags, help text
+     - `repl-mode.md` - Interactive mode specifications
+     - `batch-mode.md` - Non-interactive execution
+     - `configuration.md` - Config files and credentials
+     - `output-formats.md` - Table, JSON, CSV formatting
+     - `error-handling.md` - Error messages and exit codes
+     - `security.md` - Security requirements
+     - `performance.md` - Performance considerations
    - Owned by the `cli-ux-designer` agent
    - Defines WHAT the tool should do and HOW users interact with it
 
-2. **`rust-cli-design-general.md`** - General Rust CLI design guidelines
+#### Architecture and Testing
+
+3. **`rust-cli-design-general.md`** - General Rust CLI design guidelines
    - General Rust CLI design principles and best practices
    - Owned by the `rust-teradata-architect` agent
    - Provides patterns and principles for CLI tool development
 
-3. **`rust-architecture.md`** - Rust architecture for tq
+4. **`rust-architecture.md`** - Rust architecture for tq
    - Architecture document specific to the tq tool
    - Owned by the `rust-teradata-architect` agent
    - Defines HOW the tool is implemented internally
 
-4. **`testing-guidelines.md`** - Testing methodology and best practices
+5. **`testing-guidelines.md`** - Testing methodology and best practices
    - Testing approach, patterns, and execution techniques
    - Owned by the `quality-validator` agent
    - Defines HOW to design and execute quality validation tests

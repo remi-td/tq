@@ -12,7 +12,7 @@ These pre-hooks validate tool usage before execution and block dangerous operati
 
 ## Hooks
 
-### 1. bash-pagination-guard.sh
+### 1. bash-pagination-guard.sh (CRITICAL)
 
 Blocks unpaginated bash commands that generate massive output.
 
@@ -34,7 +34,7 @@ grep -r "pattern" .
 grep -r "pattern" . | head -100
 ```
 
-### 2. read-memory-guard.sh
+### 2. read-memory-guard.sh (CRITICAL)
 
 Prevents reading files exceeding size/line limits without pagination.
 
@@ -51,7 +51,7 @@ Prevents reading files exceeding size/line limits without pagination.
 { "file_path": "large_file.txt", "offset": 0, "limit": 1000 }
 ```
 
-### 3. grep-tool-guard.sh
+### 3. grep-tool-guard.sh (CRITICAL)
 
 Enforces head_limit on all Grep tool operations.
 
@@ -66,6 +66,76 @@ Enforces head_limit on all Grep tool operations.
 
 // ✅ ALLOWED
 { "pattern": "function", "path": "src/", "head_limit": 100 }
+```
+
+### 4. task-memory-guard.sh (MONITORING)
+
+Monitors sub-agent launches and warns when memory usage is high.
+
+**Purpose:**
+- Tracks all Task tool calls that launch sub-agents
+- Warns if parent process is using > 8GB memory before launching
+- Logs all sub-agent launches for debugging
+
+**Example:**
+```
+⚠️  WARNING: High memory usage detected before launching sub-agent
+
+Current process memory: 10.24GB
+Sub-agent: tq-project-manager
+Model: opus
+
+Consider:
+  - Restarting the session to clear accumulated memory
+  - Using model: haiku for less memory-intensive operations
+  - Breaking the task into smaller chunks
+```
+
+### 5. crash-reporter.sh (DIAGNOSTIC)
+
+SessionEnd hook that captures diagnostic information when a session ends.
+
+**Captures:**
+- Memory usage of all Claude processes
+- Recent sub-agent launch history
+- System memory statistics
+- Recent errors from debug logs
+
+**Output:**
+- Crash reports saved to `~/.claude/crash-reports/`
+- Automatically rotates old reports (keeps last 10)
+
+## Monitoring Tools
+
+### monitor-memory.sh
+
+Quick utility to check current memory usage:
+
+```bash
+./.claude/hooks/monitor-memory.sh
+```
+
+Output example:
+```
+=== Claude Code Memory Usage ===
+
+PID  3102:  10.24 GB  CPU: 363.4%  /path/to/claude ⚠️  HIGH
+PID  5806:   0.37 GB  CPU:  97.7%  /path/to/claude
+
+Total Claude memory: 10.61GB
+
+=== System Memory ===
+free:              2.45 GB
+active:           12.31 GB
+inactive:          8.92 GB
+```
+
+### Sub-Agent Launch Log
+
+All sub-agent launches are logged to `~/.claude/subagent-launches.log`:
+
+```bash
+tail -f ~/.claude/subagent-launches.log
 ```
 
 ## Configuration
@@ -104,6 +174,25 @@ Add to `.claude/settings.local.json` in your project:
           {
             "type": "command",
             "command": ".claude/hooks/grep-tool-guard.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/task-memory-guard.sh"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/crash-reporter.sh"
           }
         ]
       }
@@ -194,6 +283,45 @@ Since implementing these hooks:
 - ✅ Forces pagination on dangerous operations
 - ✅ Provides clear guidance to Claude on safe alternatives
 - ✅ No false positives in normal development workflows
+- ✅ Monitors sub-agent launches and warns about memory usage
+- ✅ Captures crash diagnostics for post-mortem analysis
+
+## What to Do If You Experience Crashes
+
+If Claude Code crashes with an Abort() message or becomes unresponsive:
+
+### Immediate Actions
+
+1. **Check crash report**:
+   ```bash
+   ls -lt ~/.claude/crash-reports/ | head -5
+   cat ~/.claude/crash-reports/crash-<latest>.txt
+   ```
+
+2. **Check current memory usage**:
+   ```bash
+   ./.claude/hooks/monitor-memory.sh
+   ```
+
+3. **Review recent sub-agent launches**:
+   ```bash
+   tail -20 ~/.claude/subagent-launches.log
+   ```
+
+### Prevention Strategies
+
+1. **Restart sessions proactively**: If memory exceeds 5GB, consider restarting Claude Code
+2. **Use Haiku for sub-agents**: When launching agents with the Task tool, prefer `model: haiku` instead of `opus` unless complex reasoning is required
+3. **Avoid parallel sub-agents**: Launching multiple sub-agents in parallel multiplies memory consumption
+4. **Monitor during long sessions**: Run `monitor-memory.sh` periodically during extended work sessions
+5. **Check agent configurations**: Review `.claude/agents/*.md` files - agents configured with `model: opus` consume more memory
+
+### Known Memory-Intensive Operations
+
+- **tq-project-manager agent**: Uses `model: opus` and can launch multiple sub-agents - VERY memory intensive
+- **Large file operations**: Even with hooks, reading many large files accumulates memory
+- **Long-running sessions**: Claude Code never releases memory from tool outputs during a session
+- **Sub-agent cascades**: When a sub-agent launches another sub-agent, memory compounds
 
 ## Limitations
 
