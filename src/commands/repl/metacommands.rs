@@ -18,7 +18,7 @@ use std::time::Instant;
 /// Returns Ok(true) to continue the REPL, Ok(false) to exit.
 pub fn handle_metacommand<W: Write>(
     input: &str,
-    state: &ReplState,
+    state: &mut ReplState,
     client: &DatabaseClient,
     writer: &mut W,
 ) -> Result<bool> {
@@ -64,6 +64,80 @@ pub fn handle_metacommand<W: Write>(
             }
         }
 
+        // Export command (Sprint 6)
+        "export" => {
+            if args.is_empty() {
+                writeln!(writer, "Usage: /export <format> [file]")?;
+                writeln!(writer, "       /export <format> --append [file]")?;
+                writeln!(writer)?;
+                writeln!(writer, "Formats: csv, json, sql")?;
+                writeln!(writer, "Example: /export csv results.csv")?;
+            } else {
+                let format = args[0];
+                let file = if args.len() > 1 {
+                    Some(args[1])
+                } else {
+                    None
+                };
+                let append = args.contains(&"--append");
+                execute_export(state, writer, format, file, append)?;
+            }
+        }
+
+        // Pager control command (Sprint 6)
+        "pager" => {
+            if args.is_empty() {
+                // Show current setting
+                let status = if state.is_pager_enabled() { "on" } else { "off" };
+                writeln!(writer, "Pager: {}", status)?;
+            } else {
+                match args[0].to_lowercase().as_str() {
+                    "on" => {
+                        state.set_pager(true);
+                        writeln!(writer, "Result paging enabled")?;
+                    }
+                    "off" => {
+                        state.set_pager(false);
+                        writeln!(writer, "Result paging disabled")?;
+                    }
+                    _ => {
+                        writeln!(
+                            writer,
+                            "Invalid pager setting '{}'. Use 'on' or 'off'.",
+                            args[0]
+                        )?;
+                    }
+                }
+            }
+        }
+
+        // Colors control command (Sprint 6)
+        "colors" => {
+            if args.is_empty() {
+                // Show current setting
+                let status = if state.are_colors_enabled() { "on" } else { "off" };
+                writeln!(writer, "Colors: {}", status)?;
+            } else {
+                match args[0].to_lowercase().as_str() {
+                    "on" => {
+                        state.set_colors(true);
+                        writeln!(writer, "Syntax highlighting enabled")?;
+                    }
+                    "off" => {
+                        state.set_colors(false);
+                        writeln!(writer, "Syntax highlighting disabled")?;
+                    }
+                    _ => {
+                        writeln!(
+                            writer,
+                            "Invalid color setting '{}'. Use 'on' or 'off'.",
+                            args[0]
+                        )?;
+                    }
+                }
+            }
+        }
+
         // Unknown command
         _ => {
             writeln!(writer, "Unknown command: /{}", command)?;
@@ -83,6 +157,9 @@ fn print_help<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "  /session               Show current session information")?;
     writeln!(writer, "  /ping                  Test database connection")?;
     writeln!(writer, "  /describe <table>, /d  Show table structure")?;
+    writeln!(writer, "  /export <fmt> [file]   Export last result (csv, json, sql)")?;
+    writeln!(writer, "  /pager on|off          Enable/disable result paging")?;
+    writeln!(writer, "  /colors on|off         Enable/disable syntax highlighting")?;
     writeln!(writer)?;
     writeln!(writer, "SQL Execution:")?;
     writeln!(writer, "  Enter SQL statements ending with semicolon (;)")?;
@@ -90,6 +167,7 @@ fn print_help<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer)?;
     writeln!(writer, "Keyboard Shortcuts:")?;
     writeln!(writer, "  Up/Down        Navigate command history")?;
+    writeln!(writer, "  Tab            Auto-complete SQL keywords")?;
     writeln!(writer, "  Ctrl-C         Cancel current input")?;
     writeln!(writer, "  Ctrl-D         Exit REPL (when input is empty)")?;
     writeln!(writer, "  Ctrl-R         Search command history")?;
@@ -318,6 +396,244 @@ fn truncate_string(s: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &s[..max_len - 3])
     }
+}
+
+/// Execute the /export metacommand (Sprint 6)
+///
+/// Exports the last query result to a file in various formats (CSV, JSON, SQL).
+fn execute_export<W: Write>(
+    state: &ReplState,
+    writer: &mut W,
+    format: &str,
+    file: Option<&str>,
+    _append: bool,
+) -> Result<()> {
+    // Check if we have a result to export
+    let result = match state.last_result() {
+        Some(r) => r,
+        None => {
+            writeln!(writer)?;
+            writeln!(writer, "Error: No query results to export.")?;
+            writeln!(writer, "Execute a query first, then use /export to save the results.")?;
+            writeln!(writer)?;
+            return Ok(());
+        }
+    };
+
+    // Validate format
+    let format_lower = format.to_lowercase();
+    if !["csv", "json", "sql"].contains(&format_lower.as_str()) {
+        writeln!(writer)?;
+        writeln!(
+            writer,
+            "Error: Unknown format '{}'. Supported formats: csv, json, sql",
+            format
+        )?;
+        writeln!(writer)?;
+        return Ok(());
+    }
+
+    // Export based on format
+    match format_lower.as_str() {
+        "csv" => {
+            export_csv(result, file, writer)?;
+        }
+        "json" => {
+            export_json(result, file, writer)?;
+        }
+        "sql" => {
+            export_sql(result, file, writer)?;
+        }
+        _ => unreachable!(),
+    }
+
+    writeln!(writer)?;
+    Ok(())
+}
+
+/// Export results as CSV
+fn export_csv<W: Write>(
+    result: &crate::db::QueryResult,
+    file: Option<&str>,
+    writer: &mut W,
+) -> Result<()> {
+    use std::fs::File;
+    use std::io::BufWriter;
+
+    // Build CSV content
+    let mut csv_content = String::new();
+
+    // Add headers
+    let headers: Vec<String> = result.columns.iter().map(|c| c.name.clone()).collect();
+    csv_content.push_str(&headers.join(","));
+    csv_content.push('\n');
+
+    // Add rows
+    for row in &result.rows {
+        let values: Vec<String> = row
+            .iter()
+            .map(|v| {
+                let s = v.display().to_string();
+                // Escape quotes and wrap in quotes if needed
+                if s.contains(',') || s.contains('"') || s.contains('\n') {
+                    format!("\"{}\"", s.replace("\"", "\"\""))
+                } else {
+                    s
+                }
+            })
+            .collect();
+        csv_content.push_str(&values.join(","));
+        csv_content.push('\n');
+    }
+
+    // Write to file or stdout
+    if let Some(filepath) = file {
+        match File::create(filepath) {
+            Ok(f) => {
+                use std::io::Write as _;
+                let mut file_writer = BufWriter::new(f);
+                file_writer.write_all(csv_content.as_bytes())?;
+                writeln!(writer, "Exported {} rows to {}", result.row_count, filepath)?;
+            }
+            Err(e) => {
+                writeln!(writer, "Error: Cannot write to {}: {}", filepath, e)?;
+            }
+        }
+    } else {
+        // Output to stdout
+        write!(writer, "{}", csv_content)?;
+    }
+
+    Ok(())
+}
+
+/// Export results as JSON
+fn export_json<W: Write>(
+    result: &crate::db::QueryResult,
+    file: Option<&str>,
+    writer: &mut W,
+) -> Result<()> {
+    use std::fs::File;
+    use std::io::BufWriter;
+
+    // Build JSON array
+    let mut rows = Vec::new();
+
+    for row in &result.rows {
+        let mut obj = serde_json::json!({});
+        for (i, col) in result.columns.iter().enumerate() {
+            let value = &row[i];
+            let json_value = match value {
+                crate::db::Value::Null => serde_json::Value::Null,
+                crate::db::Value::String(s) => serde_json::Value::String(s.clone()),
+                crate::db::Value::Integer(n) => serde_json::Value::Number((*n).into()),
+                crate::db::Value::Decimal(f) => {
+                    serde_json::Number::from_f64(*f)
+                        .map(serde_json::Value::Number)
+                        .unwrap_or(serde_json::Value::Null)
+                }
+                crate::db::Value::Boolean(b) => serde_json::Value::Bool(*b),
+                crate::db::Value::Date(d) => serde_json::Value::String(d.clone()),
+                crate::db::Value::Timestamp(ts) => serde_json::Value::String(ts.clone()),
+                crate::db::Value::Time(t) => serde_json::Value::String(t.clone()),
+                crate::db::Value::Bytes(_) => serde_json::Value::String(value.display().to_string()),
+            };
+            obj[&col.name] = json_value;
+        }
+        rows.push(obj);
+    }
+
+    let json_array = serde_json::Value::Array(rows);
+    let json_str = serde_json::to_string_pretty(&json_array)?;
+
+    if let Some(filepath) = file {
+        match File::create(filepath) {
+            Ok(f) => {
+                use std::io::Write as _;
+                let mut file_writer = BufWriter::new(f);
+                file_writer.write_all(json_str.as_bytes())?;
+                writeln!(writer, "Exported {} rows to {}", result.row_count, filepath)?;
+            }
+            Err(e) => {
+                writeln!(writer, "Error: Cannot write to {}: {}", filepath, e)?;
+            }
+        }
+    } else {
+        // Output to stdout
+        writeln!(writer, "{}", json_str)?;
+    }
+
+    Ok(())
+}
+
+/// Export results as SQL INSERT statements
+fn export_sql<W: Write>(
+    result: &crate::db::QueryResult,
+    file: Option<&str>,
+    writer: &mut W,
+) -> Result<()> {
+    use std::fs::File;
+    use std::io::BufWriter;
+
+    // For now, use a generic table name
+    // In the future, we could parse this from the last query
+    let table_name = "exported_data";
+
+    let mut sql_content = String::new();
+
+    // Add CREATE TABLE statement
+    sql_content.push_str(&format!("-- Exported data\n"));
+    sql_content.push_str(&format!(
+        "-- CREATE TABLE {} (\n",
+        table_name
+    ));
+    for col in &result.columns {
+        sql_content.push_str(&format!("--   {} VARCHAR(255),\n", col.name));
+    }
+    sql_content.push_str(&format!("-- );\n\n"));
+
+    // Add INSERT statements
+    for row in &result.rows {
+        let mut values = Vec::new();
+        for value in row {
+            let sql_value = match value {
+                crate::db::Value::Null => "NULL".to_string(),
+                crate::db::Value::String(s) => format!("'{}'", s.replace("'", "''")),
+                crate::db::Value::Integer(n) => n.to_string(),
+                crate::db::Value::Decimal(f) => f.to_string(),
+                crate::db::Value::Boolean(b) => if *b { "1" } else { "0" }.to_string(),
+                _ => format!("'{}'", value.display().to_string().replace("'", "''")),
+            };
+            values.push(sql_value);
+        }
+
+        let col_names: Vec<String> = result.columns.iter().map(|c| c.name.clone()).collect();
+        sql_content.push_str(&format!(
+            "INSERT INTO {} ({}) VALUES ({});\n",
+            table_name,
+            col_names.join(", "),
+            values.join(", ")
+        ));
+    }
+
+    if let Some(filepath) = file {
+        match File::create(filepath) {
+            Ok(f) => {
+                use std::io::Write as _;
+                let mut file_writer = BufWriter::new(f);
+                file_writer.write_all(sql_content.as_bytes())?;
+                writeln!(writer, "Exported {} rows to {}", result.row_count, filepath)?;
+            }
+            Err(e) => {
+                writeln!(writer, "Error: Cannot write to {}: {}", filepath, e)?;
+            }
+        }
+    } else {
+        // Output to stdout
+        writeln!(writer, "{}", sql_content)?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

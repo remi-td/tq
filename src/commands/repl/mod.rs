@@ -10,6 +10,7 @@
 //! - Result paging for large result sets
 //! - Graceful Ctrl-C handling
 
+mod completer;
 mod executor;
 mod highlighter;
 mod metacommands;
@@ -20,11 +21,12 @@ mod state;
 use crate::cli::{EditorMode, ReplArgs};
 use crate::db::DatabaseClient;
 use crate::error::Result;
+use completer::SqlCompleter;
 use reedline::{EditMode, Emacs, FileBackedHistory, Reedline, Signal, Vi};
 use std::io::Write;
 use std::path::PathBuf;
 
-pub use executor::{execute_sql, QueryTiming};
+pub use executor::{execute_sql, execute_sql_with_state, QueryTiming};
 pub use highlighter::SqlHighlighter;
 pub use metacommands::handle_metacommand;
 pub use pager::{PagedOutput, PagerConfig};
@@ -111,6 +113,9 @@ fn create_editor(args: &ReplArgs, writer: &mut impl Write) -> Result<Reedline> {
         highlighter::SqlHighlighter::new()
     };
     editor = editor.with_highlighter(Box::new(highlighter));
+
+    // Configure tab completion for SQL keywords (Sprint 6)
+    editor = editor.with_completer(Box::new(SqlCompleter::new()));
 
     Ok(editor)
 }
@@ -212,7 +217,7 @@ fn repl_loop<W: Write>(
     state: &mut ReplState,
     prompt: &TqPrompt,
     writer: &mut W,
-    use_color: bool,
+    _use_color: bool,
     default_limit: usize,
 ) -> Result<()> {
     loop {
@@ -250,8 +255,8 @@ fn repl_loop<W: Write>(
                 if state.input_buffer().trim_end().ends_with(';') {
                     let sql = state.take_input();
 
-                    // Execute the SQL with default limit for SELECT queries
-                    match execute_sql(client, &sql, writer, use_color, default_limit) {
+                    // Execute the SQL with default limit for SELECT queries (Sprint 6: uses state colors)
+                    match execute_sql_with_state(client, state, &sql, writer, default_limit) {
                         Ok(row_count) => {
                             state.record_query(row_count);
                         }

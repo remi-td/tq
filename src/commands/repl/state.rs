@@ -3,7 +3,7 @@
 //! Tracks the current state of the interactive session including
 //! input buffer, query count, and session timing.
 
-use crate::db::ConnectionConfig;
+use crate::db::{ConnectionConfig, QueryResult};
 use std::time::Instant;
 
 /// State of the REPL session
@@ -23,6 +23,15 @@ pub struct ReplState {
 
     /// Connection configuration (for display purposes)
     connection_info: ConnectionConfig,
+
+    /// Last query result (for /export command)
+    last_result: Option<QueryResult>,
+
+    /// Whether result paging is enabled (Sprint 6)
+    pager_enabled: bool,
+
+    /// Whether colored output is enabled (Sprint 6)
+    colors_enabled: bool,
 }
 
 impl ReplState {
@@ -34,6 +43,9 @@ impl ReplState {
             queries_executed: 0,
             total_rows: 0,
             connection_info,
+            last_result: None,
+            pager_enabled: true,
+            colors_enabled: atty::is(atty::Stream::Stdout), // Enable colors for TTY
         }
     }
 
@@ -103,6 +115,41 @@ impl ReplState {
         let duration = chrono::Duration::from_std(self.session_duration()).unwrap_or_default();
         let start = now - duration;
         start.format("%Y-%m-%d %H:%M:%S").to_string()
+    }
+
+    /// Set the last query result (Sprint 6: for /export)
+    pub fn set_last_result(&mut self, result: QueryResult) {
+        self.last_result = Some(result);
+    }
+
+    /// Take the last query result (consumes it)
+    pub fn take_last_result(&mut self) -> Option<QueryResult> {
+        self.last_result.take()
+    }
+
+    /// Get reference to last query result
+    pub fn last_result(&self) -> Option<&QueryResult> {
+        self.last_result.as_ref()
+    }
+
+    /// Set pager enabled/disabled (Sprint 6)
+    pub fn set_pager(&mut self, enabled: bool) {
+        self.pager_enabled = enabled;
+    }
+
+    /// Check if pager is enabled (Sprint 6)
+    pub fn is_pager_enabled(&self) -> bool {
+        self.pager_enabled
+    }
+
+    /// Set colors enabled/disabled (Sprint 6)
+    pub fn set_colors(&mut self, enabled: bool) {
+        self.colors_enabled = enabled;
+    }
+
+    /// Check if colors are enabled (Sprint 6)
+    pub fn are_colors_enabled(&self) -> bool {
+        self.colors_enabled
     }
 }
 

@@ -12,6 +12,7 @@ use crate::cli::OutputFormat;
 use crate::db::DatabaseClient;
 use crate::error::Result;
 use crate::format::{write_output_with_timing, FormatOptions};
+use super::state::ReplState;
 use std::io::Write;
 use std::time::{Duration, Instant};
 
@@ -72,6 +73,91 @@ pub fn execute_sql<W: Write>(
     // Write the results (always show timing in REPL)
     write_output_with_timing(
         &result,
+        writer,
+        OutputFormat::Table,
+        &format_options,
+        true, // Always show timing in REPL
+    )?;
+
+    // Show limit message if we applied the default limit
+    if limited {
+        writeln!(writer)?;
+        writeln!(
+            writer,
+            "Showing first {} rows. Add LIMIT clause for different results.",
+            default_limit
+        )?;
+    }
+
+    log::debug!(
+        "Query completed: {} rows in {:?}",
+        row_count,
+        execution_time
+    );
+
+    Ok(row_count)
+}
+
+/// Execute SQL with state management (stores results and uses state colors)
+///
+/// This version stores the query result in REPL state for later export,
+/// and uses the color setting from state.
+///
+/// Returns the number of rows returned on success.
+pub fn execute_sql_with_state<W: Write>(
+    client: &DatabaseClient,
+    state: &mut ReplState,
+    sql: &str,
+    writer: &mut W,
+    default_limit: usize,
+) -> Result<usize> {
+    let trimmed = sql.trim();
+
+    // Skip empty statements
+    if trimmed.is_empty() || trimmed == ";" {
+        return Ok(0);
+    }
+
+    // Strip trailing semicolon for execution
+    let sql_to_execute = trimmed.trim_end_matches(';').trim();
+
+    if sql_to_execute.is_empty() {
+        return Ok(0);
+    }
+
+    log::debug!("Executing SQL: {}", truncate_for_log(sql_to_execute));
+
+    // Check if we should apply the default limit
+    let apply_limit = default_limit > 0 && is_select_without_limit(sql_to_execute);
+
+    // Execute the query with or without limit
+    let start = Instant::now();
+    let result = if apply_limit {
+        log::debug!("Applying default REPL limit: {} rows", default_limit);
+        client.execute_with_limit(sql_to_execute, default_limit)?
+    } else {
+        client.execute(sql_to_execute)?
+    };
+    let execution_time = start.elapsed();
+
+    let row_count = result.row_count;
+    let limited = apply_limit && row_count == default_limit;
+
+    // Store result in state for /export command (Sprint 6)
+    let result_clone = result.clone();
+    state.set_last_result(result);
+
+    // Use color setting from state (Sprint 6)
+    let use_color = state.are_colors_enabled();
+
+    // Configure formatting
+    let format_options = FormatOptions::default()
+        .with_header(true)
+        .with_color(use_color);
+
+    // Write the results (always show timing in REPL)
+    write_output_with_timing(
+        &result_clone,
         writer,
         OutputFormat::Table,
         &format_options,

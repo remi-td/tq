@@ -40,6 +40,7 @@ secrecy = { version = "0.8", features = ["serde"] }
 log = "0.4"
 env_logger = "0.11"
 base64 = "0.22"
+atty = "0.2"
 
 # REPL / Interactive mode
 reedline = "0.38"
