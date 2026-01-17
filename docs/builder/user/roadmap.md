@@ -5,13 +5,15 @@
 
 ---
 
-## Current Sprint: Sprint 6 (Interactive Mode Phase 3)
+## Current Sprint: Sprint 6 (Interactive Mode Phase 3 - Bug Fixes & Advanced Features)
 
 **Completed:** Sprint 5
 **In Progress:** Sprint 6
-**Target Completion:** Q2 2026
+**Target Completion:** 2026-01-27
 
-Sprint 6 focuses on tab completion, export functionality, and connection switching.
+Sprint 6 focuses on fixing critical table formatting bug and adding tab completion and export functionality.
+
+**Critical Priority:** Address table formatting/padding bug affecting all table output.
 
 ### Released Features
 
@@ -68,6 +70,7 @@ Sprint 6 focuses on tab completion, export functionality, and connection switchi
 
 **Status:** Completed
 **Completed:** 2026-01-17
+**Version:** v1.3.0
 
 ### Goals
 
@@ -77,6 +80,16 @@ Sprint 6 focuses on tab completion, export functionality, and connection switchi
 | Enhanced timing display | P1 | Completed | Detailed query timing with breakdown and rows/second |
 | Vertical result paging | P2 | Completed | Navigate long result sets with less-like controls |
 | Horizontal result paging | P2 | Completed | Scroll wide tables with arrow keys |
+
+### Retrospective Summary
+
+**Status:** EXCELLENT
+- **Features Delivered:** 4/4 (100%)
+- **Quality Assessment:** 4/5 (Good)
+- **Technical Debt:** Zero introduced
+- **Tests Added:** 22 new unit tests (126 total)
+- **Key Achievement:** Significant UX improvement with syntax highlighting and result paging
+- **Full Review:** See [Sprint 5 Retrospective](../sprints/sprint-5-review.md)
 
 ### Sprint 5 Success Criteria (All Met)
 1. SQL input is syntax highlighted with keywords in cyan, strings in green, numbers in yellow
@@ -121,18 +134,39 @@ Sprint 6 focuses on tab completion, export functionality, and connection switchi
 
 ---
 
-## Next Up: Interactive Mode (Phase 3)
+## Sprint 6: Interactive Mode Phase 3 - Bug Fixes & Advanced Features (IN PROGRESS)
 
-**Planned:** Q2 2026
+**Status:** In Progress
+**Start Date:** 2026-01-18
+**Target Completion:** 2026-01-27
+**Version:** v1.4.0 (planned)
 
-| Feature | Priority | Description |
-|---------|----------|-------------|
-| Tab completion (keywords) | P1 | Complete SQL keywords |
-| Tab completion (tables) | P1 | Complete table names from schema |
-| Tab completion (columns) | P2 | Complete column names |
-| `/export` command | P1 | Export last result to file |
-| `/logon` command | P1 | Switch connections within REPL |
-| Theming | P2 | Customizable color schemes |
+### Goals
+
+| Feature | Priority | Status | Description |
+|---------|----------|--------|-------------|
+| Table formatting fix | P0 | In Progress | Fix column padding/alignment bug in table output |
+| Tab completion (keywords) | P1 | Planned | Auto-complete SQL keywords on Tab key |
+| `/export` command | P1 | Planned | Export last result to file (JSON, CSV, SQL) |
+| Runtime pager control | P2 | Planned | `/pager on\|off` metacommand for runtime toggle |
+| Color scheme display | P2 | Planned | `/colors` metacommand to show current theme |
+
+### Sprint 6 Rationale
+
+**Critical Priority:** Table formatting bug identified in user feedback affects core functionality (all table output). This must be P0 to maintain quality standards.
+
+**Feature Selection:** Tab completion and export are user-requested features that enhance productivity. These were included in the incoming Interactive-ui.md feature request.
+
+### Next Up: Sprint 7+
+
+**Planned Features (Future Sprints):**
+
+| Feature | Priority | Target Sprint | Description |
+|---------|----------|----------------|-------------|
+| Tab completion (tables) | P1 | Sprint 7 | Complete table names from schema |
+| Tab completion (columns) | P2 | Sprint 7 | Complete column names |
+| `/logon` command | P1 | Sprint 7 | Switch connections within REPL |
+| Theming system | P2 | Sprint 7+ | Customizable color schemes |
 
 ---
 
