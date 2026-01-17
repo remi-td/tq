@@ -3,13 +3,17 @@
 //! Provides an interactive SQL shell for Teradata databases.
 //! Features:
 //! - Multi-line SQL input with semicolon termination
+//! - SQL syntax highlighting with customizable colors
 //! - Persistent command history (saved to ~/.tq_history)
 //! - Vim and Emacs keybinding modes
 //! - Metacommands for session management (/quit, /help, /session, /ping, /describe)
+//! - Result paging for large result sets
 //! - Graceful Ctrl-C handling
 
 mod executor;
+mod highlighter;
 mod metacommands;
+mod pager;
 mod prompt;
 mod state;
 
@@ -20,8 +24,10 @@ use reedline::{EditMode, Emacs, FileBackedHistory, Reedline, Signal, Vi};
 use std::io::Write;
 use std::path::PathBuf;
 
-pub use executor::execute_sql;
+pub use executor::{execute_sql, QueryTiming};
+pub use highlighter::SqlHighlighter;
 pub use metacommands::handle_metacommand;
+pub use pager::{PagedOutput, PagerConfig};
 pub use prompt::TqPrompt;
 pub use state::ReplState;
 
@@ -98,6 +104,14 @@ fn create_editor(args: &ReplArgs, writer: &mut impl Write) -> Result<Reedline> {
     };
     editor = editor.with_edit_mode(edit_mode);
 
+    // Configure syntax highlighting
+    let highlighter = if args.no_syntax_highlight {
+        highlighter::SqlHighlighter::disabled()
+    } else {
+        highlighter::SqlHighlighter::new()
+    };
+    editor = editor.with_highlighter(Box::new(highlighter));
+
     Ok(editor)
 }
 
@@ -164,6 +178,26 @@ fn print_banner<W: Write>(
         EditorMode::Vi => "vi",
     };
     writeln!(writer, "Editor mode: {}", editor_mode_str)?;
+
+    // Show syntax highlighting status
+    if args.no_syntax_highlight {
+        writeln!(writer, "Syntax highlighting: disabled")?;
+    } else {
+        writeln!(writer, "Syntax highlighting: enabled")?;
+    }
+
+    // Show paging status
+    if args.no_pager {
+        writeln!(writer, "Result paging: disabled")?;
+    } else {
+        writeln!(writer, "Result paging: enabled")?;
+    }
+
+    // Show enhanced timing status
+    if args.enhanced_timing {
+        writeln!(writer, "Enhanced timing: enabled")?;
+    }
+
     writeln!(writer)?;
     writeln!(writer, "Type /help for commands, /quit to exit.")?;
     writeln!(writer)?;

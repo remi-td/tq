@@ -271,6 +271,20 @@ pub struct ReplArgs {
     /// Use 0 to disable the default limit (fetch all rows).
     #[arg(long, default_value = "100", value_name = "N", env = "TQ_REPL_LIMIT")]
     pub default_limit: usize,
+
+    /// Disable result paging (show all output at once)
+    ///
+    /// By default, large result sets are displayed with a pager
+    /// that allows scrolling. Use this flag to disable paging.
+    #[arg(long)]
+    pub no_pager: bool,
+
+    /// Show enhanced timing information
+    ///
+    /// Display detailed query timing breakdown including connection,
+    /// execution, and transfer times.
+    #[arg(long)]
+    pub enhanced_timing: bool,
 }
 
 /// Authentication mechanism for Teradata

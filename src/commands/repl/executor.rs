@@ -2,13 +2,18 @@
 //!
 //! Handles executing SQL statements and displaying results
 //! in the interactive context.
+//!
+//! Features:
+//! - Enhanced timing display with breakdown
+//! - Result paging for large result sets
+//! - Automatic row limiting for SELECT queries
 
 use crate::cli::OutputFormat;
 use crate::db::DatabaseClient;
 use crate::error::Result;
 use crate::format::{write_output_with_timing, FormatOptions};
 use std::io::Write;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Execute a SQL statement and write results to the writer
 ///
@@ -139,9 +144,125 @@ fn truncate_for_log(sql: &str) -> String {
     }
 }
 
+/// Enhanced timing information for query execution
+#[derive(Debug, Clone)]
+pub struct QueryTiming {
+    /// Total execution time (from submit to all results received)
+    pub total: Duration,
+    /// Time to receive first row (latency)
+    pub first_row: Option<Duration>,
+    /// Time to receive all rows (transfer time)
+    pub transfer: Option<Duration>,
+}
+
+impl QueryTiming {
+    /// Create a new timing record with total time only
+    pub fn new(total: Duration) -> Self {
+        Self {
+            total,
+            first_row: None,
+            transfer: None,
+        }
+    }
+
+    /// Create a timing record with full breakdown
+    pub fn with_breakdown(
+        total: Duration,
+        first_row: Duration,
+        transfer: Duration,
+    ) -> Self {
+        Self {
+            total,
+            first_row: Some(first_row),
+            transfer: Some(transfer),
+        }
+    }
+
+    /// Format timing as a simple string (e.g., "0.123s")
+    pub fn format_simple(&self) -> String {
+        format!("{:.3}s", self.total.as_secs_f64())
+    }
+
+    /// Format timing with full breakdown
+    pub fn format_enhanced(&self, row_count: usize) -> String {
+        let mut parts = Vec::new();
+
+        // Total time
+        parts.push(format!("Total: {:.3}s", self.total.as_secs_f64()));
+
+        // First row latency
+        if let Some(first_row) = self.first_row {
+            parts.push(format!("First row: {:.3}s", first_row.as_secs_f64()));
+        }
+
+        // Transfer time
+        if let Some(transfer) = self.transfer {
+            parts.push(format!("Transfer: {:.3}s", transfer.as_secs_f64()));
+        }
+
+        // Rows per second (if meaningful)
+        if row_count > 0 && self.total.as_secs_f64() > 0.001 {
+            let rows_per_sec = row_count as f64 / self.total.as_secs_f64();
+            if rows_per_sec > 1.0 {
+                parts.push(format!("{:.0} rows/s", rows_per_sec));
+            }
+        }
+
+        parts.join(" | ")
+    }
+}
+
+/// Write enhanced timing footer
+pub fn write_enhanced_timing<W: Write>(
+    writer: &mut W,
+    timing: &QueryTiming,
+    row_count: usize,
+    use_color: bool,
+) -> Result<()> {
+    let timing_str = timing.format_enhanced(row_count);
+
+    if use_color {
+        // Use dim color for timing information
+        writeln!(writer, "\n\x1b[2m{} row(s) in set\x1b[0m", row_count)?;
+        writeln!(writer, "\x1b[2m{}\x1b[0m", timing_str)?;
+    } else {
+        writeln!(writer, "\n{} row(s) in set", row_count)?;
+        writeln!(writer, "{}", timing_str)?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_query_timing_format_simple() {
+        let timing = QueryTiming::new(Duration::from_millis(123));
+        assert_eq!(timing.format_simple(), "0.123s");
+    }
+
+    #[test]
+    fn test_query_timing_format_enhanced() {
+        let timing = QueryTiming::with_breakdown(
+            Duration::from_millis(500),
+            Duration::from_millis(50),
+            Duration::from_millis(450),
+        );
+        let result = timing.format_enhanced(100);
+        assert!(result.contains("Total: 0.500s"));
+        assert!(result.contains("First row: 0.050s"));
+        assert!(result.contains("Transfer: 0.450s"));
+        assert!(result.contains("rows/s"));
+    }
+
+    #[test]
+    fn test_query_timing_rows_per_second() {
+        let timing = QueryTiming::new(Duration::from_secs(1));
+        let result = timing.format_enhanced(1000);
+        assert!(result.contains("1000 rows/s"));
+    }
 
     #[test]
     fn test_truncate_for_log_short() {

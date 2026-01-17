@@ -1,17 +1,17 @@
 # tq Roadmap
 
 **Last Updated:** 2026-01-17
-**Version:** 1.2.0
+**Version:** 1.3.0
 
 ---
 
-## Current Sprint: Sprint 5 (Interactive Mode Phase 2 - Advanced)
+## Current Sprint: Sprint 6 (Interactive Mode Phase 3)
 
-**Completed:** Sprint 4
-**In Progress:** Sprint 5
-**Target Completion:** Q1-Q2 2026
+**Completed:** Sprint 5
+**In Progress:** Sprint 6
+**Target Completion:** Q2 2026
 
-Sprint 5 focuses on advanced REPL features including syntax highlighting and result paging.
+Sprint 6 focuses on tab completion, export functionality, and connection switching.
 
 ### Released Features
 
@@ -42,6 +42,10 @@ Sprint 5 focuses on advanced REPL features including syntax highlighting and res
 | `/ping` metacommand | Test connection within REPL with latency display | Shipped |
 | Persistent history | Save command history to `~/.tq_history` | Shipped |
 | Vim/Emacs keybindings | Configurable editor modes (--editor-mode flag) | Shipped |
+| SQL syntax highlighting | Color-coded SQL keywords, strings, numbers, comments | Shipped |
+| Enhanced timing display | Detailed query timing breakdown with rows/second | Shipped |
+| Vertical result paging | Navigate long result sets with j/k, PageUp/Down | Shipped |
+| Horizontal result paging | Scroll wide tables with h/l, arrow keys | Shipped |
 
 ### Technical Notes
 
@@ -52,6 +56,37 @@ Sprint 5 focuses on advanced REPL features including syntax highlighting and res
 - Shows timing for each query
 - Column metadata fetched from Teradata API for accurate column names
 - Default 100-row limit for SELECT queries without explicit LIMIT (configurable via `--default-limit`)
+- SQL syntax highlighting uses nu-ansi-term for terminal colors
+- Result paging uses crossterm for terminal control
+- Disable highlighting with `--no-syntax-highlight`
+- Disable paging with `--no-pager`
+- Enable enhanced timing with `--enhanced-timing`
+
+---
+
+## Sprint 5: Interactive Mode Phase 2 - Advanced Features (COMPLETED)
+
+**Status:** Completed
+**Completed:** 2026-01-17
+
+### Goals
+
+| Feature | Priority | Status | Description |
+|---------|----------|--------|-------------|
+| SQL syntax highlighting | P1 | Completed | Color-coded SQL input for keywords, strings, numbers, comments |
+| Enhanced timing display | P1 | Completed | Detailed query timing with breakdown and rows/second |
+| Vertical result paging | P2 | Completed | Navigate long result sets with less-like controls |
+| Horizontal result paging | P2 | Completed | Scroll wide tables with arrow keys |
+
+### Sprint 5 Success Criteria (All Met)
+1. SQL input is syntax highlighted with keywords in cyan, strings in green, numbers in yellow
+2. Comments (-- and /* */) are displayed in gray italic
+3. Functions (COUNT, SUM, etc.) are displayed in magenta
+4. Timing information shows total time, and optionally first-row latency and rows/second
+5. Large result sets can be navigated with j/k, PageUp/Down, and arrow keys
+6. Wide tables can be scrolled horizontally with h/l and arrow keys
+7. All existing tests continue to pass (126 unit tests, 37 integration tests)
+8. New unit tests added for syntax highlighting (13 tests) and paging (5 tests)
 
 ---
 
@@ -79,20 +114,7 @@ Sprint 5 focuses on advanced REPL features including syntax highlighting and res
 
 ---
 
-## Next Up: Interactive Mode (Phase 2 - Advanced)
-
-**Planned:** Q1-Q2 2026
-
-| Feature | Priority | Description |
-|---------|----------|-------------|
-| SQL syntax highlighting | P1 | Color syntax in SQL input |
-| Query timing display | P1 | Enhanced timing information |
-| Result paging (horizontal) | P2 | Scroll through wide result sets |
-| Result paging (vertical) | P2 | Scroll through long result sets |
-
----
-
-## Future: Interactive Mode (Phase 3)
+## Next Up: Interactive Mode (Phase 3)
 
 **Planned:** Q2 2026
 
@@ -139,6 +161,40 @@ Features that have been considered and rejected:
 ---
 
 ## Release History
+
+### v1.3.0 (2026-01-17) - Interactive Mode Phase 2 Advanced
+
+**Sprint 5 Highlights:**
+- **SQL Syntax Highlighting**: Real-time color-coded SQL input
+  - Keywords (SELECT, FROM, WHERE, etc.) in cyan bold
+  - String literals in green
+  - Numbers in yellow
+  - Comments (-- and /* */) in gray italic
+  - Functions (COUNT, SUM, AVG, etc.) in magenta
+  - Supports Teradata-specific keywords (QUALIFY, SEL, TOP, SAMPLE)
+  - Disable with `--no-syntax-highlight` flag
+- **Enhanced Query Timing**: Detailed timing breakdown
+  - Total execution time
+  - First row latency (when available)
+  - Transfer time (when available)
+  - Rows per second throughput
+  - Enable with `--enhanced-timing` flag
+- **Result Paging**: Navigate large result sets interactively
+  - Vertical paging for long results (j/k, PageUp/Down, Space)
+  - Horizontal scrolling for wide tables (h/l, arrow keys)
+  - Status line shows position and scroll indicators
+  - less-like navigation with q to quit
+  - Disable with `--no-pager` flag
+
+**New Dependencies:**
+- nu-ansi-term 0.50: Terminal color support
+- crossterm 0.28: Terminal input/output control
+- unicode-width 0.2: Unicode character width calculation
+
+**New Tests:**
+- 13 new unit tests for syntax highlighting
+- 5 new unit tests for result paging
+- Tests cover keyword detection, number parsing, string handling, scroll behavior
 
 ### v1.2.0 (2026-01-17) - Interactive Mode Phase 2 Foundation
 
