@@ -12,11 +12,38 @@ A fast, lightweight command-line client for Teradata databases written in Rust.
 - **Type preservation**: proper handling of numbers, booleans, dates, and NULL values
 - **Streaming support**: efficient handling of large result sets
 
+## License & Prerequisites
+
+**tq source code** is licensed under the MIT License (see [LICENSE](LICENSE)).
+
+**Important**: This tool depends on the **Teradata GoSQL Driver**, which is proprietary
+software owned by Teradata Corporation with separate license terms. When you build this
+project, Cargo automatically fetches the driver from Teradata's official GitHub repository
+([teradatarustapi](https://github.com/Teradata/teradatarustapi)).
+
+### Requirements to Use tq
+
+1. **Authorized Teradata Access**: You must have a valid, authorized license to use the
+   Teradata Analytics Platform. This tool is a client that requires legitimate database
+   access credentials.
+
+2. **Teradata Driver License**: By building and using this software, you agree to comply
+   with Teradata Corporation's license terms for the GoSQL driver. See the
+   [NOTICE](NOTICE) file for details.
+
+3. **Rust Toolchain**: Rust 1.70 or later (for building from source)
+
+This is similar to other database clients - the client tool itself is open source, but
+you need legitimate access to the database system. See [NOTICE](NOTICE) for complete
+licensing information.
+
 ## Installation
 
 ### Prerequisites
 
-The Teradata GoSQL driver library is required. The build script automatically handles this.
+- **Rust 1.70+**: Install from [rustup.rs](https://rustup.rs/)
+- **Teradata Access**: Valid credentials for a Teradata database
+- **Teradata Driver**: Automatically fetched by Cargo from Teradata's public repository
 
 ### From source
 
@@ -321,6 +348,7 @@ git clone <repository-url>
 cd tq
 
 # Development build
+# Note: First build will fetch the Teradata driver from GitHub
 cargo build
 
 # Optimized release build
@@ -335,6 +363,11 @@ RUST_LOG=debug cargo run -- ping
 # Install to ~/.cargo/bin
 cargo install --path .
 ```
+
+**Note**: The first build will take longer as Cargo fetches dependencies, including
+the Teradata GoSQL driver from Teradata's public GitHub repository. By building this
+software, you acknowledge that you have read and agree to comply with the Teradata
+driver license terms (see [NOTICE](NOTICE)).
 
 ## Architecture
 
@@ -372,7 +405,12 @@ Contributions are welcome! Please:
 
 ## License
 
-MIT License
+The tq source code is licensed under the MIT License - see the [LICENSE](LICENSE) file
+for details.
+
+**Important**: This software depends on the Teradata GoSQL Driver, which is proprietary
+software with separate license terms. See the [NOTICE](NOTICE) file for complete
+licensing information about dependencies.
 
 ## Links
 

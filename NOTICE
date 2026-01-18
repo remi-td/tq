@@ -1,0 +1,48 @@
+tq - Teradata Query CLI Tool
+Copyright (c) 2025 tq Contributors
+
+================================================================================
+IMPORTANT: Third-Party Dependency Notice
+================================================================================
+
+This software depends on the Teradata GoSQL Driver, which is proprietary
+software owned by Teradata Corporation and distributed under separate license
+terms.
+
+TERADATA DRIVER LICENSE
+-----------------------
+The Teradata GoSQL Driver is NOT covered by the MIT license of this project.
+It is distributed under Teradata Corporation's proprietary license terms:
+https://github.com/Teradata/teradatarustapi/blob/main/LICENSE
+
+When you build this software using Cargo, the build process will automatically
+fetch the teradatarustapi dependency from Teradata's official GitHub repository.
+By building and using this software, you agree to comply with Teradata's license
+terms.
+
+USAGE REQUIREMENTS
+------------------
+To use this software, you must:
+
+1. Have a valid, authorized license to use the Teradata Analytics Platform
+2. Obtain the Teradata GoSQL Driver through Cargo's automatic dependency
+   resolution (which fetches from Teradata's public GitHub repository)
+3. Comply with all terms of Teradata Corporation's license agreement
+
+This tool is a CLIENT for Teradata databases. Like any database client, it
+requires legitimate access credentials and authorization to connect to
+Teradata systems.
+
+LICENSING SUMMARY
+-----------------
+- tq source code (this repository): MIT License
+- Teradata GoSQL Driver (dependency): Teradata proprietary license
+- Users must have: Legitimate Teradata platform access
+
+The tq project is an independent open-source tool and is not officially
+endorsed or supported by Teradata Corporation.
+
+For questions about Teradata driver licensing, contact Teradata Corporation:
+https://www.teradata.com/
+
+================================================================================
