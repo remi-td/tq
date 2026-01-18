@@ -80,7 +80,8 @@ fn run(cli: Cli) -> Result<()> {
         }
         Command::Repl(args) => {
             let mut stdout = io::stdout();
-            commands::repl(&client, &args, &mut stdout, use_color, verbose)?;
+            // Sprint 7: Pass ownership of client to REPL for /logon support
+            commands::repl(client, &args, &mut stdout, use_color, verbose)?;
         }
     }
 

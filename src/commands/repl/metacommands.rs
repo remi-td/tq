@@ -6,12 +6,17 @@
 //! Sprint 4 additions:
 //! - /describe <table> - Show table structure (columns, types, nullable)
 //! - /ping - Test connection within REPL with latency display
+//!
+//! Sprint 7 additions:
+//! - /logon <connection_string> - Switch to a different database connection
 
+use super::metadata_completer::CompletionState;
 use super::state::ReplState;
-use crate::db::DatabaseClient;
+use crate::cli::LogonMechanism;
+use crate::db::{ConnectionConfig, DatabaseClient};
 use crate::error::Result;
 use std::io::Write;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Handle a metacommand
 ///
@@ -146,6 +151,292 @@ pub fn handle_metacommand<W: Write>(
     }
 
     Ok(true)
+}
+
+/// Handle a metacommand with mutable CompletionState (Sprint 7)
+///
+/// This version supports /logon for connection switching and uses the
+/// shared completion state for database operations.
+///
+/// Returns Ok(true) to continue the REPL, Ok(false) to exit.
+pub fn handle_metacommand_with_state<W: Write>(
+    input: &str,
+    state: &mut ReplState,
+    completion_state: &mut CompletionState,
+    writer: &mut W,
+) -> Result<bool> {
+    // Normalize: remove leading / or \ and lowercase for command matching
+    let trimmed = input.trim();
+    let without_prefix = trimmed
+        .trim_start_matches('/')
+        .trim_start_matches('\\');
+
+    // Split into command and arguments (preserve case for arguments)
+    let mut parts = without_prefix.split_whitespace();
+    let command = parts.next().unwrap_or("").to_lowercase();
+    let args: Vec<&str> = parts.collect();
+
+    match command.as_str() {
+        // Exit commands
+        "quit" | "q" | "exit" => {
+            return Ok(false);
+        }
+
+        // Help command
+        "help" | "?" => {
+            print_help_extended(writer)?;
+        }
+
+        // Session info command
+        "session" => {
+            print_session_info(state, writer)?;
+        }
+
+        // Ping command (Sprint 4)
+        "ping" => {
+            execute_ping(completion_state.client(), state, writer)?;
+        }
+
+        // Describe command (Sprint 4)
+        "describe" | "d" => {
+            if args.is_empty() {
+                writeln!(writer, "Usage: /describe <table_name>")?;
+                writeln!(writer, "       /describe <database>.<table_name>")?;
+            } else {
+                execute_describe(completion_state.client(), &args[0], writer)?;
+            }
+        }
+
+        // Export command (Sprint 6)
+        "export" => {
+            if args.is_empty() {
+                writeln!(writer, "Usage: /export <format> [file]")?;
+                writeln!(writer, "       /export <format> --append [file]")?;
+                writeln!(writer)?;
+                writeln!(writer, "Formats: csv, json, sql")?;
+                writeln!(writer, "Example: /export csv results.csv")?;
+            } else {
+                let format = args[0];
+                let file = if args.len() > 1 {
+                    Some(args[1])
+                } else {
+                    None
+                };
+                let append = args.contains(&"--append");
+                execute_export(state, writer, format, file, append)?;
+            }
+        }
+
+        // Pager control command (Sprint 6)
+        "pager" => {
+            if args.is_empty() {
+                // Show current setting
+                let status = if state.is_pager_enabled() { "on" } else { "off" };
+                writeln!(writer, "Pager: {}", status)?;
+            } else {
+                match args[0].to_lowercase().as_str() {
+                    "on" => {
+                        state.set_pager(true);
+                        writeln!(writer, "Result paging enabled")?;
+                    }
+                    "off" => {
+                        state.set_pager(false);
+                        writeln!(writer, "Result paging disabled")?;
+                    }
+                    _ => {
+                        writeln!(
+                            writer,
+                            "Invalid pager setting '{}'. Use 'on' or 'off'.",
+                            args[0]
+                        )?;
+                    }
+                }
+            }
+        }
+
+        // Colors control command (Sprint 6)
+        "colors" => {
+            if args.is_empty() {
+                // Show current setting
+                let status = if state.are_colors_enabled() { "on" } else { "off" };
+                writeln!(writer, "Colors: {}", status)?;
+            } else {
+                match args[0].to_lowercase().as_str() {
+                    "on" => {
+                        state.set_colors(true);
+                        writeln!(writer, "Syntax highlighting enabled")?;
+                    }
+                    "off" => {
+                        state.set_colors(false);
+                        writeln!(writer, "Syntax highlighting disabled")?;
+                    }
+                    _ => {
+                        writeln!(
+                            writer,
+                            "Invalid color setting '{}'. Use 'on' or 'off'.",
+                            args[0]
+                        )?;
+                    }
+                }
+            }
+        }
+
+        // Logon command (Sprint 7)
+        "logon" => {
+            if args.is_empty() {
+                writeln!(writer)?;
+                writeln!(writer, "Usage: /logon <connection_string>")?;
+                writeln!(writer)?;
+                writeln!(writer, "Format: user:password@host:port/database")?;
+                writeln!(writer, "        user@host:port/database  (password from env/file)")?;
+                writeln!(writer)?;
+                writeln!(writer, "Examples:")?;
+                writeln!(writer, "  /logon alice:secret@dbhost:1025/prod")?;
+                writeln!(writer, "  /logon bob@192.168.1.100:1025/staging")?;
+                writeln!(writer)?;
+            } else {
+                execute_logon(
+                    &args[0],
+                    state,
+                    completion_state,
+                    writer,
+                )?;
+            }
+        }
+
+        // Unknown command
+        _ => {
+            writeln!(writer, "Unknown command: /{}", command)?;
+            writeln!(writer, "Type /help for available commands.")?;
+        }
+    }
+
+    Ok(true)
+}
+
+/// Print help text (extended version with /logon)
+fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
+    writeln!(writer)?;
+    writeln!(writer, "tq REPL Commands:")?;
+    writeln!(writer, "  /help, /?              Show this help message")?;
+    writeln!(writer, "  /quit, /q              Exit the REPL")?;
+    writeln!(writer, "  /session               Show current session information")?;
+    writeln!(writer, "  /ping                  Test database connection")?;
+    writeln!(writer, "  /describe <table>, /d  Show table structure")?;
+    writeln!(writer, "  /export <fmt> [file]   Export last result (csv, json, sql)")?;
+    writeln!(writer, "  /pager on|off          Enable/disable result paging")?;
+    writeln!(writer, "  /colors on|off         Enable/disable syntax highlighting")?;
+    writeln!(writer, "  /logon <conn_str>      Switch to a different connection")?;
+    writeln!(writer)?;
+    writeln!(writer, "SQL Execution:")?;
+    writeln!(writer, "  Enter SQL statements ending with semicolon (;)")?;
+    writeln!(writer, "  Multi-line statements are supported")?;
+    writeln!(writer)?;
+    writeln!(writer, "Tab Completion:")?;
+    writeln!(writer, "  Tab after FROM/JOIN    Complete table names")?;
+    writeln!(writer, "  Tab after SELECT/WHERE Complete column names")?;
+    writeln!(writer, "  Tab on partial word    Complete SQL keywords")?;
+    writeln!(writer)?;
+    writeln!(writer, "Keyboard Shortcuts:")?;
+    writeln!(writer, "  Up/Down        Navigate command history")?;
+    writeln!(writer, "  Tab            Auto-complete (keywords, tables, columns)")?;
+    writeln!(writer, "  Ctrl-C         Cancel current input")?;
+    writeln!(writer, "  Ctrl-D         Exit REPL (when input is empty)")?;
+    writeln!(writer, "  Ctrl-R         Search command history")?;
+    writeln!(writer)?;
+
+    Ok(())
+}
+
+/// Execute the /logon metacommand (Sprint 7)
+///
+/// Switches to a new database connection, clearing the metadata cache.
+fn execute_logon<W: Write>(
+    connection_string: &str,
+    state: &mut ReplState,
+    completion_state: &mut CompletionState,
+    writer: &mut W,
+) -> Result<()> {
+    writeln!(writer)?;
+    writeln!(writer, "Connecting...")?;
+
+    let start = Instant::now();
+
+    // Parse connection string
+    // Use TD2 as default logmech and 30s timeout
+    let config = match ConnectionConfig::from_connection_string(
+        connection_string,
+        LogonMechanism::Td2,
+        Duration::from_secs(30),
+        None,
+    ) {
+        Ok(mut cfg) => {
+            // Try to resolve password from environment/file
+            if let Err(e) = cfg.resolve_password(None) {
+                writeln!(writer, "Error: {}", e)?;
+                writeln!(writer)?;
+                return Ok(());
+            }
+            cfg
+        }
+        Err(e) => {
+            writeln!(writer, "Error: Invalid connection string")?;
+            writeln!(writer, "{}", e)?;
+            writeln!(writer)?;
+            writeln!(writer, "Format: user:password@host:port/database")?;
+            writeln!(writer)?;
+            return Ok(());
+        }
+    };
+
+    // Create new database client
+    let new_client = match DatabaseClient::new(config.clone(), None) {
+        Ok(client) => client,
+        Err(e) => {
+            writeln!(writer, "Error: Failed to create client")?;
+            writeln!(writer, "{}", e)?;
+            writeln!(writer)?;
+            return Ok(());
+        }
+    };
+
+    // Test connection with ping
+    match new_client.ping() {
+        Ok(latency) => {
+            let elapsed = start.elapsed();
+
+            // Update completion state with new client
+            completion_state.update_client(new_client, &config.database);
+
+            // Update REPL state
+            state.update_connection(config.clone(), Some(connection_string.to_string()));
+
+            writeln!(writer)?;
+            writeln!(writer, "Connected! ({}ms)", elapsed.as_millis())?;
+            writeln!(writer, "  Host:     {}:{}", config.host, config.port)?;
+            writeln!(writer, "  Database: {}", config.database)?;
+            writeln!(writer, "  User:     {}", config.user)?;
+            writeln!(writer, "  Latency:  {}ms", latency.as_millis())?;
+            writeln!(writer)?;
+            writeln!(writer, "Note: Tab completion cache cleared for new connection.")?;
+        }
+        Err(e) => {
+            let elapsed = start.elapsed();
+            writeln!(writer)?;
+            writeln!(
+                writer,
+                "Connection FAILED (after {}ms)",
+                elapsed.as_millis()
+            )?;
+            writeln!(writer)?;
+            writeln!(writer, "Error: {}", e)?;
+            writeln!(writer)?;
+            writeln!(writer, "The previous connection remains active.")?;
+        }
+    }
+
+    writeln!(writer)?;
+    Ok(())
 }
 
 /// Print help text

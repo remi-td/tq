@@ -1,9 +1,9 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 0.1.0
-**Last Updated:** 2026-01-17
-**Base Commit:** 369af18
+**Version:** 1.5.0 (Sprint 7)
+**Last Updated:** 2026-01-18
+**Base Commit:** 2b8320d
 
 ## Overview
 
@@ -27,11 +27,27 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 - **TC020**: Query Command - Large Result Sets
 - **TC024**: Ping Command - Multiple Attempts
 - **TC025**: Query Timing Information
+- **TC026**: REPL Tab Completion - Table Names After FROM Keyword
+- **TC027**: REPL Tab Completion - Table Names After JOIN Keywords
+- **TC028**: REPL Tab Completion - Table Names After UPDATE Keyword
+- **TC030**: REPL Tab Completion - Table Cache Invalidation
+- **TC031**: REPL Tab Completion - Column Names After SELECT Keyword
+- **TC032**: REPL Tab Completion - Column Names in JOIN Queries
+- **TC033**: REPL Tab Completion - Column Names in ORDER BY and GROUP BY
+- **TC035**: REPL Tab Completion - Column Cache Management
+- **TC036**: REPL /logon Metacommand - Show Current Connection
+- **TC037**: REPL /logon Metacommand - Successful Connection Switch
+- **TC039**: REPL /logon Metacommand - State Preservation
+- **TC040**: REPL /logon Metacommand - Authentication Mechanisms
+- **TC041**: REPL /logon Metacommand - Performance and Timeout
 
 ### Error-Handling
 - **TC002**: Ping Command - Connection Failure
 - **TC007**: Connection String Parsing - Invalid Formats
 - **TC021**: Query Command - SQL Syntax Errors
+- **TC029**: REPL Tab Completion - Table Metadata Error Handling
+- **TC034**: REPL Tab Completion - Column Metadata Error Handling
+- **TC038**: REPL /logon Metacommand - Connection Failure Handling
 
 ### Usability
 - **TC013**: CLI Help and Version Information
@@ -42,13 +58,15 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 - **TC014**: Exit Codes - Comprehensive Validation
 - **TC019**: Environment Variable Configuration
 - **TC023**: CSV Format - Special Character Escaping
+- **TC042**: REPL Performance - Table Completion Benchmark
+- **TC043**: REPL Performance - Column Completion Benchmark
 
 ### Security
 - **TC022**: Security - No Password Exposure
 
 ## Test Priority Matrix
 
-### Critical Priority (Must Pass for MVP)
+### Critical Priority (Must Pass for Release)
 | Test ID | Feature | Category |
 |---------|---------|----------|
 | TC001 | Ping - Basic | Functionality |
@@ -60,6 +78,11 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 | TC008 | Authentication | Functionality |
 | TC009 | Password Files | Functionality |
 | TC022 | Password Security | Security |
+| TC026 | Table Completion - FROM | Functionality |
+| TC027 | Table Completion - JOIN | Functionality |
+| TC028 | Table Completion - UPDATE | Functionality |
+| TC037 | /logon - Connection Switch | Functionality |
+| TC038 | /logon - Failure Handling | Error-Handling |
 
 ### High Priority (Important Features)
 | Test ID | Feature | Category |
@@ -74,6 +97,16 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 | TC019 | Environment Variables | Integration |
 | TC021 | SQL Errors | Error-Handling |
 | TC023 | CSV Escaping | Integration |
+| TC029 | Table Metadata Errors | Error-Handling |
+| TC030 | Table Cache Invalidation | Functionality |
+| TC031 | Column Completion - SELECT | Functionality |
+| TC032 | Column Completion - JOIN | Functionality |
+| TC033 | Column Completion - ORDER BY | Functionality |
+| TC034 | Column Metadata Errors | Error-Handling |
+| TC036 | /logon - Show Connection | Functionality |
+| TC039 | /logon - State Preservation | Functionality |
+| TC042 | Table Completion Performance | Integration |
+| TC043 | Column Completion Performance | Integration |
 
 ### Medium Priority (Quality of Life)
 | Test ID | Feature | Category |
@@ -84,6 +117,9 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 | TC020 | Large Results | Functionality |
 | TC024 | Multiple Pings | Functionality |
 | TC025 | Query Timing | Functionality |
+| TC035 | Column Cache Management | Functionality |
+| TC040 | /logon - Auth Mechanisms | Functionality |
+| TC041 | /logon - Performance | Functionality |
 
 ## Feature Coverage Matrix
 
@@ -101,6 +137,9 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 | FR-008 | TQ_LOGON environment variable | TC019 |
 | FR-009 | Password file support | TC009 |
 | FR-010 | Secure credential handling | TC009, TC022 |
+| FR-116 | Table name tab completion | TC026, TC027, TC028, TC029, TC030, TC042 |
+| FR-117 | Column name tab completion | TC031, TC032, TC033, TC034, TC035, TC043 |
+| FR-118 | /logon metacommand | TC036, TC037, TC038, TC039, TC040, TC041 |
 
 ### Specifications Coverage
 
@@ -115,6 +154,9 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 | 9 | Error Handling | TC002, TC007, TC021 |
 | 10 | Security Requirements | TC009, TC022 |
 | Appendix A | CLI Design Checklist | TC013, TC014, TC018 |
+| 5.6.2 | Table Name Completion | TC026, TC027, TC028, TC029, TC030, TC042 |
+| 5.6.3 | Column Name Completion | TC031, TC032, TC033, TC034, TC035, TC043 |
+| 5.8.1 | /logon Metacommand | TC036, TC037, TC038, TC039, TC040, TC041 |
 
 ## Test Execution Guidelines
 
@@ -125,38 +167,65 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 4. Required tools installed: jq (for JSON tests), ps (for security tests)
 
 ### Test Execution Order
-**Recommended order for initial validation:**
+**Recommended order for Sprint 7 validation:**
 
 1. **Smoke Tests** (verify basic functionality):
    - TC001: Basic ping
    - TC003: Basic query
    - TC013: Help/version
 
-2. **Core Functionality**:
+2. **Core Functionality** (existing features):
    - TC004, TC005: Output formats
    - TC006: Connection string parsing
    - TC008: Authentication mechanisms
    - TC009: Password files
 
-3. **Error Handling**:
+3. **Sprint 7 - Table Completion**:
+   - TC026: Table completion - FROM
+   - TC027: Table completion - JOIN
+   - TC028: Table completion - UPDATE
+   - TC029: Table metadata errors
+   - TC030: Table cache invalidation
+
+4. **Sprint 7 - Column Completion**:
+   - TC031: Column completion - SELECT/WHERE
+   - TC032: Column completion - JOIN queries
+   - TC033: Column completion - ORDER BY/GROUP BY
+   - TC034: Column metadata errors
+   - TC035: Column cache management
+
+5. **Sprint 7 - /logon Metacommand**:
+   - TC036: Show current connection
+   - TC037: Successful connection switch
+   - TC038: Connection failure handling
+   - TC039: State preservation
+   - TC040: Authentication mechanisms
+   - TC041: Performance and timeout
+
+6. **Sprint 7 - Performance Validation**:
+   - TC042: Table completion performance
+   - TC043: Column completion performance
+
+7. **Error Handling**:
    - TC002: Connection failures
    - TC007: Invalid connection strings
    - TC021: SQL errors
+   - TC029, TC034, TC038: Sprint 7 error handling
 
-4. **Integration**:
+8. **Integration**:
    - TC010, TC011, TC012: Input/output methods
    - TC014: Exit codes
    - TC019: Environment variables
 
-5. **Security**:
+9. **Security**:
    - TC022: Password exposure
 
-6. **Quality**:
-   - TC015, TC016: Data type handling
-   - TC017, TC018: Output control
-   - TC020: Large results
-   - TC023: CSV compliance
-   - TC024, TC025: Advanced features
+10. **Quality**:
+    - TC015, TC016: Data type handling
+    - TC017, TC018: Output control
+    - TC020: Large results
+    - TC023: CSV compliance
+    - TC024, TC025: Advanced features
 
 ### Environment Setup
 ```bash

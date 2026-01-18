@@ -6,25 +6,29 @@
 //! - SQL syntax highlighting with customizable colors
 //! - Persistent command history (saved to ~/.tq_history)
 //! - Vim and Emacs keybinding modes
-//! - Metacommands for session management (/quit, /help, /session, /ping, /describe)
+//! - Metacommands for session management (/quit, /help, /session, /ping, /describe, /logon)
 //! - Result paging for large result sets
 //! - Graceful Ctrl-C handling
+//! - Context-aware tab completion (Sprint 7)
 
 mod completer;
 mod executor;
 mod highlighter;
 mod metacommands;
+mod metadata_completer;
 mod pager;
 mod prompt;
+mod sql_context;
 mod state;
 
 use crate::cli::{EditorMode, ReplArgs};
 use crate::db::DatabaseClient;
 use crate::error::Result;
-use completer::SqlCompleter;
+use metadata_completer::{CompletionState, MetadataCompleter};
 use reedline::{EditMode, Emacs, FileBackedHistory, Reedline, Signal, Vi};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 pub use executor::{execute_sql, execute_sql_with_state, QueryTiming};
 pub use highlighter::SqlHighlighter;
@@ -32,23 +36,37 @@ pub use metacommands::handle_metacommand;
 pub use pager::{PagedOutput, PagerConfig};
 pub use prompt::TqPrompt;
 pub use state::ReplState;
+pub use sql_context::{analyze_context, CompletionContext, TableReference};
 
 /// Execute the REPL command
+///
+/// Sprint 7: Updated to support metadata completion and /logon.
+/// The client is now owned by a shared state that can be updated on reconnection.
 pub fn execute<W: Write>(
-    client: &DatabaseClient,
+    client: DatabaseClient,
     args: &ReplArgs,
     writer: &mut W,
     use_color: bool,
     _verbose: bool,
 ) -> Result<()> {
-    // Initialize state
-    let mut state = ReplState::new(client.config().clone());
+    // Create shared completion state (thread-safe for reedline)
+    let database = client.config().database.clone();
+    let completion_state = Arc::new(Mutex::new(CompletionState::new(client, database)));
+
+    // Initialize REPL state
+    let mut state = {
+        let cs = completion_state.lock().unwrap();
+        ReplState::new(cs.client().config().clone())
+    };
 
     // Show startup banner
-    print_banner(client, args, writer)?;
+    {
+        let cs = completion_state.lock().unwrap();
+        print_banner(&cs, args, writer)?;
+    }
 
     // Initialize reedline editor with persistent history and editor mode
-    let mut editor = create_editor(args, writer)?;
+    let mut editor = create_editor(args, writer, Arc::clone(&completion_state))?;
 
     // Create prompt
     let prompt = TqPrompt::new();
@@ -56,7 +74,7 @@ pub fn execute<W: Write>(
     // Main REPL loop
     repl_loop(
         &mut editor,
-        client,
+        &completion_state,
         &mut state,
         &prompt,
         writer,
@@ -70,7 +88,13 @@ pub fn execute<W: Write>(
 }
 
 /// Create and configure the reedline editor
-fn create_editor(args: &ReplArgs, writer: &mut impl Write) -> Result<Reedline> {
+///
+/// Sprint 7: Now accepts shared completion state for metadata-aware completion.
+fn create_editor(
+    args: &ReplArgs,
+    writer: &mut impl Write,
+    completion_state: Arc<Mutex<CompletionState>>,
+) -> Result<Reedline> {
     let mut editor = Reedline::create();
 
     // Configure persistent history if enabled
@@ -114,8 +138,9 @@ fn create_editor(args: &ReplArgs, writer: &mut impl Write) -> Result<Reedline> {
     };
     editor = editor.with_highlighter(Box::new(highlighter));
 
-    // Configure tab completion for SQL keywords (Sprint 6)
-    editor = editor.with_completer(Box::new(SqlCompleter::new()));
+    // Configure tab completion with metadata support (Sprint 7)
+    let completer = MetadataCompleter::with_state(completion_state);
+    editor = editor.with_completer(Box::new(completer));
 
     Ok(editor)
 }
@@ -159,11 +184,11 @@ mod dirs {
 
 /// Print the startup banner with connection information
 fn print_banner<W: Write>(
-    client: &DatabaseClient,
+    completion_state: &CompletionState,
     args: &ReplArgs,
     writer: &mut W,
 ) -> Result<()> {
-    let config = client.config();
+    let config = completion_state.client().config();
 
     writeln!(writer)?;
     writeln!(
@@ -211,9 +236,11 @@ fn print_banner<W: Write>(
 }
 
 /// Main REPL loop
+///
+/// Sprint 7: Updated to use shared completion state for metacommand handling.
 fn repl_loop<W: Write>(
     editor: &mut Reedline,
-    client: &DatabaseClient,
+    completion_state: &Arc<Mutex<CompletionState>>,
     state: &mut ReplState,
     prompt: &TqPrompt,
     writer: &mut W,
@@ -235,7 +262,14 @@ fn repl_loop<W: Write>(
 
                 // Check for metacommand
                 if trimmed.starts_with('/') || trimmed.starts_with('\\') {
-                    match handle_metacommand(trimmed, state, client, writer) {
+                    // Lock completion state for metacommand handling
+                    let mut cs = completion_state.lock().unwrap();
+                    match metacommands::handle_metacommand_with_state(
+                        trimmed,
+                        state,
+                        &mut cs,
+                        writer,
+                    ) {
                         Ok(should_continue) => {
                             if !should_continue {
                                 break; // /quit was issued
@@ -254,6 +288,10 @@ fn repl_loop<W: Write>(
                 // Check if statement is complete (ends with semicolon)
                 if state.input_buffer().trim_end().ends_with(';') {
                     let sql = state.take_input();
+
+                    // Lock completion state to access client
+                    let cs = completion_state.lock().unwrap();
+                    let client = cs.client();
 
                     // Execute the SQL with default limit for SELECT queries (Sprint 6: uses state colors)
                     match execute_sql_with_state(client, state, &sql, writer, default_limit) {

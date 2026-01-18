@@ -1,8 +1,8 @@
 # tq (Teradata Query) - Specifications
 
-**Version:** 1.4.0
-**Status:** Active Development - Sprint 6 (In Progress)
-**Last Updated:** 2026-01-18
+**Version:** 1.5.0-dev
+**Status:** Active Development - Sprint 7 (In Progress)
+**Last Updated:** 2026-01-19
 
 ---
 
@@ -97,12 +97,12 @@
 |---------|--------|---------|--------|----------|
 | Table formatting fix | ✅ Sprint 6 | All table output | 6 | P0 |
 | Tab completion (keywords) | ✅ Sprint 6 | Tab key | 6 | P1 |
-| Tab completion (tables) | 📋 Sprint 7 | Tab key | 7 | P1 |
-| Tab completion (columns) | 📋 Sprint 7 | Tab key | 7 | P2 |
+| Tab completion (tables) | 🚧 Sprint 7 | Tab key | 7 | P0 |
+| Tab completion (columns) | 🚧 Sprint 7 | Tab key | 7 | P1 |
 | `/export` metacommand | ✅ Sprint 6 | `/export [format] [file]` | 6 | P1 |
 | `/pager on\|off` metacommand | ✅ Sprint 6 | `/pager on\|off` | 6 | P2 |
 | `/colors` metacommand | ✅ Sprint 6 | `/colors on\|off` | 6 | P2 |
-| `/logon` metacommand | 📋 Sprint 7 | `/logon [connection-string]` | 7 | P1 |
+| `/logon` metacommand | 🚧 Sprint 7 | `/logon [connection-string]` | 7 | P1 |
 
 ### Batch Mode 📋 Planned
 
@@ -189,12 +189,26 @@
 
 **Sprint Review:** [Sprint 6 Complete Review](../sprints/sprint-6-review.md)
 
-### Sprint 7+: Batch Mode & Configuration 📋 Future
+### Sprint 7: Interactive Mode Phase 4 - Database-Aware Features 🚧 In Progress
+**Goal:** Enhance REPL with intelligent tab completion for database objects and dynamic connection management
+
+**Planned Features:**
+1. **Tab Completion for Table Names (P0)** - After FROM, JOIN, UPDATE keywords
+2. **Tab Completion for Column Names (P1)** - After SELECT, WHERE, ORDER BY keywords
+3. **`/logon` Metacommand (P1)** - Dynamic connection switching
+
+**Status:** Design Phase (UX specifications complete)
+**Target Completion:** 2026-01-20
+**Version Target:** v1.5.0
+
+**Sprint Planning:** [Sprint 7 Planning](../sprints/sprint-7-planning.md)
+
+### Sprint 8+: Batch Mode & Configuration 📋 Future
 **Goals:**
 - File input (`--file`, stdin)
 - Streaming large results
 - Configuration files and connection profiles
-- Advanced features (tab completion, export, etc.)
+- Additional completion features (functions, schemas)
 
 ---
 
@@ -240,6 +254,7 @@ Complete technical specifications are organized by domain:
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
+| 2026-01-19 | 1.5.0-dev | Sprint 7 design phase: marked table/column completion and /logon as 🚧 In Progress | CLI UX Designer Agent |
 | 2026-01-18 | 1.2.0 | Restructured into main spec + detailed specs | CLI UX Designer Agent |
 | 2026-01-17 | 1.1.0 | Added Sprint 4 specifications | CLI UX Designer Agent |
 | 2026-01-16 | 1.0.0 | Initial comprehensive specifications | Development Team |

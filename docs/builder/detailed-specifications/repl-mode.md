@@ -1,9 +1,9 @@
 # REPL Mode Specifications
 
-**Version:** 1.1.0
-**Last Updated:** 2026-01-18
+**Version:** 1.2.0
+**Last Updated:** 2026-01-19
 **Owner:** cli-ux-designer agent
-**Status:** Active Specification - Phase 2 (Sprint 4) in Development
+**Status:** Active Specification - Phase 4 (Sprint 7) in Development
 
 ---
 
@@ -547,27 +547,429 @@ tq> SEL<TAB>
 - Second Tab cycles through alternatives
 - Keywords are case-insensitive internally but match user's casing
 
-### 5.6.2 Context-Aware Completion (Sprint 7)
+### 5.6.2 Table Name Completion (Sprint 7)
 
-**After FROM**:
+**Purpose**: Enable users to discover and navigate database tables through tab completion, reducing typos and improving query writing speed.
+
+**Priority**: P0 (Critical for Sprint 7)
+
+**Trigger Contexts**: Press Tab after typing partial table name following these SQL keywords:
+- `FROM` - Main table reference (e.g., `SELECT * FROM <TAB>`)
+- `JOIN` / `INNER JOIN` / `LEFT JOIN` / `RIGHT JOIN` / `FULL JOIN` / `CROSS JOIN` - Join clauses
+- `UPDATE` - Table to update (e.g., `UPDATE <TAB>`)
+- `INTO` - Insert target (e.g., `INSERT INTO <TAB>`)
+
+**Data Source**:
+- Query Teradata system catalog: `DBC.TablesV`
+- Filter by current database (from connection context)
+- Include both tables and views
+- Cache results for session duration (invalidate on `/logon`)
+
+**Behavior Patterns**:
+
+**Single exact match - auto-complete**:
+```sql
+tq> SELECT * FROM emp<TAB>
+tq> SELECT * FROM employees
+```
+
+**Multiple matches - show list**:
+```sql
+tq> SELECT * FROM emp<TAB>
+    employees       employee_archive    employee_history    emp_summary
+```
+
+**Press Tab again to cycle through matches**:
+```sql
+tq> SELECT * FROM emp<TAB>
+tq> SELECT * FROM employees<TAB>
+tq> SELECT * FROM employee_archive<TAB>
+tq> SELECT * FROM employee_history
+```
+
+**Schema-qualified completion**:
+```sql
+tq> SELECT * FROM prod<TAB>
+    production.employees    production.orders    prod_data.metrics
+
+tq> SELECT * FROM production.<TAB>
+    production.employees    production.orders    production.customers
+```
+
+**Case-insensitive matching**:
+```sql
+tq> SELECT * FROM EMP<TAB> → employees
+tq> SELECT * FROM Emp<TAB> → employees
+tq> SELECT * FROM emp<TAB> → employees
+```
+
+**After JOIN keyword**:
+```sql
+tq> SELECT * FROM employees e
+    INNER JOIN <TAB>
+    departments    projects    users    teams
+
+tq> SELECT e.*, d.name
+    FROM employees e
+    LEFT JOIN dep<TAB>
+    departments
+```
+
+**After UPDATE keyword**:
+```sql
+tq> UPDATE emp<TAB>
+tq> UPDATE employees SET salary = 50000
+```
+
+**Loading States & Feedback**:
+
+**First Tab press (metadata not cached)**:
 ```sql
 tq> SELECT * FROM <TAB>
-    employees    departments    projects    users
+Loading tables... (500ms max timeout)
+
+[After loading completes:]
+tq> SELECT * FROM <TAB>
+    customers    employees    orders    products    [50 more...]
 ```
 
-**After WHERE column**:
+**Cached metadata (instant response)**:
 ```sql
-tq> SELECT * FROM employees WHERE dept<TAB>
-                                  department
+tq> SELECT * FROM <TAB>
+    customers    employees    orders    products    [50 more...]
 ```
 
-**Column Name Completion**:
+**Slow database response**:
 ```sql
-tq> SELECT emp<TAB>
-           employee_id    employee_name    employee_dept
+tq> SELECT * FROM <TAB>
+Loading tables... (this may take a moment)
+[Spinner animation: ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏]
 ```
 
-### 5.6.3 Metacommand Completion (Future)
+**Error Handling**:
+
+**Metadata query fails (permissions)**:
+```sql
+tq> SELECT * FROM <TAB>
+Warning: Cannot load table list (permission denied to DBC.TablesV)
+Tab completion for tables unavailable.
+
+Suggestion: Contact DBA to grant SELECT on DBC.TablesV
+```
+
+**Metadata query timeout**:
+```sql
+tq> SELECT * FROM <TAB>
+Warning: Table list query timed out after 500ms
+Tab completion for tables unavailable.
+
+Suggestion: Database may be slow. Try again or continue typing manually.
+```
+
+**No tables found (empty database)**:
+```sql
+tq> SELECT * FROM <TAB>
+(No tables found in current database)
+```
+
+**Connection lost**:
+```sql
+tq> SELECT * FROM <TAB>
+Error: Connection lost. Cannot retrieve table list.
+Use /ping to check connection or /reconnect to restore.
+```
+
+**Display Format**:
+
+**Short list (≤10 tables)**:
+```sql
+tq> SELECT * FROM <TAB>
+    customers    employees    orders    products
+```
+
+**Long list (>10 tables) - compact grid**:
+```sql
+tq> SELECT * FROM <TAB>
+    accounts         customers        departments      employees
+    invoices         orders           payments         products
+    projects         regions          sales            suppliers
+    transactions     users            vendors          warehouses
+    [23 more tables] (Press Tab again to cycle, or continue typing to filter)
+```
+
+**With schema prefix**:
+```sql
+tq> SELECT * FROM <TAB>
+    production.customers       production.employees
+    production.orders          production.products
+    staging.test_data          staging.imports
+```
+
+**Performance Requirements**:
+
+- **Metadata query time**: <500ms on first Tab press
+- **Cached completion**: <50ms response time
+- **Timeout**: 500ms max wait for metadata query
+- **Cache size**: Store up to 10,000 table names
+- **Cache invalidation**: Clear on `/logon` or manual `/refresh` command
+
+**Implementation Notes**:
+
+1. **Lazy Loading**: Don't query metadata on REPL startup - only on first Tab press in table context
+2. **Caching Strategy**:
+   - Cache table list per database session
+   - Cache is session-scoped (cleared on `/logon`)
+   - Background refresh option: `/refresh tables` metacommand
+3. **SQL Context Detection**:
+   - Parse buffer to identify keywords: FROM, JOIN, UPDATE, INTO
+   - Use simple regex patterns (avoid full SQL parser)
+   - Support common patterns, accept limitations for complex queries
+4. **Metadata Query**:
+   ```sql
+   SELECT TRIM(DatabaseName) || '.' || TRIM(TableName) AS full_name,
+          TRIM(TableName) AS table_name,
+          TableKind
+   FROM DBC.TablesV
+   WHERE DatabaseName = CURRENT_DATABASE
+      OR DatabaseName IN (/* user's accessible databases */)
+   ORDER BY TableName;
+   ```
+
+**Testing Scenarios**:
+
+1. Tab after FROM with no prefix → Show all tables
+2. Tab after FROM with partial prefix → Show matching tables
+3. Tab in JOIN clause → Complete table names
+4. Tab in UPDATE statement → Complete table names
+5. Multiple Tab presses → Cycle through matches
+6. Schema-qualified names → Complete schema.table format
+7. Slow database → Show loading indicator, timeout gracefully
+8. Permission denied → Show warning, continue REPL operation
+9. Empty result set → Display helpful message
+10. Cache hit → Instant response (<50ms)
+
+### 5.6.3 Column Name Completion (Sprint 7)
+
+**Purpose**: Enable users to discover and reference column names through tab completion, improving query accuracy and reducing the need to run `/describe` commands.
+
+**Priority**: P1 (High priority for Sprint 7)
+
+**Trigger Contexts**: Press Tab after typing partial column name following these SQL keywords:
+- `SELECT` - Column list (e.g., `SELECT <TAB>`)
+- `WHERE` - Filter conditions (e.g., `WHERE <TAB>`)
+- `ORDER BY` - Sort columns (e.g., `ORDER BY <TAB>`)
+- `GROUP BY` - Grouping columns
+- `HAVING` - Aggregate filters
+- After comma in column lists (e.g., `SELECT id, <TAB>`)
+
+**Data Source**:
+- Query Teradata system catalog: `DBC.ColumnsV`
+- Filter by table name extracted from query context
+- Include column name and data type
+- Cache results per table for session duration
+
+**Context Detection**:
+
+**Simple query - single table**:
+```sql
+tq> SELECT * FROM employees WHERE <TAB>
+    employee_id    first_name    last_name    email    hire_date
+    salary         department_id    manager_id    created_at    updated_at
+```
+
+**Column name prefix matching**:
+```sql
+tq> SELECT * FROM employees WHERE emp<TAB>
+    employee_id
+```
+
+**Multiple columns in SELECT**:
+```sql
+tq> SELECT employee_id, first<TAB>
+    first_name
+
+tq> SELECT employee_id, first_name, <TAB>
+    employee_id    first_name    last_name    email    hire_date
+```
+
+**After ORDER BY**:
+```sql
+tq> SELECT * FROM employees ORDER BY <TAB>
+    employee_id    first_name    last_name    hire_date    created_at
+```
+
+**Behavior Patterns**:
+
+**Single match - auto-complete**:
+```sql
+tq> SELECT emplo<TAB>
+tq> SELECT employee_id
+```
+
+**Multiple matches - show with type hints**:
+```sql
+tq> SELECT * FROM employees WHERE <TAB>
+    employee_id (INTEGER)       first_name (VARCHAR)
+    last_name (VARCHAR)         email (VARCHAR)
+    hire_date (DATE)            salary (DECIMAL)
+    department_id (INTEGER)     manager_id (INTEGER)
+    created_at (TIMESTAMP)      updated_at (TIMESTAMP)
+```
+
+**Type hint display format**:
+```
+column_name (TYPE)
+```
+
+**Type abbreviations for compact display**:
+- `INTEGER` → `INT`
+- `VARCHAR(n)` → `VARCHAR` (omit length for brevity)
+- `DECIMAL(p,s)` → `DEC`
+- `TIMESTAMP` → `TIMESTAMP`
+- `DATE` → `DATE`
+- `CHAR(n)` → `CHAR`
+
+**Ambiguous Context - Multiple Tables**:
+
+**JOIN query with ambiguous columns**:
+```sql
+tq> SELECT * FROM employees e
+    JOIN departments d ON e.department_id = d.id
+    WHERE <TAB>
+
+    -- Shows columns from both tables with table alias prefix:
+    e.employee_id (INT)      e.first_name (VARCHAR)
+    e.department_id (INT)    d.id (INT)
+    d.name (VARCHAR)         d.budget (DEC)
+```
+
+**Qualified column reference**:
+```sql
+tq> SELECT e.<TAB>
+    e.employee_id    e.first_name    e.last_name    e.email
+```
+
+**No table context detected**:
+```sql
+tq> SELECT <TAB>
+(Cannot determine table context. Complete table name first.)
+
+-- User must provide table in FROM clause:
+tq> SELECT * FROM employees WHERE <TAB>
+[Now shows employee columns]
+```
+
+**Loading States & Feedback**:
+
+**First Tab press for table (metadata not cached)**:
+```sql
+tq> SELECT * FROM employees WHERE <TAB>
+Loading columns for 'employees'...
+
+[After 200ms:]
+    employee_id (INT)    first_name (VARCHAR)    last_name (VARCHAR)
+```
+
+**Cached column metadata**:
+```sql
+tq> SELECT * FROM employees WHERE <TAB>
+[Instant response <50ms]
+    employee_id (INT)    first_name (VARCHAR)    last_name (VARCHAR)
+```
+
+**Error Handling**:
+
+**Table not found in metadata**:
+```sql
+tq> SELECT * FROM nonexistent_table WHERE <TAB>
+Error: Table 'nonexistent_table' not found
+Cannot provide column completion.
+```
+
+**Permission denied**:
+```sql
+tq> SELECT * FROM secure_table WHERE <TAB>
+Warning: Cannot load columns for 'secure_table' (permission denied)
+Column completion unavailable.
+```
+
+**Metadata query timeout**:
+```sql
+tq> SELECT * FROM large_table WHERE <TAB>
+Warning: Column list query timed out after 300ms
+Column completion unavailable for this table.
+```
+
+**Ambiguous table context**:
+```sql
+tq> SELECT <TAB> FROM employees e JOIN departments d
+(Multiple tables in query. Specify table: e.<TAB> or d.<TAB>)
+```
+
+**Performance Requirements**:
+
+- **Column metadata query**: <300ms on first Tab press
+- **Cached completion**: <50ms response time
+- **Timeout**: 300ms max wait for column metadata
+- **Cache size**: Store columns for up to 100 tables
+- **Cache invalidation**: Clear on `/logon`
+
+**Implementation Notes**:
+
+1. **Table Context Parsing**:
+   - Extract table name from FROM clause using regex
+   - Support simple queries first: `FROM table_name`
+   - Handle table aliases: `FROM employees e`
+   - For JOIN queries: detect which table alias user is referencing
+   - Accept limitations for complex queries (subqueries, CTEs)
+
+2. **Metadata Query**:
+   ```sql
+   SELECT TRIM(ColumnName) AS column_name,
+          TRIM(ColumnType) AS column_type,
+          ColumnLength,
+          DecimalTotalDigits,
+          DecimalFractionalDigits
+   FROM DBC.ColumnsV
+   WHERE DatabaseName = ?
+     AND TableName = ?
+   ORDER BY ColumnId;
+   ```
+
+3. **Type Formatting**:
+   - Display concise type information
+   - Include key details: `VARCHAR(100)`, `DECIMAL(10,2)`, `INTEGER`
+   - Truncate long type definitions for display
+
+4. **Context Detection Strategy**:
+   - Parse backwards from cursor position
+   - Identify table reference in current SQL statement
+   - For simple cases: single table in FROM clause
+   - For complex cases: prompt user to use table alias
+
+**Testing Scenarios**:
+
+1. Tab after SELECT in single-table query → Show all columns with types
+2. Tab with partial column name → Filter and show matches
+3. Tab after WHERE → Show columns from table in FROM clause
+4. Tab in JOIN query → Show columns with table alias prefix
+5. Tab with table alias qualifier (e.g., `e.<TAB>`) → Show columns for that table
+6. Multiple Tab presses → Cycle through column matches
+7. Ambiguous context → Show helpful error message
+8. Table not in FROM clause → Cannot complete, show message
+9. Slow metadata query → Loading indicator, timeout gracefully
+10. Permission denied → Warning message, continue REPL
+
+**Limitations (Acknowledged)**:
+
+- **Subqueries**: Won't detect table context inside subqueries (v1.5.0 limitation)
+- **CTEs (WITH clauses)**: Won't parse CTE columns (v1.5.0 limitation)
+- **Window functions**: Limited support for OVER clauses
+- **Complex expressions**: Won't complete inside CASE statements or nested functions
+
+**Workaround for limitations**: Users can still type column names manually or use `/describe table_name` to see column list.
+
+### 5.6.4 Metacommand Completion (Future)
 
 ```sql
 tq> \d<TAB>
@@ -646,10 +1048,349 @@ Metacommands provide non-SQL functionality. They start with `/` or `\` and execu
 
 | Command | Alias | Description | Example |
 |---------|-------|-------------|---------|
-| `/logon <connection>` | `\c` | Connect to database | `/logon user:pass@host:1025/db` |
+| `/logon [connection]` | `\c` | Connect/switch database or show current connection | `/logon user:pass@host:1025/db` |
 | `/disconnect` | `\q` | Disconnect current connection | `/disconnect` |
 | `/reconnect` | - | Reconnect to current database | `/reconnect` |
 | `/ping` | - | Test connection | `/ping` |
+
+**`/logon` Metacommand Specification** (Sprint 7)
+
+**Purpose**: Allow users to switch database connections dynamically without exiting the REPL, essential for users who work with multiple databases or environments.
+
+**Priority**: P1 (High priority for Sprint 7)
+
+**Syntax**:
+```
+/logon [connection-string]      # Connect to new database
+/logon                           # Show current connection info
+\c [connection-string]           # Short alias
+```
+
+**Connection String Format**: Same format as CLI `-l` flag:
+```
+username:password@hostname:port/database
+```
+
+**Supported Authentication**: All mechanisms supported by tq:
+- `TD2` (default Teradata authentication)
+- `LDAP`
+- `KRB5` (Kerberos)
+- `TDNEGO` (Negotiated)
+
+**Behavior**:
+
+**Show current connection (no arguments)**:
+```sql
+tq> /logon
+
+Current Connection:
+  Host: prod-td01.company.com:1025
+  Database: production_db
+  User: alice
+  Authentication: LDAP
+  Session ID: 987654321
+  Connected: 2026-01-19 09:15:23 (45m 12s ago)
+  Status: Active
+```
+
+**Connect to new database**:
+```sql
+tq> /logon alice:secret@dev-td01.company.com:1025/dev_db
+
+Disconnecting from prod-td01.company.com:1025/production_db...
+Connecting to dev-td01.company.com:1025/dev_db...
+Connected successfully.
+
+New Connection:
+  Host: dev-td01.company.com:1025
+  Database: dev_db
+  User: alice
+  Authentication: TD2
+  Session ID: 123456789
+```
+
+**Connection string with authentication mechanism**:
+```sql
+tq> /logon alice:secret@host:1025/db?logmech=LDAP
+
+Connecting to host:1025/db (LDAP authentication)...
+Connected successfully.
+```
+
+**Preserve REPL state across connections**:
+```sql
+tq[production_db]> /logon alice:pass@dev:1025/dev_db
+Connected to dev_db
+
+tq[dev_db]> [History preserved: ↑ still shows production_db queries]
+tq[dev_db]> [Editor mode still Vi/Emacs as configured]
+tq[dev_db]> [Pager/colors settings preserved]
+```
+
+**Clear cached metadata after connection change**:
+```sql
+tq[production_db]> /logon alice:pass@dev:1025/dev_db
+Connected to dev_db
+
+tq[dev_db]> SELECT * FROM <TAB>
+Loading tables for dev_db... [New metadata query, cache cleared]
+```
+
+**Success Messages**:
+
+**Standard connection**:
+```sql
+tq> /logon alice:pass@host:1025/mydb
+Connected to mydb on host:1025
+Session ID: 123456789
+```
+
+**With additional context**:
+```sql
+tq> /logon alice:pass@prod.company.com:1025/production
+Connecting to production on prod.company.com:1025...
+Connected successfully (247ms)
+
+Connection Details:
+  Database: production
+  User: alice
+  Authentication: TD2
+  Character Set: UTF8
+  Time Zone: America/New_York
+```
+
+**Error Handling**:
+
+**Connection failure - network**:
+```sql
+tq> /logon alice:pass@unreachable:1025/db
+
+Error: Cannot connect to unreachable:1025
+Reason: Connection refused (network unreachable)
+
+Troubleshooting:
+  - Check hostname and port are correct
+  - Verify network connectivity: ping unreachable
+  - Check firewall rules
+  - Confirm Teradata database is running
+
+Current connection preserved: prod-td01.company.com:1025/production_db
+```
+
+**Connection failure - authentication**:
+```sql
+tq> /logon alice:wrongpass@host:1025/db
+
+Error: Authentication failed
+Reason: Invalid username or password
+
+Suggestions:
+  - Verify credentials are correct
+  - Check if account is locked
+  - Confirm authentication mechanism (try ?logmech=LDAP)
+
+Current connection preserved: prod-td01.company.com:1025/production_db
+```
+
+**Connection failure - database not found**:
+```sql
+tq> /logon alice:pass@host:1025/nonexistent_db
+
+Error: Database 'nonexistent_db' not found
+Reason: Specified database does not exist
+
+Suggestions:
+  - Check database name spelling
+  - List available databases on this host
+  - Verify you have access to this database
+
+Current connection preserved: prod-td01.company.com:1025/production_db
+```
+
+**Connection timeout**:
+```sql
+tq> /logon alice:pass@slow-host:1025/db
+
+Connecting to slow-host:1025/db...
+(waiting... 5s)
+(waiting... 10s)
+
+Error: Connection timeout after 30s
+Reason: Database did not respond within timeout period
+
+Suggestions:
+  - Database may be overloaded or down
+  - Network latency may be high
+  - Try again later or contact DBA
+
+Current connection preserved: prod-td01.company.com:1025/production_db
+```
+
+**Invalid connection string format**:
+```sql
+tq> /logon invalid-format
+
+Error: Invalid connection string format
+Expected format: username:password@hostname:port/database
+
+Examples:
+  /logon alice:secret@host:1025/mydb
+  /logon alice:pass@host:1025/db?logmech=LDAP
+  /logon alice@host:1025/db  (password will be prompted)
+
+See /help logon for more details.
+```
+
+**Permission denied**:
+```sql
+tq> /logon alice:pass@host:1025/restricted_db
+
+Error: Permission denied to database 'restricted_db'
+Reason: User 'alice' does not have access
+
+Suggestions:
+  - Contact DBA to request access
+  - Verify correct database name
+  - Check if access is restricted by IP/network
+
+Current connection preserved: prod-td01.company.com:1025/production_db
+```
+
+**State Preservation on Connection Change**:
+
+**REPL settings preserved**:
+- Command history (in-memory and file-backed)
+- Editor mode (Vi/Emacs)
+- Pager setting (on/off)
+- Colors setting (on/off)
+- Timing display setting
+
+**REPL state cleared**:
+- Last query result (cleared for /export)
+- Cached table metadata (cleared)
+- Cached column metadata (cleared)
+- Active transaction state (if any, warning issued)
+
+**Transaction warning**:
+```sql
+tq(tx)> /logon alice:pass@dev:1025/dev_db
+
+Warning: You have an active transaction on the current connection
+Changes will be LOST if you switch connections now.
+
+Options:
+  1. COMMIT; then /logon    (save changes, then switch)
+  2. ROLLBACK; then /logon  (discard changes, then switch)
+  3. Cancel /logon          (stay on current connection)
+
+Proceed anyway? [y/N]: n
+Connection change cancelled.
+```
+
+**Prompt Update**:
+
+**Show database name in prompt after connection**:
+```sql
+# Before connection:
+tq>
+
+# After connecting:
+tq[production_db]>
+
+# After switching to different database:
+tq[dev_db]>
+```
+
+**Performance Requirements**:
+
+- **Connection establishment**: <2s for healthy database
+- **Connection timeout**: 30s max (configurable)
+- **Disconnection cleanup**: <500ms
+- **Metadata cache clear**: <100ms
+
+**Implementation Notes**:
+
+1. **Connection Lifecycle**:
+   - Store current connection config in `ReplState`
+   - On `/logon`, validate new connection string
+   - Attempt new connection (don't disconnect old one yet)
+   - If new connection succeeds: cleanly close old connection
+   - If new connection fails: preserve old connection, show error
+   - Update prompt with new database name
+
+2. **State Management**:
+   - Preserve: history, editor mode, pager, colors, timing
+   - Clear: query results, table cache, column cache
+   - Warn and block: active transactions
+
+3. **Error Recovery**:
+   - Always preserve old connection if new connection fails
+   - Never leave user in disconnected state
+   - Provide clear error messages with recovery suggestions
+
+4. **Security**:
+   - Don't echo password in output
+   - Don't store password in history file
+   - Handle credentials same as CLI `-l` flag
+
+**Configuration Options** (via environment or config file):
+
+```bash
+# Connection timeout (default: 30s)
+export TQ_CONNECTION_TIMEOUT=30
+
+# Auto-reconnect on connection loss (default: false)
+export TQ_AUTO_RECONNECT=false
+```
+
+**Testing Scenarios**:
+
+1. `/logon` with no args → Show current connection details
+2. `/logon <valid-string>` → Switch to new database successfully
+3. `/logon <invalid-host>` → Connection failure, preserve old connection
+4. `/logon <wrong-password>` → Auth failure, preserve old connection
+5. `/logon` with active transaction → Warning, require confirmation
+6. `/logon` → Prompt updates with new database name
+7. After `/logon` → Tab completion uses new database metadata
+8. After `/logon` → History preserved from old connection
+9. After `/logon` → Settings (pager, colors) preserved
+10. Connection timeout → Clear error, revert to old connection
+
+**Help Text**:
+
+```sql
+tq> /help logon
+
+/logon [connection-string]    Connect to database or show current connection
+
+Syntax:
+  /logon                      Show current connection information
+  /logon <connection>         Switch to new database connection
+  \c [connection]             Short alias for /logon
+
+Connection String Format:
+  username:password@hostname:port/database[?logmech=AUTH]
+
+Examples:
+  /logon                                    # Show current connection
+  /logon alice:secret@prod:1025/sales      # Switch to sales database
+  /logon alice@prod:1025/sales             # Prompt for password
+  /logon alice:pass@host:1025/db?logmech=LDAP  # Use LDAP auth
+
+Authentication Mechanisms:
+  TD2     - Teradata authentication (default)
+  LDAP    - LDAP authentication
+  KRB5    - Kerberos authentication
+  TDNEGO  - Negotiated authentication
+
+Notes:
+  - REPL history and settings are preserved across connections
+  - Table/column completion cache is cleared on connection change
+  - Active transactions will prevent connection switching (commit/rollback first)
+  - Failed connections preserve your current connection
+
+See also: /ping, /reconnect, /session
+```
 
 **`/ping` Metacommand Specification** (FR-118)
 
@@ -1168,5 +1909,60 @@ Did you mean: SELECT?
 Fix and retry? [Y/n] y
 [Executes corrected query]
 ```
+
+---
+
+## Document History
+
+| Date | Version | Changes | Author |
+|------|---------|---------|--------|
+| 2026-01-19 | 1.2.0 | Added Sprint 7 specifications: table completion (5.6.2), column completion (5.6.3), /logon metacommand (5.8.1) | CLI UX Designer Agent |
+| 2026-01-18 | 1.1.0 | Added Sprint 6 specifications: keyword completion, /export, /pager, /colors | CLI UX Designer Agent |
+| 2026-01-17 | 1.0.0 | Added Sprint 4-5 specifications: REPL foundation, syntax highlighting, paging | CLI UX Designer Agent |
+| 2026-01-16 | 0.1.0 | Initial REPL mode specifications | Development Team |
+
+---
+
+## Sprint 7 Summary
+
+**Features Added in This Version:**
+
+1. **Table Name Completion (5.6.2)** - P0
+   - Context-aware completion after FROM, JOIN, UPDATE, INTO keywords
+   - Metadata queried from DBC.TablesV with session-scoped caching
+   - Loading states, error handling, and performance optimizations
+   - <500ms metadata query, <50ms cached response
+
+2. **Column Name Completion (5.6.3)** - P1
+   - Context-aware completion after SELECT, WHERE, ORDER BY keywords
+   - Shows column names with type hints for better discoverability
+   - Handles simple single-table queries and JOIN queries with table aliases
+   - <300ms metadata query, <50ms cached response
+   - Acknowledged limitations: subqueries, CTEs, complex expressions
+
+3. **`/logon` Metacommand (5.8.1)** - P1
+   - Dynamic connection switching without exiting REPL
+   - Shows current connection with no arguments
+   - Preserves REPL state (history, settings) across connections
+   - Clears metadata cache on connection change
+   - Comprehensive error handling with connection fallback
+   - <2s connection time, 30s timeout
+
+**Design Principles Applied:**
+
+- **Consistency**: Follows patterns from Sprint 6 keyword completion
+- **Performance**: Lazy loading with aggressive caching
+- **Forgiveness**: Graceful degradation on errors, never crash REPL
+- **Discoverability**: Loading states and helpful error messages guide users
+- **Security**: Password filtering in history, secure credential handling
+
+**Testing Requirements:**
+
+All features require comprehensive testing covering:
+- Happy path scenarios (completion works as expected)
+- Edge cases (slow database, permissions, empty results)
+- Error conditions (connection loss, timeouts, invalid input)
+- Performance validation (meet <500ms table, <300ms column requirements)
+- State management (cache invalidation, connection switching)
 
 ---

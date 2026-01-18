@@ -1,9 +1,13 @@
 //! REPL state management
 //!
 //! Tracks the current state of the interactive session including
-//! input buffer, query count, and session timing.
+//! input buffer, query count, session timing, and metadata cache.
+//!
+//! Sprint 7 additions:
+//! - MetadataCache for table/column completion
+//! - Connection string storage for /logon metacommand
 
-use crate::db::{ConnectionConfig, QueryResult};
+use crate::db::{ConnectionConfig, MetadataCache, QueryResult};
 use std::time::Instant;
 
 /// State of the REPL session
@@ -32,11 +36,18 @@ pub struct ReplState {
 
     /// Whether colored output is enabled (Sprint 6)
     colors_enabled: bool,
+
+    /// Metadata cache for tab completion (Sprint 7)
+    metadata_cache: MetadataCache,
+
+    /// Original connection string for reconnection (Sprint 7)
+    connection_string: Option<String>,
 }
 
 impl ReplState {
     /// Create a new REPL state
     pub fn new(connection_info: ConnectionConfig) -> Self {
+        let database = connection_info.database.clone();
         Self {
             input_buffer: String::new(),
             session_start: Instant::now(),
@@ -46,7 +57,16 @@ impl ReplState {
             last_result: None,
             pager_enabled: true,
             colors_enabled: atty::is(atty::Stream::Stdout), // Enable colors for TTY
+            metadata_cache: MetadataCache::new(database),
+            connection_string: None,
         }
+    }
+
+    /// Create a new REPL state with connection string stored
+    pub fn with_connection_string(connection_info: ConnectionConfig, connection_string: String) -> Self {
+        let mut state = Self::new(connection_info);
+        state.connection_string = Some(connection_string);
+        state
     }
 
     /// Check if there is any input in the buffer
@@ -151,6 +171,51 @@ impl ReplState {
     pub fn are_colors_enabled(&self) -> bool {
         self.colors_enabled
     }
+
+    // ========================================================================
+    // Sprint 7: Metadata cache methods
+    // ========================================================================
+
+    /// Get mutable reference to metadata cache
+    pub fn metadata_cache_mut(&mut self) -> &mut MetadataCache {
+        &mut self.metadata_cache
+    }
+
+    /// Get reference to metadata cache
+    pub fn metadata_cache(&self) -> &MetadataCache {
+        &self.metadata_cache
+    }
+
+    /// Clear metadata cache (call on connection change)
+    pub fn clear_metadata_cache(&mut self) {
+        self.metadata_cache.clear();
+    }
+
+    /// Get stored connection string
+    pub fn connection_string(&self) -> Option<&str> {
+        self.connection_string.as_deref()
+    }
+
+    /// Update connection info (for /logon command)
+    ///
+    /// This clears the metadata cache and resets session-specific state
+    /// while preserving settings like pager and colors.
+    pub fn update_connection(&mut self, new_config: ConnectionConfig, new_connection_string: Option<String>) {
+        // Clear metadata cache for new connection
+        self.metadata_cache.clear();
+        self.metadata_cache.set_current_database(&new_config.database);
+
+        // Clear last result (not valid for new connection)
+        self.last_result = None;
+
+        // Update connection info
+        self.connection_info = new_config;
+        self.connection_string = new_connection_string;
+
+        // Note: We preserve pager_enabled and colors_enabled settings
+        // Note: We preserve query count and session start for session statistics
+        log::debug!("Connection updated, metadata cache cleared");
+    }
 }
 
 #[cfg(test)]
@@ -228,5 +293,68 @@ mod tests {
 
         assert_eq!(state.queries_executed(), 2);
         assert_eq!(state.total_rows(), 15);
+    }
+
+    #[test]
+    fn test_metadata_cache_initialization() {
+        let config = create_test_config();
+        let state = ReplState::new(config);
+
+        // Metadata cache should be initialized but empty
+        assert!(!state.metadata_cache().has_tables());
+    }
+
+    #[test]
+    fn test_with_connection_string() {
+        let config = create_test_config();
+        let state = ReplState::with_connection_string(config, "user:pass@host:1025/db".to_string());
+
+        assert_eq!(state.connection_string(), Some("user:pass@host:1025/db"));
+    }
+
+    #[test]
+    fn test_update_connection() {
+        let config = create_test_config();
+        let mut state = ReplState::new(config);
+
+        // Set some state
+        state.record_query(10);
+        state.set_pager(false);
+        state.set_colors(false);
+
+        // Create new connection config
+        let new_config = ConnectionConfig {
+            host: "newhost".to_string(),
+            port: 2025,
+            database: "newdb".to_string(),
+            user: "newuser".to_string(),
+            password: None,
+            logmech: LogonMechanism::Td2,
+            timeout: Duration::from_secs(30),
+        };
+
+        state.update_connection(new_config, Some("newuser@newhost:2025/newdb".to_string()));
+
+        // Connection info should be updated
+        assert_eq!(state.connection_info().host, "newhost");
+        assert_eq!(state.connection_info().database, "newdb");
+        assert_eq!(state.connection_string(), Some("newuser@newhost:2025/newdb"));
+
+        // Settings should be preserved
+        assert!(!state.is_pager_enabled());
+        assert!(!state.are_colors_enabled());
+
+        // Query count should be preserved (session-level)
+        assert_eq!(state.queries_executed(), 1);
+    }
+
+    #[test]
+    fn test_clear_metadata_cache() {
+        let config = create_test_config();
+        let mut state = ReplState::new(config);
+
+        // Clear should not panic even if cache is empty
+        state.clear_metadata_cache();
+        assert!(!state.metadata_cache().has_tables());
     }
 }

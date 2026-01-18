@@ -298,27 +298,6 @@ impl QueryTiming {
     }
 }
 
-/// Write enhanced timing footer
-pub fn write_enhanced_timing<W: Write>(
-    writer: &mut W,
-    timing: &QueryTiming,
-    row_count: usize,
-    use_color: bool,
-) -> Result<()> {
-    let timing_str = timing.format_enhanced(row_count);
-
-    if use_color {
-        // Use dim color for timing information
-        writeln!(writer, "\n\x1b[2m{} row(s) in set\x1b[0m", row_count)?;
-        writeln!(writer, "\x1b[2m{}\x1b[0m", timing_str)?;
-    } else {
-        writeln!(writer, "\n{} row(s) in set", row_count)?;
-        writeln!(writer, "{}", timing_str)?;
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

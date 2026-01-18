@@ -10,10 +10,7 @@
 //! - Search: Find text in results with /pattern
 //! - Status line: Shows position, total rows, and hints
 
-use crate::db::QueryResult;
-use crate::error::Result;
 use crossterm::terminal;
-use std::io::{IsTerminal, Write};
 use unicode_width::UnicodeWidthStr;
 
 /// Configuration for the pager
@@ -272,121 +269,6 @@ impl PagedOutput {
 
         status
     }
-}
-
-/// Display query results with optional paging
-///
-/// If paging is needed and we're in an interactive terminal, this will
-/// enter an interactive pager mode. Otherwise, it writes directly to the writer.
-pub fn display_with_paging<W: Write>(
-    content: &str,
-    writer: &mut W,
-    config: &PagerConfig,
-) -> Result<()> {
-    let paged = PagedOutput::new(content.to_string(), config.clone());
-
-    // If paging is not needed or we're not in a terminal, just write directly
-    if !paged.needs_paging() || !std::io::stdout().is_terminal() {
-        write!(writer, "{}", content)?;
-        return Ok(());
-    }
-
-    // Enter interactive paging mode
-    interactive_pager(paged, writer)
-}
-
-/// Interactive pager for navigating results
-fn interactive_pager<W: Write>(mut paged: PagedOutput, writer: &mut W) -> Result<()> {
-    use crossterm::{
-        cursor,
-        event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
-        execute,
-        terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType},
-    };
-
-    // Enter raw mode for keyboard input
-    enable_raw_mode()?;
-
-    // Clear screen and show initial page
-    execute!(
-        writer,
-        Clear(ClearType::All),
-        cursor::MoveTo(0, 0)
-    )?;
-
-    loop {
-        // Display current page
-        execute!(writer, cursor::MoveTo(0, 0), Clear(ClearType::All))?;
-
-        for line in paged.current_page() {
-            let visible = paged.visible_line(line);
-            writeln!(writer, "{}", visible)?;
-        }
-
-        // Display status line
-        let status = paged.status_line();
-        writeln!(writer)?;
-        writeln!(writer, "\x1b[7m{}\x1b[0m", status)?;  // Inverse video
-
-        writer.flush()?;
-
-        // Wait for key press
-        if let Event::Key(KeyEvent { code, modifiers, .. }) = event::read()? {
-            match (code, modifiers) {
-                // Quit
-                (KeyCode::Char('q'), _) | (KeyCode::Esc, _) => break,
-                (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
-
-                // Vertical scrolling
-                (KeyCode::Down, _) | (KeyCode::Char('j'), _) => paged.scroll_down(),
-                (KeyCode::Up, _) | (KeyCode::Char('k'), _) => paged.scroll_up(),
-                (KeyCode::PageDown, _) | (KeyCode::Char(' '), _) => paged.page_down(),
-                (KeyCode::PageUp, _) | (KeyCode::Char('b'), _) => paged.page_up(),
-                (KeyCode::Home, _) | (KeyCode::Char('g'), _) => paged.scroll_home(),
-                (KeyCode::End, _) | (KeyCode::Char('G'), _) => paged.scroll_end(),
-
-                // Horizontal scrolling
-                (KeyCode::Left, _) | (KeyCode::Char('h'), _) => paged.scroll_left(),
-                (KeyCode::Right, _) | (KeyCode::Char('l'), _) => paged.scroll_right(),
-
-                _ => {}
-            }
-        }
-    }
-
-    // Restore terminal state
-    disable_raw_mode()?;
-    execute!(writer, cursor::Show)?;
-
-    Ok(())
-}
-
-/// Simple helper to determine if paging should be used for a result set
-pub fn should_page(result: &QueryResult, config: &PagerConfig) -> bool {
-    if !config.vertical_paging && !config.horizontal_scrolling {
-        return false;
-    }
-
-    // Check row count for vertical paging
-    if config.vertical_paging && result.row_count > config.min_rows_for_paging {
-        return true;
-    }
-
-    // For horizontal paging, we'd need to estimate table width
-    // which requires formatting first - let the pager decide
-    if config.horizontal_scrolling {
-        let estimated_width = result
-            .columns
-            .iter()
-            .map(|c| c.name.len() + 5)  // Rough estimate
-            .sum::<usize>();
-
-        if estimated_width > config.min_cols_for_scrolling {
-            return true;
-        }
-    }
-
-    false
 }
 
 #[cfg(test)]
