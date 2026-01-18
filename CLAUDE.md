@@ -17,6 +17,75 @@ Use the following skills when working with code in this repository:
 
 This project is developed exclusively by Claude Code using the skills and agents mentioned above.
 
+### Workflow: Sprint-Driven Development
+
+The project follows a structured sprint-driven approach coordinated by the **main Claude agent** (not a sub-agent). The main agent orchestrates specialized sub-agents through parallel execution for maximum efficiency.
+
+**Use the `/sprint-coordinator` skill** when starting a new sprint or coordinating sprint phases.
+
+#### Sprint Workflow Overview
+
+```
+1. Sprint Planning (Main Agent)
+   ↓ Creates: sprint-N-planning.md
+
+2. Parallel Design (Main Agent Coordinates)
+   ├─→ cli-ux-designer: Detailed specs
+   └─→ rust-teradata-architect: Technical feasibility
+   ↓ Main agent synthesizes outputs
+
+3. Parallel Implementation (Main Agent Coordinates)
+   ├─→ rust-teradata-architect: Implementation
+   └─→ quality-validator: Test case design
+   ↓ Main agent reviews outputs
+
+4. Test Execution (Main Agent Coordinates)
+   └─→ quality-validator: Execute tests
+   ↓ If failures, back to implementation
+
+5. Sprint Closure (Main Agent Coordinates)
+   ├─→ tq-project-manager: Validate completion
+   └─→ Main agent: Sprint review + roadmap update
+```
+
+#### Key Principles
+
+1. **Main Agent Coordinates:** The primary Claude agent owns the workflow and makes all decisions
+2. **Maximize Parallelism:** Launch independent sub-agents in a single message with multiple Task calls
+3. **Context Isolation:** Sub-agents handle verbose work; main conversation stays clean
+4. **Quality Focus:** Zero technical debt tolerance, 100% test pass rate before sprint closure
+5. **Documentation-Driven:** Every sprint produces planning and review documents
+
+#### Specialized Sub-Agent Roles
+
+**cli-ux-designer** (Sonnet)
+- Owns: `specifications.md`, `detailed-specifications/*.md`
+- Creates: User-facing specifications, CLI interface designs
+- Launch when: Designing features, refining UX, updating specifications
+
+**rust-teradata-architect** (Opus)
+- Owns: `rust-cli-design-general.md`, `rust-architecture.md`, implementation
+- Creates: Production code, unit tests, architecture docs
+- Launch when: Implementing features, refactoring code, making architectural decisions
+
+**quality-validator** (Sonnet)
+- Owns: `testing-guidelines.md`, test cases, test execution
+- Creates: Test cases (`tests/cases/TC###.md`), test results, validation reports
+- Launch when: Designing tests, executing test suites, validating quality
+
+**tq-project-manager** (Haiku)
+- Owns: Completion validation, tech debt tracking
+- Creates: Sprint completion validation reports
+- Launch when: Validating sprint completion, assessing technical debt, verifying quality standards
+
+#### Sprint Planning Documents
+
+Each sprint produces two key documents:
+- **`docs/builder/sprints/sprint-N-planning.md`**: Scope, objectives, acceptance criteria (created at sprint start)
+- **`docs/builder/sprints/sprint-N-review.md`**: Retrospective, metrics, lessons learned (created at sprint end)
+
+These documents provide shared context for all agents and track sprint progress.
+
 ### Master specification documents
 
 The project is governed by authoritative specification documents located in `docs/builder/`:

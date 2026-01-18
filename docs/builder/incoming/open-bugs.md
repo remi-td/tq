@@ -1,8 +1,44 @@
-# Interactive UI user stories
+# Current bug and urgent issues
 
-We would like an interactive UI that overall looks like state of the art interactive CLI UIs for database tools Ieg. https://github.com/dbcli/mycli, https://github.com/dbcli/pgcli, https://harlequin.sh/)... But better!
+Created on 2026-01-18 at 07:21
 
-## Current bugs identified (please consider for this sprint!!!!)
+## Compilation issue
+
+Not sure what you did in the last sprint, but the tool doesn't even compile!!!
+
+(base) remi.turpaud@TD-VX1J6LT4PX tq % cargo build                                                                                                     
+warning: tq@1.3.0: Successfully copied teradatasql.dylib to /Users/remi.turpaud/Code/genAI/tq/target/debug/teradatasql.dylib
+warning: function `write_enhanced_timing` is never used
+   --> src/commands/repl/executor.rs:302:8
+    |
+302 | pub fn write_enhanced_timing<W: Write>(
+    |        ^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` on by default
+
+warning: function `display_with_paging` is never used
+   --> src/commands/repl/pager.rs:281:8
+    |
+281 | pub fn display_with_paging<W: Write>(
+    |        ^^^^^^^^^^^^^^^^^^^
+
+warning: function `interactive_pager` is never used
+   --> src/commands/repl/pager.rs:299:4
+    |
+299 | fn interactive_pager<W: Write>(mut paged: PagedOutput, writer: &mut W) -> Result<()> {
+    |    ^^^^^^^^^^^^^^^^^
+
+warning: function `should_page` is never used
+   --> src/commands/repl/pager.rs:365:8
+    |
+365 | pub fn should_page(result: &QueryResult, config: &PagerConfig) -> bool {
+    |        ^^^^^^^^^^^
+
+warning: `tq` (lib) generated 4 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.24s
+
+## Padding issue
+
 The padding doesn't work at all: everything is simply output in my terminal, and not aligned!
 
 tq> sel * from dbc.databases;
@@ -18,24 +54,3 @@ tq> sel * from dbc.databases;
 │ mldb                                                         ┆ DBC                                                          ┆ system                                                       ┆ DBC                                                          ┆ F              ┆ NN          ┆   200000000 ┆ 99230829772 ┆ 99230829772 ┆ [NULL]                                                                    ┆ 2025-10-09 17:45:12 ┆ DBC                                                          ┆ 2025-10-09 17:45:12 ┆ U      ┆      [NULL] ┆ [NULL]              │
 ├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
 │ td_tapidb                                                    ┆ DBC                                                          ┆ DBC                                                          ┆ DBC                                                          ┆ F              ┆ NN          ┆    200000
-
-## Features
-
-- Syntax highlighting
-- Auto-completion
-- Command history
-- Multi-line input
-- Support for Teradata dialect
-- Capability to save and load queries: saving queries should allow to save history as well if a certain depth or time interval is specified (ie. last 10 queries or last 10 minutes of queries).
-- Capability to save resultsets (to file and clipboard)
-- Capability to pan resultsets: scroll up and down for datasets larger than the terminal width/height
-- Capability to open multiple sessions: ie. put current session in background and open a new one, switch back and forth between sessions.
-- Identification on the system: on startup display a nice "tq" logo, welcome message, the database version number (from dbc.dbcinfo), the system name (from the logon string) and the current user name (from `select user).
-- Needs to be beatiful, multiple standard CLI themes available, and a Teradata one with teradata orange color for accents and whatever goes well with it.
-- Ascii art logo displayed on start on the left (right is system information discussed above): "tq" lower case with "t" in teradata orange and "q" in white/black.
-- Should allow for special commands with `/` eg. `/systemspace`, `/databasespace`, `/monitor`, `/sessions`, `/health`, `/descibe`
-
-## Technical requirement
-- Needs to be as light as possible, extremely robust and super fast.
-- Needs to be easy to install: should be available as a single binary (+ teradata driver library as license may be constraigning)
-- Needs to be hackable: a lot can be specified in config files: editor behaviour and hotkeys (eg. vim, emacs...), row limits, default output format, user directory for history and saved queries, etc. That config file should come with reasonable defaults, an assistant should help in the user home directory (eg: `~/.tq/config.toml` on UNIX or whatever follows best practices). If the config file is found where the program is started, it should be used.
