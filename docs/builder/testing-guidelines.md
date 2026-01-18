@@ -525,6 +525,307 @@ Verify no race conditions or conflicts.
 4. **Format compliance matters**: JSON must be valid, CSV must follow RFC 4180
 5. **Documentation is feature**: Help text is first user experience
 
+## Sprint 11 Lessons: Testing Visual/Interactive Features
+
+### What We Learned From Sprint 11 Bug Failures
+
+**Bug Context:**
+- Tab completion showed "(SQL keyword)" repeated instead of database/table names
+- Table display had excessive padding, scattered text (broken AGAIN)
+- Both bugs occurred despite Sprint 9/10 tests passing
+
+**Root Cause - Test Coverage Gaps:**
+
+1. **Content Validation Missing**
+   - Tests verified *mechanism* works (Tab triggers completion)
+   - Tests didn't verify *content* is correct (shows actual tables, not keywords)
+   - **Lesson**: Test semantic meaning, not just mechanical function
+
+2. **Visual Layout Not Validated**
+   - Tests checked content presence (columns exist in output)
+   - Tests didn't check visual layout (headers align with data)
+   - **Lesson**: Interactive features need visual inspection, not just content checks
+
+3. **Live Database Testing Inconsistent**
+   - Some tests used mocks or assumptions
+   - Real Teradata behavior differs from assumptions
+   - **Lesson**: MANDATORY live database testing for all REPL features
+
+### New Testing Requirements (Sprint 11+)
+
+**For Tab Completion Tests:**
+
+1. **Content Validation** (not just mechanism)
+   ```
+   ✗ BAD:  "Verify Tab key triggers completion"
+   ✓ GOOD: "Verify Tab after FROM shows database names (not keywords)"
+   ```
+
+2. **Semantic Checks**
+   - What type of completions shown? (tables vs keywords vs garbage)
+   - Are they queryable? (can user use them?)
+   - Do they make sense in context? (databases after FROM)
+
+3. **Anti-Pattern Detection**
+   - Explicitly test for known failure modes
+   - Example: Check for "(SQL keyword)" repeated
+   - Document what should NOT happen
+
+4. **Live Database Required**
+   - Must test against real Teradata
+   - Must have actual databases/tables
+   - Must verify metadata queries work
+
+**For Table Display Tests:**
+
+1. **Visual Layout Validation**
+   ```
+   ✗ BAD:  "Verify table contains columns X, Y, Z"
+   ✓ GOOD: "Verify header 'X' aligns with data column X"
+   ```
+
+2. **Width Measurements**
+   - Measure actual character widths
+   - Count columns displayed
+   - Verify fits in terminal (80, 120, 160 cols)
+   - Test with `tput cols` and measure output
+
+3. **Readability Checks**
+   - Can human read it? (subjective but critical)
+   - Headers clear? Data clear?
+   - Alignment preserved?
+   - Professional appearance?
+
+4. **Terminal Width Testing**
+   - Test multiple widths: 80, 120, 160, 200+ cols
+   - Verify dynamic adjustment
+   - Check edge cases (very narrow, very wide)
+
+5. **Visual Comparison**
+   - Screenshots recommended
+   - Before/after comparisons
+   - Document expected appearance
+
+**For REPL Interactive Features (General):**
+
+1. **Test With Live Environment**
+   - Real database connection
+   - Real terminal (not just stdout capture)
+   - Real user interaction patterns
+
+2. **Validate Meaning, Not Just Mechanics**
+   - Don't just check "output exists"
+   - Check "output is useful and correct"
+   - Semantic validation critical
+
+3. **Visual Inspection Required**
+   - Some features need human eyes
+   - Automated tests can't catch everything
+   - Document visual acceptance criteria
+
+4. **Test Failure Modes**
+   - What happens when things go wrong?
+   - Permission denied, timeout, connection loss
+   - Graceful degradation vs crashes
+
+5. **Regression Test Suites**
+   - Re-run previous sprint tests
+   - Ensure fixes don't break other features
+   - Systematic regression checking
+
+### Updated Test Case Template
+
+**For interactive/visual features, test cases must include:**
+
+```markdown
+## Anti-Pattern (What Should NOT Happen)
+
+**INCORRECT Output (Bug Behavior):**
+[Screenshot or description of broken behavior]
+[Specific example of failure mode to watch for]
+
+## Visual Validation
+
+**Layout Checklist:**
+- [ ] Visual inspection item 1
+- [ ] Visual inspection item 2
+- [ ] Specific alignment checks
+- [ ] Width measurements
+
+**Semantic Validation:**
+- [ ] Content type is correct (tables not keywords)
+- [ ] Content is usable/queryable
+- [ ] Makes sense in context
+```
+
+### Testing Philosophy Changes
+
+**OLD Approach (Insufficient):**
+- ✓ Feature exists
+- ✓ Mechanism works
+- ✓ Content present
+
+**NEW Approach (Sprint 11+):**
+- ✓ Feature exists
+- ✓ Mechanism works
+- ✓ Content present
+- ✓ **Content is semantically correct** (NEW)
+- ✓ **Layout is visually correct** (NEW)
+- ✓ **Tested with live database** (NEW)
+- ✓ **Known failure modes don't occur** (NEW)
+
+### Specific Test Gaps That Allowed Sprint 11 Bugs
+
+**Tab Completion Gaps:**
+
+What we tested:
+- ✓ Tab key triggers completion
+- ✓ Completion mechanism works
+- ✓ Some output appears
+
+What we DIDN'T test:
+- ✗ Output contains actual database/table names
+- ✗ Output does NOT contain generic keywords
+- ✗ Context detection works with real SQL
+- ✗ Completions are queryable/useful
+
+**Table Display Gaps:**
+
+What we tested:
+- ✓ Table output generated
+- ✓ Columns present in output
+- ✓ Data values appear
+
+What we DIDN'T test:
+- ✗ Headers align with data visually
+- ✗ Column widths reasonable (not excessive)
+- ✗ Table fits in terminal width
+- ✗ Layout is readable by human
+
+### Mandatory Checklist for REPL Feature Tests
+
+Before marking test complete:
+
+- [ ] Tested with live Teradata database
+- [ ] Validated content semantically (not just presence)
+- [ ] Checked visual layout/alignment (if applicable)
+- [ ] Measured widths/counts (quantitative validation)
+- [ ] Tested known failure modes explicitly
+- [ ] Human visual inspection performed
+- [ ] Can reproduce bug if test fails
+- [ ] Anti-patterns documented
+
+### Tools and Techniques
+
+**For Visual Testing:**
+
+1. **Terminal Width Control:**
+   ```bash
+   # Set terminal to specific width
+   # iTerm2: Profiles > Window > Columns
+   # Terminal.app: Window Settings
+   tput cols  # Verify width
+   ```
+
+2. **Width Measurement:**
+   ```bash
+   # Count characters in output line
+   output | head -1 | wc -c
+
+   # Visual ruler (iTerm2)
+   # View > Show Ruler
+   ```
+
+3. **Screenshot Capture:**
+   - Document expected appearance
+   - Compare before/after
+   - Include in test results
+
+4. **Automated REPL Testing:**
+   - Use `expectrl` crate (see tests/interactive_tests.rs)
+   - Simulate Tab key presses
+   - Capture and validate output
+
+**For Semantic Testing:**
+
+1. **Live Database Queries:**
+   ```rust
+   // Verify completion results are queryable
+   let completion = get_completion_after_from();
+   let query = format!("SELECT * FROM {} LIMIT 1", completion);
+   assert!(execute_query(query).is_ok());  // Must work!
+   ```
+
+2. **Content Type Validation:**
+   ```rust
+   let completions = get_completions();
+   assert!(completions.iter().all(|c| is_database_object(c)));
+   assert!(!completions.iter().any(|c| is_sql_keyword(c)));
+   ```
+
+3. **Context Verification:**
+   ```rust
+   // After FROM, should show databases/tables
+   let context = CompletionContext::from("SELECT * FROM ");
+   assert_eq!(context.expected_type, CompletionType::Table);
+   ```
+
+### Prevention: How to Avoid Sprint 11-Style Regressions
+
+1. **Mandatory Live Database Testing**
+   - Every REPL feature test runs against real Teradata
+   - No mocks for integration tests
+   - CI/CD must have test database available
+
+2. **Visual Acceptance Tests**
+   - Manual visual inspection required
+   - QA agent performs human validation
+   - Screenshots in test results
+
+3. **Semantic Assertions**
+   - Test MEANING of output, not just presence
+   - Validate completions are usable
+   - Check context awareness works
+
+4. **Regression Test Suites**
+   - Re-run all previous tests after changes
+   - Automated regression detection
+   - Block merge if regressions found
+
+5. **Known-Failure Testing**
+   - Explicitly test for past bug patterns
+   - Example: "Does NOT show '(SQL keyword)' repeated"
+   - Document anti-patterns in tests
+
+### Success Metrics
+
+**Quality-Validator Agent Checklist:**
+
+When validating a sprint, verify:
+
+1. **Test Coverage:**
+   - [ ] All features have test cases
+   - [ ] Tests include semantic validation
+   - [ ] Visual features have layout tests
+   - [ ] Anti-patterns explicitly checked
+
+2. **Test Execution:**
+   - [ ] All tests run against live database
+   - [ ] Visual inspection performed
+   - [ ] Measurements taken (widths, counts)
+   - [ ] Screenshots captured
+
+3. **Regression Prevention:**
+   - [ ] Previous sprint tests re-run
+   - [ ] No new failures introduced
+   - [ ] Known bugs don't reappear
+
+4. **Documentation:**
+   - [ ] Test cases document visual expectations
+   - [ ] Anti-patterns described
+   - [ ] Failure modes covered
+   - [ ] Lessons learned updated
+
 ## Quick Reference Checklist
 
 ### Before Testing
@@ -671,7 +972,11 @@ echo "SELECT 1" | ./target/release/tq query
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: 2026-01-17
-**Based on**: tq v1.0.0 testing (commit 369af18)
+**Document Version**: 2.0
+**Last Updated**: 2026-01-18
+**Based on**: tq Sprint 11 testing (commit a1c02cd)
 **Author**: quality-validator agent
+
+**Version History:**
+- v2.0 (2026-01-18): Sprint 11 lessons added - visual/interactive feature testing requirements
+- v1.0 (2026-01-17): Initial version from Sprint 10 testing

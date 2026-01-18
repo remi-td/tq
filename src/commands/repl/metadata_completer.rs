@@ -60,18 +60,45 @@ impl CompletionState {
     }
 
     /// Ensure tables are loaded, triggering lazy load if needed
+    ///
+    /// Sprint 11: Added explicit error logging for debugging completion failures.
     pub fn ensure_tables_loaded(&mut self) -> bool {
         if !self.cache.has_tables() {
-            self.cache.load_tables(&self.client)
+            log::debug!("Tab completion: Triggering lazy load of table metadata");
+            let result = self.cache.load_tables(&self.client);
+            if !result {
+                // Log the error explicitly so it's visible when debugging
+                if let Some(error) = self.cache.last_error() {
+                    log::error!("Tab completion: Failed to load table metadata: {}", error);
+                } else {
+                    log::error!("Tab completion: Failed to load table metadata (unknown error)");
+                }
+            } else {
+                log::debug!("Tab completion: Table metadata loaded successfully");
+            }
+            result
         } else {
             true
         }
     }
 
     /// Ensure columns are loaded for a table
+    ///
+    /// Sprint 11: Added explicit error logging for debugging completion failures.
     pub fn ensure_columns_loaded(&mut self, table_name: &str) -> bool {
         if self.cache.get_columns(table_name).is_none() {
-            self.cache.load_columns(&self.client, table_name)
+            log::debug!("Tab completion: Triggering lazy load of columns for table: {}", table_name);
+            let result = self.cache.load_columns(&self.client, table_name);
+            if !result {
+                if let Some(error) = self.cache.last_error() {
+                    log::error!("Tab completion: Failed to load columns for {}: {}", table_name, error);
+                } else {
+                    log::error!("Tab completion: Failed to load columns for {} (unknown error)", table_name);
+                }
+            } else {
+                log::debug!("Tab completion: Columns loaded successfully for table: {}", table_name);
+            }
+            result
         } else {
             true
         }
@@ -571,20 +598,10 @@ impl Completer for MetadataCompleter {
             }
 
             CompletionContext::TableName { prefix } => {
-                let sug = self.complete_tables(&prefix);
-                // Check if we got real completions or just status/error messages
-                let has_real_suggestions = sug.iter().any(|s| !s.value.is_empty());
-                if has_real_suggestions {
-                    sug
-                } else {
-                    // Try keywords as fallback, but keep status messages if no keywords match
-                    let keywords = self.complete_keywords(&prefix);
-                    if keywords.is_empty() {
-                        sug // Keep the status message
-                    } else {
-                        keywords
-                    }
-                }
+                // Sprint 11 Bug Fix: Do NOT fall back to keywords when in table context.
+                // Users expect table/database names here, not SQL keywords.
+                // If metadata loading fails, show the error/status message instead.
+                self.complete_tables(&prefix)
             }
 
             CompletionContext::SchemaQualifiedTable { schema, prefix } => {
@@ -596,20 +613,10 @@ impl Completer for MetadataCompleter {
                 prefix,
                 table_qualifier: _,
             } => {
-                let sug = self.complete_columns(&tables, &prefix, None);
-                // Check if we got real completions or just status/error messages
-                let has_real_suggestions = sug.iter().any(|s| !s.value.is_empty());
-                if has_real_suggestions {
-                    sug
-                } else {
-                    // Try keywords as fallback, but keep status messages if no keywords match
-                    let keywords = self.complete_keywords(&prefix);
-                    if keywords.is_empty() {
-                        sug // Keep the status message
-                    } else {
-                        keywords
-                    }
-                }
+                // Sprint 11 Bug Fix: Do NOT fall back to keywords when in column context.
+                // Users expect column names here, not SQL keywords.
+                // If metadata loading fails, show the error/status message instead.
+                self.complete_columns(&tables, &prefix, None)
             }
         };
 
@@ -698,19 +705,20 @@ mod tests {
     }
 
     #[test]
-    fn test_complete_empty_prefix() {
+    fn test_complete_empty_prefix_table_context() {
         let mut completer = MetadataCompleter::keywords_only();
 
         let suggestions = completer.complete("SELECT * FROM ", 14);
-        // Without database connection, should return empty for table context
-        // but the completer falls back to keywords
-        // This is correct behavior - no matching keywords either
-        assert!(
-            suggestions.is_empty()
-                || suggestions
-                    .iter()
-                    .any(|s| s.description.as_ref().unwrap().contains("keyword"))
-        );
+        // Sprint 11 Bug Fix: Without database connection, we should show a
+        // status message about no database connection, NOT fall back to keywords.
+        // This is the correct behavior - users expect table names after FROM.
+        assert_eq!(suggestions.len(), 1);
+        assert!(suggestions[0].value.is_empty()); // Status message has empty value
+        assert!(suggestions[0]
+            .description
+            .as_ref()
+            .unwrap()
+            .contains("No database connection"));
     }
 
     #[test]
@@ -771,5 +779,73 @@ mod tests {
             .as_ref()
             .unwrap()
             .contains("No database connection"));
+    }
+
+    // Sprint 11 Bug Fix Tests: Verify no fallback to keywords
+
+    #[test]
+    fn test_table_context_no_keyword_fallback() {
+        // Sprint 11: When in table context (after FROM), we should NOT fall back to keywords.
+        // This test verifies that "SELECT * FROM S<TAB>" does NOT show SQL keywords.
+        let mut completer = MetadataCompleter::keywords_only();
+
+        // After FROM with a prefix - this is table context
+        let suggestions = completer.complete("SELECT * FROM S", 15);
+
+        // Should show status message about no connection, NOT keywords like "SELECT", "SET"
+        assert_eq!(suggestions.len(), 1);
+        assert!(suggestions[0].value.is_empty());
+        assert!(!suggestions
+            .iter()
+            .any(|s| s.description.as_ref().unwrap().contains("keyword")));
+    }
+
+    #[test]
+    fn test_column_context_no_keyword_fallback() {
+        // Sprint 11: When in column context (after WHERE), we should NOT fall back to keywords.
+        // We can't fully test this without a database connection (need table context first),
+        // but we can test that keyword completion is NOT used inappropriately.
+        let mut completer = MetadataCompleter::keywords_only();
+
+        // This input has a FROM clause (establishes table context) and WHERE (column context)
+        let suggestions = completer.complete("SELECT * FROM employees WHERE n", 31);
+
+        // Should show status message about determining table context, NOT keywords
+        assert_eq!(suggestions.len(), 1);
+        assert!(suggestions[0].value.is_empty());
+        // Should NOT contain "AND", "NOT", "NULL" etc. - just context message
+        assert!(!suggestions
+            .iter()
+            .any(|s| s.description.as_ref().unwrap().contains("keyword")));
+    }
+
+    #[test]
+    fn test_keyword_context_still_works() {
+        // Sprint 11: Keyword completion should still work in keyword context (start of line)
+        let mut completer = MetadataCompleter::keywords_only();
+
+        let suggestions = completer.complete("SEL", 3);
+
+        // Should have keyword suggestions
+        assert!(!suggestions.is_empty());
+        assert!(suggestions.iter().any(|s| s.value == "SELECT"));
+        assert!(suggestions
+            .iter()
+            .all(|s| s.description.as_ref().unwrap().contains("keyword")));
+    }
+
+    #[test]
+    fn test_schema_qualified_table_no_fallback() {
+        // Sprint 11: Schema-qualified table completion (schema.) should not fall back to keywords
+        let mut completer = MetadataCompleter::keywords_only();
+
+        let suggestions = completer.complete("SELECT * FROM prod.", 19);
+
+        // Should show status message about no connection, NOT keywords
+        assert_eq!(suggestions.len(), 1);
+        assert!(suggestions[0].value.is_empty());
+        assert!(!suggestions
+            .iter()
+            .any(|s| s.description.as_ref().unwrap().contains("keyword")));
     }
 }

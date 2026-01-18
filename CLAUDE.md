@@ -55,7 +55,7 @@ The project follows a structured sprint-driven approach coordinated by the **mai
        ↓ Loop until 100% pass rate
 
 5. Sprint Closure (Main Agent Coordinates)
-   ├─→ tq-project-manager: Validate completion
+   ├─→ tq-project-manager: Validate completion + commit/push to GitHub
    ├─→ Main agent: Sprint review + specifications update
    ├─→ /collect-metrics: Extract token usage data (2-3 min)
    └─→ Main agent: Update docs/user/roadmap.md
@@ -91,8 +91,9 @@ The project follows a structured sprint-driven approach coordinated by the **mai
 - Launch when: Designing tests, executing test suites, validating quality
 
 **tq-project-manager** (Haiku)
-- Owns: Completion validation, tech debt tracking
-- Creates: Sprint completion validation reports
+- Owns: Completion validation, tech debt tracking, sprint finalization
+- Creates: Sprint completion validation reports, final sprint commits
+- Performs: Git commit and push to GitHub after validation approval
 - Launch when: Validating sprint completion, assessing technical debt, verifying quality standards
 
 #### Sprint Planning Documents

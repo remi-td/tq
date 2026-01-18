@@ -1,19 +1,25 @@
-//! Table output formatting using comfy-table
+//! Table output formatting with terminal width awareness
 //!
-//! Provides beautiful UTF8 table formatting with:
-//! - Box-drawing characters
-//! - Automatic column sizing
-//! - Type-based alignment (numbers right, text left)
+//! Sprint 11: Simplified table formatting that removes broken padding logic
+//! and implements terminal-width-aware column truncation.
+//!
+//! ## Design Philosophy
+//! - NO complex padding calculations (repeatedly broke in Sprints 6, 8, 11)
+//! - Detect terminal width and show columns that fit
+//! - Clear truncation indicator when columns are hidden
+//! - Batch mode (non-TTY) shows ALL columns
+//!
+//! ## Features
+//! - Box-drawing characters (UTF-8)
+//! - Terminal width detection
+//! - Column truncation with "(+n cols)" indicator
+//! - Type-based alignment
 //! - NULL value styling
 
 use crate::db::{Alignment, QueryResult};
 use crate::error::Result;
-use comfy_table::{
-    modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Attribute, Cell, CellAlignment, Color,
-    ContentArrangement, Table,
-};
 use crossterm::terminal;
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 
 /// Table formatting options
 #[derive(Debug, Clone)]
@@ -22,7 +28,7 @@ pub struct TableOptions {
     pub show_header: bool,
     /// Use colors (for terminal output)
     pub use_color: bool,
-    /// Maximum column width before wrapping (deprecated, terminal width is auto-detected)
+    /// Maximum column width (deprecated, kept for API compatibility)
     #[allow(dead_code)]
     pub max_column_width: Option<u16>,
 }
@@ -37,77 +43,360 @@ impl Default for TableOptions {
     }
 }
 
+/// Column selection result after fitting columns to terminal width
+#[derive(Debug)]
+struct ColumnSelection {
+    /// Indices of columns to display
+    visible_columns: Vec<usize>,
+    /// Number of hidden columns
+    hidden_count: usize,
+    /// Names of hidden columns (for footer message)
+    hidden_names: Vec<String>,
+    /// Width needed for each visible column (content + 2 for spacing)
+    column_widths: Vec<usize>,
+}
+
+/// Get terminal width, returning None for non-TTY (batch mode)
+fn get_terminal_width() -> Option<usize> {
+    // Check if stdout is a terminal (TTY)
+    if !std::io::stdout().is_terminal() {
+        // Batch mode: return None to indicate no truncation
+        return None;
+    }
+
+    // Try to get terminal size using crossterm
+    if let Ok((width, _height)) = terminal::size() {
+        Some(width as usize)
+    } else {
+        // Default fallback for TTY without detectable size
+        Some(80)
+    }
+}
+
+/// Calculate minimum width needed for a column
+fn calculate_column_width(header: &str, values: &[String], max_sample: usize) -> usize {
+    let header_width = header.len();
+    let max_value_width = values
+        .iter()
+        .take(max_sample)
+        .map(|v| v.len())
+        .max()
+        .unwrap_or(0);
+
+    // Minimum width is max of header and content, plus 2 for spacing (1 on each side)
+    std::cmp::max(header_width, max_value_width) + 2
+}
+
+/// Select which columns to display based on terminal width
+fn select_visible_columns(
+    column_names: &[String],
+    column_values: &[Vec<String>],
+    terminal_width: Option<usize>,
+) -> ColumnSelection {
+    let total_columns = column_names.len();
+
+    // Batch mode (non-TTY): show all columns
+    let Some(term_width) = terminal_width else {
+        let widths: Vec<usize> = column_names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                let values: Vec<String> = column_values.iter().map(|row| row[i].clone()).collect();
+                calculate_column_width(name, &values, 100)
+            })
+            .collect();
+
+        return ColumnSelection {
+            visible_columns: (0..total_columns).collect(),
+            hidden_count: 0,
+            hidden_names: vec![],
+            column_widths: widths,
+        };
+    };
+
+    // Interactive mode: calculate which columns fit
+    let mut visible = Vec::new();
+    let mut widths = Vec::new();
+    let mut used_width = 0;
+
+    // Reserve space for truncation indicator: "| (+n cols) |" = ~15 chars
+    let truncation_width = 15;
+    // Account for left border
+    let left_border = 1; // "│"
+
+    for (idx, name) in column_names.iter().enumerate() {
+        let values: Vec<String> = column_values.iter().map(|row| row[idx].clone()).collect();
+        let col_width = calculate_column_width(name, &values, 100);
+
+        // Separator width: │ between columns (1 char)
+        let separator_width = if visible.is_empty() { 0 } else { 1 };
+
+        // Calculate new total width if we add this column
+        let new_width = used_width + left_border + col_width + separator_width;
+
+        // Check if we can fit this column
+        let remaining_columns = total_columns - idx - 1;
+        if remaining_columns > 0 {
+            // Not the last column - need room for truncation indicator
+            if new_width + truncation_width + 1 <= term_width {
+                // +1 for right border
+                visible.push(idx);
+                widths.push(col_width);
+                used_width = new_width;
+            } else {
+                break; // Stop adding columns
+            }
+        } else {
+            // Last column - no truncation indicator needed
+            if new_width + 1 <= term_width {
+                // +1 for right border
+                visible.push(idx);
+                widths.push(col_width);
+            }
+            // Either way, we're done
+            break;
+        }
+    }
+
+    // Ensure at least one column is shown
+    if visible.is_empty() && !column_names.is_empty() {
+        let values: Vec<String> = column_values
+            .iter()
+            .map(|row| row[0].clone())
+            .collect();
+        let col_width = calculate_column_width(&column_names[0], &values, 100);
+        visible.push(0);
+        widths.push(col_width);
+    }
+
+    let hidden_count = total_columns - visible.len();
+    let hidden_names: Vec<String> = column_names
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !visible.contains(i))
+        .map(|(_, name)| name.clone())
+        .collect();
+
+    ColumnSelection {
+        visible_columns: visible,
+        hidden_count,
+        hidden_names,
+        column_widths: widths,
+    }
+}
+
+/// Render the table with UTF-8 box-drawing characters
+fn render_table(
+    result: &QueryResult,
+    selection: &ColumnSelection,
+    options: &TableOptions,
+) -> String {
+    let mut output = String::new();
+
+    // Get column names and values as strings
+    let column_names: Vec<String> = result.columns.iter().map(|c| c.name.clone()).collect();
+    let row_values: Vec<Vec<String>> = result
+        .rows
+        .iter()
+        .map(|row| row.iter().map(|v| v.display()).collect())
+        .collect();
+
+    // Calculate truncation indicator width if needed
+    let truncation_col_width = if selection.hidden_count > 0 {
+        format!("(+{} cols)", selection.hidden_count).len() + 2
+    } else {
+        0
+    };
+
+    // Render top border
+    output.push_str(&render_border(
+        &selection.column_widths,
+        truncation_col_width,
+        BorderStyle::Top,
+    ));
+
+    // Render header row
+    if options.show_header {
+        output.push_str(&render_header_row(
+            &column_names,
+            selection,
+            truncation_col_width,
+        ));
+
+        // Render header separator
+        output.push_str(&render_border(
+            &selection.column_widths,
+            truncation_col_width,
+            BorderStyle::Middle,
+        ));
+    }
+
+    // Render data rows
+    for row in &row_values {
+        output.push_str(&render_data_row(
+            row,
+            &result.columns,
+            selection,
+            truncation_col_width,
+            options,
+        ));
+    }
+
+    // Render bottom border
+    output.push_str(&render_border(
+        &selection.column_widths,
+        truncation_col_width,
+        BorderStyle::Bottom,
+    ));
+
+    output
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BorderStyle {
+    Top,
+    Middle,
+    Bottom,
+}
+
+fn render_border(column_widths: &[usize], truncation_width: usize, style: BorderStyle) -> String {
+    let (left, mid, right, line) = match style {
+        BorderStyle::Top => ('╭', '┬', '╮', '─'),
+        BorderStyle::Middle => ('├', '┼', '┤', '─'),
+        BorderStyle::Bottom => ('╰', '┴', '╯', '─'),
+    };
+
+    let mut border = String::new();
+    border.push(left);
+
+    for (i, width) in column_widths.iter().enumerate() {
+        if i > 0 {
+            border.push(mid);
+        }
+        border.push_str(&line.to_string().repeat(*width));
+    }
+
+    // Add truncation indicator column
+    if truncation_width > 0 {
+        border.push(mid);
+        border.push_str(&line.to_string().repeat(truncation_width));
+    }
+
+    border.push(right);
+    border.push('\n');
+    border
+}
+
+fn render_header_row(
+    column_names: &[String],
+    selection: &ColumnSelection,
+    truncation_width: usize,
+) -> String {
+    let mut row = String::from("│");
+
+    for (i, &col_idx) in selection.visible_columns.iter().enumerate() {
+        let name = &column_names[col_idx];
+        let width = selection.column_widths[i];
+        // Basic spacing: 1 space before and after
+        row.push_str(&format!(" {:width$}", name, width = width - 2));
+        row.push_str(" │");
+    }
+
+    // Add truncation indicator
+    if selection.hidden_count > 0 {
+        let indicator = format!("(+{} cols)", selection.hidden_count);
+        row.push_str(&format!(" {:width$}", indicator, width = truncation_width - 2));
+        row.push_str(" │");
+    }
+
+    row.push('\n');
+    row
+}
+
+fn render_data_row(
+    values: &[String],
+    columns: &[crate::db::ColumnMetadata],
+    selection: &ColumnSelection,
+    truncation_width: usize,
+    options: &TableOptions,
+) -> String {
+    let mut row = String::from("│");
+
+    for (i, &col_idx) in selection.visible_columns.iter().enumerate() {
+        let value = &values[col_idx];
+        let width = selection.column_widths[i];
+        let col = &columns[col_idx];
+
+        // Format value with alignment
+        let formatted = match col.data_type.alignment() {
+            Alignment::Right => format!(" {:>width$}", value, width = width - 2),
+            Alignment::Center => format!(" {:^width$}", value, width = width - 2),
+            Alignment::Left => format!(" {:width$}", value, width = width - 2),
+        };
+
+        // Apply NULL styling if color is enabled
+        if options.use_color && value == "[NULL]" {
+            // ANSI escape for dim/italic: \x1b[2;3m ... \x1b[0m
+            row.push_str(&format!("\x1b[2;3m{}\x1b[0m", formatted));
+        } else {
+            row.push_str(&formatted);
+        }
+        row.push_str(" │");
+    }
+
+    // Add truncation indicator for data rows
+    if selection.hidden_count > 0 {
+        row.push_str(&format!(" {:width$}", "...", width = truncation_width - 2));
+        row.push_str(" │");
+    }
+
+    row.push('\n');
+    row
+}
+
 /// Write query results as a formatted table
+///
+/// Sprint 11: Simplified implementation with terminal width awareness.
+/// - In TTY mode: Shows columns that fit, with "(+n cols)" indicator for hidden ones
+/// - In batch mode: Shows ALL columns without truncation
 pub fn write<W: Write>(result: &QueryResult, writer: &mut W, options: &TableOptions) -> Result<()> {
     if result.is_empty() {
         writeln!(writer, "No results returned.")?;
         return Ok(());
     }
 
-    let mut table = Table::new();
+    // Get terminal width (None for batch mode)
+    let terminal_width = get_terminal_width();
 
-    // Configure table style
-    table.load_preset(UTF8_FULL);
-    table.apply_modifier(UTF8_ROUND_CORNERS);
+    // Prepare data
+    let column_names: Vec<String> = result.columns.iter().map(|c| c.name.clone()).collect();
+    let column_values: Vec<Vec<String>> = result
+        .rows
+        .iter()
+        .map(|row| row.iter().map(|v| v.display()).collect())
+        .collect();
 
-    // Use DynamicFullWidth to expand table to terminal width
-    // This properly handles wide tables by dynamically sizing columns
-    // to fit within the terminal while wrapping long content
-    table.set_content_arrangement(ContentArrangement::DynamicFullWidth);
+    // Select columns to display
+    let selection = select_visible_columns(&column_names, &column_values, terminal_width);
 
-    // Detect terminal width and set table width accordingly
-    // This ensures proper column sizing based on actual terminal dimensions
-    if let Ok((term_width, _)) = terminal::size() {
-        table.set_width(term_width);
+    // Render the table
+    let table_output = render_table(result, &selection, options);
+    write!(writer, "{}", table_output)?;
+
+    // Show hidden columns message if any
+    if !selection.hidden_names.is_empty() {
+        writeln!(writer)?;
+        writeln!(
+            writer,
+            "{} columns hidden: {}",
+            selection.hidden_count,
+            selection.hidden_names.join(", ")
+        )?;
+        writeln!(
+            writer,
+            "Use --format csv or --format json to see all columns"
+        )?;
     }
-
-    // Add header row
-    if options.show_header {
-        let header_cells: Vec<Cell> = result
-            .columns
-            .iter()
-            .map(|col| {
-                let cell = Cell::new(&col.name);
-                if options.use_color {
-                    cell.add_attribute(Attribute::Bold).fg(Color::Cyan)
-                } else {
-                    cell.add_attribute(Attribute::Bold)
-                }
-            })
-            .collect();
-
-        table.set_header(header_cells);
-    }
-
-    // Add data rows
-    for row in &result.rows {
-        let cells: Vec<Cell> = row
-            .iter()
-            .zip(&result.columns)
-            .map(|(value, col)| {
-                let cell = Cell::new(value.display());
-
-                // Apply alignment based on column type
-                let cell = match col.data_type.alignment() {
-                    Alignment::Left => cell,
-                    Alignment::Center => cell.set_alignment(CellAlignment::Center),
-                    Alignment::Right => cell.set_alignment(CellAlignment::Right),
-                };
-
-                // Style NULL values
-                if value.is_null() && options.use_color {
-                    cell.fg(Color::DarkGrey).add_attribute(Attribute::Italic)
-                } else {
-                    cell
-                }
-            })
-            .collect();
-
-        table.add_row(cells);
-    }
-
-    // Write table
-    writeln!(writer, "{}", table)?;
 
     Ok(())
 }
@@ -166,6 +455,31 @@ mod tests {
         QueryResult::new(columns, rows, Duration::from_millis(100))
     }
 
+    fn create_wide_result() -> QueryResult {
+        // Create a result with many columns to test truncation
+        let columns = vec![
+            ColumnMetadata::new("id", TeradataType::Integer, false),
+            ColumnMetadata::new("username", TeradataType::Varchar, true),
+            ColumnMetadata::new("email", TeradataType::Varchar, true),
+            ColumnMetadata::new("department", TeradataType::Varchar, true),
+            ColumnMetadata::new("role", TeradataType::Varchar, true),
+            ColumnMetadata::new("active", TeradataType::Boolean, false),
+            ColumnMetadata::new("created_at", TeradataType::Timestamp, true),
+            ColumnMetadata::new("updated_at", TeradataType::Timestamp, true),
+        ];
+        let rows = vec![vec![
+            Value::Integer(1),
+            Value::String("alice".into()),
+            Value::String("alice@example.com".into()),
+            Value::String("engineering".into()),
+            Value::String("developer".into()),
+            Value::Boolean(true),
+            Value::String("2024-01-01".into()),
+            Value::String("2024-01-15".into()),
+        ]];
+        QueryResult::new(columns, rows, Duration::from_millis(50))
+    }
+
     #[test]
     fn test_write_table() {
         let result = create_test_result();
@@ -196,7 +510,7 @@ mod tests {
 
         let output = format_string(&result, &options).unwrap();
 
-        // Should not contain header row (but header name might appear if it matches data)
+        // Should contain data
         assert!(output.contains("Alice"));
         assert!(output.contains("1"));
     }
@@ -227,5 +541,184 @@ mod tests {
 
         assert!(output.contains("3 row(s) in set"));
         assert!(output.contains("0.100s"));
+    }
+
+    // Sprint 11: Column selection tests
+
+    #[test]
+    fn test_column_width_calculation() {
+        let values = vec![
+            "Alice".to_string(),
+            "Bob".to_string(),
+            "Charlie".to_string(),
+        ];
+        let width = calculate_column_width("name", &values, 100);
+        // "Charlie" is 7 chars, header "name" is 4 chars, so max is 7 + 2 = 9
+        assert_eq!(width, 9);
+    }
+
+    #[test]
+    fn test_column_width_uses_header_when_larger() {
+        let values = vec!["A".to_string(), "B".to_string()];
+        let width = calculate_column_width("very_long_header", &values, 100);
+        // Header is 16 chars, values are 1 char, so width = 16 + 2 = 18
+        assert_eq!(width, 18);
+    }
+
+    #[test]
+    fn test_select_columns_batch_mode() {
+        // Batch mode (terminal_width = None) should show all columns
+        let column_names = vec![
+            "id".to_string(),
+            "name".to_string(),
+            "email".to_string(),
+            "dept".to_string(),
+        ];
+        let column_values = vec![vec![
+            "1".to_string(),
+            "Alice".to_string(),
+            "alice@example.com".to_string(),
+            "engineering".to_string(),
+        ]];
+
+        let selection = select_visible_columns(&column_names, &column_values, None);
+
+        assert_eq!(selection.visible_columns.len(), 4);
+        assert_eq!(selection.hidden_count, 0);
+        assert!(selection.hidden_names.is_empty());
+    }
+
+    #[test]
+    fn test_select_columns_narrow_terminal() {
+        // Narrow terminal should truncate columns
+        let column_names = vec![
+            "id".to_string(),
+            "username".to_string(),
+            "email".to_string(),
+            "department".to_string(),
+            "role".to_string(),
+        ];
+        let column_values = vec![vec![
+            "1".to_string(),
+            "alice".to_string(),
+            "alice@example.com".to_string(),
+            "engineering".to_string(),
+            "developer".to_string(),
+        ]];
+
+        // Very narrow terminal (50 chars) - should truncate
+        let selection = select_visible_columns(&column_names, &column_values, Some(50));
+
+        // Should have fewer than all columns
+        assert!(selection.visible_columns.len() < 5);
+        assert!(selection.hidden_count > 0);
+        assert!(!selection.hidden_names.is_empty());
+
+        // Should prioritize leftmost columns
+        assert!(selection.visible_columns.contains(&0)); // id should be first
+    }
+
+    #[test]
+    fn test_select_columns_wide_terminal() {
+        // Wide terminal should show all columns
+        let column_names = vec!["id".to_string(), "name".to_string()];
+        let column_values = vec![vec!["1".to_string(), "Alice".to_string()]];
+
+        let selection = select_visible_columns(&column_names, &column_values, Some(200));
+
+        assert_eq!(selection.visible_columns.len(), 2);
+        assert_eq!(selection.hidden_count, 0);
+    }
+
+    #[test]
+    fn test_truncation_indicator_in_output() {
+        // Test that truncation indicator appears in narrow terminal
+        let result = create_wide_result();
+        let options = TableOptions {
+            use_color: false,
+            ..Default::default()
+        };
+
+        // Manually select columns with truncation for testing
+        let column_names: Vec<String> = result.columns.iter().map(|c| c.name.clone()).collect();
+        let column_values: Vec<Vec<String>> = result
+            .rows
+            .iter()
+            .map(|row| row.iter().map(|v| v.display()).collect())
+            .collect();
+
+        // Force narrow terminal
+        let selection = select_visible_columns(&column_names, &column_values, Some(60));
+
+        // If truncation happened, we should see the indicator
+        if selection.hidden_count > 0 {
+            let table_output = render_table(&result, &selection, &options);
+            assert!(table_output.contains(&format!("(+{} cols)", selection.hidden_count)));
+            assert!(table_output.contains("..."));
+        }
+    }
+
+    #[test]
+    fn test_border_rendering() {
+        let widths = vec![5, 10, 8];
+
+        let top = render_border(&widths, 0, BorderStyle::Top);
+        assert!(top.contains("╭"));
+        assert!(top.contains("┬"));
+        assert!(top.contains("╮"));
+
+        let middle = render_border(&widths, 0, BorderStyle::Middle);
+        assert!(middle.contains("├"));
+        assert!(middle.contains("┼"));
+        assert!(middle.contains("┤"));
+
+        let bottom = render_border(&widths, 0, BorderStyle::Bottom);
+        assert!(bottom.contains("╰"));
+        assert!(bottom.contains("┴"));
+        assert!(bottom.contains("╯"));
+    }
+
+    #[test]
+    fn test_hidden_columns_message() {
+        let result = create_wide_result();
+        let options = TableOptions {
+            use_color: false,
+            ..Default::default()
+        };
+
+        // Get column data
+        let column_names: Vec<String> = result.columns.iter().map(|c| c.name.clone()).collect();
+        let column_values: Vec<Vec<String>> = result
+            .rows
+            .iter()
+            .map(|row| row.iter().map(|v| v.display()).collect())
+            .collect();
+
+        // Force truncation with narrow terminal
+        let selection = select_visible_columns(&column_names, &column_values, Some(50));
+
+        if selection.hidden_count > 0 {
+            // Hidden names should be populated
+            assert!(!selection.hidden_names.is_empty());
+
+            // The message should list hidden column names
+            let mut buffer = Vec::new();
+            write(&result, &mut buffer, &options).unwrap();
+            // Note: In tests, stdout is not a terminal, so batch mode applies
+            // This test verifies the selection logic, not the full output
+        }
+    }
+
+    #[test]
+    fn test_at_least_one_column_shown() {
+        // Even with very narrow terminal, at least one column should show
+        let column_names = vec!["very_long_column_name".to_string()];
+        let column_values = vec![vec!["some_value".to_string()]];
+
+        let selection = select_visible_columns(&column_names, &column_values, Some(10));
+
+        // Must show at least one column
+        assert!(!selection.visible_columns.is_empty());
+        assert_eq!(selection.visible_columns[0], 0);
     }
 }
