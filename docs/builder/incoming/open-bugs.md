@@ -1,14 +1,20 @@
 # Current bug and urgent issues
 
-Created on 2026-01-18 at 17:00
+Created on 2026-01-18 at 20:15
 
-## Tab Completion doesn't work properly
+## Tab Completion STTILL DOESN'T WORK PROPERLY
 
 Completion doesn make sense AGAIN! See example: ![alt text](completion.png)
+![alt text](image.png)
 
-## Table display is broken
-Broken AGAIN with the padding!!! Please stop the padding for now and pospone it for much later as it just breaks everthing. When you will be ready for padding, you will need to do some extensive research in how to do it right and test it very carefully.
-Screenshot: docs/builder/incoming/table display-bug.png
+eg. tab after
+  `select * from ` gives keywords when it should be databasenames, selecting a keyword inserts it at the beginning of the
+  current line instead of where my cursor ar at, etc... These were right a few sprint ago!
 
-This padding story isn't so important after all... I think that the key thing, for now, will be to recognize that the terminal has a specific width and that considering that width only a certain number of columns should be displayed for readibility... You can use the last few characters to add a last column stating | (+n cols) | in the table header and | ... | for the  body.
-This will do for a long time. To implement an actual padding feature, we will need to do some extensive research in how to do it right and test it very carefully, most importantly you will need a test framework that will enable you to "see" like the user.... 
+## Export needs enhancements
+Two key enhancements that I need you to prioritize:
+- Export should allow to export to clipboard
+- Export should allow to export ALL the dataset to a file: if I do a `select * from mytable;` you will limit the dataset to 100 (or the default) rows, which makes sense since we don't want to display all in the terminal not to pointlessly export all from the database. However, if I want to export to a file, I want to export ALL the dataset, not just the first 100 rows... Of course, if it's my who specified a limit (eg. `select top 1000 * from mytable;`), then it will export the 1000 rows to the file (this currently works fine). So what you need to so is just to make sure we export the full dataset when no limit is specified by the user.
+
+## Branding
+It's very sad but the tool has no logo, no welcome message at all. We need a bare minimum of brand identity when we start the tool. This was discussed in your specifications and still there is zero progress on this aspect. We need it so it can be presented to our clients and users.

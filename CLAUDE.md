@@ -8,10 +8,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Claude Skills for this project
 Use the following skills when working with code in this repository:
-- teradata-rust: Guides writing idiomatic Rust code for Teradata database interactions using the teradatarustapi 
-- rust-coder: for writing idiomatic Rust code
-- rust-debugger: for debugging Rust code
-- cli-ux-       designer: Skills to design CLI applications
+
+### Development Skills
+- **teradata-rust**: Guides writing idiomatic Rust code for Teradata database interactions using the teradatarustapi
+- **rust-coder**: Guides writing idiomatic, efficient, well-structured Rust code
+- **rust-debugger**: Diagnoses and fixes Rust compile errors, borrow-checker issues, runtime panics, and logic bugs
+- **cli-designer**: Skills to design CLI applications following industry best practices
+
+### Sprint Management Skills
+- **sprint-coordinator**: Coordinates sprint phases and manages the sprint-driven development workflow (use when starting a new sprint)
+- **sprint-reviewer**: Coordinates comprehensive sprint retrospectives with specialized agents, producing consolidated review documents
+- **collect-metrics**: Collects token usage metrics from sprint subagent transcripts for framework optimization
+- **optimize-agents**: Analyzes historical sprint metrics to identify framework optimization opportunities
+
+### Framework Development Skills
+- **skill-builder**: Guides the creation of effective Claude skills following the Agent Skills Standard
+- **subagent-builder**: Creates specialized Claude subagents through interactive interviews and configuration guidance
 
 ## Development methodology
 
@@ -60,9 +72,30 @@ The project follows a structured sprint-driven approach coordinated by the **mai
    ├─→ /collect-metrics: Extract token usage data (2-3 min)
    └─→ Main agent: Update docs/user/roadmap.md
 
-6. Framework Optimization (Periodic - Every 3-4 Sprints)
-   └─→ /optimize-agents: Analyze metrics, generate improvement actions (30-60 min)
-       ↓ Produces concrete file edits to optimize agents/docs/tools
+6. Framework Optimization (End of every sprint)
+   ├─→ Step 1: Close sprint work
+   │   └─→ tq-project-manager: Commit & push feature code
+   │
+   ├─→ Step 2: Parallel optimization analysis (using Task tool)
+   │   ├─→ Task(optimization-analyzer): Analyze transcript-001.md for sprint N
+   │   ├─→ Task(optimization-analyzer): Analyze transcript-002.md for sprint N
+   │   ├─→ Task(optimization-analyzer): Analyze transcript-003.md for sprint N
+   │   └─→ ... (Variable number based on agent invocations in sprint)
+   │   Note: Each agent analyzes one transcript in isolated context
+   │
+   ├─→ Step 3: Consolidate proposals into backlog
+   │   └─→ Main agent: Review outputs, deduplicate, assign IDs (P###)
+   │       Add to docs/builder/optimization-backlog/pending/
+   │
+   ├─→ Step 4: Prioritize & implement optimizations
+   │   ├─→ Main agent: Calculate impact scores for all proposals
+   │   ├─→ Main agent: Select top 3-5 high-impact proposals
+   │   ├─→ Main agent: Compact conversation history
+   │   └─→ Main agent: Implement selected proposals
+   │       Move implemented proposals to optimization-backlog/implemented/
+   │
+   └─→ Step 5: Commit framework improvements
+       └─→ Main agent: Commit & push with descriptive message
 ```
 
 #### Key Principles
@@ -96,6 +129,13 @@ The project follows a structured sprint-driven approach coordinated by the **mai
 - Performs: Git commit and push to GitHub after validation approval
 - Launch when: Validating sprint completion, assessing technical debt, verifying quality standards
 
+**optimization-analyzer** (Opus)
+- Owns: Framework optimization analysis, waste pattern identification
+- Creates: Structured optimization proposals with impact metrics
+- Uses: `/optimize-agents` skill with waste patterns catalog
+- Launch when: Phase 6 (Framework Optimization) - one instance per transcript, all in parallel
+- Note: Multiple instances launched simultaneously, each analyzing one transcript in isolation
+
 #### Sprint Planning Documents
 
 Each sprint produces two key documents:
@@ -106,40 +146,61 @@ These documents provide shared context for all agents and track sprint progress.
 
 #### Self-Improvement System
 
-The framework continuously optimizes itself through metrics-driven analysis:
+The framework continuously optimizes itself through metrics-driven analysis and a structured optimization backlog:
 
-**Step 1: Collect Metrics (Every Sprint)**
-- Use `/collect-metrics <sprint-num>` during Phase 5 (Sprint Closure)
+**Every Sprint - Collect Metrics (Phase 5)**
+- Use `/collect-metrics <sprint-num>` during Sprint Closure
 - Extracts token usage from subagent transcripts
 - Generates `sprint-N-metrics.md` with factual data
-- Adds metrics section to sprint review
 - Duration: 2-3 minutes
 
-**Step 2: Analyze & Optimize (Every 3-4 Sprints)**
-- Use `/optimize-agents` after collecting metrics from multiple sprints
-- Analyzes patterns across sprints to identify waste
-- Applies decision tree analysis (see `docs/builder/token-optimization-decision-tree.md`)
-- Generates concrete optimization actions (specific file edits)
-- Duration: 30-60 minutes (Opus-powered deep analysis)
+**Every Sprint - Analyze & Optimize (Phase 6)**
+1. **Parallel Analysis:** Launch `optimization-analyzer` agents for each transcript
+   - Each agent identifies waste patterns using `/optimize-agents` skill
+   - Generates structured proposals with metrics (tokens saved, frequency, confidence)
+   - Returns proposals to main agent
+
+2. **Consolidation:** Main agent processes all proposals
+   - Deduplicates similar findings across transcripts
+   - Assigns proposal IDs (P001, P002, etc.)
+   - Adds to `docs/builder/optimization-backlog/pending/`
+
+3. **Prioritization:** Calculate impact scores
+   ```
+   Impact Score = (Tokens Saved × Frequency Weight × Confidence Weight) / Implementation Effort
+   ```
+   - Select top 3-5 proposals for immediate implementation
+   - Prioritize: High impact OR (high confidence + small effort)
+
+4. **Implementation:** Main agent implements selected proposals
+   - Makes concrete file changes (agent prompts, documentation, workflow)
+   - Moves proposals from `pending/` to `implemented/`
+   - Commits framework improvements
+
+5. **Validation:** Next sprint verifies impact
+   - Metrics should show expected token reductions
+   - Quality maintained or improved
+   - Document results in proposal files
 
 **What Gets Optimized:**
-- **Agent prompts:** More efficient instructions, better context
-- **Documentation:** Fill gaps that cause agent confusion
-- **Workflow:** Improve parallelism, reduce rework
-- **Tools:** Automate repetitive agent tasks
-- **Quality processes:** Prevent Sprint 8-style quality failures
+- **Agent prompts:** Eliminate redundant reads, add missing context
+- **Documentation:** Fill gaps causing exploration/questions
+- **Workflow:** Improve parallelism, reduce rework loops
+- **Quality processes:** Prevent recurring bugs/failures
 
-**Key Files:**
-- `.claude/scripts/extract-sprint-metrics.sh` - Bash script for metrics extraction
-- `docs/builder/token-optimization-decision-tree.md` - Systematic analysis framework
-- `.claude/skills/collect-metrics/SKILL.md` - Simple data collection
-- `.claude/skills/optimize-agents/SKILL.md` - Deep analysis and improvements
+**Key Components:**
+- `.claude/subagents/optimization-analyzer.md` - Analyzes single transcript for waste
+- `.claude/skills/optimize-agents/SKILL.md` - Analysis framework and workflow
+- `.claude/skills/optimize-agents/references/waste-patterns.md` - Pattern catalog
+- `docs/builder/optimization-backlog/` - Structured backlog with proposals
+- `.claude/skills/collect-metrics/SKILL.md` - Metrics extraction
 
 **Expected Outcomes:**
 - 30-50% token reduction after 3-4 optimization cycles
 - Zero quality failures through improved processes
 - Faster sprint execution via better parallelism
 - Continuously improving agent efficiency
+- Data-driven, measurable improvements
 
 ### Master specification documents
 

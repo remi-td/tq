@@ -38,12 +38,12 @@ Examines metrics to identify:
 - **Quality failures:** Rework due to bugs, missed requirements
 - **Missing tools:** Tasks agents improvise that should be automated
 
-### 2. Apply Decision Tree Analysis
+### 2. Apply Pattern Analysis
 
-Uses `docs/builder/token-optimization-decision-tree.md` to systematically:
-- Categorize patterns
+Uses bundled `references/waste-patterns.md` to systematically:
+- Match transcript operations to known waste patterns
 - Identify root causes
-- Map to known solutions
+- Map to documented solutions
 - Estimate impact of fixes
 
 ### 3. Generate Concrete Optimization Actions
@@ -69,17 +69,19 @@ ls -t docs/builder/sprints/sprint-*-metrics.md | head -6
 
 Read the most recent 3-6 sprint metrics files to establish patterns.
 
-### Step 2: Load Decision Tree
+### Step 2: Load Waste Patterns Catalog
 
-```bash
-cat docs/builder/token-optimization-decision-tree.md
-```
+The bundled `references/waste-patterns.md` is automatically available when this skill loads. It contains:
+- 12 common waste patterns with symptoms and solutions
+- Detection techniques for each pattern
+- Quantification methods
+- Prioritization framework
 
-This is your analytical framework.
+Reference this catalog throughout your analysis to match observed behaviors to known patterns.
 
 ### Step 3: Identify Patterns Across Sprints
 
-For each pattern in the decision tree, check if it appears in multiple sprints:
+For each pattern in the waste patterns catalog, check if it appears in multiple sprints:
 
 #### Pattern: High Token Agent
 
@@ -158,7 +160,7 @@ jq -r 'select(.message.content) | .message.content[] | select(.type == "tool_use
 
 ### Step 4: Map Patterns to Root Causes
 
-For each pattern identified, use the decision tree to determine:
+For each pattern identified, use the waste patterns catalog to determine:
 
 1. **Why is this happening?**
    - Missing documentation?
@@ -323,7 +325,7 @@ Generate a concrete action list:
 **Sprint 11:**
 - [ ] Remaining P2 actions
 - [ ] Quarterly review: Did optimizations work?
-- [ ] Refine decision tree based on results
+- [ ] Refine waste patterns catalog based on results
 ```
 
 ### Step 8: Present Findings to User
@@ -391,7 +393,7 @@ Would you like me to:
 Why Opus?
 - Requires complex pattern recognition across large datasets
 - Needs to generate detailed, accurate documentation content
-- Must apply decision tree logic systematically
+- Must apply waste patterns catalog logic systematically
 - Outputs are high-leverage (impact entire framework)
 
 ### Context: Fork
@@ -407,7 +409,7 @@ This skill generates **recommendations**, not automatic changes. User reviews an
 After each round of optimizations:
 1. Measure impact in next sprint metrics
 2. Validate expected reductions achieved
-3. Refine decision tree with new learnings
+3. Refine waste patterns catalog with new learnings
 4. Remove ineffective recommendations
 
 ## Expected Outcomes
