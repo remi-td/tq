@@ -57,7 +57,12 @@ The project follows a structured sprint-driven approach coordinated by the **mai
 5. Sprint Closure (Main Agent Coordinates)
    ├─→ tq-project-manager: Validate completion
    ├─→ Main agent: Sprint review + specifications update
+   ├─→ /collect-metrics: Extract token usage data (2-3 min)
    └─→ Main agent: Update docs/user/roadmap.md
+
+6. Framework Optimization (Periodic - Every 3-4 Sprints)
+   └─→ /optimize-agents: Analyze metrics, generate improvement actions (30-60 min)
+       ↓ Produces concrete file edits to optimize agents/docs/tools
 ```
 
 #### Key Principles
@@ -97,6 +102,43 @@ Each sprint produces two key documents:
 - **`docs/builder/sprints/sprint-N-review.md`**: Retrospective, metrics, lessons learned (created at sprint end)
 
 These documents provide shared context for all agents and track sprint progress.
+
+#### Self-Improvement System
+
+The framework continuously optimizes itself through metrics-driven analysis:
+
+**Step 1: Collect Metrics (Every Sprint)**
+- Use `/collect-metrics <sprint-num>` during Phase 5 (Sprint Closure)
+- Extracts token usage from subagent transcripts
+- Generates `sprint-N-metrics.md` with factual data
+- Adds metrics section to sprint review
+- Duration: 2-3 minutes
+
+**Step 2: Analyze & Optimize (Every 3-4 Sprints)**
+- Use `/optimize-agents` after collecting metrics from multiple sprints
+- Analyzes patterns across sprints to identify waste
+- Applies decision tree analysis (see `docs/builder/token-optimization-decision-tree.md`)
+- Generates concrete optimization actions (specific file edits)
+- Duration: 30-60 minutes (Opus-powered deep analysis)
+
+**What Gets Optimized:**
+- **Agent prompts:** More efficient instructions, better context
+- **Documentation:** Fill gaps that cause agent confusion
+- **Workflow:** Improve parallelism, reduce rework
+- **Tools:** Automate repetitive agent tasks
+- **Quality processes:** Prevent Sprint 8-style quality failures
+
+**Key Files:**
+- `.claude/scripts/extract-sprint-metrics.sh` - Bash script for metrics extraction
+- `docs/builder/token-optimization-decision-tree.md` - Systematic analysis framework
+- `.claude/skills/collect-metrics/SKILL.md` - Simple data collection
+- `.claude/skills/optimize-agents/SKILL.md` - Deep analysis and improvements
+
+**Expected Outcomes:**
+- 30-50% token reduction after 3-4 optimization cycles
+- Zero quality failures through improved processes
+- Faster sprint execution via better parallelism
+- Continuously improving agent efficiency
 
 ### Master specification documents
 

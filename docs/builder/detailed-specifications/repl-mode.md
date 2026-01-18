@@ -1,9 +1,9 @@
 # REPL Mode Specifications
 
-**Version:** 1.2.0
-**Last Updated:** 2026-01-19
+**Version:** 1.3.0
+**Last Updated:** 2026-01-18
 **Owner:** cli-ux-designer agent
-**Status:** Active Specification - Phase 4 (Sprint 7) in Development
+**Status:** Active Specification - Sprint 8 (Quality Recovery) in Progress
 
 ---
 
@@ -547,11 +547,13 @@ tq> SEL<TAB>
 - Second Tab cycles through alternatives
 - Keywords are case-insensitive internally but match user's casing
 
-### 5.6.2 Table Name Completion (Sprint 7)
+### 5.6.2 Table Name Completion (Sprint 7 - Sprint 8 Fixes)
 
-**Purpose**: Enable users to discover and navigate database tables through tab completion, reducing typos and improving query writing speed.
+**Purpose**: Enable users to discover and navigate database tables through tab completion, reducing typos and improving query writing speed. Properly handles Teradata's `database.table` qualified naming convention.
 
-**Priority**: P0 (Critical for Sprint 7)
+**Priority**: P0 (Critical for Sprint 7, Fixed in Sprint 8)
+
+**Sprint 8 Note:** Original Sprint 7 implementation didn't work with real Teradata databases. Sprint 8 redesigns completion to properly support Teradata's qualified naming and intelligent caching.
 
 **Trigger Contexts**: Press Tab after typing partial table name following these SQL keywords:
 - `FROM` - Main table reference (e.g., `SELECT * FROM <TAB>`)
@@ -561,9 +563,16 @@ tq> SEL<TAB>
 
 **Data Source**:
 - Query Teradata system catalog: `DBC.TablesV`
-- Filter by current database (from connection context)
+- Load database names + current database tables initially (lazy loading)
+- Cache per-database tables on-demand
 - Include both tables and views
-- Cache results for session duration (invalidate on `/logon`)
+
+**Teradata-Specific Behavior**:
+- **Qualified Names**: Teradata uses `database.table` format (not single-level like MySQL)
+- **Unqualified Names**: Resolve to current database (from `SELECT DATABASE`)
+- **Best Practice**: Encourage fully qualified names by showing databases first
+- **Lazy Loading**: Only load metadata for databases user actually explores
+- **Intelligent Caching**: Cache per-database, not global (performance for large systems)
 
 **Behavior Patterns**:
 
@@ -603,10 +612,48 @@ tq> SELECT * FROM Emp<TAB> → employees
 tq> SELECT * FROM emp<TAB> → employees
 ```
 
+**Teradata Qualified Names** (Sprint 8):
+
+**After FROM with no prefix - Show databases + current DB tables**:
+```sql
+tq> SELECT * FROM <TAB>
+
+Databases:
+    production    staging    development    analytics
+
+Tables in current database (production):
+    customers    employees    orders    products    [50 more...]
+```
+
+**After database name + dot - Show tables in that database**:
+```sql
+tq> SELECT * FROM production.<TAB>
+Tables in 'production':
+    customers    employees    orders    products    invoices    [45 more...]
+```
+
+**Partial database name**:
+```sql
+tq> SELECT * FROM prod<TAB>
+    production
+
+tq> SELECT * FROM production.<TAB>
+[Shows tables in production]
+```
+
+**Unqualified table in current database**:
+```sql
+tq[production]> SELECT * FROM emp<TAB>
+    employees    employee_archive    emp_summary
+```
+
 **After JOIN keyword**:
 ```sql
 tq> SELECT * FROM employees e
     INNER JOIN <TAB>
+Databases:
+    production    staging    development
+Tables in current database (production):
     departments    projects    users    teams
 
 tq> SELECT e.*, d.name
@@ -621,30 +668,60 @@ tq> UPDATE emp<TAB>
 tq> UPDATE employees SET salary = 50000
 ```
 
-**Loading States & Feedback**:
+**Loading States & Feedback** (Sprint 8 Improvements):
+
+**Design Principle:** Always show user what's happening during metadata loading. Never leave user wondering if completion is working.
 
 **First Tab press (metadata not cached)**:
 ```sql
 tq> SELECT * FROM <TAB>
-Loading tables... (500ms max timeout)
+Loading tables... ⠋
 
-[After loading completes:]
+[After loading completes (< 500ms):]
 tq> SELECT * FROM <TAB>
+Databases:
+    production    staging    development
+Tables in current database (production):
     customers    employees    orders    products    [50 more...]
 ```
 
-**Cached metadata (instant response)**:
+**Cached metadata (instant response < 50ms)**:
 ```sql
 tq> SELECT * FROM <TAB>
+[Instant, no loading indicator]
+Databases:
+    production    staging    development
+Tables in current database (production):
     customers    employees    orders    products    [50 more...]
 ```
 
-**Slow database response**:
+**Slow database response (>500ms)**:
 ```sql
 tq> SELECT * FROM <TAB>
-Loading tables... (this may take a moment)
-[Spinner animation: ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏]
+Loading tables (this may take a moment)... ⠋
+[Spinner animation cycles: ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏]
+[Updates every 100ms]
+
+[After completion:]
+Loading tables (this may take a moment)... Done (1.2s)
+    customers    employees    orders    products    [50 more...]
 ```
+
+**Loading specific database tables**:
+```sql
+tq> SELECT * FROM staging.<TAB>
+Loading tables in 'staging'... ⠋
+
+[After completion:]
+Tables in 'staging':
+    test_data    imports    staging_employees
+```
+
+**Visual Feedback States:**
+1. **<200ms:** No indicator (feels instant)
+2. **200-500ms:** Simple "Loading..." with spinner
+3. **>500ms:** "Loading (this may take a moment)..." with spinner
+4. **>2s:** Show progress if available: "Loading... 1,234 tables found"
 
 **Error Handling**:
 
@@ -705,48 +782,126 @@ tq> SELECT * FROM <TAB>
     staging.test_data          staging.imports
 ```
 
+**Intelligent Caching Strategy** (Sprint 8):
+
+**Design Goal:** Minimize metadata queries for large Teradata systems (millions of tables, hundreds of databases) while providing fast completion.
+
+**Cache Structure:**
+```
+MetadataCache {
+    databases: Vec<String>,                    // All database names (~100)
+    current_database: String,                  // Active database
+    tables: HashMap<String, Vec<Table>>,       // Per-database table cache
+    columns: HashMap<String, Vec<Column>>,     // Per-table column cache
+}
+```
+
+**Lazy Loading Strategy:**
+1. **REPL Startup:** Don't load any metadata (instant startup)
+2. **First Tab After FROM:** Load:
+   - All database names (fast query: ~100 names)
+   - Tables in current database only
+3. **User Types `database.`:** Load tables for that database on-demand
+4. **Cache Typical Session:** User works with 2-3 databases, minimal memory
+
+**Cache Lifecycle:**
+- **Load:** On-demand when user requests completion
+- **Invalidate:** After successful DDL statements (CREATE/DROP/ALTER)
+- **Clear:** On `/logon` (new connection = new context)
+- **Size Limit:** Max 100 databases cached, LRU eviction if exceeded
+
+**DDL Detection for Cache Refresh:**
+
+After successful DDL execution, automatically invalidate relevant cache:
+
+```sql
+tq> CREATE TABLE new_table (id INT);
+Table created successfully.
+[Cache invalidated for current database]
+
+tq> SELECT * FROM new<TAB>
+[Re-fetches table list from DBC.TablesV]
+    new_table    new_orders    new_customers
+```
+
+**DDL Keywords to Watch:**
+- `CREATE TABLE` / `CREATE VIEW` → Invalidate current database table cache
+- `DROP TABLE` / `DROP VIEW` → Invalidate current database table cache
+- `ALTER TABLE` → Invalidate current database table cache (name may change)
+- `RENAME TABLE` → Invalidate current database table cache
+- `CREATE DATABASE` → Invalidate database list cache
+- `DROP DATABASE` → Invalidate database list cache
+
+**Cache Benefits:**
+- First completion: 200-500ms (metadata query)
+- Subsequent completions: <50ms (cache hit)
+- Memory usage: ~1MB per 1,000 tables (minimal)
+- Typical session: 2-3 databases cached, <5MB total
+
 **Performance Requirements**:
 
-- **Metadata query time**: <500ms on first Tab press
+- **Database list query**: <200ms (small list)
+- **Table list query (one database)**: <500ms on first Tab press
 - **Cached completion**: <50ms response time
 - **Timeout**: 500ms max wait for metadata query
-- **Cache size**: Store up to 10,000 table names
-- **Cache invalidation**: Clear on `/logon` or manual `/refresh` command
+- **Cache size**: Store up to 100 databases, 10,000 tables per database
+- **Cache invalidation**: On DDL success, on `/logon`, or manual `/refresh`
 
-**Implementation Notes**:
+**Implementation Notes** (Sprint 8):
 
 1. **Lazy Loading**: Don't query metadata on REPL startup - only on first Tab press in table context
 2. **Caching Strategy**:
-   - Cache table list per database session
+   - Cache per-database (not global)
    - Cache is session-scoped (cleared on `/logon`)
-   - Background refresh option: `/refresh tables` metacommand
+   - LRU eviction if >100 databases cached
+   - Background refresh option: `/refresh` metacommand
 3. **SQL Context Detection**:
    - Parse buffer to identify keywords: FROM, JOIN, UPDATE, INTO
+   - Detect `database.` pattern for qualified name completion
    - Use simple regex patterns (avoid full SQL parser)
    - Support common patterns, accept limitations for complex queries
-4. **Metadata Query**:
+4. **Metadata Queries**:
+
+   **Get all database names:**
    ```sql
-   SELECT TRIM(DatabaseName) || '.' || TRIM(TableName) AS full_name,
-          TRIM(TableName) AS table_name,
+   SELECT DISTINCT TRIM(DatabaseName) AS database_name
+   FROM DBC.TablesV
+   WHERE DatabaseName NOT IN ('DBC', 'SYSLIB', 'SYSBAR', 'SYSJDBC')
+   ORDER BY DatabaseName;
+   ```
+
+   **Get tables in specific database:**
+   ```sql
+   SELECT TRIM(TableName) AS table_name,
           TableKind
    FROM DBC.TablesV
-   WHERE DatabaseName = CURRENT_DATABASE
-      OR DatabaseName IN (/* user's accessible databases */)
+   WHERE DatabaseName = ?
    ORDER BY TableName;
    ```
 
-**Testing Scenarios**:
+   **Get current database:**
+   ```sql
+   SELECT DATABASE;
+   ```
 
-1. Tab after FROM with no prefix → Show all tables
-2. Tab after FROM with partial prefix → Show matching tables
-3. Tab in JOIN clause → Complete table names
-4. Tab in UPDATE statement → Complete table names
-5. Multiple Tab presses → Cycle through matches
-6. Schema-qualified names → Complete schema.table format
-7. Slow database → Show loading indicator, timeout gracefully
-8. Permission denied → Show warning, continue REPL operation
-9. Empty result set → Display helpful message
-10. Cache hit → Instant response (<50ms)
+**Testing Scenarios** (Sprint 8):
+
+1. Tab after FROM with no prefix → Show databases + current DB tables
+2. Tab after FROM with partial table prefix → Show matching tables in current DB
+3. Tab after FROM with database name → Complete database name
+4. Tab after `FROM database.` → Show tables in that database
+5. Tab in JOIN clause → Show databases + current DB tables
+6. Tab in UPDATE statement → Complete table names
+7. Multiple Tab presses → Cycle through matches
+8. Qualified names → Complete `database.table` format
+9. First tab press → Show loading indicator (<500ms)
+10. Slow database → Show "this may take a moment", timeout at 500ms
+11. Permission denied → Show warning with actionable suggestion
+12. Empty database → Display "No tables found" message
+13. Cache hit (2nd tab) → Instant response (<50ms)
+14. After DDL (CREATE TABLE) → Cache refreshes, new table appears
+15. After `/logon` → Cache cleared, new connection context
+16. Large database (1000+ tables) → Pagination or truncation with count
 
 ### 5.6.3 Column Name Completion (Sprint 7)
 
@@ -1008,25 +1163,444 @@ email  | b@test.com
 active | false
 ```
 
-### 5.7.2 Large Result Handling
+### 5.7.2 Large Result Handling & Result Paging
 
-**Wide Tables** (horizontal scrolling):
+**Version:** 2.0 (Sprint 8 Redesign)
+**Status:** Redesigned to fix critical UX issues
+
+**Overview:**
+
+Result paging uses a three-layer strategy to make any result set readable:
+1. **Column Windowing** - Limit visible columns to maintain readability
+2. **Cell Truncation** - Limit cell content length to prevent layout breaks
+3. **Row Paging** - Paginate vertically through long result sets
+
+**Critical Requirement:** Pager MUST be safe - 'q' key exits pager and returns to REPL, never exits the entire program.
+
+---
+
+#### Column Windowing (Layer 1)
+
+**Objective:** Display manageable subset of columns, navigate horizontally through remaining columns.
+
+**Column Window Size - Dynamic Calculation:**
 ```
-Use arrow keys: ← → to scroll, Q to quit pager
-[Columns 1-5 of 20] >>>
+1. Start with first column (leftmost)
+2. Calculate minimum usable width for column:
+   min_width = max(column_name.length + 2, 8)  // At least 8 chars
+   max_width = 40  // Never exceed 40 chars per column
+3. Add columns until total_width > (terminal_width - 10)
+   - Reserve 10 chars for borders and margins
+4. Show at least 3 columns, even if slightly exceeds terminal width
 ```
 
-**Long Results** (vertical paging):
+**Result:** Typically 4-6 readable columns visible at once (in 100-120 char terminal).
+
+**Column Navigation:**
+- `←` (Left Arrow): Shift window left by 1 column
+- `→` (Right Arrow): Shift window right by 1 column
+- `Ctrl-←`: Jump to first column group
+- `Ctrl-→`: Jump to last column group
+- `Home`: Jump to first column
+- `End`: Jump to last column
+
+**Column Position Indicator:**
 ```
-Rows 1-50 of 1,234 (4%)
-Space: next page | b: previous page | q: quit | /: search
+Columns 1-5 of 23 | Rows 1-20 of 1,234 (2%)
 ```
 
-**Pager Options**:
-- `less`-like navigation
-- Search with `/pattern`
-- Jump to line with `123G`
-- Follow mode for streaming results
+**Transition Behavior:**
+- Smooth scrolling: one column at a time
+- At edges: Arrow keys do nothing (no wrap-around)
+- Window size recalculates dynamically for new columns
+
+---
+
+#### Cell Truncation (Layer 2)
+
+**Objective:** Prevent long cell values from breaking table layout.
+
+**Truncation Rules:**
+
+**Maximum Cell Display Length:**
+- **Text cells (VARCHAR, CHAR):** 100 characters maximum
+- **Numeric cells:** No truncation (naturally bounded)
+- **Date/Time cells:** No truncation (fixed format)
+
+**Truncation Indicator:**
+- Append `…` (Unicode ellipsis U+2026) to truncated values
+- Example: `This is a very long description that goes on and on and on for hundreds of characters...`
+  → Displays as: `This is a very long description that goes on and on and on for hundreds of characters and so...`
+  (99 chars + ellipsis)
+
+**Column Width Calculation:**
+```
+1. Examine all values in column (first 100 rows for performance)
+2. Find max display length after truncation:
+   max_length = max(header_length, max(truncated_value_lengths))
+3. Cap at maximum column width:
+   column_width = min(max_length + 2, 40)  // +2 for padding, max 40
+```
+
+**Viewing Full Values:**
+
+**Current Solution (Sprint 8):** Use workarounds:
+- Query specific row: `SELECT long_column FROM table WHERE id = 123;`
+- Export results: `/export csv results.csv` to view full values in file
+
+**Future Enhancement (Sprint 9+):**
+- Press `v` (view) on cell to open expanded modal with full content
+- Scrollable popup showing complete cell value
+- Press Escape to return to table view
+
+---
+
+#### Vertical Row Paging (Layer 3)
+
+**Objective:** Navigate long result sets smoothly with clear position indicators.
+
+**Page Size - Dynamic:**
+```
+page_size = terminal_height - 5
+  - 1 row for header
+  - 2 rows for borders
+  - 1 row for status bar
+  - 1 row for margin
+```
+
+Example: 24-line terminal → 19 rows per page
+
+**Navigation Keys:**
+
+**Single Row Movement:**
+- `j` / `↓` (Down Arrow): Next row
+- `k` / `↑` (Up Arrow): Previous row
+
+**Page Movement:**
+- `Space` / `Page Down`: Next page (jump by page_size rows)
+- `b` / `Page Up`: Previous page (jump by page_size rows)
+
+**Jump Navigation:**
+- `g` / `Home`: Jump to first row
+- `G` / `End`: Jump to last row
+- `50G`: Jump to row 50 (vi-style, future enhancement)
+
+**Search (Future):**
+- `/pattern`: Search forward for pattern in visible columns
+- `n`: Next match
+- `N`: Previous match
+
+**Row Position Indicator:**
+```
+Rows 1-20 of 1,234 (2%)
+```
+
+Shows: current visible range, total rows, percentage through results
+
+**Edge Behavior:**
+- At first row: `k` or `↑` does nothing (no error)
+- At last row: `j` or `↓` does nothing (no error)
+- Empty results: Display "(No results)" with "Press q to exit pager"
+
+---
+
+#### Pager Exit Behavior (CRITICAL)
+
+**Primary Requirement:** 'q' MUST exit pager and return to REPL, never exit the entire program.
+
+**Exit Keys:**
+- `q` (lowercase): Exit pager, return to `tq>` prompt
+- `Escape`: Also exits pager
+- `Ctrl-C`: Cancel pager, return to prompt
+
+**Exit Program (From REPL Only, NOT from Pager):**
+- `Ctrl-D`: Exit tq program (when at empty prompt)
+- `/quit`: Exit tq program (metacommand)
+
+**Exit Flow Example:**
+```
+tq> SELECT * FROM employees;
+[Query executes, enters pager mode with results displayed]
+
+┌─────────────┬──────────────┬──────────────┐
+│ employee_id │ first_name   │ last_name    │
+├─────────────┼──────────────┼──────────────┤
+│ 1           │ Alice        │ Anderson     │
+│ 2           │ Bob          │ Brown        │
+└─────────────┴──────────────┴──────────────┘
+
+Rows 1-20 of 500 | q: exit pager
+
+[User presses 'q']
+
+tq> _
+[Back at REPL prompt, session fully preserved]
+```
+
+**Technical Implementation:**
+- Pager runs in controlled local event loop, NOT blocking mode like `minus::page_all()`
+- 'q' key breaks pager event loop and returns control to REPL
+- REPL state fully preserved: connection, history, settings
+- No process exit signals sent from pager
+
+**Mode Indicators:**
+
+**In Pager Mode:**
+- Status bar visible (only in pager)
+- Clear "exit pager" text in status bar
+- No `tq>` prompt visible
+
+**In REPL Mode:**
+- `tq>` or `tq[dbname]>` prompt visible
+- No status bar
+- Blinking cursor ready for input
+
+---
+
+#### Complete Status Bar Design
+
+**Layout (Two-Line Status Bar at Bottom):**
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│ Columns 1-5 of 23 | Rows 1-20 of 1,234 (2%) | Navigation: ←→ ↑↓ Space b  │
+│ g/G: first/last | q/Esc: exit pager                                        │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Elements:**
+- **Column position:** Shows current visible columns and total (e.g., "Columns 1-5 of 23")
+- **Row position:** Shows current visible rows, total, and percentage (e.g., "Rows 1-20 of 1,234 (2%)")
+- **Navigation hints:** Most common keys for quick reference
+- **Exit hint:** Clear "exit pager" wording to distinguish from "exit program"
+
+---
+
+#### Complete Paging Example: Wide Table
+
+**Scenario:** Table with 23 columns, 1,234 rows, 100-char terminal width
+
+**Initial View (Columns 1-5):**
+```
+┌──────────┬────────────┬───────────┬──────────────┬────────────┐
+│ emp_id   │ first_name │ last_name │ email        │ hire_date  │
+├──────────┼────────────┼───────────┼──────────────┼────────────┤
+│ 1        │ Alice      │ Anderson  │ alice@co.com │ 2020-01-15 │
+│ 2        │ Bob        │ Brown     │ bob@co.com   │ 2020-03-22 │
+│ 3        │ Charlie    │ Chen      │ charlie@c... │ 2020-07-01 │
+│ 4        │ Diana      │ Davis     │ diana@co.com │ 2021-01-10 │
+│ 5        │ Edward     │ Evans     │ edward@co... │ 2021-04-05 │
+│ ...      │ ...        │ ...       │ ...          │ ...        │
+│ 20       │ Tina       │ Turner    │ tina@co.com  │ 2024-12-15 │
+└──────────┴────────────┴───────────┴──────────────┴────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ Columns 1-5 of 23 | Rows 1-20 of 1,234 (2%) | →: more columns             │
+│ Space: next page | ↑↓: scroll rows | q: exit pager                         │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+**After Pressing → (Right Arrow) - Columns 3-7:**
+```
+┌────────────┬──────────────┬─────────────┬────────────┬──────────┐
+│ last_name  │ email        │ hire_date   │ salary     │ dept_id  │
+├────────────┼──────────────┼─────────────┼────────────┼──────────┤
+│ Anderson   │ alice@co.com │ 2020-01-15  │ 75000.00   │ 101      │
+│ Brown      │ bob@co.com   │ 2020-03-22  │ 68000.00   │ 102      │
+│ Chen       │ charlie@...  │ 2020-07-01  │ 82000.00   │ 101      │
+│ Davis      │ diana@co.com │ 2021-01-10  │ 71000.00   │ 103      │
+│ Evans      │ edward@co... │ 2021-04-05  │ 79000.00   │ 102      │
+│ ...        │ ...          │ ...         │ ...        │ ...      │
+│ Turner     │ tina@co.com  │ 2024-12-15  │ 65000.00   │ 104      │
+└────────────┴──────────────┴─────────────┴────────────┴──────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ Columns 3-7 of 23 | Rows 1-20 of 1,234 (2%) | ←: prev | →: next           │
+│ Space: next page | ↑↓: scroll rows | q: exit pager                         │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+**After Pressing Space (Next Page) - Rows 21-40:**
+```
+┌────────────┬──────────────┬─────────────┬────────────┬──────────┐
+│ last_name  │ email        │ hire_date   │ salary     │ dept_id  │
+├────────────┼──────────────┼─────────────┼────────────┼──────────┤
+│ Garcia     │ uma@co.com   │ 2020-02-12  │ 73000.00   │ 105      │
+│ Harris     │ victor@co... │ 2020-04-18  │ 76000.00   │ 101      │
+│ Irwin      │ wendy@co.com │ 2020-08-22  │ 69000.00   │ 102      │
+│ ...        │ ...          │ ...         │ ...        │ ...      │
+│ Zane       │ xander@co... │ 2023-11-30  │ 71000.00   │ 103      │
+└────────────┴──────────────┴─────────────┴────────────┴──────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ Columns 3-7 of 23 | Rows 21-40 of 1,234 (3%) | ←→: columns                │
+│ Space: next page | b: prev page | q: exit pager                            │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+**After Pressing 'q':**
+```
+tq> _
+[Returns to REPL prompt, session preserved]
+```
+
+---
+
+#### Paging Example: Long Cell Values
+
+**Scenario:** Table with VARCHAR(2000) columns containing 500+ character values
+
+**Query:**
+```sql
+SELECT id, title, description FROM articles LIMIT 5;
+```
+
+**Paged Output:**
+```
+┌─────┬─────────────────────┬──────────────────────────────────────────┐
+│ id  │ title               │ description                              │
+├─────┼─────────────────────┼──────────────────────────────────────────┤
+│ 1   │ Getting Started     │ This article explains how to get star... │
+│ 2   │ Advanced Features   │ Learn about advanced features includi... │
+│ 3   │ Troubleshooting     │ Common issues and their solutions are... │
+│ 4   │ Performance Tuning  │ Optimize your queries for maximum per... │
+│ 5   │ Best Practices      │ Follow these best practices to ensure... │
+└─────┴─────────────────────┴──────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ Columns 1-3 of 3 | Rows 1-5 of 5 (100%) | q: exit pager                   │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Note:** Description values truncated to 100 characters with `...` ellipsis. To view full values, use separate query or `/export` command.
+
+---
+
+#### Result Truncation Hint (>100 rows)
+
+When displaying results and suggesting result limiting, show Teradata-specific hint:
+
+```sql
+tq> SELECT * FROM employees;
+... 100 rows displayed ...
+
+Showing first 100 rows. Use TOP N or SAMPLE N for different results.
+```
+
+**Note:** This hint uses Teradata-specific syntax (TOP/SAMPLE), not MySQL/PostgreSQL LIMIT.
+
+**Optional Verbose Hint** (with examples):
+```sql
+Showing first 100 rows. Use TOP N or SAMPLE N for different results.
+
+Examples:
+  SELECT TOP 50 * FROM employees;       -- Get first 50 rows
+  SELECT * FROM employees SAMPLE 200;   -- Sample 200 rows
+```
+
+---
+
+#### Performance Considerations
+
+**Large Result Sets (10,000+ rows):**
+- Use streaming or chunked loading (fetch 1000 rows at a time)
+- Render only visible rows (current page)
+- Show loading indicator if next page not yet fetched
+- Don't load entire result set into memory
+
+**Wide Tables (50+ columns):**
+- Column width calculation: sample first 100 rows only
+- Cache column widths per window for reuse
+- Re-render only changed portions when scrolling
+
+**Terminal Resizing:**
+- Listen for SIGWINCH signal (terminal resize)
+- Recalculate column windows and page size
+- Re-render current view with new dimensions
+
+**Target Performance:**
+- Pager opens: <1s for 10,000 row result set
+- Navigation response: <100ms per keypress
+- Memory usage: <100MB for typical result sets
+
+---
+
+#### Implementation Guidance
+
+**Architecture:**
+
+Pager is a function call within REPL, not a separate mode:
+```rust
+fn execute_query(sql: &str) -> Result<()> {
+    let results = database.query(sql)?;
+
+    if results.row_count() > PAGING_THRESHOLD {
+        // Enter pager - runs event loop, then returns
+        pager::display_with_navigation(results)?;
+    } else {
+        // Small result, print directly
+        print_table(results);
+    }
+
+    // Always returns to REPL prompt
+    Ok(())
+}
+```
+
+**Library Recommendations:**
+
+**Replace `minus` with custom pager:**
+- Current `minus` library lacks control for safe exit and custom windowing
+- Use `crossterm` for terminal control (cursor, colors, input)
+- Build custom pager with exact behavior specified here
+
+**Alternative (if keeping `minus`):**
+- Use `minus::Pager::new()` instead of `minus::page_all()`
+- Override keybindings to prevent program exit
+- May have limitations for column windowing features
+
+---
+
+#### Testing Requirements
+
+**Critical Tests (Must Pass):**
+
+1. **Test: 'q' Returns to REPL**
+   - Execute query, enter pager, press 'q'
+   - Expected: Returns to `tq>` prompt, session preserved
+
+2. **Test: Wide Table Readable**
+   - Query 25-column table
+   - Expected: 4-6 columns visible, readable width, smooth right-arrow navigation
+
+3. **Test: Long Values Truncated**
+   - Query VARCHAR(2000) column with 500-char values
+   - Expected: Values truncated at 100 chars with "…", table layout stable
+
+**Edge Case Tests:**
+
+4. **Test: Empty Result Set**
+   - Query returns 0 rows
+   - Expected: Show "(No results)", 'q' exits pager
+
+5. **Test: Single Wide Column**
+   - Table with 1 column 150 chars wide
+   - Expected: Show full column even if exceeds terminal
+
+6. **Test: Navigation at Boundaries**
+   - Press 'k' at first row, 'j' at last row, left-arrow at first column
+   - Expected: No error, no crash, no action
+
+**Performance Tests:**
+
+7. **Test: Large Result Set (10,000 rows)**
+   - Expected: Pager opens <1s, navigation <100ms response
+
+8. **Test: Very Wide Table (50 columns)**
+   - Expected: Column window calculated quickly, smooth scrolling
+
+---
+
+**Sprint 8 Design Complete:** See [Sprint 8 Paging UX Design](../sprints/sprint-8-paging-ux-design.md) for full technical design document.
 
 ### 5.7.3 NULL Handling
 
@@ -1916,10 +2490,75 @@ Fix and retry? [Y/n] y
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
+| 2026-01-18 | 2.0.0 | Sprint 8 paging redesign: Complete overhaul of section 5.7.2 with three-layer strategy (column windowing, cell truncation, row paging), safe exit behavior, comprehensive status bar design, implementation guidance | CLI UX Designer Agent |
+| 2026-01-18 | 1.3.0 | Sprint 8 fixes: Teradata-specific tab completion (database.table), visual feedback, intelligent caching, DDL detection, fixed LIMIT hint to TOP/SAMPLE | CLI UX Designer Agent |
 | 2026-01-19 | 1.2.0 | Added Sprint 7 specifications: table completion (5.6.2), column completion (5.6.3), /logon metacommand (5.8.1) | CLI UX Designer Agent |
 | 2026-01-18 | 1.1.0 | Added Sprint 6 specifications: keyword completion, /export, /pager, /colors | CLI UX Designer Agent |
 | 2026-01-17 | 1.0.0 | Added Sprint 4-5 specifications: REPL foundation, syntax highlighting, paging | CLI UX Designer Agent |
 | 2026-01-16 | 0.1.0 | Initial REPL mode specifications | Development Team |
+
+---
+
+## Sprint 8 Summary (Quality Recovery)
+
+**Critical Fixes in This Version:**
+
+**Bug 4 (P1): LIMIT Hint Message Fixed**
+- **Problem:** Incorrect hint message used MySQL `LIMIT` syntax
+- **Fix:** Changed to Teradata-specific `TOP N or SAMPLE N` syntax
+- **Location:** Section 5.7.2 - Large Result Handling
+- **Impact:** Users now get correct Teradata SQL guidance
+
+**Bug 2 (P0): Tab Completion Redesigned for Teradata**
+- **Problem:** Completion didn't work, assumed single-level table names
+- **Fix:** Complete redesign supporting Teradata's `database.table` qualified naming
+- **Key Changes:**
+  - Show databases + current DB tables after FROM
+  - Support `database.` pattern for cross-database completion
+  - Intelligent lazy loading: databases + current DB only initially
+  - Per-database caching with LRU eviction
+  - DDL detection for automatic cache refresh
+- **Location:** Section 5.6.2 - Table Name Completion
+- **Performance:** <200ms database list, <500ms table list, <50ms cached
+
+**Visual Feedback Added (Bug 2 Improvements):**
+- **Loading Indicators:** Spinner with "Loading..." during metadata fetch
+- **Context Indicators:** Show what's being completed (databases/tables/columns)
+- **Error Messages:** Clear, actionable guidance when completion fails
+- **Visual States:** <200ms no indicator, 200-500ms spinner, >500ms "may take a moment"
+- **Location:** Section 5.6.2 - Loading States & Feedback
+
+**Quality Improvements:**
+- All specifications now tested against real Teradata databases
+- Acknowledged Sprint 7 features didn't work as implemented
+- Added comprehensive testing scenarios for live database validation
+- Documented Teradata-specific requirements and limitations
+
+**Design Principles Applied:**
+
+- **Teradata-First**: Designed for Teradata's `database.table` model, not adapted from MySQL/PostgreSQL
+- **Clear Communication**: Always show user what's happening (loading, errors, context)
+- **Performance at Scale**: Handles millions of tables across hundreds of databases
+- **Intelligent Caching**: Lazy load, per-database cache, minimal memory
+- **Graceful Degradation**: Completion failures don't block user from typing manually
+- **Best Practices**: Encourage fully qualified names by showing databases first
+
+**Testing Requirements:**
+
+All fixes require mandatory live database testing:
+- Real Teradata database with multiple databases (3+)
+- Database with 100+ tables for completion testing
+- Slow network conditions for loading indicator validation
+- Permission scenarios (DBC.TablesV access)
+- DDL operations for cache refresh validation
+- Large result sets (>100 rows) for hint message validation
+
+**Next Steps:**
+
+1. **rust-teradata-architect:** Implement fixes based on these specifications
+2. **quality-validator:** Design and execute comprehensive test suite
+3. **User:** Acceptance testing to confirm bugs are resolved
+4. **Team:** Ensure mandatory live database testing for all future sprints
 
 ---
 
@@ -1932,6 +2571,7 @@ Fix and retry? [Y/n] y
    - Metadata queried from DBC.TablesV with session-scoped caching
    - Loading states, error handling, and performance optimizations
    - <500ms metadata query, <50ms cached response
+   - **NOTE:** Sprint 8 revealed these features didn't work against real Teradata databases
 
 2. **Column Name Completion (5.6.3)** - P1
    - Context-aware completion after SELECT, WHERE, ORDER BY keywords
@@ -1939,6 +2579,7 @@ Fix and retry? [Y/n] y
    - Handles simple single-table queries and JOIN queries with table aliases
    - <300ms metadata query, <50ms cached response
    - Acknowledged limitations: subqueries, CTEs, complex expressions
+   - **NOTE:** Sprint 8 revealed these features didn't work against real Teradata databases
 
 3. **`/logon` Metacommand (5.8.1)** - P1
    - Dynamic connection switching without exiting REPL

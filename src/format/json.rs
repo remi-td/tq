@@ -24,11 +24,7 @@ impl Default for JsonOptions {
 }
 
 /// Write query results as JSON array of objects
-pub fn write<W: Write>(
-    result: &QueryResult,
-    writer: &mut W,
-    options: &JsonOptions,
-) -> Result<()> {
+pub fn write<W: Write>(result: &QueryResult, writer: &mut W, options: &JsonOptions) -> Result<()> {
     let rows: Vec<JsonValue> = result
         .rows
         .iter()
@@ -86,10 +82,16 @@ pub fn write_with_metadata<W: Write>(
     let mut wrapper = Map::new();
 
     // Add metadata
-    wrapper.insert("row_count".to_string(), JsonValue::Number(result.row_count.into()));
+    wrapper.insert(
+        "row_count".to_string(),
+        JsonValue::Number(result.row_count.into()),
+    );
     wrapper.insert(
         "execution_time_ms".to_string(),
-        JsonValue::Number(serde_json::Number::from_f64(result.execution_time.as_secs_f64() * 1000.0).unwrap_or_else(|| 0.into())),
+        JsonValue::Number(
+            serde_json::Number::from_f64(result.execution_time.as_secs_f64() * 1000.0)
+                .unwrap_or_else(|| 0.into()),
+        ),
     );
 
     // Add column info

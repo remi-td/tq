@@ -34,11 +34,7 @@ impl Default for CsvOptions {
 }
 
 /// Write query results as CSV
-pub fn write<W: Write>(
-    result: &QueryResult,
-    writer: &mut W,
-    options: &CsvOptions,
-) -> Result<()> {
+pub fn write<W: Write>(result: &QueryResult, writer: &mut W, options: &CsvOptions) -> Result<()> {
     let mut csv_writer = csv::WriterBuilder::new()
         .delimiter(options.delimiter as u8)
         .quote(options.quote as u8)

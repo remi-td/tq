@@ -25,7 +25,11 @@ use crate::cli::{EditorMode, ReplArgs};
 use crate::db::DatabaseClient;
 use crate::error::Result;
 use metadata_completer::{CompletionState, MetadataCompleter};
-use reedline::{EditMode, Emacs, FileBackedHistory, Reedline, Signal, Vi};
+use reedline::{
+    default_emacs_keybindings, default_vi_insert_keybindings, default_vi_normal_keybindings,
+    ColumnarMenu, EditMode, Emacs, FileBackedHistory, KeyCode, KeyModifiers, Keybindings,
+    MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal, Vi,
+};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -33,10 +37,10 @@ use std::sync::{Arc, Mutex};
 pub use executor::{execute_sql, execute_sql_with_state, QueryTiming};
 pub use highlighter::SqlHighlighter;
 pub use metacommands::handle_metacommand;
-pub use pager::{PagedOutput, PagerConfig};
+pub use pager::{display_with_pager, should_page, PagedOutput, PagerConfig};
 pub use prompt::TqPrompt;
-pub use state::ReplState;
 pub use sql_context::{analyze_context, CompletionContext, TableReference};
+pub use state::ReplState;
 
 /// Execute the REPL command
 ///
@@ -90,6 +94,7 @@ pub fn execute<W: Write>(
 /// Create and configure the reedline editor
 ///
 /// Sprint 7: Now accepts shared completion state for metadata-aware completion.
+/// Sprint 8: Fixed tab completion by adding ColumnarMenu and keybindings.
 fn create_editor(
     args: &ReplArgs,
     writer: &mut impl Write,
@@ -114,7 +119,10 @@ fn create_editor(
                     history_path.display(),
                     e
                 );
-                let _ = writeln!(writer, "History will be stored in memory only for this session.");
+                let _ = writeln!(
+                    writer,
+                    "History will be stored in memory only for this session."
+                );
                 log::warn!("Failed to load history file: {}", e);
             }
         }
@@ -123,10 +131,33 @@ fn create_editor(
         editor = editor.with_history_exclusion_prefix(Some("/".to_string()));
     }
 
-    // Configure editor mode (Vim or Emacs keybindings)
+    // Configure tab completion with metadata support (Sprint 7)
+    // Sprint 8: Fixed by adding ColumnarMenu and proper keybindings
+    let completer = MetadataCompleter::with_state(completion_state);
+    editor = editor.with_completer(Box::new(completer));
+
+    // Create a completion menu that shows suggestions in columns
+    // Sprint 8 Bug Fix: Configure for better display
+    let completion_menu = ColumnarMenu::default()
+        .with_name("completion_menu")
+        .with_columns(1); // Single column for readability
+    editor = editor.with_menu(ReedlineMenu::EngineCompleter(Box::new(completion_menu)));
+
+    // Configure editor mode with keybindings that include Tab completion
     let edit_mode: Box<dyn EditMode> = match args.editor_mode {
-        EditorMode::Vi => Box::new(Vi::default()),
-        EditorMode::Emacs => Box::new(Emacs::default()),
+        EditorMode::Vi => {
+            // Vi insert mode keybindings with Tab completion
+            let mut insert_kb = default_vi_insert_keybindings();
+            add_completion_keybinding(&mut insert_kb);
+            // Vi normal mode keybindings
+            let normal_kb = default_vi_normal_keybindings();
+            Box::new(Vi::new(insert_kb, normal_kb))
+        }
+        EditorMode::Emacs => {
+            let mut kb = default_emacs_keybindings();
+            add_completion_keybinding(&mut kb);
+            Box::new(Emacs::new(kb))
+        }
     };
     editor = editor.with_edit_mode(edit_mode);
 
@@ -138,11 +169,20 @@ fn create_editor(
     };
     editor = editor.with_highlighter(Box::new(highlighter));
 
-    // Configure tab completion with metadata support (Sprint 7)
-    let completer = MetadataCompleter::with_state(completion_state);
-    editor = editor.with_completer(Box::new(completer));
-
     Ok(editor)
+}
+
+/// Add Tab keybinding for completion menu
+fn add_completion_keybinding(keybindings: &mut Keybindings) {
+    // Tab key triggers the completion menu
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Tab,
+        ReedlineEvent::UntilFound(vec![
+            ReedlineEvent::Menu("completion_menu".to_string()),
+            ReedlineEvent::MenuNext,
+        ]),
+    );
 }
 
 /// Resolve the history file path
@@ -191,11 +231,7 @@ fn print_banner<W: Write>(
     let config = completion_state.client().config();
 
     writeln!(writer)?;
-    writeln!(
-        writer,
-        "Connected to {}:{}",
-        config.host, config.port
-    )?;
+    writeln!(writer, "Connected to {}:{}", config.host, config.port)?;
     writeln!(writer, "Database: {}", config.database)?;
     writeln!(writer, "User: {}", config.user)?;
     writeln!(writer, "Logon Mechanism: {}", config.logmech)?;
@@ -265,10 +301,7 @@ fn repl_loop<W: Write>(
                     // Lock completion state for metacommand handling
                     let mut cs = completion_state.lock().unwrap();
                     match metacommands::handle_metacommand_with_state(
-                        trimmed,
-                        state,
-                        &mut cs,
-                        writer,
+                        trimmed, state, &mut cs, writer,
                     ) {
                         Ok(should_continue) => {
                             if !should_continue {

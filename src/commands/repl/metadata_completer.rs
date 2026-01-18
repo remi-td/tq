@@ -4,13 +4,15 @@
 //! - SQL keywords (always available)
 //! - Table names (after FROM, JOIN, UPDATE, INSERT INTO)
 //! - Column names (after SELECT, WHERE, ORDER BY with table context)
+//! - Database names for Teradata's `database.table` qualified naming
 //!
 //! ## Design
 //! - Uses shared MetadataCache for fast cached lookups
 //! - Triggers lazy loading of metadata on first table completion request
 //! - Falls back to keyword completion when metadata unavailable
+//! - Surfaces errors as user-visible feedback (not silent failures)
 //!
-//! Sprint 7 implementation.
+//! Sprint 7 implementation, Sprint 8 bug fixes.
 
 use super::sql_context::{analyze_context, CompletionContext};
 use crate::db::{ColumnInfo, DatabaseClient, MetadataCache, TableInfo};
@@ -217,56 +219,164 @@ impl MetadataCompleter {
     }
 
     /// Get table name completions
+    ///
+    /// Sprint 8 Bug Fix: Now returns DATABASE NAMES + tables in current database
+    /// for Teradata's database.table naming model
     fn complete_tables(&self, prefix: &str) -> Vec<Suggestion> {
         let Some(state) = &self.state else {
-            return vec![];
+            // No database connection - show message instead of silent failure
+            return vec![
+                self.status_suggestion("No database connection for table completion", prefix.len())
+            ];
         };
 
         let Ok(mut state) = state.lock() else {
             log::warn!("Failed to acquire lock for table completion");
-            return vec![];
+            return vec![
+                self.error_suggestion("Unable to load tables (internal lock error)", prefix.len())
+            ];
         };
 
         // Ensure tables are loaded
         if !state.ensure_tables_loaded() {
-            return vec![];
+            // Loading failed - show the error to user
+            if let Some(error) = state.cache().last_error() {
+                return vec![self.error_suggestion(error, prefix.len())];
+            } else {
+                return vec![self.error_suggestion("Failed to load table metadata", prefix.len())];
+            }
         }
 
-        let tables = state.cache().find_tables_by_prefix(prefix);
+        let mut suggestions = Vec::new();
 
-        tables
-            .into_iter()
-            .map(|t| self.table_to_suggestion(t, prefix.len()))
-            .collect()
+        // Sprint 8 Fix: Show database names for Teradata's database.table model
+        let databases = state.cache().find_databases_by_prefix(prefix);
+        for db in databases {
+            suggestions.push(Suggestion {
+                value: db.clone(),
+                description: Some("(database)".to_string()),
+                style: None,
+                extra: None,
+                span: reedline::Span {
+                    start: 0,
+                    end: prefix.len(),
+                },
+                append_whitespace: false, // Don't add space after database name (user will type '.')
+            });
+        }
+
+        // Also show tables in current database (unqualified names)
+        let tables = state.cache().find_tables_in_current_db_by_prefix(prefix);
+        for table in tables {
+            let kind = match table.table_kind.as_str() {
+                "T" => "table",
+                "V" => "view",
+                "O" => "object",
+                _ => "table",
+            };
+
+            suggestions.push(Suggestion {
+                value: table.table_name.clone(),
+                description: Some(format!("{} ({})", table.schema_name, kind)),
+                style: None,
+                extra: None,
+                span: reedline::Span {
+                    start: 0,
+                    end: prefix.len(),
+                },
+                append_whitespace: true,
+            });
+        }
+
+        if suggestions.is_empty() {
+            // No databases or tables found - provide helpful message
+            if prefix.is_empty() {
+                return vec![
+                    self.status_suggestion("No databases or tables found", prefix.len())
+                ];
+            } else {
+                return vec![self
+                    .status_suggestion(&format!("No databases or tables matching '{}'", prefix), prefix.len())];
+            }
+        }
+
+        suggestions
     }
 
     /// Get schema-qualified table completions
+    ///
+    /// Sprint 8 Bug Fix: Improved error handling for database.table completions
     fn complete_schema_tables(&self, schema: &str, prefix: &str) -> Vec<Suggestion> {
+        // Sprint 8 Round 4: Add safety check for empty schema
+        if schema.is_empty() {
+            log::warn!("complete_schema_tables called with empty schema");
+            return vec![self.status_suggestion("Invalid database name", prefix.len())];
+        }
+
         let Some(state) = &self.state else {
-            return vec![];
+            return vec![
+                self.status_suggestion("No database connection for table completion", prefix.len())
+            ];
         };
 
         let Ok(mut state) = state.lock() else {
             log::warn!("Failed to acquire lock for schema-qualified table completion");
-            return vec![];
+            return vec![
+                self.error_suggestion("Unable to load tables (internal lock error)", prefix.len())
+            ];
         };
 
         // Ensure tables are loaded
         if !state.ensure_tables_loaded() {
-            return vec![];
+            if let Some(error) = state.cache().last_error() {
+                return vec![self.error_suggestion(error, prefix.len())];
+            } else {
+                return vec![self.error_suggestion("Failed to load table metadata", prefix.len())];
+            }
         }
 
-        // Find tables matching schema.prefix
-        let full_prefix = format!("{}.{}", schema, prefix);
-        let tables = state.cache().find_tables_by_prefix(&full_prefix);
+        // Find tables in the specified database/schema
+        let cache = state.cache();
+        let Some(tables) = cache.get_tables() else {
+            return vec![self.status_suggestion("No tables loaded", prefix.len())];
+        };
 
-        tables
+        let schema_upper = schema.to_uppercase();
+        let prefix_upper = prefix.to_uppercase();
+
+        let matching_tables: Vec<_> = tables
+            .iter()
+            .filter(|t| {
+                t.schema_name.to_uppercase() == schema_upper
+                    && (prefix.is_empty() || t.table_name.to_uppercase().starts_with(&prefix_upper))
+            })
+            .collect();
+
+        if matching_tables.is_empty() {
+            // No tables found in schema - provide helpful message
+            let msg = if prefix.is_empty() {
+                format!("No tables in database '{}'", schema)
+            } else {
+                format!("No tables in '{}' matching '{}'", schema, prefix)
+            };
+            return vec![self.status_suggestion(&msg, prefix.len())];
+        }
+
+        matching_tables
             .into_iter()
             .map(|t| {
-                // Return just the table name (schema already typed)
+                let kind = match t.table_kind.as_str() {
+                    "T" => "table",
+                    "V" => "view",
+                    "O" => "object",
+                    _ => "table",
+                };
+
+                // Sprint 8 Bug Fix: Return FULL qualified name (schema.table) so user doesn't lose the schema prefix
+                let full_name = format!("{}.{}", schema, t.table_name);
                 Suggestion {
-                    value: t.table_name.clone(),
-                    description: Some(format!("{}.{}", t.schema_name, t.table_name)),
+                    value: full_name.clone(),
+                    description: Some(format!("{} ({})", full_name, kind)),
                     style: None,
                     extra: None,
                     span: reedline::Span {
@@ -280,6 +390,8 @@ impl MetadataCompleter {
     }
 
     /// Get column name completions
+    ///
+    /// Sprint 8: Now surfaces errors when column loading fails.
     fn complete_columns(
         &self,
         tables: &[super::sql_context::TableReference],
@@ -287,19 +399,34 @@ impl MetadataCompleter {
         _qualifier: Option<&str>,
     ) -> Vec<Suggestion> {
         let Some(state) = &self.state else {
-            return vec![];
+            return vec![self
+                .status_suggestion("No database connection for column completion", prefix.len())];
         };
 
         let Ok(mut state) = state.lock() else {
             log::warn!("Failed to acquire lock for column completion");
-            return vec![];
+            return vec![
+                self.error_suggestion("Unable to load columns (internal lock error)", prefix.len())
+            ];
         };
 
+        if tables.is_empty() {
+            return vec![self.status_suggestion(
+                "Cannot determine table context. Specify table in FROM clause first.",
+                prefix.len(),
+            )];
+        }
+
         let mut suggestions = Vec::new();
+        let mut had_error = false;
 
         for table in tables {
             // Try to load columns for this table
-            state.ensure_columns_loaded(&table.name);
+            if !state.ensure_columns_loaded(&table.name) {
+                // Loading failed - note the error but continue trying other tables
+                had_error = true;
+                log::debug!("Failed to load columns for table: {}", table.name);
+            }
 
             // Get matching columns
             let columns = state.cache().find_columns_by_prefix(&table.name, prefix);
@@ -309,33 +436,37 @@ impl MetadataCompleter {
             }
         }
 
+        if suggestions.is_empty() {
+            if had_error {
+                if let Some(error) = state.cache().last_error() {
+                    return vec![self.error_suggestion(error, prefix.len())];
+                } else {
+                    return vec![
+                        self.error_suggestion("Failed to load column metadata", prefix.len())
+                    ];
+                }
+            } else if prefix.is_empty() {
+                return vec![
+                    self.status_suggestion("No columns found for specified table(s)", prefix.len())
+                ];
+            } else {
+                return vec![self.status_suggestion(
+                    &format!("No columns matching '{}'", prefix),
+                    prefix.len(),
+                )];
+            }
+        }
+
         suggestions
     }
 
-    /// Convert TableInfo to Suggestion
-    fn table_to_suggestion(&self, table: &TableInfo, prefix_len: usize) -> Suggestion {
-        let kind = match table.table_kind.as_str() {
-            "T" => "table",
-            "V" => "view",
-            "O" => "object",
-            _ => "table",
-        };
-
-        Suggestion {
-            value: table.table_name.clone(),
-            description: Some(format!("{} ({})", table.full_name, kind)),
-            style: None,
-            extra: None,
-            span: reedline::Span {
-                start: 0,
-                end: prefix_len,
-            },
-            append_whitespace: true,
-        }
-    }
-
     /// Convert ColumnInfo to Suggestion
-    fn column_to_suggestion(&self, col: &ColumnInfo, table_name: &str, prefix_len: usize) -> Suggestion {
+    fn column_to_suggestion(
+        &self,
+        col: &ColumnInfo,
+        table_name: &str,
+        prefix_len: usize,
+    ) -> Suggestion {
         Suggestion {
             value: col.name.clone(),
             description: Some(format!("{}.{} ({})", table_name, col.name, col.data_type)),
@@ -354,6 +485,40 @@ impl MetadataCompleter {
         // Find start of current word
         let start = line.len().saturating_sub(prefix_len);
         (start, line.len())
+    }
+
+    /// Create an error suggestion to display to user
+    ///
+    /// Sprint 8: Surfaces errors as user-visible feedback instead of silent failures.
+    fn error_suggestion(&self, message: &str, prefix_len: usize) -> Suggestion {
+        Suggestion {
+            value: String::new(), // Empty value - can't be selected
+            description: Some(format!("[Error: {}]", message)),
+            style: None,
+            extra: None,
+            span: reedline::Span {
+                start: 0,
+                end: prefix_len,
+            },
+            append_whitespace: false,
+        }
+    }
+
+    /// Create a status suggestion (e.g., "Loading..." or "No tables found")
+    ///
+    /// Sprint 8: Provides user feedback during operations.
+    fn status_suggestion(&self, message: &str, prefix_len: usize) -> Suggestion {
+        Suggestion {
+            value: String::new(), // Empty value - can't be selected
+            description: Some(format!("[{}]", message)),
+            style: None,
+            extra: None,
+            span: reedline::Span {
+                start: 0,
+                end: prefix_len,
+            },
+            append_whitespace: false,
+        }
     }
 }
 
@@ -377,12 +542,20 @@ impl Completer for MetadataCompleter {
             }
 
             CompletionContext::TableName { prefix } => {
-                let mut sug = self.complete_tables(&prefix);
-                // Also include matching keywords as fallback
-                if sug.is_empty() {
-                    sug = self.complete_keywords(&prefix);
+                let sug = self.complete_tables(&prefix);
+                // Check if we got real completions or just status/error messages
+                let has_real_suggestions = sug.iter().any(|s| !s.value.is_empty());
+                if has_real_suggestions {
+                    sug
+                } else {
+                    // Try keywords as fallback, but keep status messages if no keywords match
+                    let keywords = self.complete_keywords(&prefix);
+                    if keywords.is_empty() {
+                        sug // Keep the status message
+                    } else {
+                        keywords
+                    }
                 }
-                sug
             }
 
             CompletionContext::SchemaQualifiedTable { schema, prefix } => {
@@ -394,12 +567,20 @@ impl Completer for MetadataCompleter {
                 prefix,
                 table_qualifier: _,
             } => {
-                let mut sug = self.complete_columns(&tables, &prefix, None);
-                // Also include matching keywords as fallback
-                if sug.is_empty() {
-                    sug = self.complete_keywords(&prefix);
+                let sug = self.complete_columns(&tables, &prefix, None);
+                // Check if we got real completions or just status/error messages
+                let has_real_suggestions = sug.iter().any(|s| !s.value.is_empty());
+                if has_real_suggestions {
+                    sug
+                } else {
+                    // Try keywords as fallback, but keep status messages if no keywords match
+                    let keywords = self.complete_keywords(&prefix);
+                    if keywords.is_empty() {
+                        sug // Keep the status message
+                    } else {
+                        keywords
+                    }
                 }
-                sug
             }
         };
 
@@ -411,8 +592,16 @@ impl Completer for MetadataCompleter {
             sug.span = reedline::Span { start, end };
         }
 
-        // Sort: shorter matches first, then alphabetically
+        // Sort: actual suggestions first (non-empty values), then by length and alphabetically
+        // Status/error messages (empty values) should appear at the end
         suggestions.sort_by(|a, b| {
+            // First, prioritize non-empty values
+            let a_empty = a.value.is_empty();
+            let b_empty = b.value.is_empty();
+            if a_empty != b_empty {
+                return a_empty.cmp(&b_empty);
+            }
+            // Then sort by length and alphabetically
             a.value
                 .len()
                 .cmp(&b.value.len())
@@ -420,7 +609,8 @@ impl Completer for MetadataCompleter {
         });
 
         // Limit to reasonable number
-        suggestions.truncate(20);
+        // Sprint 8 Bug Fix: Increased from 20 to 50 to show more completions
+        suggestions.truncate(50);
 
         suggestions
     }
@@ -486,7 +676,12 @@ mod tests {
         // Without database connection, should return empty for table context
         // but the completer falls back to keywords
         // This is correct behavior - no matching keywords either
-        assert!(suggestions.is_empty() || suggestions.iter().any(|s| s.description.as_ref().unwrap().contains("keyword")));
+        assert!(
+            suggestions.is_empty()
+                || suggestions
+                    .iter()
+                    .any(|s| s.description.as_ref().unwrap().contains("keyword"))
+        );
     }
 
     #[test]
@@ -504,5 +699,48 @@ mod tests {
         assert!(keywords.contains(&"FROM".to_string()));
         assert!(keywords.contains(&"WHERE".to_string()));
         assert!(keywords.contains(&"JOIN".to_string()));
+    }
+
+    #[test]
+    fn test_error_suggestion_format() {
+        let completer = MetadataCompleter::keywords_only();
+        let suggestion = completer.error_suggestion("Connection failed", 3);
+
+        assert!(suggestion.value.is_empty());
+        assert!(suggestion.description.as_ref().unwrap().contains("[Error:"));
+        assert!(suggestion
+            .description
+            .as_ref()
+            .unwrap()
+            .contains("Connection failed"));
+    }
+
+    #[test]
+    fn test_status_suggestion_format() {
+        let completer = MetadataCompleter::keywords_only();
+        let suggestion = completer.status_suggestion("No tables found", 3);
+
+        assert!(suggestion.value.is_empty());
+        assert!(suggestion
+            .description
+            .as_ref()
+            .unwrap()
+            .contains("[No tables found]"));
+    }
+
+    #[test]
+    fn test_complete_tables_no_connection() {
+        // Without a connection, complete_tables should return a status message
+        let completer = MetadataCompleter::keywords_only();
+        let suggestions = completer.complete_tables("emp");
+
+        // Should have one status message (empty value with description)
+        assert_eq!(suggestions.len(), 1);
+        assert!(suggestions[0].value.is_empty());
+        assert!(suggestions[0]
+            .description
+            .as_ref()
+            .unwrap()
+            .contains("No database connection"));
     }
 }

@@ -223,11 +223,7 @@ pub struct QueryResult {
 
 impl QueryResult {
     /// Create a new query result
-    pub fn new(
-        columns: Vec<ColumnMetadata>,
-        rows: Vec<Row>,
-        execution_time: Duration,
-    ) -> Self {
+    pub fn new(columns: Vec<ColumnMetadata>, rows: Vec<Row>, execution_time: Duration) -> Self {
         let row_count = rows.len();
         Self {
             columns,
@@ -300,7 +296,10 @@ mod tests {
         assert_eq!(Value::Null.to_json(), serde_json::Value::Null);
         assert_eq!(Value::Boolean(true).to_json(), serde_json::json!(true));
         assert_eq!(Value::Integer(42).to_json(), serde_json::json!(42));
-        assert_eq!(Value::String("test".into()).to_json(), serde_json::json!("test"));
+        assert_eq!(
+            Value::String("test".into()).to_json(),
+            serde_json::json!("test")
+        );
     }
 
     #[test]

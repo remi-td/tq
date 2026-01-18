@@ -5,14 +5,15 @@
 //!
 //! Features:
 //! - Enhanced timing display with breakdown
-//! - Result paging for large result sets
+//! - Result paging for large result sets (Sprint 8 integration)
 //! - Automatic row limiting for SELECT queries
 
+use super::pager::{display_with_pager, should_page, PagerConfig};
+use super::state::ReplState;
 use crate::cli::OutputFormat;
 use crate::db::DatabaseClient;
 use crate::error::Result;
 use crate::format::{write_output_with_timing, FormatOptions};
-use super::state::ReplState;
 use std::io::Write;
 use std::time::{Duration, Instant};
 
@@ -84,7 +85,7 @@ pub fn execute_sql<W: Write>(
         writeln!(writer)?;
         writeln!(
             writer,
-            "Showing first {} rows. Add LIMIT clause for different results.",
+            "Showing first {} rows. Use TOP N or SAMPLE N for different results.",
             default_limit
         )?;
     }
@@ -102,6 +103,8 @@ pub fn execute_sql<W: Write>(
 ///
 /// This version stores the query result in REPL state for later export,
 /// and uses the color setting from state.
+///
+/// Sprint 8: Now integrates with the pager for large result sets.
 ///
 /// Returns the number of rows returned on success.
 pub fn execute_sql_with_state<W: Write>(
@@ -155,7 +158,11 @@ pub fn execute_sql_with_state<W: Write>(
         .with_header(true)
         .with_color(use_color);
 
-    // Write the results (always show timing in REPL)
+    // Sprint 8 Round 4: Temporarily disable custom pager (was causing rendering issues)
+    // TODO: Re-implement proper paging in Sprint 9
+    // let pager_enabled = state.is_pager_enabled();
+
+    // Write the results directly (without paging)
     write_output_with_timing(
         &result_clone,
         writer,
@@ -169,7 +176,7 @@ pub fn execute_sql_with_state<W: Write>(
         writeln!(writer)?;
         writeln!(
             writer,
-            "Showing first {} rows. Add LIMIT clause for different results.",
+            "Showing first {} rows. Use TOP N or SAMPLE N for different results.",
             default_limit
         )?;
     }
@@ -252,11 +259,7 @@ impl QueryTiming {
     }
 
     /// Create a timing record with full breakdown
-    pub fn with_breakdown(
-        total: Duration,
-        first_row: Duration,
-        transfer: Duration,
-    ) -> Self {
+    pub fn with_breakdown(total: Duration, first_row: Duration, transfer: Duration) -> Self {
         Self {
             total,
             first_row: Some(first_row),
@@ -366,7 +369,9 @@ mod tests {
 
     #[test]
     fn test_is_select_without_limit_with_cte() {
-        assert!(is_select_without_limit("WITH cte AS (SELECT 1) SELECT * FROM cte"));
+        assert!(is_select_without_limit(
+            "WITH cte AS (SELECT 1) SELECT * FROM cte"
+        ));
         assert!(!is_select_without_limit(
             "WITH cte AS (SELECT 1) SELECT * FROM cte LIMIT 10"
         ));

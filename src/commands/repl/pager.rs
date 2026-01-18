@@ -1,17 +1,40 @@
-//! Result Paging for Large Result Sets
+//! Custom Result Pager for Large Result Sets
 //!
-//! Provides both vertical and horizontal paging for query results
-//! that exceed terminal dimensions. Based on the minus crate for
-//! less-like paging functionality.
+//! Sprint 8: Complete rewrite to fix critical bugs:
+//! - Bug 3.1: 'q' now returns to REPL instead of exiting program
+//! - Bug 3.2: Column windowing for wide tables (shows 4-6 readable columns)
+//! - Bug 3.3: Cell truncation at 100 chars for long values
+//!
+//! This pager uses crossterm for terminal control and implements
+//! a custom event loop that properly returns control to the REPL.
 //!
 //! Features:
-//! - Vertical paging: Navigate through long result sets with j/k, Page Up/Down
-//! - Horizontal paging: Scroll wide tables with h/l, arrow keys
-//! - Search: Find text in results with /pattern
-//! - Status line: Shows position, total rows, and hints
+//! - Column windowing: Show readable columns, navigate with Left/Right
+//! - Row paging: Navigate with j/k, Space/b, g/G
+//! - Cell truncation: Long values truncated with ellipsis
+//! - Safe exit: 'q' returns to REPL, never exits program
 
-use crossterm::terminal;
-use unicode_width::UnicodeWidthStr;
+use crossterm::{
+    cursor::{Hide, MoveTo, Show},
+    event::{self, Event, KeyCode, KeyEvent},
+    execute,
+    style::{Color, ResetColor, SetForegroundColor},
+    terminal::{
+        disable_raw_mode, enable_raw_mode, size as terminal_size, Clear, ClearType,
+        EnterAlternateScreen, LeaveAlternateScreen,
+    },
+};
+use std::io::{self, Write};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+/// Maximum characters to display in a cell before truncation
+const MAX_CELL_LENGTH: usize = 100;
+
+/// Minimum column width (including padding)
+const MIN_COLUMN_WIDTH: usize = 8;
+
+/// Maximum column width (including padding)
+const MAX_COLUMN_WIDTH: usize = 40;
 
 /// Configuration for the pager
 #[derive(Debug, Clone)]
@@ -37,8 +60,8 @@ impl Default for PagerConfig {
             horizontal_scrolling: true,
             min_rows_for_paging: 25,
             min_cols_for_scrolling: 120,
-            page_size: 0,  // Auto-detect
-            visible_width: 0,  // Auto-detect
+            page_size: 0,     // Auto-detect
+            visible_width: 0, // Auto-detect
         }
     }
 }
@@ -59,9 +82,9 @@ impl PagerConfig {
             self.page_size
         } else {
             // Try to get terminal height, default to 24
-            terminal::size()
-                .map(|(_, h)| (h as usize).saturating_sub(3))  // Reserve for header and status
-                .unwrap_or(24)
+            terminal_size()
+                .map(|(_, h)| (h as usize).saturating_sub(5)) // Reserve for header and status
+                .unwrap_or(20)
         }
     }
 
@@ -71,14 +94,456 @@ impl PagerConfig {
             self.visible_width
         } else {
             // Try to get terminal width, default to 120
-            terminal::size()
-                .map(|(w, _)| w as usize)
-                .unwrap_or(120)
+            terminal_size().map(|(w, _)| w as usize).unwrap_or(120)
         }
     }
 }
 
-/// Represents paged output with navigation state
+/// A single column with its data
+#[derive(Debug, Clone)]
+struct ColumnData {
+    /// Column header name
+    header: String,
+    /// Cell values for each row
+    values: Vec<String>,
+    /// Calculated display width for this column
+    display_width: usize,
+}
+
+/// Represents the parsed and processed table data for paging
+#[derive(Debug)]
+pub struct TableData {
+    /// Columns with their data
+    columns: Vec<ColumnData>,
+    /// Total number of rows
+    row_count: usize,
+}
+
+impl TableData {
+    /// Parse table content from formatted string
+    ///
+    /// This parses the comfy-table output format and extracts columns and values.
+    /// It applies cell truncation during parsing.
+    pub fn parse_from_content(content: &str) -> Option<Self> {
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.len() < 3 {
+            return None;
+        }
+
+        // Find header row (first row with actual content between separators)
+        let header_idx = lines.iter().position(|l| {
+            l.contains('│') && !l.chars().all(|c| c == '─' || c == '│' || c == '┌' || c == '┐' || c == '├' || c == '┤' || c == '└' || c == '┘' || c == '╭' || c == '╮' || c == '╰' || c == '╯' || c == '┼' || c.is_whitespace())
+        })?;
+
+        // Parse header
+        let header_line = lines[header_idx];
+        let headers: Vec<String> = parse_row_cells(header_line);
+        if headers.is_empty() {
+            return None;
+        }
+
+        // Find data rows
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        for line in lines.iter().skip(header_idx + 1) {
+            if line.contains('│') && !is_separator_line(line) {
+                let cells = parse_row_cells(line);
+                if cells.len() == headers.len() {
+                    // Apply truncation to each cell
+                    let truncated_cells: Vec<String> = cells
+                        .into_iter()
+                        .map(|c| truncate_cell(&c, MAX_CELL_LENGTH))
+                        .collect();
+                    rows.push(truncated_cells);
+                }
+            }
+        }
+
+        // Build column data
+        let mut columns: Vec<ColumnData> = headers
+            .into_iter()
+            .map(|h| {
+                let truncated_header = truncate_cell(&h, MAX_COLUMN_WIDTH - 2);
+                ColumnData {
+                    display_width: truncated_header.width().max(MIN_COLUMN_WIDTH),
+                    header: truncated_header,
+                    values: Vec::new(),
+                }
+            })
+            .collect();
+
+        // Populate column values and calculate widths
+        for row in &rows {
+            for (i, value) in row.iter().enumerate() {
+                if i < columns.len() {
+                    let value_width = value.width();
+                    columns[i].display_width = columns[i]
+                        .display_width
+                        .max(value_width)
+                        .min(MAX_COLUMN_WIDTH);
+                    columns[i].values.push(value.clone());
+                }
+            }
+        }
+
+        Some(TableData {
+            columns,
+            row_count: rows.len(),
+        })
+    }
+}
+
+/// Parse cells from a table row line
+///
+/// Sprint 8 Bug Fix: Simplified and more robust parsing logic
+fn parse_row_cells(line: &str) -> Vec<String> {
+    let parts: Vec<&str> = line.split('│').collect();
+
+    // Skip first (before first │) and last (after last │) which are empty or borders
+    if parts.len() <= 2 {
+        return vec![];
+    }
+
+    parts[1..parts.len()-1]
+        .iter()
+        .map(|s| s.trim().to_string())
+        .collect()
+}
+
+/// Check if a line is a separator line (borders only)
+fn is_separator_line(line: &str) -> bool {
+    line.chars().all(|c| {
+        c == '─' || c == '│' || c == '┌' || c == '┐' || c == '├' || c == '┤'
+            || c == '└' || c == '┘' || c == '╭' || c == '╮' || c == '╰' || c == '╯'
+            || c == '┼' || c == '┬' || c == '┴' || c.is_whitespace()
+    })
+}
+
+/// Truncate a cell value to max_length with ellipsis
+fn truncate_cell(value: &str, max_length: usize) -> String {
+    let trimmed = value.trim();
+    if trimmed.width() <= max_length {
+        trimmed.to_string()
+    } else {
+        // Find a safe truncation point
+        let mut result = String::new();
+        let mut width = 0;
+        for c in trimmed.chars() {
+            let char_width = c.width().unwrap_or(1);
+            if width + char_width + 1 > max_length {
+                // Leave room for ellipsis
+                break;
+            }
+            result.push(c);
+            width += char_width;
+        }
+        result.push('…');
+        result
+    }
+}
+
+/// Pager state for navigation
+pub struct Pager {
+    /// Table data
+    data: TableData,
+    /// Current row offset (first visible row)
+    row_offset: usize,
+    /// Current column offset (first visible column)
+    col_offset: usize,
+    /// Page size (rows per page)
+    page_size: usize,
+    /// Terminal width
+    term_width: usize,
+    /// Terminal height
+    #[allow(dead_code)]
+    term_height: usize,
+    /// Total row count in result
+    total_rows: usize,
+}
+
+impl Pager {
+    /// Create a new pager with parsed table data
+    pub fn new(content: String, row_count: usize, config: &PagerConfig) -> Self {
+        let (term_width, term_height) = terminal_size().unwrap_or((120, 24));
+        let page_size = config.effective_page_size();
+
+        let data = TableData::parse_from_content(&content).unwrap_or_else(|| {
+            // Fallback: create single-column display
+            TableData {
+                columns: vec![ColumnData {
+                    header: "Output".to_string(),
+                    values: content.lines().map(|s| s.to_string()).collect(),
+                    display_width: term_width as usize - 4,
+                }],
+                row_count: content.lines().count(),
+            }
+        });
+
+        Pager {
+            data,
+            row_offset: 0,
+            col_offset: 0,
+            page_size,
+            term_width: term_width as usize,
+            term_height: term_height as usize,
+            total_rows: row_count,
+        }
+    }
+
+    /// Calculate how many columns can fit in the terminal width
+    fn visible_column_count(&self) -> usize {
+        let mut total_width = 3; // Left border + padding
+        let mut count = 0;
+
+        for col in self.data.columns.iter().skip(self.col_offset) {
+            let col_width = col.display_width + 3; // Cell + separator
+            if total_width + col_width > self.term_width && count > 0 {
+                break;
+            }
+            total_width += col_width;
+            count += 1;
+        }
+
+        count.max(1) // Always show at least 1 column
+    }
+
+    /// Render the current view
+    fn render(&self) -> io::Result<()> {
+        let mut stdout = io::stdout();
+
+        // Clear screen and move to top
+        execute!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
+
+        let visible_cols = self.visible_column_count();
+        let end_col = (self.col_offset + visible_cols).min(self.data.columns.len());
+        let end_row = (self.row_offset + self.page_size).min(self.data.row_count);
+
+        // Render top border
+        self.render_border(&mut stdout, "top")?;
+
+        // Render header row
+        self.render_header(&mut stdout, self.col_offset, end_col)?;
+
+        // Render header separator
+        self.render_border(&mut stdout, "middle")?;
+
+        // Render data rows
+        for row_idx in self.row_offset..end_row {
+            self.render_row(&mut stdout, row_idx, self.col_offset, end_col)?;
+        }
+
+        // Render bottom border
+        self.render_border(&mut stdout, "bottom")?;
+
+        // Render status bar
+        self.render_status_bar(&mut stdout)?;
+
+        stdout.flush()
+    }
+
+    /// Render a table border
+    fn render_border(&self, stdout: &mut impl Write, position: &str) -> io::Result<()> {
+        let (left, middle, right, line) = match position {
+            "top" => ('╭', '┬', '╮', '─'),
+            "middle" => ('├', '┼', '┤', '─'),
+            "bottom" => ('╰', '┴', '╯', '─'),
+            _ => ('├', '┼', '┤', '─'),
+        };
+
+        let visible_cols = self.visible_column_count();
+        let end_col = (self.col_offset + visible_cols).min(self.data.columns.len());
+
+        let mut border = String::new();
+        border.push(left);
+
+        for (i, col) in self.data.columns[self.col_offset..end_col].iter().enumerate() {
+            border.push_str(&line.to_string().repeat(col.display_width + 2));
+            if i < end_col - self.col_offset - 1 {
+                border.push(middle);
+            }
+        }
+        border.push(right);
+
+        writeln!(stdout, "{}", border)
+    }
+
+    /// Render the header row
+    fn render_header(&self, stdout: &mut impl Write, start_col: usize, end_col: usize) -> io::Result<()> {
+        let mut row_str = String::from("│");
+
+        for col in &self.data.columns[start_col..end_col] {
+            let padded = format!(" {:^width$} ", col.header, width = col.display_width);
+            row_str.push_str(&padded);
+            row_str.push('│');
+        }
+
+        // Use bold/cyan for header
+        execute!(stdout, SetForegroundColor(Color::Cyan))?;
+        write!(stdout, "{}", row_str)?;
+        execute!(stdout, ResetColor)?;
+        writeln!(stdout)
+    }
+
+    /// Render a data row
+    ///
+    /// Sprint 8 Bug Fix: Write leading border, simplified logic
+    fn render_row(&self, stdout: &mut impl Write, row_idx: usize, start_col: usize, end_col: usize) -> io::Result<()> {
+        // Sprint 8 Fix: Write leading border FIRST
+        write!(stdout, "│")?;
+
+        for col in &self.data.columns[start_col..end_col] {
+            let value = col.values.get(row_idx).map(|s| s.as_str()).unwrap_or("");
+            let is_null = value == "[NULL]";
+
+            // Pad value to column width
+            let padded = format!(" {:width$} ", value, width = col.display_width);
+
+            if is_null {
+                // Dim color for NULL values
+                execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+                write!(stdout, "{}", padded)?;
+                execute!(stdout, ResetColor)?;
+            } else {
+                write!(stdout, "{}", padded)?;
+            }
+
+            // Write column separator
+            write!(stdout, "│")?;
+        }
+
+        writeln!(stdout)
+    }
+
+    /// Render the status bar
+    fn render_status_bar(&self, stdout: &mut impl Write) -> io::Result<()> {
+        let visible_cols = self.visible_column_count();
+        let end_col = (self.col_offset + visible_cols).min(self.data.columns.len());
+        let end_row = (self.row_offset + self.page_size).min(self.data.row_count);
+
+        // Calculate progress percentage
+        let progress = if self.data.row_count == 0 {
+            100
+        } else {
+            (end_row * 100) / self.data.row_count
+        };
+
+        // Build status line
+        let col_status = format!(
+            "Columns {}-{} of {}",
+            self.col_offset + 1,
+            end_col,
+            self.data.columns.len()
+        );
+
+        let row_status = format!(
+            "Rows {}-{} of {} ({}%)",
+            self.row_offset + 1,
+            end_row,
+            self.total_rows,
+            progress
+        );
+
+        let nav_hints = "j/k:scroll  Space/b:page  Left/Right:columns  g/G:first/last  q:exit";
+
+        writeln!(stdout)?;
+        execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+        writeln!(stdout, "{} | {} | {}", col_status, row_status, nav_hints)?;
+        execute!(stdout, ResetColor)?;
+
+        Ok(())
+    }
+
+    /// Handle navigation input
+    fn handle_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            // Exit pager
+            KeyCode::Char('q') | KeyCode::Esc => return false,
+
+            // Vertical navigation
+            KeyCode::Char('j') | KeyCode::Down => {
+                if self.row_offset + self.page_size < self.data.row_count {
+                    self.row_offset += 1;
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.row_offset = self.row_offset.saturating_sub(1);
+            }
+            KeyCode::Char(' ') | KeyCode::PageDown => {
+                let max_offset = self.data.row_count.saturating_sub(self.page_size);
+                self.row_offset = (self.row_offset + self.page_size).min(max_offset);
+            }
+            KeyCode::Char('b') | KeyCode::PageUp => {
+                self.row_offset = self.row_offset.saturating_sub(self.page_size);
+            }
+            KeyCode::Char('g') | KeyCode::Home => {
+                self.row_offset = 0;
+            }
+            KeyCode::Char('G') | KeyCode::End => {
+                self.row_offset = self.data.row_count.saturating_sub(self.page_size);
+            }
+
+            // Horizontal navigation (column windowing)
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.col_offset = self.col_offset.saturating_sub(1);
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                if self.col_offset + self.visible_column_count() < self.data.columns.len() {
+                    self.col_offset += 1;
+                }
+            }
+
+            // Ctrl-Left: Jump to first column
+            KeyCode::Char('H') => {
+                self.col_offset = 0;
+            }
+            // Ctrl-Right: Jump to last column window
+            KeyCode::Char('L') => {
+                let visible = self.visible_column_count();
+                self.col_offset = self.data.columns.len().saturating_sub(visible);
+            }
+
+            _ => {}
+        }
+        true // Continue paging
+    }
+
+    /// Run the pager event loop
+    pub fn run(&mut self) -> io::Result<()> {
+        // Enter alternate screen and raw mode
+        let mut stdout = io::stdout();
+        enable_raw_mode()?;
+        execute!(stdout, EnterAlternateScreen, Hide)?;
+
+        // Initial render
+        self.render()?;
+
+        // Event loop
+        loop {
+            if event::poll(std::time::Duration::from_millis(100))? {
+                if let Event::Key(key) = event::read()? {
+                    if !self.handle_key(key) {
+                        break; // Exit pager
+                    }
+                    self.render()?;
+                }
+                if let Event::Resize(w, h) = event::read().unwrap_or(Event::FocusGained) {
+                    self.term_width = w as usize;
+                    self.term_height = h as usize;
+                    self.page_size = self.term_height.saturating_sub(5);
+                    self.render()?;
+                }
+            }
+        }
+
+        // Leave alternate screen and disable raw mode
+        execute!(stdout, Show, LeaveAlternateScreen)?;
+        disable_raw_mode()?;
+
+        Ok(())
+    }
+}
+
+/// Represents paged output with navigation state (legacy API compatibility)
+#[allow(dead_code)]
 pub struct PagedOutput {
     /// The formatted table lines
     lines: Vec<String>,
@@ -134,141 +599,77 @@ impl PagedOutput {
         self.lines.len()
     }
 
-    /// Get the current page of content with horizontal scrolling applied
-    pub fn current_page(&self) -> Vec<&str> {
-        let page_size = self.config.effective_page_size();
-        let end = (self.scroll_y + page_size).min(self.lines.len());
+    /// Get the full content as a string
+    pub fn content(&self) -> String {
+        self.lines.join("\n")
+    }
+}
 
-        self.lines[self.scroll_y..end]
-            .iter()
-            .map(|s| s.as_str())
-            .collect()
+/// Display content using the custom pager for interactive scrolling
+///
+/// Sprint 8: Complete rewrite using crossterm instead of minus.
+/// CRITICAL: 'q' now returns to REPL instead of exiting the program.
+///
+/// # Arguments
+/// * `content` - The content to display (typically formatted table output)
+/// * `row_count` - Number of rows in the result (for the status bar)
+/// * `config` - Pager configuration
+///
+/// # Returns
+/// * `Ok(true)` if paging was used
+/// * `Ok(false)` if content didn't need paging (should be displayed directly)
+/// * `Err` if paging failed
+pub fn display_with_pager(
+    content: &str,
+    row_count: usize,
+    config: &PagerConfig,
+) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    let paged = PagedOutput::new(content.to_string(), config.clone());
+
+    if !paged.needs_paging() {
+        // Content doesn't need paging - return false so caller can display directly
+        return Ok(false);
     }
 
-    /// Get the visible portion of a line accounting for horizontal scroll
-    pub fn visible_line(&self, line: &str) -> String {
-        if self.scroll_x == 0 && !self.needs_horizontal_scrolling {
-            return line.to_string();
-        }
+    log::debug!(
+        "Starting custom pager for {} lines ({} rows)",
+        paged.total_lines(),
+        row_count
+    );
 
-        let visible_width = self.config.effective_visible_width();
+    // Create and run the pager
+    let mut pager = Pager::new(content.to_string(), row_count, config);
 
-        // Handle horizontal scrolling by character position
-        let chars: Vec<char> = line.chars().collect();
+    // Run pager - this blocks until user presses 'q'
+    // CRITICAL: This returns normally, it does NOT exit the program
+    pager.run()?;
 
-        if self.scroll_x >= chars.len() {
-            return String::new();
-        }
+    log::debug!("Pager exited normally, returning to REPL");
 
-        let visible_chars: String = chars[self.scroll_x..]
-            .iter()
-            .take(visible_width)
-            .collect();
+    Ok(true)
+}
 
-        // Add scroll indicators
-        let left_indicator = if self.scroll_x > 0 { "<" } else { " " };
-        let right_indicator = if self.scroll_x + visible_width < chars.len() {
-            ">"
-        } else {
-            " "
-        };
-
-        format!("{}{}{}", left_indicator, visible_chars, right_indicator)
+/// Check if content should be paged based on configuration and size
+pub fn should_page(content: &str, config: &PagerConfig) -> bool {
+    if !config.vertical_paging && !config.horizontal_scrolling {
+        return false;
     }
 
-    /// Scroll down by one line
-    pub fn scroll_down(&mut self) {
-        let page_size = self.config.effective_page_size();
-        if self.scroll_y + page_size < self.lines.len() {
-            self.scroll_y += 1;
-        }
-    }
+    let lines: Vec<&str> = content.lines().collect();
+    let line_count = lines.len();
+    let max_width = lines.iter().map(|l| l.width()).max().unwrap_or(0);
 
-    /// Scroll up by one line
-    pub fn scroll_up(&mut self) {
-        if self.scroll_y > 0 {
-            self.scroll_y -= 1;
-        }
-    }
+    let page_size = config.effective_page_size();
+    let visible_width = config.effective_visible_width();
 
-    /// Scroll down by one page
-    pub fn page_down(&mut self) {
-        let page_size = self.config.effective_page_size();
-        let max_scroll = self.lines.len().saturating_sub(page_size);
-        self.scroll_y = (self.scroll_y + page_size).min(max_scroll);
-    }
+    let needs_vertical =
+        config.vertical_paging && line_count > config.min_rows_for_paging && line_count > page_size;
 
-    /// Scroll up by one page
-    pub fn page_up(&mut self) {
-        let page_size = self.config.effective_page_size();
-        self.scroll_y = self.scroll_y.saturating_sub(page_size);
-    }
+    let needs_horizontal = config.horizontal_scrolling
+        && max_width > config.min_cols_for_scrolling
+        && max_width > visible_width;
 
-    /// Scroll left by one column
-    pub fn scroll_left(&mut self) {
-        if self.scroll_x > 0 {
-            self.scroll_x -= 1;
-        }
-    }
-
-    /// Scroll right by one column
-    pub fn scroll_right(&mut self) {
-        let visible_width = self.config.effective_visible_width();
-        if self.scroll_x + visible_width < self.max_line_width {
-            self.scroll_x += 1;
-        }
-    }
-
-    /// Scroll to the beginning
-    pub fn scroll_home(&mut self) {
-        self.scroll_y = 0;
-        self.scroll_x = 0;
-    }
-
-    /// Scroll to the end
-    pub fn scroll_end(&mut self) {
-        let page_size = self.config.effective_page_size();
-        self.scroll_y = self.lines.len().saturating_sub(page_size);
-    }
-
-    /// Get the status line for the pager
-    pub fn status_line(&self) -> String {
-        let page_size = self.config.effective_page_size();
-        let visible_end = (self.scroll_y + page_size).min(self.lines.len());
-        let progress = if self.lines.is_empty() {
-            100
-        } else {
-            (visible_end * 100) / self.lines.len()
-        };
-
-        let mut status = format!(
-            "Lines {}-{} of {} ({}%)",
-            self.scroll_y + 1,
-            visible_end,
-            self.lines.len(),
-            progress
-        );
-
-        if self.needs_horizontal_scrolling {
-            let visible_width = self.config.effective_visible_width();
-            status.push_str(&format!(
-                " | Cols {}-{} of {}",
-                self.scroll_x + 1,
-                (self.scroll_x + visible_width).min(self.max_line_width),
-                self.max_line_width
-            ));
-        }
-
-        status.push_str(" | q: quit");
-        if self.needs_vertical_paging {
-            status.push_str(" | j/k: scroll");
-        }
-        if self.needs_horizontal_scrolling {
-            status.push_str(" | h/l: scroll horiz");
-        }
-
-        status
-    }
+    needs_vertical || needs_horizontal
 }
 
 #[cfg(test)]
@@ -301,87 +702,44 @@ mod tests {
     }
 
     #[test]
-    fn test_paged_output_scroll() {
-        let mut lines = Vec::new();
-        for i in 0..100 {
-            lines.push(format!("Line {}", i));
-        }
-        let content = lines.join("\n");
-
-        let mut config = PagerConfig::default();
-        config.page_size = 10;
-        config.min_rows_for_paging = 5;
-
-        let mut paged = PagedOutput::new(content, config);
-        assert!(paged.needs_paging());
-        assert_eq!(paged.scroll_y, 0);
-
-        paged.scroll_down();
-        assert_eq!(paged.scroll_y, 1);
-
-        paged.scroll_up();
-        assert_eq!(paged.scroll_y, 0);
-
-        paged.page_down();
-        assert_eq!(paged.scroll_y, 10);
-
-        paged.page_up();
-        assert_eq!(paged.scroll_y, 0);
+    fn test_truncate_cell_short() {
+        let value = "Hello";
+        assert_eq!(truncate_cell(value, 10), "Hello");
     }
 
     #[test]
-    fn test_paged_output_horizontal_scroll() {
-        let long_line = "A".repeat(200);
-        let content = format!("{}\n{}\n{}", long_line, long_line, long_line);
-
-        let mut config = PagerConfig::default();
-        config.visible_width = 80;
-        config.min_cols_for_scrolling = 50;
-
-        let mut paged = PagedOutput::new(content, config);
-        assert!(paged.needs_horizontal_scrolling);
-        assert_eq!(paged.scroll_x, 0);
-
-        paged.scroll_right();
-        assert_eq!(paged.scroll_x, 1);
-
-        paged.scroll_left();
-        assert_eq!(paged.scroll_x, 0);
+    fn test_truncate_cell_long() {
+        let value = "This is a very long string that should be truncated";
+        let truncated = truncate_cell(value, 20);
+        // The display width should be <= 20, byte length may be longer due to ellipsis
+        assert!(truncated.width() <= 20);
+        assert!(truncated.ends_with('…'));
     }
 
     #[test]
-    fn test_status_line() {
-        let mut lines = Vec::new();
-        for i in 0..50 {
-            lines.push(format!("Line {}", i));
-        }
-        let content = lines.join("\n");
-
-        let mut config = PagerConfig::default();
-        config.page_size = 10;
-        config.min_rows_for_paging = 5;
-
-        let paged = PagedOutput::new(content, config);
-        let status = paged.status_line();
-
-        assert!(status.contains("Lines 1-10 of 50"));
-        assert!(status.contains("q: quit"));
+    fn test_truncate_cell_exact() {
+        let value = "ExactLen";
+        assert_eq!(truncate_cell(value, 8), "ExactLen");
     }
 
     #[test]
-    fn test_visible_line_with_scroll() {
-        let line = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    fn test_parse_row_cells() {
+        let line = "│ id │ name │ value │";
+        let cells = parse_row_cells(line);
+        assert_eq!(cells, vec!["id", "name", "value"]);
+    }
 
-        let mut config = PagerConfig::default();
-        config.visible_width = 10;
-        config.min_cols_for_scrolling = 5;
-        config.horizontal_scrolling = true;
+    #[test]
+    fn test_is_separator_line() {
+        assert!(is_separator_line("├────┼────────┼───────┤"));
+        assert!(is_separator_line("╭────┬────────┬───────╮"));
+        assert!(!is_separator_line("│ id │ name   │ value │"));
+    }
 
-        let mut paged = PagedOutput::new(line.to_string(), config);
-        paged.scroll_x = 5;
-
-        let visible = paged.visible_line(line);
-        // Should show scroll indicators and visible portion
-        assert!(visible.starts_with('<'));  // Left indicator shows more content
+    #[test]
+    fn test_should_page_small_content() {
+        let content = "Line 1\nLine 2\nLine 3";
+        let config = PagerConfig::default();
+        assert!(!should_page(content, &config));
     }
 }

@@ -39,13 +39,7 @@ pub fn execute<W: Write>(
         .with_color(use_color);
 
     // Write output
-    write_output_with_timing(
-        &result,
-        writer,
-        args.format,
-        &format_options,
-        args.timing,
-    )?;
+    write_output_with_timing(&result, writer, args.format, &format_options, args.timing)?;
 
     Ok(())
 }

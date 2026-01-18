@@ -49,8 +49,8 @@ chrono = "0.4"
 # Syntax highlighting
 nu-ansi-term = "0.50"
 
-# Paging
-minus = { version = "5.6", features = ["search"] }
+# Terminal / Paging
+# Sprint 8: Custom pager using crossterm directly (removed minus dependency)
 crossterm = "0.28"
 unicode-width = "0.2"
 
@@ -58,6 +58,7 @@ unicode-width = "0.2"
 assert_cmd = "2.0"
 predicates = "3.1"
 tempfile = "3.10"
+expectrl = "0.7"
 
 [profile.release]
 opt-level = "z"

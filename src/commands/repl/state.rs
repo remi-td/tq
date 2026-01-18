@@ -63,7 +63,10 @@ impl ReplState {
     }
 
     /// Create a new REPL state with connection string stored
-    pub fn with_connection_string(connection_info: ConnectionConfig, connection_string: String) -> Self {
+    pub fn with_connection_string(
+        connection_info: ConnectionConfig,
+        connection_string: String,
+    ) -> Self {
         let mut state = Self::new(connection_info);
         state.connection_string = Some(connection_string);
         state
@@ -200,10 +203,15 @@ impl ReplState {
     ///
     /// This clears the metadata cache and resets session-specific state
     /// while preserving settings like pager and colors.
-    pub fn update_connection(&mut self, new_config: ConnectionConfig, new_connection_string: Option<String>) {
+    pub fn update_connection(
+        &mut self,
+        new_config: ConnectionConfig,
+        new_connection_string: Option<String>,
+    ) {
         // Clear metadata cache for new connection
         self.metadata_cache.clear();
-        self.metadata_cache.set_current_database(&new_config.database);
+        self.metadata_cache
+            .set_current_database(&new_config.database);
 
         // Clear last result (not valid for new connection)
         self.last_result = None;
@@ -338,7 +346,10 @@ mod tests {
         // Connection info should be updated
         assert_eq!(state.connection_info().host, "newhost");
         assert_eq!(state.connection_info().database, "newdb");
-        assert_eq!(state.connection_string(), Some("newuser@newhost:2025/newdb"));
+        assert_eq!(
+            state.connection_string(),
+            Some("newuser@newhost:2025/newdb")
+        );
 
         // Settings should be preserved
         assert!(!state.is_pager_enabled());

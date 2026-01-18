@@ -1,7 +1,7 @@
 # tq (Teradata Query) - Specifications
 
 **Version:** 1.5.0
-**Status:** Active Development - Sprint 7 Complete
+**Status:** Active Development - Sprint 8 (Quality Recovery) in Progress
 **Last Updated:** 2026-01-18
 
 ---
@@ -77,7 +77,7 @@
 | `/quit` metacommand | ✅ Implemented | `/quit` | P0 |
 | `/help` metacommand | ✅ Implemented | `/help` | P0 |
 
-#### Phase 2 - Enhanced REPL ✅ Complete (Sprint 4-5)
+#### Phase 2 - Enhanced REPL (Sprint 4-5)
 
 | Feature | Status | Command | Sprint | Priority |
 |---------|--------|---------|--------|----------|
@@ -87,22 +87,22 @@
 | Vi keybindings | ✅ Implemented | `--editor-mode vi` | 4 | P1 |
 | Emacs keybindings | ✅ Implemented | `--editor-mode emacs` | 4 | P1 |
 | SQL syntax highlighting | ✅ Implemented | Auto-enabled in TTY | 5 | P1 |
-| Result paging (horizontal) | ✅ Implemented | Wide tables | 5 | P1 |
-| Result paging (vertical) | ✅ Implemented | Long results | 5 | P1 |
+| Result paging (horizontal) | 🔧 In Repair | Wide tables | 5 | P1 |
+| Result paging (vertical) | 🔧 In Repair | Long results | 5 | P1 |
 | Query timing display | ✅ Implemented | Show execution time | 5 | P1 |
 
-#### Phase 3 - Advanced REPL ✅ Complete (Sprint 6)
+#### Phase 3 - Advanced REPL (Sprint 6-7)
 
 | Feature | Status | Command | Sprint | Priority |
 |---------|--------|---------|--------|----------|
-| Table formatting fix | ✅ Sprint 6 | All table output | 6 | P0 |
-| Tab completion (keywords) | ✅ Sprint 6 | Tab key | 6 | P1 |
-| Tab completion (tables) | ✅ Sprint 7 | Tab key | 7 | P0 |
-| Tab completion (columns) | ✅ Sprint 7 | Tab key | 7 | P1 |
-| `/export` metacommand | ✅ Sprint 6 | `/export [format] [file]` | 6 | P1 |
-| `/pager on\|off` metacommand | ✅ Sprint 6 | `/pager on\|off` | 6 | P2 |
-| `/colors` metacommand | ✅ Sprint 6 | `/colors on\|off` | 6 | P2 |
-| `/logon` metacommand | ✅ Sprint 7 | `/logon [connection-string]` | 7 | P1 |
+| Table formatting fix | 🔧 In Repair | All table output | 6 | P0 |
+| Tab completion (keywords) | ✅ Implemented | Tab key | 6 | P1 |
+| Tab completion (tables) | 🔧 In Repair | Tab key | 7 | P0 |
+| Tab completion (columns) | 🔧 In Repair | Tab key | 7 | P1 |
+| `/export` metacommand | ✅ Implemented | `/export [format] [file]` | 6 | P1 |
+| `/pager on\|off` metacommand | ✅ Implemented | `/pager on\|off` | 6 | P2 |
+| `/colors` metacommand | ✅ Implemented | `/colors on\|off` | 6 | P2 |
+| `/logon` metacommand | ✅ Implemented | `/logon [connection-string]` | 7 | P1 |
 
 ### Batch Mode 📋 Planned
 
@@ -130,6 +130,7 @@
 **Legend:**
 - ✅ Implemented and tested
 - 🚧 In progress (current sprint)
+- 🔧 In repair (broken, being fixed)
 - 📋 Planned (future sprint)
 - 🔲 Deferred
 
@@ -189,7 +190,7 @@
 
 **Sprint Review:** [Sprint 6 Complete Review](../sprints/sprint-6-review.md)
 
-### Sprint 7: Interactive Mode Phase 4 - Database-Aware Features ✅ Complete
+### Sprint 7: Interactive Mode Phase 4 - Database-Aware Features (Quality Issues Found)
 **Goal:** Enhance REPL with intelligent tab completion for database objects and dynamic connection management
 
 **Delivered Features:**
@@ -197,13 +198,32 @@
 2. **Tab Completion for Column Names (P1)** - Complete after SELECT, WHERE, ORDER BY with SQL context awareness
 3. **`/logon` Metacommand (P1)** - Dynamic connection switching without restarting REPL
 
-**Status:** Complete
-**Completion Date:** 2026-01-18
+**Status:** 🔧 Features Do Not Work - In Repair (Sprint 8)
+**Completion Date:** 2026-01-18 (marked complete prematurely)
 **Version Released:** v1.5.0
 
 **Sprint Review:** [Sprint 7 Review](../sprints/sprint-7-review.md)
 
-### Sprint 8+: Batch Mode & Configuration 📋 Future
+**Quality Issue:** Features passed unit tests but fail against real Teradata databases. Manual testing was not performed.
+
+### Sprint 8: Quality Recovery - Critical Bug Fixes 🚧 In Progress
+**Goal:** Fix all critical bugs from Sprints 5-7 and restore user trust through mandatory live database testing
+
+**Critical Bugs Being Fixed:**
+1. **Bug 1 (P0):** Table padding completely broken - columns misaligned, output unreadable
+2. **Bug 2 (P0):** Tab completion doesn't work at all - no completions, no feedback
+3. **Bug 3 (P0):** Result paging with arrows doesn't work - navigation fails
+4. **Bug 4 (P1):** Incorrect LIMIT hint message - uses MySQL syntax instead of Teradata TOP/SAMPLE
+
+**Status:** 🚧 In Progress
+**Target Completion:** 2026-01-19
+**Version Target:** v1.5.1
+
+**Sprint Planning:** [Sprint 8 Planning](../sprints/sprint-8-planning.md)
+
+**Root Cause:** Unit tests alone insufficient for database client tools. Live database integration testing now mandatory for all future sprints.
+
+### Sprint 9+: Batch Mode & Configuration 📋 Future
 **Goals:**
 - File input (`--file`, stdin)
 - Streaming large results
@@ -254,6 +274,7 @@ Complete technical specifications are organized by domain:
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
+| 2026-01-18 | 1.5.1-dev | Sprint 8: Mark broken features as 🔧 In Repair, add Sprint 8 roadmap, add 🔧 to legend | CLI UX Designer Agent |
 | 2026-01-19 | 1.5.0-dev | Sprint 7 design phase: marked table/column completion and /logon as 🚧 In Progress | CLI UX Designer Agent |
 | 2026-01-18 | 1.2.0 | Restructured into main spec + detailed specs | CLI UX Designer Agent |
 | 2026-01-17 | 1.1.0 | Added Sprint 4 specifications | CLI UX Designer Agent |

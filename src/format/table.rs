@@ -12,6 +12,7 @@ use comfy_table::{
     modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Attribute, Cell, CellAlignment, Color,
     ContentArrangement, Table,
 };
+use crossterm::terminal;
 use std::io::Write;
 
 /// Table formatting options
@@ -21,7 +22,8 @@ pub struct TableOptions {
     pub show_header: bool,
     /// Use colors (for terminal output)
     pub use_color: bool,
-    /// Maximum column width before wrapping
+    /// Maximum column width before wrapping (deprecated, terminal width is auto-detected)
+    #[allow(dead_code)]
     pub max_column_width: Option<u16>,
 }
 
@@ -36,11 +38,7 @@ impl Default for TableOptions {
 }
 
 /// Write query results as a formatted table
-pub fn write<W: Write>(
-    result: &QueryResult,
-    writer: &mut W,
-    options: &TableOptions,
-) -> Result<()> {
+pub fn write<W: Write>(result: &QueryResult, writer: &mut W, options: &TableOptions) -> Result<()> {
     if result.is_empty() {
         writeln!(writer, "No results returned.")?;
         return Ok(());
@@ -51,11 +49,16 @@ pub fn write<W: Write>(
     // Configure table style
     table.load_preset(UTF8_FULL);
     table.apply_modifier(UTF8_ROUND_CORNERS);
-    table.set_content_arrangement(ContentArrangement::Dynamic);
 
-    // Set maximum column width if specified
-    if let Some(max_width) = options.max_column_width {
-        table.set_width(max_width * result.columns.len() as u16);
+    // Use DynamicFullWidth to expand table to terminal width
+    // This properly handles wide tables by dynamically sizing columns
+    // to fit within the terminal while wrapping long content
+    table.set_content_arrangement(ContentArrangement::DynamicFullWidth);
+
+    // Detect terminal width and set table width accordingly
+    // This ensures proper column sizing based on actual terminal dimensions
+    if let Ok((term_width, _)) = terminal::size() {
+        table.set_width(term_width);
     }
 
     // Add header row

@@ -1,9 +1,9 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.5.0 (Sprint 7)
+**Version:** 1.6.0 (Sprint 8)
 **Last Updated:** 2026-01-18
-**Base Commit:** 2b8320d
+**Base Commit:** e0ec05a
 
 ## Overview
 
@@ -60,6 +60,30 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 - **TC023**: CSV Format - Special Character Escaping
 - **TC042**: REPL Performance - Table Completion Benchmark
 - **TC043**: REPL Performance - Column Completion Benchmark
+- **TC044**: Table Formatting - Basic 5 Column Layout (Sprint 8)
+- **TC045**: Table Formatting - Wide Table with 16+ Columns (Sprint 8)
+- **TC046**: Table Formatting - NULL Values and Proper Alignment (Sprint 8)
+- **TC047**: Table Formatting - Very Long Values and Truncation (Sprint 8)
+- **TC048**: Table Formatting - Mixed Data Types Alignment (Sprint 8)
+- **TC049**: Tab Completion - FROM Shows Databases and Current DB Tables (Sprint 8)
+- **TC050**: Tab Completion - FROM database.TAB Shows Tables in That Database (Sprint 8)
+- **TC051**: Tab Completion - Loading Indicator for Slow Metadata Queries (Sprint 8)
+- **TC053**: Tab Completion - Cache Cleared After CREATE TABLE DDL (Sprint 8)
+- **TC054**: Tab Completion - Cache Cleared After DROP TABLE DDL (Sprint 8)
+- **TC055**: Tab Completion - Works With Alias Context (Sprint 8)
+- **TC056**: Tab Completion - Handles Multiple Databases Gracefully (Sprint 8)
+- **TC057**: Result Paging - Vertical Paging with j/k Keys (Sprint 8)
+- **TC058**: Result Paging - Vertical Paging with PageUp/PageDown Keys (Sprint 8)
+- **TC059**: Result Paging - Horizontal Paging with h/l Keys (Sprint 8)
+- **TC060**: Result Paging - Horizontal Paging with Arrow Keys (Sprint 8)
+- **TC061**: Result Paging - Pager Shows Position Indicator (Sprint 8)
+- **TC062**: Result Paging - Exit Pager with q or Esc (Sprint 8)
+- **TC063**: Result Paging - /pager on and /pager off Metacommands (Sprint 8)
+- **TC064**: LIMIT Hint - Query with 100+ Rows Shows Correct Teradata Syntax (Sprint 8)
+- **TC065**: LIMIT Hint - Help Text Uses Teradata Syntax (Sprint 8)
+
+### Error-Handling (Sprint 8 Additions)
+- **TC052**: Tab Completion - Error Messages When Metadata Query Fails
 
 ### Security
 - **TC022**: Security - No Password Exposure
@@ -83,6 +107,13 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 | TC028 | Table Completion - UPDATE | Functionality |
 | TC037 | /logon - Connection Switch | Functionality |
 | TC038 | /logon - Failure Handling | Error-Handling |
+| TC044 | Table Formatting - 5 Columns | Functionality (Sprint 8) |
+| TC045 | Table Formatting - 16+ Columns | Functionality (Sprint 8) |
+| TC049 | Tab Completion - FROM | Functionality (Sprint 8) |
+| TC050 | Tab Completion - Database.Table | Functionality (Sprint 8) |
+| TC052 | Tab Completion - Error Handling | Error-Handling (Sprint 8) |
+| TC057 | Paging - j/k Keys | Functionality (Sprint 8) |
+| TC062 | Paging - Exit with q/Esc | Functionality (Sprint 8) |
 
 ### High Priority (Important Features)
 | Test ID | Feature | Category |
@@ -107,6 +138,16 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 | TC039 | /logon - State Preservation | Functionality |
 | TC042 | Table Completion Performance | Integration |
 | TC043 | Column Completion Performance | Integration |
+| TC046 | Table Formatting - NULLs | Functionality (Sprint 8) |
+| TC048 | Table Formatting - Mixed Types | Functionality (Sprint 8) |
+| TC051 | Tab Completion - Loading Indicator | Usability (Sprint 8) |
+| TC053 | Tab Completion - CREATE TABLE Cache | Functionality (Sprint 8) |
+| TC054 | Tab Completion - DROP TABLE Cache | Functionality (Sprint 8) |
+| TC058 | Paging - PageUp/PageDown | Functionality (Sprint 8) |
+| TC059 | Paging - h/l Keys | Functionality (Sprint 8) |
+| TC061 | Paging - Position Indicator | Usability (Sprint 8) |
+| TC063 | Paging - /pager on/off | Functionality (Sprint 8) |
+| TC064 | LIMIT Hint - Correct Syntax | Usability (Sprint 8) |
 
 ### Medium Priority (Quality of Life)
 | Test ID | Feature | Category |
@@ -120,6 +161,11 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 | TC035 | Column Cache Management | Functionality |
 | TC040 | /logon - Auth Mechanisms | Functionality |
 | TC041 | /logon - Performance | Functionality |
+| TC047 | Table Formatting - Long Values | Functionality (Sprint 8) |
+| TC055 | Tab Completion - Alias Context | Functionality (Sprint 8) |
+| TC056 | Tab Completion - Multiple Databases | Functionality (Sprint 8) |
+| TC060 | Paging - Arrow Keys | Functionality (Sprint 8) |
+| TC065 | LIMIT Hint - Help Text | Usability (Sprint 8) |
 
 ## Feature Coverage Matrix
 

@@ -60,7 +60,6 @@ impl TableReference {
     }
 }
 
-
 /// Analyze SQL input and determine the completion context
 ///
 /// # Arguments
@@ -160,7 +159,11 @@ fn is_table_context(upper: &str, last_word: &str) -> bool {
         }
 
         // Stop if we hit a column context keyword
-        if ["WHERE", "SELECT", "AND", "OR", "ON", "SET", "ORDER", "GROUP", "HAVING"].contains(&word) {
+        if [
+            "WHERE", "SELECT", "AND", "OR", "ON", "SET", "ORDER", "GROUP", "HAVING",
+        ]
+        .contains(&word)
+        {
             return false;
         }
     }
@@ -307,7 +310,12 @@ fn check_table_alias_qualified_with_tables(
 
         // Also check table names (unaliased)
         for table in tables {
-            let table_name_upper = table.name.split('.').last().unwrap_or(&table.name).to_uppercase();
+            let table_name_upper = table
+                .name
+                .split('.')
+                .last()
+                .unwrap_or(&table.name)
+                .to_uppercase();
             if table_name_upper == alias_upper || table.name.to_uppercase() == alias_upper {
                 return Some(CompletionContext::ColumnName {
                     tables: vec![table.clone()],
@@ -333,7 +341,13 @@ fn check_table_alias_qualified_with_tables(
                     .as_ref()
                     .map(|a| a.to_uppercase() == alias_upper)
                     .unwrap_or(false)
-                    || table.name.split('.').last().unwrap_or(&table.name).to_uppercase() == alias_upper;
+                    || table
+                        .name
+                        .split('.')
+                        .last()
+                        .unwrap_or(&table.name)
+                        .to_uppercase()
+                        == alias_upper;
 
                 if is_match {
                     return Some(CompletionContext::ColumnName {
@@ -360,7 +374,9 @@ fn extract_table_references(sql: &str) -> Option<Vec<TableReference>> {
     let after_from = &sql[from_pos + 6..]; // 6 = " FROM ".len()
 
     // Find end of table list (WHERE, GROUP BY, ORDER BY, etc.)
-    let end_keywords = [" WHERE ", " GROUP ", " ORDER ", " HAVING ", " LIMIT ", " UNION "];
+    let end_keywords = [
+        " WHERE ", " GROUP ", " ORDER ", " HAVING ", " LIMIT ", " UNION ",
+    ];
     let table_section_end = end_keywords
         .iter()
         .filter_map(|kw| upper[from_pos..].find(kw))
@@ -397,18 +413,25 @@ fn extract_table_references(sql: &str) -> Option<Vec<TableReference>> {
 
         // Check for JOIN keyword
         let join_offset = [
-            "INNER JOIN ", "LEFT OUTER JOIN ", "RIGHT OUTER JOIN ", "FULL OUTER JOIN ",
-            "LEFT JOIN ", "RIGHT JOIN ", "FULL JOIN ", "CROSS JOIN ", "JOIN "
+            "INNER JOIN ",
+            "LEFT OUTER JOIN ",
+            "RIGHT OUTER JOIN ",
+            "FULL OUTER JOIN ",
+            "LEFT JOIN ",
+            "RIGHT JOIN ",
+            "FULL JOIN ",
+            "CROSS JOIN ",
+            "JOIN ",
         ]
-            .iter()
-            .filter_map(|j| {
-                if current_upper.starts_with(j) {
-                    Some(j.len())
-                } else {
-                    None
-                }
-            })
-            .next();
+        .iter()
+        .filter_map(|j| {
+            if current_upper.starts_with(j) {
+                Some(j.len())
+            } else {
+                None
+            }
+        })
+        .next();
 
         if let Some(offset) = join_offset {
             current = current[offset..].trim_start();
@@ -440,14 +463,18 @@ fn extract_table_references(sql: &str) -> Option<Vec<TableReference>> {
 /// Find the position of the next JOIN keyword in the string
 fn find_next_join_position(upper: &str) -> Option<usize> {
     let join_keywords = [
-        " INNER JOIN ", " LEFT OUTER JOIN ", " RIGHT OUTER JOIN ", " FULL OUTER JOIN ",
-        " LEFT JOIN ", " RIGHT JOIN ", " FULL JOIN ", " CROSS JOIN ", " JOIN "
+        " INNER JOIN ",
+        " LEFT OUTER JOIN ",
+        " RIGHT OUTER JOIN ",
+        " FULL OUTER JOIN ",
+        " LEFT JOIN ",
+        " RIGHT JOIN ",
+        " FULL JOIN ",
+        " CROSS JOIN ",
+        " JOIN ",
     ];
 
-    join_keywords
-        .iter()
-        .filter_map(|kw| upper.find(kw))
-        .min()
+    join_keywords.iter().filter_map(|kw| upper.find(kw)).min()
 }
 
 /// Parse a single table reference (name + optional alias)
@@ -484,9 +511,12 @@ fn parse_table_reference(s: &str) -> Option<(TableReference, &str)> {
 
     // Check for join keywords or clause endings (no alias)
     let stop_words: HashSet<&str> = [
-        "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "ON",
-        "WHERE", "GROUP", "ORDER", "HAVING", "LIMIT", "UNION", ","
-    ].iter().copied().collect();
+        "JOIN", "INNER", "LEFT", "RIGHT", "FULL", "CROSS", "ON", "WHERE", "GROUP", "ORDER",
+        "HAVING", "LIMIT", "UNION", ",",
+    ]
+    .iter()
+    .copied()
+    .collect();
 
     let first_word = rest_upper.split_whitespace().next().unwrap_or("");
     if stop_words.contains(first_word) || rest_trimmed.starts_with(',') {
@@ -572,7 +602,12 @@ mod tests {
     #[test]
     fn test_analyze_context_column_with_alias_qualifier() {
         let ctx = analyze_context("SELECT * FROM employees e WHERE e.", 34);
-        if let CompletionContext::ColumnName { tables, table_qualifier, .. } = ctx {
+        if let CompletionContext::ColumnName {
+            tables,
+            table_qualifier,
+            ..
+        } = ctx
+        {
             assert_eq!(tables.len(), 1);
             assert_eq!(table_qualifier, Some("e".to_string()));
         } else {
@@ -618,8 +653,9 @@ mod tests {
     #[test]
     fn test_extract_table_references_join() {
         let tables = extract_table_references(
-            "SELECT * FROM employees e JOIN departments d ON e.dept_id = d.id"
-        ).unwrap();
+            "SELECT * FROM employees e JOIN departments d ON e.dept_id = d.id",
+        )
+        .unwrap();
         assert_eq!(tables.len(), 2);
         assert_eq!(tables[0].name, "employees");
         assert_eq!(tables[0].alias, Some("e".to_string()));

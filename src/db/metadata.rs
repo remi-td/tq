@@ -277,10 +277,7 @@ impl MetadataCache {
 
         // Parse schema.table format
         let (schema, table) = if let Some(dot_pos) = table_name.find('.') {
-            (
-                Some(&table_name[..dot_pos]),
-                &table_name[dot_pos + 1..],
-            )
+            (Some(&table_name[..dot_pos]), &table_name[dot_pos + 1..])
         } else {
             (None, table_name)
         };
@@ -331,11 +328,7 @@ impl MetadataCache {
                     }
                 }
 
-                log::info!(
-                    "Loaded {} columns for table {}",
-                    columns.len(),
-                    table_name
-                );
+                log::info!("Loaded {} columns for table {}", columns.len(), table_name);
 
                 // Store with normalized key (uppercase for case-insensitive lookup)
                 let cache_key = table_name.to_uppercase();
@@ -389,6 +382,58 @@ impl MetadataCache {
         columns
             .iter()
             .filter(|c| c.name.to_uppercase().starts_with(&prefix_upper))
+            .collect()
+    }
+
+    /// Get distinct database names from cached tables
+    ///
+    /// Sprint 8 Bug Fix: Returns database names for Teradata's database.table model
+    pub fn get_databases(&self) -> Vec<String> {
+        let Some(tables) = &self.tables else {
+            return vec![];
+        };
+
+        // Collect unique database names
+        let mut databases: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for table in tables {
+            databases.insert(table.schema_name.clone());
+        }
+
+        let mut result: Vec<String> = databases.into_iter().collect();
+        result.sort();
+        result
+    }
+
+    /// Find databases matching a prefix (case-insensitive)
+    ///
+    /// Sprint 8 Bug Fix: For showing database names after FROM
+    pub fn find_databases_by_prefix(&self, prefix: &str) -> Vec<String> {
+        let databases = self.get_databases();
+        let prefix_upper = prefix.to_uppercase();
+
+        databases
+            .into_iter()
+            .filter(|db| db.to_uppercase().starts_with(&prefix_upper))
+            .collect()
+    }
+
+    /// Find tables in current database matching a prefix
+    ///
+    /// Sprint 8 Bug Fix: For showing unqualified table names in current database
+    pub fn find_tables_in_current_db_by_prefix(&self, prefix: &str) -> Vec<&TableInfo> {
+        let Some(tables) = &self.tables else {
+            return vec![];
+        };
+
+        let prefix_upper = prefix.to_uppercase();
+        let current_db_upper = self.current_database.to_uppercase();
+
+        tables
+            .iter()
+            .filter(|t| {
+                t.schema_name.to_uppercase() == current_db_upper
+                    && t.table_name.to_uppercase().starts_with(&prefix_upper)
+            })
             .collect()
     }
 }

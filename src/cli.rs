@@ -51,8 +51,7 @@ CONFIGURATION:\n  \
     port = 1025\n    \
     user = \"myuser\"\n    \
     database = \"mydb\"\n\n\
-For more information, visit: https://github.com/remi-td/tq"
-)]
+For more information, visit: https://github.com/remi-td/tq")]
 pub struct Cli {
     /// Global options that apply to all commands
     #[command(flatten)]
@@ -259,7 +258,12 @@ pub struct ReplArgs {
     /// Choose between emacs (default) or vi keybindings.
     /// emacs: Standard readline-style keybindings
     /// vi: Modal editing with insert/normal modes
-    #[arg(long, default_value = "emacs", value_name = "MODE", env = "TQ_EDITOR_MODE")]
+    #[arg(
+        long,
+        default_value = "emacs",
+        value_name = "MODE",
+        env = "TQ_EDITOR_MODE"
+    )]
     pub editor_mode: EditorMode,
 
     /// Default row limit for SELECT queries (0 = unlimited)

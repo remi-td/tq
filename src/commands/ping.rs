@@ -74,11 +74,7 @@ pub fn execute<W: Write>(
     // Print summary for multiple pings
     if count > 1 {
         writeln!(writer)?;
-        writeln!(
-            writer,
-            "--- {} ping statistics ---",
-            client.config().host
-        )?;
+        writeln!(writer, "--- {} ping statistics ---", client.config().host)?;
         writeln!(
             writer,
             "{} connections, {} successful, {} failed",

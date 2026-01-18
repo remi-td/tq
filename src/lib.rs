@@ -71,7 +71,9 @@ pub mod error;
 pub mod format;
 
 // Re-export commonly used types for convenience
-pub use cli::{Cli, Command, GlobalOpts, LogonMechanism, OutputFormat, PingArgs, QueryArgs, ReplArgs};
+pub use cli::{
+    Cli, Command, GlobalOpts, LogonMechanism, OutputFormat, PingArgs, QueryArgs, ReplArgs,
+};
 pub use config::Config;
 pub use db::{
     Alignment, ColumnMetadata, ConnectionConfig, DatabaseClient, QueryResult, Row, TeradataType,

@@ -1,8 +1,22 @@
 # tq CLI - Rust Architecture and Implementation Guide
 
-**Version:** 1.3.0
+**Version:** 1.3.1
 **Status:** Production Ready
-**Last Updated:** 2026-01-17
+**Last Updated:** 2026-01-18
+
+## Recent Changes (Sprint 8)
+
+### Bug Fixes
+- **Table Formatting**: Changed from `ContentArrangement::Dynamic` to `ContentArrangement::DynamicFullWidth` with terminal width detection. Tables now properly expand to use available terminal width.
+- **Tab Completion Feedback**: Error messages are now surfaced to users via pseudo-suggestions with `[Error: ...]` format instead of being silently logged. Status messages show `[Status: ...]` for loading/empty states.
+- **Result Paging**: The pager module is now properly integrated with the executor. Uses `minus` crate (with `static_output` feature) for interactive scrolling through large result sets.
+- **LIMIT Hint**: Changed error message from "Add LIMIT clause" to "Use TOP N or SAMPLE N" to reflect Teradata syntax.
+
+### Architecture Changes
+- `src/format/table.rs`: Uses `crossterm::terminal::size()` for dynamic terminal width detection
+- `src/commands/repl/pager.rs`: Added `display_with_pager()` and `should_page()` public functions
+- `src/commands/repl/executor.rs`: Integrated pager flow with state management
+- `src/commands/repl/metadata_completer.rs`: Added error/status suggestion methods for user feedback
 
 ---
 

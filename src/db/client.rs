@@ -68,16 +68,18 @@ impl DatabaseClient {
     ///
     /// Returns the round-trip latency if successful.
     pub fn ping(&self) -> Result<Duration> {
-        log::debug!("Pinging database at {}:{}", self.config.host, self.config.port);
+        log::debug!(
+            "Pinging database at {}:{}",
+            self.config.host,
+            self.config.port
+        );
 
         let start = Instant::now();
 
         // Create connection
         let connection_string = self.config.to_json_string();
-        let (u_log, conn_handle) =
-            teradatarustapi::create_connection(&connection_string).map_err(|e| {
-                self.map_connection_error(&e)
-            })?;
+        let (u_log, conn_handle) = teradatarustapi::create_connection(&connection_string)
+            .map_err(|e| self.map_connection_error(&e))?;
 
         log::debug!("Connection established, executing ping query");
 
@@ -98,17 +100,19 @@ impl DatabaseClient {
     /// Use this for queries where you need all data at once.
     /// For large result sets, consider streaming.
     pub fn execute(&self, sql: &str) -> Result<QueryResult> {
-        log::debug!("Executing query on {}:{}", self.config.host, self.config.port);
+        log::debug!(
+            "Executing query on {}:{}",
+            self.config.host,
+            self.config.port
+        );
         log::trace!("Query: {}", sql);
 
         let start = Instant::now();
 
         // Create connection
         let connection_string = self.config.to_json_string();
-        let (u_log, conn_handle) =
-            teradatarustapi::create_connection(&connection_string).map_err(|e| {
-                self.map_connection_error(&e)
-            })?;
+        let (u_log, conn_handle) = teradatarustapi::create_connection(&connection_string)
+            .map_err(|e| self.map_connection_error(&e))?;
 
         log::debug!("Connection established, executing query");
 
@@ -137,10 +141,8 @@ impl DatabaseClient {
 
         // Create connection
         let connection_string = self.config.to_json_string();
-        let (u_log, conn_handle) =
-            teradatarustapi::create_connection(&connection_string).map_err(|e| {
-                self.map_connection_error(&e)
-            })?;
+        let (u_log, conn_handle) = teradatarustapi::create_connection(&connection_string)
+            .map_err(|e| self.map_connection_error(&e))?;
 
         // Execute and fetch with limit
         let result = self.execute_and_fetch_limited(u_log, conn_handle, sql, limit, start);
@@ -438,10 +440,7 @@ impl DatabaseClient {
                 error
             )
         } else if error.contains("timeout") || error.contains("Timeout") {
-            format!(
-                "Connection timeout. Check network connectivity. {}",
-                error
-            )
+            format!("Connection timeout. Check network connectivity. {}", error)
         } else if error.contains("Invalid credentials")
             || error.contains("Logon failed")
             || error.contains("Authentication")
@@ -511,7 +510,10 @@ fn map_type_name_to_teradata_type(type_name: &str) -> TeradataType {
         "XML" => TeradataType::Varchar,         // XML mapped to Varchar for display
         "INTERVAL" => TeradataType::Varchar,    // Intervals displayed as strings
         _ => {
-            log::debug!("Unknown Teradata type: {}, defaulting to Varchar", type_name);
+            log::debug!(
+                "Unknown Teradata type: {}, defaulting to Varchar",
+                type_name
+            );
             TeradataType::Unknown
         }
     }

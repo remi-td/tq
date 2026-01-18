@@ -47,7 +47,10 @@ pub enum TqError {
     // ========================================================================
     /// SQL syntax error
     #[error("SQL syntax error: {message}")]
-    SqlSyntaxError { message: String, query: Option<String> },
+    SqlSyntaxError {
+        message: String,
+        query: Option<String>,
+    },
 
     /// Query execution failed
     #[error("Query execution failed: {0}")]
@@ -208,7 +211,11 @@ impl TqError {
                 )
             }
 
-            TqError::AuthenticationFailed { user, logmech, source } => {
+            TqError::AuthenticationFailed {
+                user,
+                logmech,
+                source,
+            } => {
                 let source_msg = source
                     .as_ref()
                     .map(|s| format!("\n\nCause: {}", s))
@@ -274,15 +281,13 @@ impl TqError {
                 )
             }
 
-            TqError::MissingPassword => {
-                "Error: No password provided\n\n\
+            TqError::MissingPassword => "Error: No password provided\n\n\
                  Provide password using one of:\n  \
                  - Include in connection string: user:password@host:port/db\n  \
                  - Password file: --password-file ~/.tq_passwords\n  \
                  - Environment variable: TQ_PASSWORD\n  \
                  - Interactive prompt (when stdin is a terminal)"
-                    .to_string()
-            }
+                .to_string(),
 
             TqError::FileReadError { path, source } => {
                 format!(
@@ -300,7 +305,11 @@ impl TqError {
     }
 
     /// Create a connection failed error from a string message
-    pub fn connection_failed(host: impl Into<String>, port: u16, message: impl Into<String>) -> Self {
+    pub fn connection_failed(
+        host: impl Into<String>,
+        port: u16,
+        message: impl Into<String>,
+    ) -> Self {
         TqError::ConnectionFailed {
             host: host.into(),
             port,
@@ -320,7 +329,10 @@ mod tests {
 
     #[test]
     fn test_exit_codes() {
-        assert_eq!(TqError::InvalidConnectionString("test".into()).exit_code(), 2);
+        assert_eq!(
+            TqError::InvalidConnectionString("test".into()).exit_code(),
+            2
+        );
         assert_eq!(TqError::MissingPassword.exit_code(), 2);
         assert_eq!(TqError::QueryExecution("test".into()).exit_code(), 1);
         assert_eq!(TqError::PingFailed("test".into()).exit_code(), 1);

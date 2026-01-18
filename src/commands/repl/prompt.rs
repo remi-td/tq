@@ -75,7 +75,10 @@ impl Prompt for StatefulPrompt {
             PromptHistorySearchStatus::Passing => "",
             PromptHistorySearchStatus::Failing => "failing ",
         };
-        Cow::Owned(format!("({}reverse-i-search)`{}': ", prefix, history_search.term))
+        Cow::Owned(format!(
+            "({}reverse-i-search)`{}': ",
+            prefix, history_search.term
+        ))
     }
 }
 

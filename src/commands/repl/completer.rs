@@ -120,11 +120,7 @@ impl Default for SqlCompleter {
 impl Completer for SqlCompleter {
     fn complete(&mut self, line: &str, _pos: usize) -> Vec<Suggestion> {
         // Get the last word on the line
-        let last_word = line
-            .split_whitespace()
-            .last()
-            .unwrap_or("")
-            .to_uppercase();
+        let last_word = line.split_whitespace().last().unwrap_or("").to_uppercase();
 
         if last_word.is_empty() {
             return vec![];

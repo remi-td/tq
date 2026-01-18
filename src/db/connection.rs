@@ -45,7 +45,11 @@ impl std::fmt::Debug for ConnectionConfig {
 
 impl std::fmt::Display for ConnectionConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}@{}:{}/{}", self.user, self.host, self.port, self.database)
+        write!(
+            f,
+            "{}@{}:{}/{}",
+            self.user, self.host, self.port, self.database
+        )
     }
 }
 
@@ -132,7 +136,9 @@ impl ConnectionConfig {
             return Err(TqError::InvalidConfig("User cannot be empty".to_string()));
         }
         if self.database.is_empty() {
-            return Err(TqError::InvalidConfig("Database cannot be empty".to_string()));
+            return Err(TqError::InvalidConfig(
+                "Database cannot be empty".to_string(),
+            ));
         }
         Ok(())
     }
@@ -306,7 +312,9 @@ impl ConnectionConfig {
 pub fn parse_duration(s: &str) -> Result<Duration> {
     let s = s.trim();
     if s.is_empty() {
-        return Err(TqError::InvalidDuration("Duration cannot be empty".to_string()));
+        return Err(TqError::InvalidDuration(
+            "Duration cannot be empty".to_string(),
+        ));
     }
 
     // Find where the number ends and unit begins
@@ -367,7 +375,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.user, "demo_user");
-        assert_eq!(config.password.as_ref().unwrap().expose_secret(), "demo_pass");
+        assert_eq!(
+            config.password.as_ref().unwrap().expose_secret(),
+            "demo_pass"
+        );
         assert_eq!(config.host, "localhost");
         assert_eq!(config.port, 1025);
         assert_eq!(config.database, "demo_db");
@@ -383,7 +394,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(config.password.as_ref().unwrap().expose_secret(), "override_pass");
+        assert_eq!(
+            config.password.as_ref().unwrap().expose_secret(),
+            "override_pass"
+        );
     }
 
     #[test]
@@ -397,7 +411,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.user, "user");
-        assert_eq!(config.password.as_ref().unwrap().expose_secret(), "pass:word");
+        assert_eq!(
+            config.password.as_ref().unwrap().expose_secret(),
+            "pass:word"
+        );
     }
 
     #[test]
@@ -411,7 +428,7 @@ mod tests {
         .is_err());
 
         assert!(ConnectionConfig::from_connection_string(
-            "user@host/db",  // Missing port
+            "user@host/db", // Missing port
             LogonMechanism::Td2,
             Duration::from_secs(30),
             None,
@@ -455,7 +472,7 @@ mod tests {
         assert_eq!(parse_duration("5m").unwrap(), Duration::from_secs(300));
         assert_eq!(parse_duration("1h").unwrap(), Duration::from_secs(3600));
         assert_eq!(parse_duration("500ms").unwrap(), Duration::from_millis(500));
-        assert_eq!(parse_duration("30").unwrap(), Duration::from_secs(30));  // Default to seconds
+        assert_eq!(parse_duration("30").unwrap(), Duration::from_secs(30)); // Default to seconds
     }
 
     #[test]

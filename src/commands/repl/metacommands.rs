@@ -29,9 +29,7 @@ pub fn handle_metacommand<W: Write>(
 ) -> Result<bool> {
     // Normalize: remove leading / or \ and lowercase for command matching
     let trimmed = input.trim();
-    let without_prefix = trimmed
-        .trim_start_matches('/')
-        .trim_start_matches('\\');
+    let without_prefix = trimmed.trim_start_matches('/').trim_start_matches('\\');
 
     // Split into command and arguments (preserve case for arguments)
     let mut parts = without_prefix.split_whitespace();
@@ -79,11 +77,7 @@ pub fn handle_metacommand<W: Write>(
                 writeln!(writer, "Example: /export csv results.csv")?;
             } else {
                 let format = args[0];
-                let file = if args.len() > 1 {
-                    Some(args[1])
-                } else {
-                    None
-                };
+                let file = if args.len() > 1 { Some(args[1]) } else { None };
                 let append = args.contains(&"--append");
                 execute_export(state, writer, format, file, append)?;
             }
@@ -93,7 +87,11 @@ pub fn handle_metacommand<W: Write>(
         "pager" => {
             if args.is_empty() {
                 // Show current setting
-                let status = if state.is_pager_enabled() { "on" } else { "off" };
+                let status = if state.is_pager_enabled() {
+                    "on"
+                } else {
+                    "off"
+                };
                 writeln!(writer, "Pager: {}", status)?;
             } else {
                 match args[0].to_lowercase().as_str() {
@@ -120,7 +118,11 @@ pub fn handle_metacommand<W: Write>(
         "colors" => {
             if args.is_empty() {
                 // Show current setting
-                let status = if state.are_colors_enabled() { "on" } else { "off" };
+                let status = if state.are_colors_enabled() {
+                    "on"
+                } else {
+                    "off"
+                };
                 writeln!(writer, "Colors: {}", status)?;
             } else {
                 match args[0].to_lowercase().as_str() {
@@ -167,9 +169,7 @@ pub fn handle_metacommand_with_state<W: Write>(
 ) -> Result<bool> {
     // Normalize: remove leading / or \ and lowercase for command matching
     let trimmed = input.trim();
-    let without_prefix = trimmed
-        .trim_start_matches('/')
-        .trim_start_matches('\\');
+    let without_prefix = trimmed.trim_start_matches('/').trim_start_matches('\\');
 
     // Split into command and arguments (preserve case for arguments)
     let mut parts = without_prefix.split_whitespace();
@@ -217,11 +217,7 @@ pub fn handle_metacommand_with_state<W: Write>(
                 writeln!(writer, "Example: /export csv results.csv")?;
             } else {
                 let format = args[0];
-                let file = if args.len() > 1 {
-                    Some(args[1])
-                } else {
-                    None
-                };
+                let file = if args.len() > 1 { Some(args[1]) } else { None };
                 let append = args.contains(&"--append");
                 execute_export(state, writer, format, file, append)?;
             }
@@ -231,7 +227,11 @@ pub fn handle_metacommand_with_state<W: Write>(
         "pager" => {
             if args.is_empty() {
                 // Show current setting
-                let status = if state.is_pager_enabled() { "on" } else { "off" };
+                let status = if state.is_pager_enabled() {
+                    "on"
+                } else {
+                    "off"
+                };
                 writeln!(writer, "Pager: {}", status)?;
             } else {
                 match args[0].to_lowercase().as_str() {
@@ -258,7 +258,11 @@ pub fn handle_metacommand_with_state<W: Write>(
         "colors" => {
             if args.is_empty() {
                 // Show current setting
-                let status = if state.are_colors_enabled() { "on" } else { "off" };
+                let status = if state.are_colors_enabled() {
+                    "on"
+                } else {
+                    "off"
+                };
                 writeln!(writer, "Colors: {}", status)?;
             } else {
                 match args[0].to_lowercase().as_str() {
@@ -288,19 +292,17 @@ pub fn handle_metacommand_with_state<W: Write>(
                 writeln!(writer, "Usage: /logon <connection_string>")?;
                 writeln!(writer)?;
                 writeln!(writer, "Format: user:password@host:port/database")?;
-                writeln!(writer, "        user@host:port/database  (password from env/file)")?;
+                writeln!(
+                    writer,
+                    "        user@host:port/database  (password from env/file)"
+                )?;
                 writeln!(writer)?;
                 writeln!(writer, "Examples:")?;
                 writeln!(writer, "  /logon alice:secret@dbhost:1025/prod")?;
                 writeln!(writer, "  /logon bob@192.168.1.100:1025/staging")?;
                 writeln!(writer)?;
             } else {
-                execute_logon(
-                    &args[0],
-                    state,
-                    completion_state,
-                    writer,
-                )?;
+                execute_logon(&args[0], state, completion_state, writer)?;
             }
         }
 
@@ -320,13 +322,28 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "tq REPL Commands:")?;
     writeln!(writer, "  /help, /?              Show this help message")?;
     writeln!(writer, "  /quit, /q              Exit the REPL")?;
-    writeln!(writer, "  /session               Show current session information")?;
+    writeln!(
+        writer,
+        "  /session               Show current session information"
+    )?;
     writeln!(writer, "  /ping                  Test database connection")?;
     writeln!(writer, "  /describe <table>, /d  Show table structure")?;
-    writeln!(writer, "  /export <fmt> [file]   Export last result (csv, json, sql)")?;
-    writeln!(writer, "  /pager on|off          Enable/disable result paging")?;
-    writeln!(writer, "  /colors on|off         Enable/disable syntax highlighting")?;
-    writeln!(writer, "  /logon <conn_str>      Switch to a different connection")?;
+    writeln!(
+        writer,
+        "  /export <fmt> [file]   Export last result (csv, json, sql)"
+    )?;
+    writeln!(
+        writer,
+        "  /pager on|off          Enable/disable result paging"
+    )?;
+    writeln!(
+        writer,
+        "  /colors on|off         Enable/disable syntax highlighting"
+    )?;
+    writeln!(
+        writer,
+        "  /logon <conn_str>      Switch to a different connection"
+    )?;
     writeln!(writer)?;
     writeln!(writer, "SQL Execution:")?;
     writeln!(writer, "  Enter SQL statements ending with semicolon (;)")?;
@@ -339,7 +356,10 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer)?;
     writeln!(writer, "Keyboard Shortcuts:")?;
     writeln!(writer, "  Up/Down        Navigate command history")?;
-    writeln!(writer, "  Tab            Auto-complete (keywords, tables, columns)")?;
+    writeln!(
+        writer,
+        "  Tab            Auto-complete (keywords, tables, columns)"
+    )?;
     writeln!(writer, "  Ctrl-C         Cancel current input")?;
     writeln!(writer, "  Ctrl-D         Exit REPL (when input is empty)")?;
     writeln!(writer, "  Ctrl-R         Search command history")?;
@@ -418,7 +438,10 @@ fn execute_logon<W: Write>(
             writeln!(writer, "  User:     {}", config.user)?;
             writeln!(writer, "  Latency:  {}ms", latency.as_millis())?;
             writeln!(writer)?;
-            writeln!(writer, "Note: Tab completion cache cleared for new connection.")?;
+            writeln!(
+                writer,
+                "Note: Tab completion cache cleared for new connection."
+            )?;
         }
         Err(e) => {
             let elapsed = start.elapsed();
@@ -445,12 +468,24 @@ fn print_help<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "tq REPL Commands:")?;
     writeln!(writer, "  /help, /?              Show this help message")?;
     writeln!(writer, "  /quit, /q              Exit the REPL")?;
-    writeln!(writer, "  /session               Show current session information")?;
+    writeln!(
+        writer,
+        "  /session               Show current session information"
+    )?;
     writeln!(writer, "  /ping                  Test database connection")?;
     writeln!(writer, "  /describe <table>, /d  Show table structure")?;
-    writeln!(writer, "  /export <fmt> [file]   Export last result (csv, json, sql)")?;
-    writeln!(writer, "  /pager on|off          Enable/disable result paging")?;
-    writeln!(writer, "  /colors on|off         Enable/disable syntax highlighting")?;
+    writeln!(
+        writer,
+        "  /export <fmt> [file]   Export last result (csv, json, sql)"
+    )?;
+    writeln!(
+        writer,
+        "  /pager on|off          Enable/disable result paging"
+    )?;
+    writeln!(
+        writer,
+        "  /colors on|off         Enable/disable syntax highlighting"
+    )?;
     writeln!(writer)?;
     writeln!(writer, "SQL Execution:")?;
     writeln!(writer, "  Enter SQL statements ending with semicolon (;)")?;
@@ -521,7 +556,11 @@ fn format_duration(duration: std::time::Duration) -> String {
 /// Execute the /ping metacommand
 ///
 /// Tests database connectivity and displays latency information.
-fn execute_ping<W: Write>(client: &DatabaseClient, state: &ReplState, writer: &mut W) -> Result<()> {
+fn execute_ping<W: Write>(
+    client: &DatabaseClient,
+    state: &ReplState,
+    writer: &mut W,
+) -> Result<()> {
     writeln!(writer)?;
 
     let start = Instant::now();
@@ -564,7 +603,11 @@ fn execute_ping<W: Write>(client: &DatabaseClient, state: &ReplState, writer: &m
 /// Execute the /describe metacommand
 ///
 /// Shows table structure including columns, types, and nullable status.
-fn execute_describe<W: Write>(client: &DatabaseClient, table_name: &str, writer: &mut W) -> Result<()> {
+fn execute_describe<W: Write>(
+    client: &DatabaseClient,
+    table_name: &str,
+    writer: &mut W,
+) -> Result<()> {
     writeln!(writer)?;
 
     // Parse table name - may be qualified (database.table) or unqualified
@@ -602,12 +645,22 @@ fn execute_describe<W: Write>(client: &DatabaseClient, table_name: &str, writer:
     match client.execute(&sql) {
         Ok(result) => {
             if result.row_count == 0 {
-                writeln!(writer, "Table '{}' not found or no columns available.", table_name)?;
+                writeln!(
+                    writer,
+                    "Table '{}' not found or no columns available.",
+                    table_name
+                )?;
                 writeln!(writer)?;
                 writeln!(writer, "Suggestions:")?;
                 writeln!(writer, "  - Check the table name spelling")?;
-                writeln!(writer, "  - Try using qualified name: /describe database.table")?;
-                writeln!(writer, "  - Verify you have SELECT permission on DBC.ColumnsV")?;
+                writeln!(
+                    writer,
+                    "  - Try using qualified name: /describe database.table"
+                )?;
+                writeln!(
+                    writer,
+                    "  - Verify you have SELECT permission on DBC.ColumnsV"
+                )?;
             } else {
                 // Display table header
                 let qualified_name = if let Some(db) = database {
@@ -631,11 +684,21 @@ fn execute_describe<W: Write>(client: &DatabaseClient, table_name: &str, writer:
                 for row in &result.rows {
                     let col_name = row.get(0).map(|v| v.display()).unwrap_or_default();
                     let col_type = row.get(1).map(|v| v.display()).unwrap_or_default();
-                    let nullable = row.get(2).map(|v| format_nullable(&v.display())).unwrap_or_else(|| "YES".to_string());
-                    let default = row.get(3).map(|v| {
-                        let s = v.display();
-                        if s == "[NULL]" { "-".to_string() } else { s }
-                    }).unwrap_or_else(|| "-".to_string());
+                    let nullable = row
+                        .get(2)
+                        .map(|v| format_nullable(&v.display()))
+                        .unwrap_or_else(|| "YES".to_string());
+                    let default = row
+                        .get(3)
+                        .map(|v| {
+                            let s = v.display();
+                            if s == "[NULL]" {
+                                "-".to_string()
+                            } else {
+                                s
+                            }
+                        })
+                        .unwrap_or_else(|| "-".to_string());
 
                     writeln!(
                         writer,
@@ -656,7 +719,10 @@ fn execute_describe<W: Write>(client: &DatabaseClient, table_name: &str, writer:
             writeln!(writer)?;
             writeln!(writer, "Suggestions:")?;
             writeln!(writer, "  - Check table name spelling")?;
-            writeln!(writer, "  - Verify you have permission to access DBC.ColumnsV")?;
+            writeln!(
+                writer,
+                "  - Verify you have permission to access DBC.ColumnsV"
+            )?;
         }
     }
 
@@ -705,7 +771,10 @@ fn execute_export<W: Write>(
         None => {
             writeln!(writer)?;
             writeln!(writer, "Error: No query results to export.")?;
-            writeln!(writer, "Execute a query first, then use /export to save the results.")?;
+            writeln!(
+                writer,
+                "Execute a query first, then use /export to save the results."
+            )?;
             writeln!(writer)?;
             return Ok(());
         }
@@ -818,16 +887,16 @@ fn export_json<W: Write>(
                 crate::db::Value::Null => serde_json::Value::Null,
                 crate::db::Value::String(s) => serde_json::Value::String(s.clone()),
                 crate::db::Value::Integer(n) => serde_json::Value::Number((*n).into()),
-                crate::db::Value::Decimal(f) => {
-                    serde_json::Number::from_f64(*f)
-                        .map(serde_json::Value::Number)
-                        .unwrap_or(serde_json::Value::Null)
-                }
+                crate::db::Value::Decimal(f) => serde_json::Number::from_f64(*f)
+                    .map(serde_json::Value::Number)
+                    .unwrap_or(serde_json::Value::Null),
                 crate::db::Value::Boolean(b) => serde_json::Value::Bool(*b),
                 crate::db::Value::Date(d) => serde_json::Value::String(d.clone()),
                 crate::db::Value::Timestamp(ts) => serde_json::Value::String(ts.clone()),
                 crate::db::Value::Time(t) => serde_json::Value::String(t.clone()),
-                crate::db::Value::Bytes(_) => serde_json::Value::String(value.display().to_string()),
+                crate::db::Value::Bytes(_) => {
+                    serde_json::Value::String(value.display().to_string())
+                }
             };
             obj[&col.name] = json_value;
         }
@@ -874,10 +943,7 @@ fn export_sql<W: Write>(
 
     // Add CREATE TABLE statement
     sql_content.push_str(&format!("-- Exported data\n"));
-    sql_content.push_str(&format!(
-        "-- CREATE TABLE {} (\n",
-        table_name
-    ));
+    sql_content.push_str(&format!("-- CREATE TABLE {} (\n", table_name));
     for col in &result.columns {
         sql_content.push_str(&format!("--   {} VARCHAR(255),\n", col.name));
     }

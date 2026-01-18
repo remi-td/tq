@@ -6,7 +6,9 @@
 
 use std::time::Duration;
 use tq::cli::{LogonMechanism, OutputFormat};
-use tq::db::{parse_duration, ColumnMetadata, ConnectionConfig, QueryResult, Row, TeradataType, Value};
+use tq::db::{
+    parse_duration, ColumnMetadata, ConnectionConfig, QueryResult, Row, TeradataType, Value,
+};
 use tq::error::TqError;
 use tq::format::{csv, json, table, FormatOptions};
 
@@ -241,13 +243,11 @@ fn make_test_result() -> QueryResult {
 
 fn make_empty_result() -> QueryResult {
     QueryResult {
-        columns: vec![
-            ColumnMetadata {
-                name: "Column1".to_string(),
-                data_type: TeradataType::Varchar,
-                nullable: false,
-            },
-        ],
+        columns: vec![ColumnMetadata {
+            name: "Column1".to_string(),
+            data_type: TeradataType::Varchar,
+            nullable: false,
+        }],
         rows: vec![],
         row_count: 0,
         execution_time: Duration::from_millis(10),
@@ -367,7 +367,7 @@ fn test_format_csv_output() {
 
     // Should have data rows
     assert!(output_str.contains("Alice,30,95.5"));
-    assert!(output_str.contains("Bob,25,"));  // NULL becomes empty
+    assert!(output_str.contains("Bob,25,")); // NULL becomes empty
 }
 
 #[test]
@@ -442,7 +442,10 @@ fn test_error_user_message() {
     let err = TqError::ConnectionFailed {
         host: "localhost".to_string(),
         port: 1025,
-        source: Box::new(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused")),
+        source: Box::new(std::io::Error::new(
+            std::io::ErrorKind::ConnectionRefused,
+            "refused",
+        )),
     };
 
     let msg = err.user_message();
@@ -572,9 +575,18 @@ fn test_actual_column_names_from_metadata() {
 
     // Verify actual column names are used (not generic col1, col2, col3)
     assert_eq!(result.columns.len(), 3, "Expected 3 columns");
-    assert_eq!(result.columns[0].name, "test_col", "First column should be 'test_col'");
-    assert_eq!(result.columns[1].name, "text_col", "Second column should be 'text_col'");
-    assert_eq!(result.columns[2].name, "null_col", "Third column should be 'null_col'");
+    assert_eq!(
+        result.columns[0].name, "test_col",
+        "First column should be 'test_col'"
+    );
+    assert_eq!(
+        result.columns[1].name, "text_col",
+        "Second column should be 'text_col'"
+    );
+    assert_eq!(
+        result.columns[2].name, "null_col",
+        "Third column should be 'null_col'"
+    );
 
     // Verify row data
     assert_eq!(result.rows.len(), 1, "Expected 1 row");
