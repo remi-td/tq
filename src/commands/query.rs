@@ -2,14 +2,209 @@
 //!
 //! Executes SQL queries and formats output.
 //! Supports multiple input sources: argument, file, stdin.
+//! Supports batch mode for multi-statement execution.
 
-use crate::cli::QueryArgs;
+use crate::cli::{OutputFormat, QueryArgs};
 use crate::db::DatabaseClient;
 use crate::error::{Result, TqError};
 use crate::format::{write_output_with_timing, FormatOptions};
+use crate::sql::{has_multiple_statements, parse_statements, ParsedStatement};
 use std::fs::File;
 use std::io::{self, BufReader, IsTerminal, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+// ============================================================================
+// Input Source Types
+// ============================================================================
+
+/// Represents the source of SQL input for the query command
+#[derive(Debug, Clone, PartialEq)]
+pub enum InputSource {
+    /// SQL provided as command-line argument
+    Argument(String),
+    /// SQL read from a file
+    File(PathBuf),
+    /// SQL read from stdin (piped input)
+    Stdin,
+}
+
+impl InputSource {
+    /// Get a description of the input source for error messages
+    pub fn description(&self) -> String {
+        match self {
+            InputSource::Argument(_) => "command-line argument".to_string(),
+            InputSource::File(path) => format!("file '{}'", path.display()),
+            InputSource::Stdin => "stdin".to_string(),
+        }
+    }
+}
+
+// ============================================================================
+// Batch Execution Types
+// ============================================================================
+
+/// Result of batch execution for reporting
+#[derive(Debug)]
+pub struct BatchExecutionResult {
+    /// Number of statements successfully executed
+    pub successful_count: usize,
+    /// Total number of statements
+    pub total_count: usize,
+}
+
+/// Context for a batch execution error
+#[derive(Debug)]
+pub struct BatchExecutionError {
+    /// The statement that failed
+    pub statement: ParsedStatement,
+    /// The underlying error
+    pub error: TqError,
+    /// Number of statements executed before failure
+    pub successful_count: usize,
+    /// Total number of statements in the batch
+    pub total_count: usize,
+}
+
+impl BatchExecutionError {
+    /// Create a new batch execution error
+    pub fn new(
+        statement: ParsedStatement,
+        error: TqError,
+        successful_count: usize,
+        total_count: usize,
+    ) -> Self {
+        Self {
+            statement,
+            error,
+            successful_count,
+            total_count,
+        }
+    }
+
+    /// Format the error for display
+    pub fn format_error(&self) -> String {
+        let mut msg = format!(
+            "Error at statement {} (line {}): {}\n",
+            self.statement.statement_number, self.statement.start_line, self.error
+        );
+
+        // Add statement preview
+        msg.push_str(&format!(
+            "\nStatement: {}\n",
+            self.statement.preview(80)
+        ));
+
+        // Add execution context
+        if self.successful_count > 0 {
+            msg.push_str(&format!(
+                "\nStatements executed: 1-{}\n",
+                self.successful_count
+            ));
+        }
+
+        let remaining_start = self.statement.statement_number + 1;
+        if remaining_start <= self.total_count {
+            msg.push_str(&format!(
+                "Statements remaining: {}-{}\n",
+                remaining_start, self.total_count
+            ));
+        }
+
+        msg
+    }
+}
+
+// ============================================================================
+// Input Source Resolution
+// ============================================================================
+
+/// Determine the input source based on QueryArgs
+///
+/// Returns an error if conflicting sources are provided (mutual exclusivity check).
+///
+/// Priority order:
+/// 1. Explicit query argument
+/// 2. File flag
+/// 3. Stdin (only if no explicit source provided)
+///
+/// Note: We only check for stdin conflicts when user explicitly provides both
+/// a query arg/file AND pipes data. Having stdin be non-terminal is fine when
+/// --file is used (common in scripts).
+fn determine_input_source(args: &QueryArgs) -> Result<InputSource> {
+    let has_query_arg = args.query.is_some();
+    let stdin_is_pipe = !io::stdin().is_terminal();
+
+    // Check for query argument + stdin conflict
+    // This is the main conflict we care about - user piping data but also providing SQL argument
+    if has_query_arg && stdin_is_pipe {
+        return Err(TqError::InvalidConfig(
+            "Multiple input sources provided: query argument, piped stdin.\n\
+             Only one input source is allowed.\n\n\
+             Either provide SQL as argument OR pipe via stdin, not both."
+                .to_string(),
+        ));
+    }
+
+    // Return the appropriate source (priority: argument > file > stdin)
+    if let Some(ref query) = args.query {
+        Ok(InputSource::Argument(query.clone()))
+    } else if let Some(ref file_path) = args.file {
+        // File flag takes precedence over stdin - this is common usage in scripts
+        // where stdin may be redirected from /dev/null or attached to a pty
+        Ok(InputSource::File(file_path.clone()))
+    } else if stdin_is_pipe {
+        // Only use stdin if no explicit source provided
+        Ok(InputSource::Stdin)
+    } else {
+        Err(TqError::InvalidConfig(
+            "No query provided.\n\n\
+             Provide SQL via:\n  \
+             - Command argument: tq query \"SELECT 1\"\n  \
+             - File: tq query --file script.sql\n  \
+             - Stdin: echo \"SELECT 1\" | tq query"
+                .to_string(),
+        ))
+    }
+}
+
+/// Read SQL from the determined input source
+fn read_input_sql(source: &InputSource) -> Result<String> {
+    match source {
+        InputSource::Argument(query) => Ok(query.clone()),
+        InputSource::File(path) => read_sql_file(path),
+        InputSource::Stdin => read_sql_stdin(),
+    }
+}
+
+/// Read SQL from a file
+fn read_sql_file(path: &Path) -> Result<String> {
+    std::fs::read_to_string(path).map_err(|e| TqError::FileReadError {
+        path: path.to_path_buf(),
+        source: e,
+    })
+}
+
+/// Read SQL from stdin
+fn read_sql_stdin() -> Result<String> {
+    let stdin = io::stdin();
+    let mut sql = String::new();
+    let mut reader = BufReader::new(stdin.lock());
+    reader.read_to_string(&mut sql)?;
+
+    if sql.trim().is_empty() {
+        return Err(TqError::InvalidConfig(
+            "Empty query received from stdin.\n\
+             Provide valid SQL via stdin."
+                .to_string(),
+        ));
+    }
+
+    Ok(sql)
+}
+
+// ============================================================================
+// Main Execute Functions
+// ============================================================================
 
 /// Execute the query command
 pub fn execute<W: Write>(
@@ -19,18 +214,51 @@ pub fn execute<W: Write>(
     use_color: bool,
     verbose: bool,
 ) -> Result<()> {
-    // Get SQL from appropriate source
-    let sql = get_sql(args)?;
+    // Determine input source
+    let source = determine_input_source(args)?;
 
     if verbose {
-        eprintln!("Executing query: {}", truncate_sql(&sql, 100));
+        eprintln!("Reading SQL from {}", source.description());
+    }
+
+    // Read SQL from source
+    let sql = read_input_sql(&source)?;
+
+    // Determine execution mode: single statement (fast path) or batch
+    // For command-line arguments, always use single statement mode (no splitting)
+    // For file/stdin, check for multiple statements
+    let use_batch = match source {
+        InputSource::Argument(_) => false, // Never split argument SQL
+        _ => has_multiple_statements(&sql),
+    };
+
+    if use_batch {
+        execute_batch(client, &sql, args, writer, use_color, verbose)
+    } else {
+        execute_single(client, &sql, args, writer, use_color, verbose)
+    }
+}
+
+/// Execute a single SQL statement (fast path)
+fn execute_single<W: Write>(
+    client: &DatabaseClient,
+    sql: &str,
+    args: &QueryArgs,
+    writer: &mut W,
+    use_color: bool,
+    verbose: bool,
+) -> Result<()> {
+    let trimmed_sql = sql.trim();
+
+    if verbose {
+        eprintln!("Executing query: {}", truncate_sql(trimmed_sql, 100));
     }
 
     // Execute query
     let result = if let Some(limit) = args.limit {
-        client.execute_with_limit(&sql, limit)?
+        client.execute_with_limit(trimmed_sql, limit)?
     } else {
-        client.execute(&sql)?
+        client.execute(trimmed_sql)?
     };
 
     // Configure output formatting
@@ -40,6 +268,94 @@ pub fn execute<W: Write>(
 
     // Write output
     write_output_with_timing(&result, writer, args.format, &format_options, args.timing)?;
+
+    Ok(())
+}
+
+/// Execute multiple SQL statements in batch mode
+fn execute_batch<W: Write>(
+    client: &DatabaseClient,
+    sql: &str,
+    args: &QueryArgs,
+    writer: &mut W,
+    use_color: bool,
+    verbose: bool,
+) -> Result<()> {
+    // Parse statements
+    let statements = parse_statements(sql);
+    let total_count = statements.len();
+
+    if verbose {
+        eprintln!("Found {} statements to execute", total_count);
+    }
+
+    // Configure output formatting (no color in batch progress messages to stderr)
+    let format_options = FormatOptions::default()
+        .with_header(!args.no_header)
+        .with_color(use_color);
+
+    let mut successful_count = 0;
+
+    for statement in &statements {
+        // Show progress to stderr
+        eprint!(
+            "Statement {}: {}... ",
+            statement.statement_number,
+            get_statement_type(&statement.sql)
+        );
+
+        // Execute statement
+        let result = match args.limit {
+            Some(limit) => client.execute_with_limit(&statement.sql, limit),
+            None => client.execute(&statement.sql),
+        };
+
+        match result {
+            Ok(query_result) => {
+                successful_count += 1;
+
+                // Format status based on result
+                let status = format_statement_status(&query_result, args.format);
+                eprintln!("{}", status);
+
+                // Write results for SELECT queries (those with rows)
+                if query_result.row_count > 0 {
+                    write_output_with_timing(
+                        &query_result,
+                        writer,
+                        args.format,
+                        &format_options,
+                        args.timing,
+                    )?;
+
+                    // Add separator between result sets for readability
+                    if statement.statement_number < total_count && args.format == OutputFormat::Table
+                    {
+                        writeln!(writer)?;
+                    }
+                }
+            }
+            Err(error) => {
+                // Fail-fast: stop on first error
+                eprintln!("FAILED");
+
+                let batch_error = BatchExecutionError::new(
+                    statement.clone(),
+                    error,
+                    successful_count,
+                    total_count,
+                );
+
+                // Return error with batch context
+                return Err(TqError::QueryExecution(batch_error.format_error()));
+            }
+        }
+    }
+
+    // Summary message
+    if verbose {
+        eprintln!("\nAll {} statements executed successfully", total_count);
+    }
 
     Ok(())
 }
@@ -56,18 +372,20 @@ pub fn execute_to_file<W: Write>(
         TqError::InternalError("execute_to_file called without output path".to_string())
     })?;
 
-    // Get SQL
-    let sql = get_sql(args)?;
+    // Determine input source
+    let source = determine_input_source(args)?;
 
     if verbose {
-        eprintln!("Executing query: {}", truncate_sql(&sql, 100));
+        eprintln!("Reading SQL from {}", source.description());
     }
 
-    // Execute query
-    let result = if let Some(limit) = args.limit {
-        client.execute_with_limit(&sql, limit)?
-    } else {
-        client.execute(&sql)?
+    // Read SQL from source
+    let sql = read_input_sql(&source)?;
+
+    // Determine execution mode
+    let use_batch = match source {
+        InputSource::Argument(_) => false,
+        _ => has_multiple_statements(&sql),
     };
 
     // Create output file
@@ -80,76 +398,102 @@ pub fn execute_to_file<W: Write>(
     // Configure formatting (no colors for file output)
     let format_options = FormatOptions::default()
         .with_header(!args.no_header)
-        .with_color(false); // Never use colors in file output
+        .with_color(false);
 
-    // Write to file
-    write_output_with_timing(
-        &result,
-        &mut buffered_writer,
-        args.format,
-        &format_options,
-        args.timing,
-    )?;
+    if use_batch {
+        // Execute batch and write to file
+        let statements = parse_statements(&sql);
+        let total_count = statements.len();
+        let mut total_rows = 0;
 
-    buffered_writer.flush()?;
+        for statement in &statements {
+            if verbose {
+                eprint!(
+                    "Statement {}: {}... ",
+                    statement.statement_number,
+                    get_statement_type(&statement.sql)
+                );
+            }
 
-    // Report success to status writer
-    writeln!(
-        status_writer,
-        "Wrote {} rows to {}",
-        result.row_count,
-        output_path.display()
-    )?;
+            let result = match args.limit {
+                Some(limit) => client.execute_with_limit(&statement.sql, limit),
+                None => client.execute(&statement.sql),
+            };
+
+            match result {
+                Ok(query_result) => {
+                    if verbose {
+                        eprintln!("OK ({} rows)", query_result.row_count);
+                    }
+
+                    total_rows += query_result.row_count;
+
+                    if query_result.row_count > 0 {
+                        write_output_with_timing(
+                            &query_result,
+                            &mut buffered_writer,
+                            args.format,
+                            &format_options,
+                            args.timing,
+                        )?;
+                    }
+                }
+                Err(error) => {
+                    if verbose {
+                        eprintln!("FAILED");
+                    }
+                    return Err(error);
+                }
+            }
+        }
+
+        buffered_writer.flush()?;
+
+        writeln!(
+            status_writer,
+            "Wrote {} rows from {} statements to {}",
+            total_rows,
+            total_count,
+            output_path.display()
+        )?;
+    } else {
+        // Single statement execution
+        let trimmed_sql = sql.trim();
+
+        if verbose {
+            eprintln!("Executing query: {}", truncate_sql(trimmed_sql, 100));
+        }
+
+        let result = if let Some(limit) = args.limit {
+            client.execute_with_limit(trimmed_sql, limit)?
+        } else {
+            client.execute(trimmed_sql)?
+        };
+
+        write_output_with_timing(
+            &result,
+            &mut buffered_writer,
+            args.format,
+            &format_options,
+            args.timing,
+        )?;
+
+        buffered_writer.flush()?;
+
+        writeln!(
+            status_writer,
+            "Wrote {} rows to {}",
+            result.row_count,
+            output_path.display()
+        )?;
+    }
 
     Ok(())
 }
 
-/// Get SQL from the appropriate source (argument, file, or stdin)
-fn get_sql(args: &QueryArgs) -> Result<String> {
-    // Priority: argument > file > stdin
-    if let Some(ref query) = args.query {
-        return Ok(query.clone());
-    }
-
-    if let Some(ref file_path) = args.file {
-        return read_sql_file(file_path);
-    }
-
-    // Read from stdin
-    read_sql_stdin()
-}
-
-/// Read SQL from a file
-fn read_sql_file(path: &Path) -> Result<String> {
-    std::fs::read_to_string(path).map_err(|e| TqError::FileReadError {
-        path: path.to_path_buf(),
-        source: e,
-    })
-}
-
-/// Read SQL from stdin
-fn read_sql_stdin() -> Result<String> {
-    let stdin = io::stdin();
-
-    // Check if stdin is a terminal
-    if stdin.is_terminal() {
-        return Err(TqError::InvalidConfig(
-            "No query provided. Use 'tq query \"SELECT ...\"' or pipe SQL via stdin.".to_string(),
-        ));
-    }
-
-    let mut sql = String::new();
-    let mut reader = BufReader::new(stdin.lock());
-    reader.read_to_string(&mut sql)?;
-
-    if sql.trim().is_empty() {
-        return Err(TqError::InvalidConfig(
-            "Empty query. Provide SQL via argument, file, or stdin.".to_string(),
-        ));
-    }
-
-    Ok(sql)
-}
+// ============================================================================
+// Helper Functions
+// ============================================================================
 
 /// Truncate SQL for display (verbose output)
 fn truncate_sql(sql: &str, max_len: usize) -> String {
@@ -157,7 +501,62 @@ fn truncate_sql(sql: &str, max_len: usize) -> String {
     if normalized.len() <= max_len {
         normalized
     } else {
-        format!("{}...", &normalized[..max_len - 3])
+        format!("{}...", &normalized[..max_len.saturating_sub(3)])
+    }
+}
+
+/// Get the statement type (first keyword) for progress messages
+fn get_statement_type(sql: &str) -> &str {
+    // Skip leading comments to find the real keyword
+    let sql_trimmed = sql.trim();
+
+    // Check for line comment
+    if sql_trimmed.starts_with("--") {
+        // Find the first line that's not a comment
+        for line in sql_trimmed.lines() {
+            let line_trimmed = line.trim();
+            if !line_trimmed.is_empty() && !line_trimmed.starts_with("--") {
+                return line_trimmed
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("SQL")
+                    .trim_matches(|c: char| !c.is_alphanumeric());
+            }
+        }
+    }
+
+    // Check for block comment
+    if sql_trimmed.starts_with("/*") {
+        if let Some(end_pos) = sql_trimmed.find("*/") {
+            let after_comment = sql_trimmed[end_pos + 2..].trim();
+            return after_comment
+                .split_whitespace()
+                .next()
+                .unwrap_or("SQL")
+                .trim_matches(|c: char| !c.is_alphanumeric());
+        }
+    }
+
+    // No leading comment, get first word
+    sql_trimmed
+        .split_whitespace()
+        .next()
+        .unwrap_or("SQL")
+        .trim_matches(|c: char| !c.is_alphanumeric())
+}
+
+/// Format the status message for a completed statement
+fn format_statement_status(result: &crate::db::QueryResult, format: OutputFormat) -> String {
+    let row_count = result.row_count;
+
+    if row_count == 0 {
+        "OK".to_string()
+    } else {
+        match format {
+            OutputFormat::Table => format!("{} rows returned", row_count),
+            OutputFormat::Json => format!("{} rows (JSON)", row_count),
+            OutputFormat::Csv => format!("{} rows (CSV)", row_count),
+        }
     }
 }
 
@@ -184,5 +583,73 @@ mod tests {
         let sql = "SELECT\n    a,\n    b\nFROM\n    t";
         let result = truncate_sql(sql, 100);
         assert_eq!(result, "SELECT a, b FROM t");
+    }
+
+    #[test]
+    fn test_input_source_description() {
+        assert_eq!(
+            InputSource::Argument("SELECT 1".to_string()).description(),
+            "command-line argument"
+        );
+        assert_eq!(
+            InputSource::File(PathBuf::from("test.sql")).description(),
+            "file 'test.sql'"
+        );
+        assert_eq!(InputSource::Stdin.description(), "stdin");
+    }
+
+    #[test]
+    fn test_get_statement_type() {
+        assert_eq!(get_statement_type("SELECT * FROM t"), "SELECT");
+        assert_eq!(get_statement_type("INSERT INTO t VALUES (1)"), "INSERT");
+        assert_eq!(get_statement_type("UPDATE t SET x = 1"), "UPDATE");
+        assert_eq!(get_statement_type("DELETE FROM t"), "DELETE");
+        assert_eq!(get_statement_type("CREATE TABLE t (x INT)"), "CREATE");
+        // Comments are skipped to find the real statement type
+        assert_eq!(get_statement_type("-- Comment\nSELECT 1"), "SELECT");
+        assert_eq!(get_statement_type("/* Block comment */\nUPDATE t SET x = 1"), "UPDATE");
+    }
+
+    #[test]
+    fn test_batch_execution_error_format() {
+        let statement = ParsedStatement::new("SELECT * FROM nonexistent".to_string(), 2, 5);
+        let error = TqError::TableNotFound {
+            table: "nonexistent".to_string(),
+        };
+        let batch_error = BatchExecutionError::new(statement, error, 1, 5);
+
+        let formatted = batch_error.format_error();
+
+        assert!(formatted.contains("statement 2"));
+        assert!(formatted.contains("line 5"));
+        assert!(formatted.contains("SELECT * FROM nonexistent"));
+        assert!(formatted.contains("Statements executed: 1-1"));
+        assert!(formatted.contains("Statements remaining: 3-5"));
+    }
+
+    #[test]
+    fn test_batch_execution_error_no_remaining() {
+        let statement = ParsedStatement::new("SELECT 1".to_string(), 3, 1);
+        let error = TqError::QueryExecution("test error".to_string());
+        let batch_error = BatchExecutionError::new(statement, error, 2, 3);
+
+        let formatted = batch_error.format_error();
+
+        // Last statement failed, no remaining
+        assert!(formatted.contains("Statements executed: 1-2"));
+        assert!(!formatted.contains("Statements remaining"));
+    }
+
+    #[test]
+    fn test_batch_execution_error_first_statement() {
+        let statement = ParsedStatement::new("SELECT 1".to_string(), 1, 1);
+        let error = TqError::QueryExecution("test error".to_string());
+        let batch_error = BatchExecutionError::new(statement, error, 0, 3);
+
+        let formatted = batch_error.format_error();
+
+        // First statement failed, no executed
+        assert!(!formatted.contains("Statements executed"));
+        assert!(formatted.contains("Statements remaining: 2-3"));
     }
 }

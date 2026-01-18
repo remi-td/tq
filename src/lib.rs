@@ -69,6 +69,7 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod format;
+pub mod sql;
 
 // Re-export commonly used types for convenience
 pub use cli::{

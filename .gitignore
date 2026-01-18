@@ -33,10 +33,6 @@ tests/*testing*.md
 tests/*regression*.md
 mvp_implementation_notes/
 
-# Sprint working documents
-docs/builder/sprints/sprint-*-planning.md
-docs/builder/sprints/sprint-*-review.md
-docs/builder/sprints/sprint-*-*.md
 
 # Temporary and debug files
 docs/builder/incoming/*.png

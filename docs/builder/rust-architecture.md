@@ -1,6 +1,6 @@
 # tq CLI - Rust Architecture and Implementation Guide
 
-**Version:** 1.3.1
+**Version:** 1.4.0
 **Status:** Production Ready
 **Last Updated:** 2026-01-18
 
@@ -1884,7 +1884,194 @@ upx --best --lzma target/release/tq
 
 ---
 
-## 11. Implementation Roadmap
+## 11. Batch Mode Architecture (Sprint 10)
+
+This section documents the batch mode architecture implemented in Sprint 10.
+
+### 11.1 Overview
+
+Batch mode enables non-interactive use of tq for scripts, cron jobs, CI/CD pipelines, and command-line data processing. Key capabilities:
+
+- Execute SQL from files (`--file`)
+- Accept piped input from stdin
+- Execute multiple statements sequentially
+- Fail-fast error handling with context
+- All output formats (table, JSON, CSV)
+
+### 11.2 Module Structure
+
+```
+src/
+├── sql/
+│   ├── mod.rs           # Module exports
+│   └── parser.rs        # SQL statement parsing
+├── commands/
+│   └── query.rs         # Batch execution (refactored)
+└── lib.rs               # Add: pub mod sql;
+```
+
+### 11.3 Input Source Architecture
+
+#### InputSource Enum
+
+```rust
+/// Represents the source of SQL input
+#[derive(Debug, Clone, PartialEq)]
+pub enum InputSource {
+    /// SQL provided as command-line argument
+    Argument(String),
+    /// SQL read from a file
+    File(PathBuf),
+    /// SQL read from stdin (piped input)
+    Stdin,
+}
+```
+
+#### Input Source Resolution
+
+**Precedence order:**
+1. Explicit SQL argument: `tq query "SELECT 1"`
+2. File flag: `tq query --file script.sql`
+3. stdin: `cat script.sql | tq query`
+
+**stdin detection:** Uses `std::io::IsTerminal::is_terminal()` (Rust 1.70+) to detect piped vs interactive input.
+
+### 11.4 Statement Parser
+
+The statement parser (`src/sql/parser.rs`) provides simple semicolon-based statement splitting.
+
+#### Design Decisions
+
+1. **Simple splitting**: Split on `;` without full SQL grammar parsing
+2. **Comments preserved**: Pass through to Teradata (handles them correctly)
+3. **Line tracking**: Track line numbers for error messages
+4. **Empty handling**: Skip whitespace-only statements
+
+#### Known Limitations
+
+- Semicolons inside string literals may cause incorrect splits (rare in practice)
+- Documented limitation; full SQL parsing deferred to future if needed
+
+#### Key Types
+
+```rust
+/// A parsed SQL statement with metadata
+pub struct ParsedStatement {
+    pub sql: String,           // Statement text (trimmed)
+    pub statement_number: usize, // 1-based index
+    pub start_line: usize,     // Line number for errors
+}
+
+/// Parse SQL text into individual statements
+pub fn parse_statements(sql: &str) -> Vec<ParsedStatement>
+```
+
+### 11.5 Batch Executor
+
+#### Execution Flow
+
+```
+┌─────────────┐    ┌──────────────┐    ┌─────────────────┐
+│ Input       │───▶│ Resolve      │───▶│ Read SQL        │
+│ Arguments   │    │ Source       │    │ Content         │
+└─────────────┘    └──────────────┘    └────────┬────────┘
+                                                │
+                                                ▼
+                           ┌────────────────────────────────┐
+                           │ parse_statements()             │
+                           │ "SELECT 1; SELECT 2;" ──▶      │
+                           │ [ParsedStatement, ...]         │
+                           └───────────────┬────────────────┘
+                                           │
+                                           ▼
+                   ┌───────────────────────────────────────────┐
+                   │           Batch Executor Loop             │
+                   │                                           │
+                   │  for statement in statements:             │
+                   │    1. Progress message → stderr           │
+                   │    2. Execute via DatabaseClient          │
+                   │    3. Success: format + output            │
+                   │       Error: stop + return context        │
+                   └───────────────────────────────────────────┘
+```
+
+#### Fail-Fast Behavior
+
+- Executes statements sequentially
+- Stops immediately on first error
+- Reports: statement number, line number, preview, Teradata error
+- Returns appropriate exit code (1 for runtime errors, 2 for usage errors)
+
+#### Error Context
+
+```rust
+pub struct BatchExecutionError {
+    pub statement: ParsedStatement,  // Failed statement
+    pub error: TqError,              // Underlying error
+    pub successful_count: usize,     // Statements before failure
+}
+```
+
+Example error output:
+```
+Error at statement 2 (line 4): SQL syntax error: [Error 3707]...
+
+Statement: SELECT * FORM users...
+```
+
+### 11.6 Integration Points
+
+#### Reused Components
+
+| Component | Usage in Batch Mode |
+|-----------|-------------------|
+| `DatabaseClient` | Execute statements (unchanged) |
+| `FormatOptions` | Configure output formatting |
+| `write_output_with_timing` | Format and write results |
+| `TqError` | All error variants |
+
+#### REPL vs Batch Mode
+
+| Aspect | REPL | Batch |
+|--------|------|-------|
+| Input | Interactive line editor | File/stdin/argument |
+| Execution | Single statement, continue on error | Sequential, fail-fast |
+| Output | Pager for large results | Direct to stdout |
+| State | Session state maintained | Stateless |
+| Progress | Not shown | To stderr |
+
+### 11.7 Testing Strategy
+
+#### Test Levels
+
+1. **Unit tests** (inline in source files)
+   - Statement parser: edge cases, whitespace, comments
+   - Input source resolution: precedence, validation
+   - Error formatting: context, preview
+
+2. **Integration tests** (`tests/integration/`)
+   - CLI argument handling
+   - File input processing
+   - Error propagation
+
+3. **Manual tests** (with real database)
+   - stdin piping (echo, heredoc, cat)
+   - File execution
+   - Multi-statement batches
+   - Error handling verification
+
+#### Coverage Targets
+
+| Component | Target |
+|-----------|--------|
+| Statement parser | 95%+ |
+| Input resolution | 90%+ |
+| Batch executor | 85%+ |
+| Error propagation | 90%+ |
+
+---
+
+## 12. Implementation Roadmap
 
 ### Phase 1: MVP (Current)
 - ✅ Basic CLI structure with clap
@@ -1906,17 +2093,25 @@ upx --best --lzma target/release/tq
 - [x] Command history (persistent to ~/.tq_history)
 - [x] Multi-line SQL input
 - [x] Syntax highlighting (nu-ansi-term)
-- [ ] Tab completion (Phase 4)
+- [x] Tab completion (database-aware)
 - [x] Result paging (vertical and horizontal)
 
-### Phase 4: Advanced Features
+### Phase 4: Batch Mode (Sprint 10 - In Progress)
+- [ ] stdin input support (piped SQL)
+- [ ] File input support (--file flag)
+- [ ] Multi-statement execution
+- [ ] Enhanced batch error messages
+- [ ] Batch output behavior (no pager, TTY detection)
+
+### Phase 5: Advanced Features
 - [ ] Schema metadata commands
-- [ ] Transaction support
+- [ ] Transaction support (--atomic flag)
+- [ ] Variable substitution (--var flag)
 - [ ] Query templates
 - [ ] SSL/TLS support
 - [ ] Keyring integration
 
-### Phase 5: Distribution
+### Phase 6: Distribution
 - [ ] Shell completions (bash/zsh/fish)
 - [ ] Man pages
 - [ ] Homebrew formula

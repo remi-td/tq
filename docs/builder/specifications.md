@@ -1,7 +1,7 @@
 # tq (Teradata Query) - Specifications
 
-**Version:** 1.5.1
-**Status:** Active Development - Sprint 9 Complete, Ready for Sprint 10
+**Version:** 1.6.0
+**Status:** Active Development - Sprint 10 Complete, Ready for Sprint 11
 **Last Updated:** 2026-01-18
 
 ---
@@ -105,18 +105,20 @@
 | `/colors` metacommand | ✅ Implemented | `/colors on\|off` | 6 | P2 |
 | `/logon` metacommand | ✅ Implemented | `/logon [connection-string]` | 7 | P1 |
 
-### Batch Mode 📋 Planned
+### Batch Mode (Sprint 10) ✅ Foundation Complete
 
-| Feature | Status | Priority |
-|---------|--------|----------|
-| Execute from file | 📋 Planned | P0 |
-| Read SQL from stdin | 📋 Planned | P0 |
-| Output to stdout | ✅ Implemented | P0 |
-| Output to file | 📋 Planned | P1 |
-| Streaming large results | 📋 Planned | P1 |
-| Multiple statement execution | 📋 Planned | P1 |
-| Transaction control | 📋 Planned | P2 |
-| Variable substitution | 📋 Planned | P2 |
+| Feature | Status | Sprint | Priority |
+|---------|--------|--------|----------|
+| Execute from file | ✅ Implemented | 10 | P0 |
+| Read SQL from stdin | ✅ Implemented | 10 | P0 |
+| Output to stdout | ✅ Implemented | 10 | P0 |
+| Multiple statement execution | ✅ Implemented | 10 | P0 |
+| Enhanced error messages | ✅ Implemented | 10 | P1 |
+| Batch mode output behavior | ✅ Implemented | 10 | P1 |
+| Output to file | 📋 Planned | 11+ | P1 |
+| Streaming large results | 📋 Planned | 11+ | P1 |
+| Transaction control | 📋 Planned | 11+ | P2 |
+| Variable substitution | 📋 Planned | 11+ | P2 |
 
 ### Configuration 📋 Planned
 
@@ -238,9 +240,39 @@
 
 **Key Achievement:** 100% bug fix completion with autonomous execution
 
-### Sprint 9+: Batch Mode & Configuration 📋 Future
+---
+
+### Sprint 10: Batch Mode Foundation ✅ Complete
+**Goal:** Implement foundational batch mode features for scripting and automation
+
+**Delivered Features:**
+1. **stdin Input Support (P0)** - Pipe SQL queries from stdin (`cat query.sql | tq query`)
+2. **File Input Support (P0)** - Execute SQL scripts from files (`tq query --file script.sql`)
+3. **Multiple Statement Execution (P0)** - Sequential execution with fail-fast error handling
+4. **Enhanced Error Messages (P1)** - Statement number, line tracking, contextual errors
+5. **Batch Mode Output Behavior (P1)** - Appropriate defaults for scripting use cases
+
+**Status:** ✅ Complete
+**Completion Date:** 2026-01-18
+**Version Released:** v1.6.0
+
+**Test Results:**
+- Unit Tests: 195/195 passed (100%)
+- Integration Tests: 37/37 passed (100%)
+- Code Coverage: >95% for new code
+- Build Warnings: 0
+
+**Sprint Planning:** [Sprint 10 Planning](../sprints/sprint-10-planning.md)
+**Sprint Review:** [Sprint 10 Review](../sprints/sprint-10-review.md)
+
+**Key Achievement:** Full batch mode foundation enabling scripting, automation, and CI/CD integration
+
+---
+
+### Sprint 11+: Advanced Batch Mode & Configuration 📋 Future
 **Goals:**
-- File input (`--file`, stdin)
+- Transaction control (`--atomic` flag)
+- Variable substitution
 - Streaming large results
 - Configuration files and connection profiles
 - Additional completion features (functions, schemas)

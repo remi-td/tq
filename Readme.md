@@ -219,6 +219,72 @@ tq query --file report.sql
 echo "SELECT COUNT(*) FROM orders" | tq query
 ```
 
+### Batch Mode (Multiple Statements)
+
+Execute multiple SQL statements from files or stdin. Statements are separated by semicolons and executed sequentially.
+
+```bash
+# Execute multiple statements from a file
+cat > setup.sql << 'EOF'
+-- Create temporary table
+CREATE VOLATILE TABLE temp_data (
+    id INTEGER,
+    value VARCHAR(100)
+) ON COMMIT PRESERVE ROWS;
+
+-- Insert test data
+INSERT INTO temp_data VALUES (1, 'test1');
+INSERT INTO temp_data VALUES (2, 'test2');
+
+-- Query the data
+SELECT * FROM temp_data;
+
+-- Cleanup
+DROP TABLE temp_data;
+EOF
+tq query --file setup.sql
+
+# Execute multiple statements from stdin using heredoc
+tq query <<'EOF'
+SELECT CURRENT_DATE;
+SELECT CURRENT_TIME;
+SELECT DATABASE;
+EOF
+
+# Batch mode with progress output (to stderr)
+# Statement 1: SELECT... 1 rows returned
+# Statement 2: SELECT... 1 rows returned
+# Statement 3: SELECT... 1 rows returned
+
+# Pipe multiple statements
+echo "SELECT 1; SELECT 2; SELECT 3;" | tq query
+```
+
+**Batch Mode Features:**
+- Automatic statement parsing (semicolon-separated)
+- Progress messages for each statement (to stderr)
+- Results output (to stdout)
+- Fail-fast error handling with statement context
+- Line number tracking for error messages
+
+**Error Handling in Batch Mode:**
+
+If a statement fails, tq stops execution and shows:
+- Which statement failed (number and line)
+- The SQL that caused the error
+- Which statements completed successfully
+- Which statements were not executed
+
+```bash
+# Example error output:
+# Statement 1: SELECT... 1 rows returned
+# Statement 2: INSERT... FAILED
+# Error at statement 2 (line 5): SQL syntax error...
+# Statement: INSERT INTO nonexistent VALUES (1)
+# Statements executed: 1-1
+# Statements remaining: 3-3
+```
+
 ### Output Formats
 
 ```bash
