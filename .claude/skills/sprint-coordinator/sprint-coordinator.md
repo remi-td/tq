@@ -119,9 +119,40 @@ Task 2: quality-validator
 
 ---
 
-### Phase 4: Test Execution Phase (You Coordinate)
+### Phase 3.5: Database Connectivity Check (You Execute)
 
-**Goal:** Execute all tests and validate quality.
+**Goal:** Verify test database is accessible before testing begins.
+
+**Your Actions:**
+
+1. **Check Database Configuration:**
+   - Verify `.env` file exists in project root
+   - Check that `TQ_LOGON` environment variable is set
+   - Example: `TQ_LOGON=user:password@host:port/database`
+
+2. **Test Database Connectivity:**
+   - Build if needed: `cargo build --release`
+   - Run ping command: `./target/release/tq ping`
+   - Alternative: Use environment variable directly if needed
+
+3. **Decision Point:**
+   - **Ping succeeds:** Proceed to Phase 4 (Test Execution)
+   - **Ping fails:** STOP and ask user to:
+     * Copy `.env.example` to `.env`
+     * Configure `TQ_LOGON` with valid test database credentials
+     * Start the test database instance (you cannot do this)
+     * Confirm when database is ready
+   - **Resume:** Once user confirms, re-run ping test, then proceed
+
+**CRITICAL:** Never proceed to Phase 4 without verifying database connectivity. Features requiring database access cannot be tested without a live database.
+
+**Output:** Confirmed database connectivity.
+
+---
+
+### Phase 4: Test Execution & Fix Loop (You Coordinate)
+
+**Goal:** Execute all tests and fix any failures until 100% pass rate achieved.
 
 **Your Actions:**
 
@@ -136,11 +167,43 @@ Task: quality-validator
 2. **Analyze Results:**
    - Review test report
    - Check pass rate (should be 100%)
-   - Analyze any failures
+   - Categorize any failures:
+     * **Trivial issues:** Auto-fixable warnings, unused imports, documentation typos
+     * **Code issues:** Logic errors, performance problems, architectural flaws
 
 3. **Decision Point:**
-   - **All tests pass:** Proceed to Phase 5 (Sprint Closure)
-   - **Tests fail:** Launch rust-teradata-architect to fix issues, return to start of Phase 4
+   - **All tests pass (100%):** Proceed to Phase 5 (Sprint Closure)
+   - **Tests fail with trivial issues:** You MAY fix directly if:
+     * Auto-fixable via `cargo fix` or `cargo clippy --fix`
+     * Simple documentation/comment updates
+     * Unused imports or dead code removal
+   - **Tests fail with code issues:** You MUST delegate to rust-teradata-architect:
+     * Launch rust-teradata-architect with specific fix instructions
+     * Wait for fix completion
+     * Return to step 1 (re-run quality-validator)
+     * Loop until 100% pass rate OR escalate if blocked
+
+4. **Fix Loop Pattern:**
+
+```
+quality-validator reports failures
+  ↓
+Categorize issues (trivial vs code)
+  ↓
+If trivial: Fix directly with simple commands
+If code: Launch rust-teradata-architect
+  ↓
+rust-teradata-architect fixes and commits
+  ↓
+Launch quality-validator again
+  ↓
+Loop until 100% pass rate
+```
+
+**When to Escalate:**
+- After 3 fix attempts with no progress
+- If rust-teradata-architect reports blocker
+- If fundamental design flaw discovered
 
 **Output:** All tests passing (100% pass rate).
 
@@ -178,9 +241,10 @@ Task: tq-project-manager
      - Change 🚧 to ✅ for completed features
      - Update sprint roadmap section
      - Add link to sprint-N-review.md
-   - Update `docs/builder/user/roadmap.md`:
-     - Add completed sprint to "Releases" section
-     - Update "Next Up" section with upcoming work
+   - Update `docs/user/roadmap.md`:
+     - Add completed sprint to "Releases" section with version and key features
+     - Update "Next Up" section with upcoming sprint work
+     - Keep high-level and user-friendly (technical details in specifications.md)
 
 5. **Commit Changes:**
    - Review all changes with user

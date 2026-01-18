@@ -1,41 +1,13 @@
 # Current bug and urgent issues
 
-Created on 2026-01-18 at 07:21
+Created on 2026-01-18 at 08:21
 
-## Compilation issue
+## Confusing hints
 
-Not sure what you did in the last sprint, but the tool doesn't even compile!!!
+After displaying the result of a query, with more than 100 rows, the tool shows a hint:
+`Showing first 100 rows. Add LIMIT clause for different results.`
 
-(base) remi.turpaud@TD-VX1J6LT4PX tq % cargo build                                                                                                     
-warning: tq@1.3.0: Successfully copied teradatasql.dylib to /Users/remi.turpaud/Code/genAI/tq/target/debug/teradatasql.dylib
-warning: function `write_enhanced_timing` is never used
-   --> src/commands/repl/executor.rs:302:8
-    |
-302 | pub fn write_enhanced_timing<W: Write>(
-    |        ^^^^^^^^^^^^^^^^^^^^^
-    |
-    = note: `#[warn(dead_code)]` on by default
-
-warning: function `display_with_paging` is never used
-   --> src/commands/repl/pager.rs:281:8
-    |
-281 | pub fn display_with_paging<W: Write>(
-    |        ^^^^^^^^^^^^^^^^^^^
-
-warning: function `interactive_pager` is never used
-   --> src/commands/repl/pager.rs:299:4
-    |
-299 | fn interactive_pager<W: Write>(mut paged: PagedOutput, writer: &mut W) -> Result<()> {
-    |    ^^^^^^^^^^^^^^^^^
-
-warning: function `should_page` is never used
-   --> src/commands/repl/pager.rs:365:8
-    |
-365 | pub fn should_page(result: &QueryResult, config: &PagerConfig) -> bool {
-    |        ^^^^^^^^^^^
-
-warning: `tq` (lib) generated 4 warnings
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.24s
+...LIMIT isn't a valid Teradata SQL keyword (TOP is the equivalent keyword, SAMPLE is an alternative), so this is confusing. For some reason using TOP or SAMPLE actually works (override the limit), which is pretty cool! ;). So just adjust this hint to use TOP or SAMPLE instead of LIMIT. 
 
 ## Padding issue
 

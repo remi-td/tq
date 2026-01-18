@@ -27,6 +27,8 @@ The project follows a structured sprint-driven approach coordinated by the **mai
 
 ```
 1. Sprint Planning (Main Agent)
+   - Check docs/builder/incoming/ for new feature requests/bugs
+   - Review previous sprint retrospective
    ↓ Creates: sprint-N-planning.md
 
 2. Parallel Design (Main Agent Coordinates)
@@ -34,18 +36,28 @@ The project follows a structured sprint-driven approach coordinated by the **mai
    └─→ rust-teradata-architect: Technical feasibility
    ↓ Main agent synthesizes outputs
 
+2.5. Database Connectivity Check (Main Agent)
+   - Verify .env file exists and TQ_LOGON is configured
+   - Run: ./target/release/tq ping
+   - If fails: STOP and ask user to start test database
+   ↓ Only proceed when database is verified
+
 3. Parallel Implementation (Main Agent Coordinates)
    ├─→ rust-teradata-architect: Implementation
    └─→ quality-validator: Test case design
    ↓ Main agent reviews outputs
 
-4. Test Execution (Main Agent Coordinates)
+4. Test Execution & Fix Loop (Main Agent Coordinates)
    └─→ quality-validator: Execute tests
-   ↓ If failures, back to implementation
+   ↓ If failures:
+       ├─→ rust-teradata-architect: Fix issues
+       └─→ quality-validator: Re-run tests
+       ↓ Loop until 100% pass rate
 
 5. Sprint Closure (Main Agent Coordinates)
    ├─→ tq-project-manager: Validate completion
-   └─→ Main agent: Sprint review + roadmap update
+   ├─→ Main agent: Sprint review + specifications update
+   └─→ Main agent: Update docs/user/roadmap.md
 ```
 
 #### Key Principles
