@@ -1,8 +1,8 @@
 # tq (Teradata Query) - Specifications
 
-**Version:** 1.5.0-dev
-**Status:** Active Development - Sprint 7 (In Progress)
-**Last Updated:** 2026-01-19
+**Version:** 1.5.0
+**Status:** Active Development - Sprint 7 Complete
+**Last Updated:** 2026-01-18
 
 ---
 
@@ -97,12 +97,12 @@
 |---------|--------|---------|--------|----------|
 | Table formatting fix | ✅ Sprint 6 | All table output | 6 | P0 |
 | Tab completion (keywords) | ✅ Sprint 6 | Tab key | 6 | P1 |
-| Tab completion (tables) | 🚧 Sprint 7 | Tab key | 7 | P0 |
-| Tab completion (columns) | 🚧 Sprint 7 | Tab key | 7 | P1 |
+| Tab completion (tables) | ✅ Sprint 7 | Tab key | 7 | P0 |
+| Tab completion (columns) | ✅ Sprint 7 | Tab key | 7 | P1 |
 | `/export` metacommand | ✅ Sprint 6 | `/export [format] [file]` | 6 | P1 |
 | `/pager on\|off` metacommand | ✅ Sprint 6 | `/pager on\|off` | 6 | P2 |
 | `/colors` metacommand | ✅ Sprint 6 | `/colors on\|off` | 6 | P2 |
-| `/logon` metacommand | 🚧 Sprint 7 | `/logon [connection-string]` | 7 | P1 |
+| `/logon` metacommand | ✅ Sprint 7 | `/logon [connection-string]` | 7 | P1 |
 
 ### Batch Mode 📋 Planned
 
@@ -189,19 +189,19 @@
 
 **Sprint Review:** [Sprint 6 Complete Review](../sprints/sprint-6-review.md)
 
-### Sprint 7: Interactive Mode Phase 4 - Database-Aware Features 🚧 In Progress
+### Sprint 7: Interactive Mode Phase 4 - Database-Aware Features ✅ Complete
 **Goal:** Enhance REPL with intelligent tab completion for database objects and dynamic connection management
 
-**Planned Features:**
-1. **Tab Completion for Table Names (P0)** - After FROM, JOIN, UPDATE keywords
-2. **Tab Completion for Column Names (P1)** - After SELECT, WHERE, ORDER BY keywords
-3. **`/logon` Metacommand (P1)** - Dynamic connection switching
+**Delivered Features:**
+1. **Tab Completion for Table Names (P0)** - Complete after FROM, JOIN, UPDATE keywords using database metadata
+2. **Tab Completion for Column Names (P1)** - Complete after SELECT, WHERE, ORDER BY with SQL context awareness
+3. **`/logon` Metacommand (P1)** - Dynamic connection switching without restarting REPL
 
-**Status:** Design Phase (UX specifications complete)
-**Target Completion:** 2026-01-20
-**Version Target:** v1.5.0
+**Status:** Complete
+**Completion Date:** 2026-01-18
+**Version Released:** v1.5.0
 
-**Sprint Planning:** [Sprint 7 Planning](../sprints/sprint-7-planning.md)
+**Sprint Review:** [Sprint 7 Review](../sprints/sprint-7-review.md)
 
 ### Sprint 8+: Batch Mode & Configuration 📋 Future
 **Goals:**
