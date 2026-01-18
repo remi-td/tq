@@ -434,13 +434,14 @@ impl DatabaseClient {
 
     /// Map connection error to TqError
     fn map_connection_error(&self, error: &str) -> TqError {
+        let clean_error = strip_go_stack_trace(error);
         let message = if error.contains("Connection refused") {
             format!(
                 "Connection refused. Ensure the Teradata database is running. {}",
-                error
+                clean_error
             )
         } else if error.contains("timeout") || error.contains("Timeout") {
-            format!("Connection timeout. Check network connectivity. {}", error)
+            format!("Connection timeout. Check network connectivity. {}", clean_error)
         } else if error.contains("Invalid credentials")
             || error.contains("Logon failed")
             || error.contains("Authentication")
@@ -448,10 +449,10 @@ impl DatabaseClient {
             return TqError::AuthenticationFailed {
                 user: self.config.user.clone(),
                 logmech: self.config.logmech.to_string(),
-                source: Some(crate::error::string_to_error(error.to_string())),
+                source: Some(crate::error::string_to_error(clean_error)),
             };
         } else {
-            error.to_string()
+            clean_error
         };
 
         TqError::connection_failed(&self.config.host, self.config.port, message)
@@ -460,10 +461,11 @@ impl DatabaseClient {
     /// Map query error to TqError
     fn map_query_error(&self, error: &str, sql: &str) -> TqError {
         let error_lower = error.to_lowercase();
+        let clean_error = strip_go_stack_trace(error);
 
         if error_lower.contains("syntax") || error_lower.contains("parse") {
             TqError::SqlSyntaxError {
-                message: error.to_string(),
+                message: clean_error,
                 query: Some(sql.to_string()),
             }
         } else if error_lower.contains("does not exist") || error_lower.contains("not found") {
@@ -472,9 +474,9 @@ impl DatabaseClient {
                 table: extract_table_name(sql).unwrap_or_else(|| "unknown".to_string()),
             }
         } else if error_lower.contains("permission") || error_lower.contains("privilege") {
-            TqError::PermissionDenied(error.to_string())
+            TqError::PermissionDenied(clean_error)
         } else {
-            TqError::QueryExecution(error.to_string())
+            TqError::QueryExecution(clean_error)
         }
     }
 }
@@ -536,6 +538,36 @@ fn extract_table_name(sql: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Strip Go stack traces from Teradata driver error messages
+///
+/// The teradatasql driver (written in Go) includes full stack traces in error messages.
+/// This function removes those traces to provide clean, user-friendly error messages.
+///
+/// Example input:
+/// ```text
+/// [Error 3707] Syntax error...
+///  at gosqldriver/teradatasql.formatError ErrorUtil.go:101
+///  at gosqldriver/teradatasql.(*teradataConnection).formatDatabaseError ErrorUtil.go:210
+/// ```
+///
+/// Example output:
+/// ```text
+/// [Error 3707] Syntax error...
+/// ```
+fn strip_go_stack_trace(error: &str) -> String {
+    // Find the first occurrence of Go stack trace marker
+    if let Some(pos) = error.find("\n at ") {
+        // Truncate at first stack frame
+        error[..pos].trim().to_string()
+    } else if let Some(pos) = error.find(" at gosqldriver") {
+        // Handle case where stack trace doesn't have leading newline
+        error[..pos].trim().to_string()
+    } else {
+        // No stack trace found, return as-is
+        error.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -777,5 +809,27 @@ mod tests {
         } else {
             panic!("Expected MetadataParsing error");
         }
+    }
+
+    #[test]
+    fn test_strip_go_stack_trace() {
+        // Test with full Go stack trace
+        let error_with_trace = "[Version 20.0.49] [Session 1429] [Teradata Database] [Error 3707] Syntax error\n at gosqldriver/teradatasql.formatError ErrorUtil.go:101\n at gosqldriver/teradatasql.(*teradataConnection).formatDatabaseError ErrorUtil.go:210";
+        let cleaned = strip_go_stack_trace(error_with_trace);
+        assert_eq!(cleaned, "[Version 20.0.49] [Session 1429] [Teradata Database] [Error 3707] Syntax error");
+        assert!(!cleaned.contains(" at "));
+        assert!(!cleaned.contains("gosqldriver"));
+
+        // Test with stack trace without leading newline
+        let error_no_newline = "SQL error at gosqldriver/teradatasql.query Query.go:50";
+        let cleaned = strip_go_stack_trace(error_no_newline);
+        assert_eq!(cleaned, "SQL error");
+
+        // Test error without stack trace
+        let error_clean = "Simple error message";
+        assert_eq!(strip_go_stack_trace(error_clean), "Simple error message");
+
+        // Test empty error
+        assert_eq!(strip_go_stack_trace(""), "");
     }
 }

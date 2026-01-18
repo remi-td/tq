@@ -111,36 +111,55 @@ Troubleshooting:
 
 **Definition**: SQL syntax or execution error
 **Exit Code**: `1`
-**Strategy**: Show error with context, suggest fixes
+**Strategy**: Show error with context, suppress internal stack traces
 
-**Example**:
+**Format (Sprint 9 Design):**
+```
+Error: [Short Error Type]
+
+[User-Friendly Error Message]
+
+Error Code: [Teradata Error Code]
+Session ID: [Session Number]
+```
+
+**Key Principles:**
+- ✅ Show only relevant information (message, error code, session ID)
+- ❌ Suppress Go stack traces from Teradata driver (all "at gosqldriver/..." lines)
+- ✅ Professional and actionable format
+- ✅ Include metadata for debugging with DBAs
+
+**Example 1: Syntax Error**
 ```bash
 $ tq query "SELCT * FROM users"
 Error: SQL syntax error
 
-Query:
-  SELCT * FROM users
-  ^^^^^ Syntax error here
+Expected something like a 'SELECT' keyword but found 'SELCT'.
 
-Details: [3706] Syntax error: expected SELECT but found SELCT
-
-Suggestion: Did you mean "SELECT"?
+Error Code: 3706
+Session ID: 1429
 ```
 
+**Example 2: Table Not Found**
 ```bash
 $ tq query "SELECT * FROM nonexistent_table"
 Error: Table does not exist
 
-Query:
-  SELECT * FROM nonexistent_table
-                ^^^^^^^^^^^^^^^^^
+Object 'nonexistent_table' does not exist.
 
-Details: [3807] Object 'nonexistent_table' does not exist
+Error Code: 3807
+Session ID: 1429
+```
 
-Suggestions:
-  - Check spelling: tq query "\dt %table%"
-  - List tables: tq query "\dt"
-  - Check schema: tq query "\dn"
+**Example 3: Incomplete Table Reference**
+```bash
+$ tq query "SELECT * FROM database."
+Error: SQL syntax error
+
+Expected something like an 'UDFCALLNAME' keyword between '.' and the 'AS' keyword.
+
+Error Code: 3707
+Session ID: 1429
 ```
 
 ### 9.1.5 Permission Errors
@@ -150,13 +169,12 @@ Suggestions:
 $ tq query "DROP TABLE important_data"
 Error: Permission denied
 
-Query:
-  DROP TABLE important_data
+User 'alice' does not have DROP privilege on table 'important_data'.
 
-Details: [3523] User 'alice' does not have DROP privilege on table 'important_data'
+Error Code: 3523
+Session ID: 1429
 
-Action required:
-  Contact your database administrator to request privileges
+Action required: Contact your database administrator to request privileges
 ```
 
 ### 9.1.6 System Errors
@@ -193,7 +211,7 @@ Workarounds:
 
 ## 9.2 Error Message Structure
 
-**Template**:
+### General Template
 ```
 Error: [Short description]
 
@@ -206,12 +224,42 @@ Error: [Short description]
 [Links: documentation, issues]
 ```
 
+### SQL Error Template (Sprint 9 Refined)
+```
+Error: [Short Error Type]
+
+[User-Friendly Error Message]
+
+Error Code: [Teradata Error Code]
+Session ID: [Session Number]
+```
+
+**SQL Error Parsing Rules:**
+1. Extract session ID from `[Session NNNN]` pattern
+2. Extract error code from `[Error NNNN]` pattern
+3. Extract message text (after last `]` bracket, before stack traces)
+4. **Discard all lines starting with "at"** (internal Go stack traces)
+5. Format cleanly with whitespace for readability
+
+**What to Suppress:**
+- ❌ Stack traces (all "at gosqldriver/..." lines)
+- ❌ Version information (redundant for SQL errors)
+- ❌ Internal function names and file paths
+- ❌ Runtime call stacks from driver internals
+
+**What to Include:**
+- ✅ Clear error type (syntax error, permission error, etc.)
+- ✅ Actual SQL error message (descriptive text)
+- ✅ Teradata error code (for documentation lookup)
+- ✅ Session ID (for troubleshooting with DBAs)
+
 **Best Practices**:
 1. **Be specific**: Not "Error occurred" but "Connection refused to host:1025"
-2. **Show context**: Display relevant query/command
+2. **Show context**: Display relevant query/command when helpful
 3. **Suggest solutions**: Actionable next steps
 4. **Use plain language**: Avoid jargon
 5. **Format for scanning**: Use whitespace, bullets
+6. **Suppress internal details**: No stack traces for end users
 
 ## 9.3 Progress Indicators
 

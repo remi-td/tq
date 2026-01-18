@@ -27,8 +27,8 @@ use crate::error::Result;
 use metadata_completer::{CompletionState, MetadataCompleter};
 use reedline::{
     default_emacs_keybindings, default_vi_insert_keybindings, default_vi_normal_keybindings,
-    ColumnarMenu, EditMode, Emacs, FileBackedHistory, KeyCode, KeyModifiers, Keybindings,
-    MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal, Vi,
+    EditMode, Emacs, FileBackedHistory, KeyCode, KeyModifiers, Keybindings,
+    ListMenu, MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal, Vi,
 };
 use std::io::Write;
 use std::path::PathBuf;
@@ -136,11 +136,11 @@ fn create_editor(
     let completer = MetadataCompleter::with_state(completion_state);
     editor = editor.with_completer(Box::new(completer));
 
-    // Create a completion menu that shows suggestions in columns
-    // Sprint 8 Bug Fix: Configure for better display
-    let completion_menu = ColumnarMenu::default()
+    // Create a completion menu that shows suggestions
+    // Sprint 9 Bug 1 Fix: Use ListMenu with larger page size to show more completions
+    let completion_menu = ListMenu::default()
         .with_name("completion_menu")
-        .with_columns(1); // Single column for readability
+        .with_page_size(25); // Show up to 25 completions at once (previously ~9 with ColumnarMenu)
     editor = editor.with_menu(ReedlineMenu::EngineCompleter(Box::new(completion_menu)));
 
     // Configure editor mode with keybindings that include Tab completion
@@ -284,6 +284,11 @@ fn repl_loop<W: Write>(
     default_limit: usize,
 ) -> Result<()> {
     loop {
+        // Sprint 9 Bug 2 Fix: Update accumulated buffer in completion state for multi-line context
+        if let Ok(mut state_lock) = completion_state.lock() {
+            state_lock.set_accumulated_buffer(state.input_buffer().to_string());
+        }
+
         // Get the appropriate prompt based on state
         let current_prompt = prompt.for_state(state);
 

@@ -268,7 +268,7 @@ pub struct ReplArgs {
 
     /// Default row limit for SELECT queries (0 = unlimited)
     ///
-    /// In REPL mode, SELECT queries without an explicit LIMIT clause will
+    /// In REPL mode, SELECT queries without an explicit TOP or SAMPLE clause will
     /// be limited to this many rows by default. This prevents accidentally
     /// flooding the terminal with millions of rows.
     ///

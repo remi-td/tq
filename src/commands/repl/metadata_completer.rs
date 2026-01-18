@@ -15,7 +15,7 @@
 //! Sprint 7 implementation, Sprint 8 bug fixes.
 
 use super::sql_context::{analyze_context, CompletionContext};
-use crate::db::{ColumnInfo, DatabaseClient, MetadataCache, TableInfo};
+use crate::db::{ColumnInfo, DatabaseClient, MetadataCache};
 use reedline::{Completer, Suggestion};
 use std::sync::{Arc, Mutex};
 
@@ -28,6 +28,8 @@ pub struct CompletionState {
     client: DatabaseClient,
     /// Cached metadata
     cache: MetadataCache,
+    /// Accumulated SQL buffer for multi-line context (Sprint 9 Bug 2)
+    accumulated_buffer: String,
 }
 
 impl CompletionState {
@@ -36,6 +38,7 @@ impl CompletionState {
         Self {
             client,
             cache: MetadataCache::new(database),
+            accumulated_buffer: String::new(),
         }
     }
 
@@ -72,6 +75,16 @@ impl CompletionState {
         } else {
             true
         }
+    }
+
+    /// Set the accumulated SQL buffer for multi-line context (Sprint 9 Bug 2)
+    pub fn set_accumulated_buffer(&mut self, buffer: String) {
+        self.accumulated_buffer = buffer;
+    }
+
+    /// Get the accumulated buffer
+    pub fn accumulated_buffer(&self) -> &str {
+        &self.accumulated_buffer
     }
 }
 
@@ -530,10 +543,26 @@ impl Default for MetadataCompleter {
 
 impl Completer for MetadataCompleter {
     fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
-        // Analyze context to determine what kind of completions to provide
-        let context = analyze_context(line, pos);
+        // Sprint 9 Bug 2 Fix: Support multi-line context by prepending accumulated buffer
+        let (full_text, adjusted_pos) = if let Some(state) = &self.state {
+            let state_lock = state.lock().unwrap();
+            let accumulated = state_lock.accumulated_buffer();
+            if !accumulated.is_empty() {
+                // Prepend accumulated buffer to current line
+                let combined = format!("{}{}", accumulated, line);
+                let new_pos = accumulated.len() + pos;
+                (combined, new_pos)
+            } else {
+                (line.to_string(), pos)
+            }
+        } else {
+            (line.to_string(), pos)
+        };
 
-        log::debug!("Completion context: {:?}", context);
+        // Analyze context to determine what kind of completions to provide
+        let context = analyze_context(&full_text, adjusted_pos);
+
+        log::debug!("Completion context: {:?} (full_text len: {}, pos: {})", context, full_text.len(), adjusted_pos);
 
         let mut suggestions = match context {
             CompletionContext::Keyword => {

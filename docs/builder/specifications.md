@@ -1,7 +1,7 @@
 # tq (Teradata Query) - Specifications
 
-**Version:** 1.5.0
-**Status:** Active Development - Sprint 8 (Quality Recovery) in Progress
+**Version:** 1.5.1
+**Status:** Active Development - Sprint 9 Complete, Ready for Sprint 10
 **Last Updated:** 2026-01-18
 
 ---
@@ -87,18 +87,19 @@
 | Vi keybindings | ✅ Implemented | `--editor-mode vi` | 4 | P1 |
 | Emacs keybindings | ✅ Implemented | `--editor-mode emacs` | 4 | P1 |
 | SQL syntax highlighting | ✅ Implemented | Auto-enabled in TTY | 5 | P1 |
-| Result paging (horizontal) | 🔧 In Repair | Wide tables | 5 | P1 |
-| Result paging (vertical) | 🔧 In Repair | Long results | 5 | P1 |
+| Result paging (horizontal) | ✅ Implemented | Wide tables | 5 | P1 |
+| Result paging (vertical) | ✅ Implemented | Long results | 5 | P1 |
 | Query timing display | ✅ Implemented | Show execution time | 5 | P1 |
 
 #### Phase 3 - Advanced REPL (Sprint 6-7)
 
 | Feature | Status | Command | Sprint | Priority |
 |---------|--------|---------|--------|----------|
-| Table formatting fix | 🔧 In Repair | All table output | 6 | P0 |
+| Table formatting | ✅ Implemented | All table output | 6 | P0 |
 | Tab completion (keywords) | ✅ Implemented | Tab key | 6 | P1 |
-| Tab completion (tables) | 🔧 In Repair | Tab key | 7 | P0 |
-| Tab completion (columns) | 🔧 In Repair | Tab key | 7 | P1 |
+| Tab completion (tables) | ✅ Implemented | Tab key | 7 | P0 |
+| Tab completion (columns) | ✅ Implemented | Tab key | 7 | P1 |
+| Tab completion (multi-line) | ✅ Implemented | Across line breaks | 9 | P0 |
 | `/export` metacommand | ✅ Implemented | `/export [format] [file]` | 6 | P1 |
 | `/pager on\|off` metacommand | ✅ Implemented | `/pager on\|off` | 6 | P2 |
 | `/colors` metacommand | ✅ Implemented | `/colors on\|off` | 6 | P2 |
@@ -206,22 +207,36 @@
 
 **Quality Issue:** Features passed unit tests but fail against real Teradata databases. Manual testing was not performed.
 
-### Sprint 8: Quality Recovery - Critical Bug Fixes 🚧 In Progress
+### Sprint 8: Quality Recovery - Critical Bug Fixes (Partial)
 **Goal:** Fix all critical bugs from Sprints 5-7 and restore user trust through mandatory live database testing
 
-**Critical Bugs Being Fixed:**
-1. **Bug 1 (P0):** Table padding completely broken - columns misaligned, output unreadable
-2. **Bug 2 (P0):** Tab completion doesn't work at all - no completions, no feedback
-3. **Bug 3 (P0):** Result paging with arrows doesn't work - navigation fails
-4. **Bug 4 (P1):** Incorrect LIMIT hint message - uses MySQL syntax instead of Teradata TOP/SAMPLE
+**Status:** Partially Complete - Continued in Sprint 9
+**Completion Date:** 2026-01-18
+**Version:** v1.5.0 (partial fixes)
 
-**Status:** 🚧 In Progress
-**Target Completion:** 2026-01-19
-**Version Target:** v1.5.1
+**Sprint Review:** [Sprint 8 Review](../sprints/sprint-8-review.md)
 
-**Sprint Planning:** [Sprint 8 Planning](../sprints/sprint-8-planning.md)
+---
 
-**Root Cause:** Unit tests alone insufficient for database client tools. Live database integration testing now mandatory for all future sprints.
+### Sprint 9: Complete Quality Recovery ✅ Complete
+**Goal:** Complete all remaining bug fixes from Sprint 8 with autonomous execution
+
+**Bugs Fixed:**
+1. ✅ Tab completion menu size (shows 25 items, not 9)
+2. ✅ Multi-line tab completion (context preserved across lines)
+3. ✅ Error messages (clean SQL errors, no Go stack traces)
+4. ✅ LIMIT hint message (uses Teradata TOP/SAMPLE syntax)
+5. ✅ Result paging re-enabled (with Sprint 8 fixes)
+6. ✅ Build warnings cleaned up (zero warnings)
+
+**Status:** ✅ Complete
+**Completion Date:** 2026-01-18
+**Version Released:** v1.5.1
+
+**Sprint Planning:** [Sprint 9 Planning](../sprints/sprint-9-planning.md)
+**Sprint Review:** [Sprint 9 Review](../sprints/sprint-9-review.md)
+
+**Key Achievement:** 100% bug fix completion with autonomous execution
 
 ### Sprint 9+: Batch Mode & Configuration 📋 Future
 **Goals:**

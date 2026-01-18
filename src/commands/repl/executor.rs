@@ -158,18 +158,29 @@ pub fn execute_sql_with_state<W: Write>(
         .with_header(true)
         .with_color(use_color);
 
-    // Sprint 8 Round 4: Temporarily disable custom pager (was causing rendering issues)
-    // TODO: Re-implement proper paging in Sprint 9
-    // let pager_enabled = state.is_pager_enabled();
+    // Sprint 9 Bug 5: Re-enable pager with Sprint 8 Round 3 fixes
+    let pager_enabled = state.is_pager_enabled();
 
-    // Write the results directly (without paging)
+    // Format output to string first so we can check if paging is needed
+    let mut output_buffer = Vec::new();
     write_output_with_timing(
         &result_clone,
-        writer,
+        &mut output_buffer,
         OutputFormat::Table,
         &format_options,
         true, // Always show timing in REPL
     )?;
+    let output_str = String::from_utf8_lossy(&output_buffer);
+
+    // Check if paging is needed
+    if pager_enabled && should_page(&output_str, &PagerConfig::default()) {
+        // Use pager for large/wide results
+        display_with_pager(&output_str, row_count, &PagerConfig::default())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+    } else {
+        // Write directly for small results or when pager disabled
+        writer.write_all(&output_buffer)?;
+    }
 
     // Show limit message if we applied the default limit
     if limited {

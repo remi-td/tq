@@ -223,7 +223,7 @@ echo "SELECT COUNT(*) FROM orders" | tq query
 
 ```bash
 # Human-readable table (default)
-tq query "SELECT * FROM products LIMIT 5"
+tq query "SELECT TOP 5 * FROM products"
 
 # JSON for scripting
 tq query --format json "SELECT product_id, name, price FROM products" | jq '.'
