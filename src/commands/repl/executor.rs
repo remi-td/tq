@@ -150,6 +150,9 @@ pub fn execute_sql_with_state<W: Write>(
     let result_clone = result.clone();
     state.set_last_result(result);
 
+    // Store SQL and limited flag for full dataset export (Sprint 12)
+    state.set_last_query(sql_to_execute.to_string(), limited);
+
     // Use color setting from state (Sprint 6)
     let use_color = state.are_colors_enabled();
 

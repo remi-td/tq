@@ -1,8 +1,8 @@
 # tq (Teradata Query) - Specifications
 
 **Version:** 1.6.1
-**Status:** Active Development - Sprint 11 Complete, Ready for Sprint 12
-**Last Updated:** 2026-01-18
+**Status:** Active Development - Sprint 12 Complete
+**Last Updated:** 2026-01-19
 
 ---
 
@@ -301,14 +301,57 @@
 
 ---
 
-### Sprint 12+: Advanced Batch Mode & Configuration 📋 Future
+### Sprint 12: Export Enhancements & Branding ✅ Complete
+**Goal:** Add high-value export features and professional branding for client presentations
+
+**Delivered Features:**
+1. **Export to Clipboard (P1)** - Copy results directly to system clipboard
+   - Supports table, CSV, JSON, sql formats
+   - Cross-platform support (macOS, Linux, Windows) via arboard
+   - Graceful error handling for unavailable clipboard
+
+2. **Full Dataset Export (P1)** - Export complete dataset to files
+   - Re-executes query without row limit for file exports
+   - Respects user-specified limits (TOP, SAMPLE)
+   - Clear messaging on export behavior
+
+3. **Professional Branding (P1)** - ASCII logo and Teradata orange
+   - Welcome banner on REPL startup
+   - Teradata orange color (#F37021) throughout
+   - Session information display
+   - Professional appearance for presentations
+
+4. **Process Improvement** - Proper deployment workflow
+   - Version bumped: 1.6.0 → 1.6.1
+   - Binary rebuilt and verified
+   - Sprint 11 fixes now properly deployed
+
+**Status:** ✅ Complete
+**Completion Date:** 2026-01-19
+**Version Released:** v1.6.1
+
+**Test Results:**
+- Unit Tests: 216/216 passed (100%)
+- Integration Tests: 37/37 passed (100%)
+- Code Quality: Excellent (4 minor cosmetic warnings)
+- Build Warnings: 4 (cosmetic, non-blocking)
+
+**Sprint Planning:** [Sprint 12 Planning](../sprints/sprint-12-planning.md)
+**Sprint Review:** [Sprint 12 Review](../sprints/sprint-12-review.md)
+
+**Key Achievement:** User-requested export enhancements shipped with professional branding for client presentations
+
+---
+
+### Sprint 13+: Advanced Features & Configuration 📋 Future
 **Goals:**
 - Transaction control (`--atomic` flag)
 - Variable substitution
 - Streaming large results
 - Configuration files and connection profiles
 - Additional completion features (functions, schemas)
-- **Proper padding implementation** (requires visual testing framework first)
+- Interactive testing framework (expectrl)
+- Build warning cleanup
 
 ---
 

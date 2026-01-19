@@ -30,6 +30,7 @@ use reedline::{
     EditMode, Emacs, FileBackedHistory, KeyCode, KeyModifiers, Keybindings,
     ListMenu, MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal, Vi,
 };
+use nu_ansi_term::Color;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -230,6 +231,17 @@ fn print_banner<W: Write>(
 ) -> Result<()> {
     let config = completion_state.client().config();
 
+    // Sprint 12: Add branding with ASCII logo and Teradata orange (#F37021)
+    // Teradata orange RGB: 243, 112, 33
+    let orange = Color::Rgb(243, 112, 33);
+
+    writeln!(writer)?;
+    writeln!(writer, "{}", orange.paint("  _____"));
+    writeln!(writer, "{}", orange.paint(" |_   _|__ _"));
+    writeln!(writer, "{}", orange.paint("   | |/ _` |"));
+    writeln!(writer, "{}", orange.paint("   | | (_| |"));
+    writeln!(writer, "{}   {}", orange.paint("   |_|\\__, |"), orange.bold().paint("Teradata Query Tool"))?;
+    writeln!(writer, "{}     v{}", orange.paint("      |_|"), env!("CARGO_PKG_VERSION"))?;
     writeln!(writer)?;
     writeln!(writer, "Connected to {}:{}", config.host, config.port)?;
     writeln!(writer, "Database: {}", config.database)?;

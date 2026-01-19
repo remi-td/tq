@@ -67,19 +67,22 @@ pub fn handle_metacommand<W: Write>(
             }
         }
 
-        // Export command (Sprint 6)
+        // Export command (Sprint 6, Sprint 12: clipboard support only)
+        // Note: Old handler - no full dataset export (client not available for re-execution)
         "export" => {
             if args.is_empty() {
                 writeln!(writer, "Usage: /export <format> [file]")?;
+                writeln!(writer, "       /export <format> clipboard")?;
+                writeln!(writer, "       /export clipboard [format]")?;
                 writeln!(writer, "       /export <format> --append [file]")?;
                 writeln!(writer)?;
-                writeln!(writer, "Formats: csv, json, sql")?;
-                writeln!(writer, "Example: /export csv results.csv")?;
+                writeln!(writer, "Formats: table (default), csv, json, sql")?;
+                writeln!(writer, "Examples:")?;
+                writeln!(writer, "  /export csv results.csv")?;
+                writeln!(writer, "  /export clipboard csv")?;
+                writeln!(writer, "  /export json clipboard")?;
             } else {
-                let format = args[0];
-                let file = if args.len() > 1 { Some(args[1]) } else { None };
-                let append = args.contains(&"--append");
-                execute_export(state, writer, format, file, append)?;
+                execute_export(state, None, writer, &args)?;
             }
         }
 
@@ -207,19 +210,24 @@ pub fn handle_metacommand_with_state<W: Write>(
             }
         }
 
-        // Export command (Sprint 6)
+        // Export command (Sprint 6, Sprint 12: clipboard support + full dataset export)
         "export" => {
             if args.is_empty() {
                 writeln!(writer, "Usage: /export <format> [file]")?;
+                writeln!(writer, "       /export <format> clipboard")?;
+                writeln!(writer, "       /export clipboard [format]")?;
                 writeln!(writer, "       /export <format> --append [file]")?;
                 writeln!(writer)?;
-                writeln!(writer, "Formats: csv, json, sql")?;
-                writeln!(writer, "Example: /export csv results.csv")?;
+                writeln!(writer, "Formats: table (default), csv, json, sql")?;
+                writeln!(writer, "Examples:")?;
+                writeln!(writer, "  /export csv results.csv")?;
+                writeln!(writer, "  /export clipboard csv")?;
+                writeln!(writer, "  /export json clipboard")?;
+                writeln!(writer)?;
+                writeln!(writer, "Note: File exports include ALL rows (no limit),")?;
+                writeln!(writer, "      clipboard exports use currently displayed rows.")?;
             } else {
-                let format = args[0];
-                let file = if args.len() > 1 { Some(args[1]) } else { None };
-                let append = args.contains(&"--append");
-                execute_export(state, writer, format, file, append)?;
+                execute_export(state, Some(completion_state.client()), writer, &args)?;
             }
         }
 
@@ -330,7 +338,11 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "  /describe <table>, /d  Show table structure")?;
     writeln!(
         writer,
-        "  /export <fmt> [file]   Export last result (csv, json, sql)"
+        "  /export <fmt> [file]   Export last result (table, csv, json, sql)"
+    )?;
+    writeln!(
+        writer,
+        "  /export clipboard      Copy last result to clipboard"
     )?;
     writeln!(
         writer,
@@ -476,7 +488,11 @@ fn print_help<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "  /describe <table>, /d  Show table structure")?;
     writeln!(
         writer,
-        "  /export <fmt> [file]   Export last result (csv, json, sql)"
+        "  /export <fmt> [file]   Export last result (table, csv, json, sql)"
+    )?;
+    writeln!(
+        writer,
+        "  /export clipboard      Copy last result to clipboard"
     )?;
     writeln!(
         writer,
@@ -755,15 +771,22 @@ fn truncate_string(s: &str, max_len: usize) -> String {
     }
 }
 
-/// Execute the /export metacommand (Sprint 6)
+/// Execute the /export metacommand (Sprint 6, Sprint 12: clipboard support + full dataset)
 ///
-/// Exports the last query result to a file in various formats (CSV, JSON, SQL).
+/// Exports the last query result to a file or clipboard in various formats.
+/// When exporting to a file and the result was limited, re-executes the query
+/// to get the full dataset.
+///
+/// Syntax:
+///   /export <format> [file]
+///   /export <format> clipboard
+///   /export clipboard [format]
+///   /export <format> --append [file]
 fn execute_export<W: Write>(
     state: &ReplState,
+    client: Option<&DatabaseClient>,
     writer: &mut W,
-    format: &str,
-    file: Option<&str>,
-    _append: bool,
+    args: &[&str],
 ) -> Result<()> {
     // Check if we have a result to export
     let result = match state.last_result() {
@@ -780,53 +803,246 @@ fn execute_export<W: Write>(
         }
     };
 
+    // Parse arguments to determine: format, destination (file/clipboard), append flag
+    let (format, destination, append) = parse_export_args(args);
+
     // Validate format
     let format_lower = format.to_lowercase();
-    if !["csv", "json", "sql"].contains(&format_lower.as_str()) {
+    if !["table", "csv", "json", "sql"].contains(&format_lower.as_str()) {
         writeln!(writer)?;
         writeln!(
             writer,
-            "Error: Unknown format '{}'. Supported formats: csv, json, sql",
+            "Error: Unknown format '{}'. Supported formats: table, csv, json, sql",
             format
         )?;
         writeln!(writer)?;
         return Ok(());
     }
 
-    // Export based on format
-    match format_lower.as_str() {
-        "csv" => {
-            export_csv(result, file, writer)?;
+    // For file exports, check if we need to re-execute to get full dataset (Sprint 12)
+    let result_to_export = match destination {
+        ExportDestination::File(_) if state.was_last_result_limited() => {
+            // Need to re-execute query without limit to get full dataset
+            match (client, state.last_sql()) {
+                (Some(db_client), Some(sql)) => {
+                    writeln!(writer)?;
+                    writeln!(writer, "Re-executing query to export full dataset...")?;
+
+                    match db_client.execute(sql) {
+                        Ok(full_result) => {
+                            writeln!(
+                                writer,
+                                "Retrieved {} rows (full dataset)",
+                                full_result.row_count
+                            )?;
+                            Box::new(full_result)
+                        }
+                        Err(e) => {
+                            writeln!(writer)?;
+                            writeln!(writer, "Error re-executing query: {}", e)?;
+                            writeln!(writer, "Falling back to limited results in memory.")?;
+                            Box::new(result.clone())
+                        }
+                    }
+                }
+                _ => {
+                    // No client available or no SQL stored - use what we have
+                    writeln!(writer)?;
+                    writeln!(writer, "Warning: Cannot re-execute query for full dataset.")?;
+                    writeln!(writer, "Exporting limited results ({} rows).", result.row_count)?;
+                    Box::new(result.clone())
+                }
+            }
         }
-        "json" => {
-            export_json(result, file, writer)?;
+        _ => {
+            // Clipboard or not limited - use current result
+            Box::new(result.clone())
         }
-        "sql" => {
-            export_sql(result, file, writer)?;
+    };
+
+    // Export based on destination
+    match destination {
+        ExportDestination::Clipboard => {
+            export_to_clipboard(&result_to_export, &format_lower, writer)?;
         }
-        _ => unreachable!(),
+        ExportDestination::File(filepath) => {
+            // Export based on format
+            match format_lower.as_str() {
+                "table" => {
+                    export_table(&result_to_export, Some(filepath), append, writer)?;
+                }
+                "csv" => {
+                    export_csv(&result_to_export, Some(filepath), append, writer)?;
+                }
+                "json" => {
+                    export_json(&result_to_export, Some(filepath), append, writer)?;
+                }
+                "sql" => {
+                    export_sql(&result_to_export, Some(filepath), append, writer)?;
+                }
+                _ => unreachable!(),
+            }
+        }
+        ExportDestination::Stdout => {
+            // Export to stdout (no file specified)
+            match format_lower.as_str() {
+                "table" => {
+                    export_table(&result_to_export, None, false, writer)?;
+                }
+                "csv" => {
+                    export_csv(&result_to_export, None, false, writer)?;
+                }
+                "json" => {
+                    export_json(&result_to_export, None, false, writer)?;
+                }
+                "sql" => {
+                    export_sql(&result_to_export, None, false, writer)?;
+                }
+                _ => unreachable!(),
+            }
+        }
     }
 
     writeln!(writer)?;
     Ok(())
 }
 
-/// Export results as CSV
-fn export_csv<W: Write>(
+/// Export destination
+enum ExportDestination<'a> {
+    Clipboard,
+    File(&'a str),
+    Stdout,
+}
+
+/// Parse export command arguments
+///
+/// Returns (format, destination, append_flag)
+fn parse_export_args<'a>(args: &'a [&str]) -> (String, ExportDestination<'a>, bool) {
+    let mut format = "table".to_string(); // default format
+    let mut destination = ExportDestination::Stdout;
+    let mut append = false;
+
+    // Check if "clipboard" appears in args
+    let clipboard_idx = args.iter().position(|&arg| arg.eq_ignore_ascii_case("clipboard"));
+
+    // Check if "--append" appears in args
+    let append_idx = args.iter().position(|&arg| arg == "--append");
+    if append_idx.is_some() {
+        append = true;
+    }
+
+    if let Some(clip_idx) = clipboard_idx {
+        destination = ExportDestination::Clipboard;
+
+        // Find format: the argument that isn't "clipboard" and isn't "--append"
+        for (i, &arg) in args.iter().enumerate() {
+            if i != clip_idx && Some(i) != append_idx && !arg.starts_with("--") {
+                format = arg.to_string();
+                break;
+            }
+        }
+    } else {
+        // No clipboard - first arg is format, second (if present and not --append) is file
+        if !args.is_empty() {
+            format = args[0].to_string();
+        }
+
+        // Find file path: first arg that isn't the format and isn't --append
+        for (i, &arg) in args.iter().enumerate().skip(1) {
+            if Some(i) != append_idx && !arg.starts_with("--") {
+                destination = ExportDestination::File(arg);
+                break;
+            }
+        }
+    }
+
+    (format, destination, append)
+}
+
+/// Export results to clipboard (Sprint 12)
+///
+/// Copies the formatted result to the system clipboard.
+fn export_to_clipboard<W: Write>(
     result: &crate::db::QueryResult,
-    file: Option<&str>,
+    format: &str,
     writer: &mut W,
 ) -> Result<()> {
-    use std::fs::File;
-    use std::io::BufWriter;
+    use arboard::Clipboard;
 
-    // Build CSV content
-    let mut csv_content = String::new();
+    // Format data as string
+    let content = match format {
+        "table" => format_as_table(result)?,
+        "csv" => format_as_csv(result)?,
+        "json" => format_as_json(result)?,
+        "sql" => format_as_sql(result)?,
+        _ => return Err(crate::error::TqError::InvalidConfig(
+            format!("Unsupported format for clipboard: {}", format)
+        ).into()),
+    };
+
+    // Copy to clipboard
+    match Clipboard::new() {
+        Ok(mut clipboard) => {
+            match clipboard.set_text(&content) {
+                Ok(_) => {
+                    writeln!(writer)?;
+                    writeln!(
+                        writer,
+                        "Exported {} rows to clipboard ({})",
+                        result.row_count,
+                        format
+                    )?;
+                }
+                Err(e) => {
+                    writeln!(writer)?;
+                    writeln!(writer, "Error: Failed to copy to clipboard: {}", e)?;
+                    writeln!(writer)?;
+                    writeln!(writer, "The clipboard may not be available on this system.")?;
+                }
+            }
+        }
+        Err(e) => {
+            writeln!(writer)?;
+            writeln!(writer, "Error: Clipboard not available: {}", e)?;
+            writeln!(writer)?;
+            writeln!(writer, "Possible reasons:")?;
+            writeln!(writer, "  - Running in a headless environment")?;
+            writeln!(writer, "  - Missing clipboard support on this platform")?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Format result as table string
+fn format_as_table(result: &crate::db::QueryResult) -> Result<String> {
+    use comfy_table::{Table, ContentArrangement, presets};
+
+    let mut table = Table::new();
+    table.load_preset(presets::UTF8_FULL);
+    table.set_content_arrangement(ContentArrangement::Dynamic);
+
+    // Add header
+    let headers: Vec<String> = result.columns.iter().map(|c| c.name.clone()).collect();
+    table.set_header(&headers);
+
+    // Add rows
+    for row in &result.rows {
+        let values: Vec<String> = row.iter().map(|v| v.display().to_string()).collect();
+        table.add_row(values);
+    }
+
+    Ok(table.to_string())
+}
+
+/// Format result as CSV string
+fn format_as_csv(result: &crate::db::QueryResult) -> Result<String> {
+    let mut output = String::new();
 
     // Add headers
     let headers: Vec<String> = result.columns.iter().map(|c| c.name.clone()).collect();
-    csv_content.push_str(&headers.join(","));
-    csv_content.push('\n');
+    output.push_str(&headers.join(","));
+    output.push('\n');
 
     // Add rows
     for row in &result.rows {
@@ -842,41 +1058,15 @@ fn export_csv<W: Write>(
                 }
             })
             .collect();
-        csv_content.push_str(&values.join(","));
-        csv_content.push('\n');
+        output.push_str(&values.join(","));
+        output.push('\n');
     }
 
-    // Write to file or stdout
-    if let Some(filepath) = file {
-        match File::create(filepath) {
-            Ok(f) => {
-                use std::io::Write as _;
-                let mut file_writer = BufWriter::new(f);
-                file_writer.write_all(csv_content.as_bytes())?;
-                writeln!(writer, "Exported {} rows to {}", result.row_count, filepath)?;
-            }
-            Err(e) => {
-                writeln!(writer, "Error: Cannot write to {}: {}", filepath, e)?;
-            }
-        }
-    } else {
-        // Output to stdout
-        write!(writer, "{}", csv_content)?;
-    }
-
-    Ok(())
+    Ok(output)
 }
 
-/// Export results as JSON
-fn export_json<W: Write>(
-    result: &crate::db::QueryResult,
-    file: Option<&str>,
-    writer: &mut W,
-) -> Result<()> {
-    use std::fs::File;
-    use std::io::BufWriter;
-
-    // Build JSON array
+/// Format result as JSON string
+fn format_as_json(result: &crate::db::QueryResult) -> Result<String> {
     let mut rows = Vec::new();
 
     for row in &result.rows {
@@ -904,10 +1094,149 @@ fn export_json<W: Write>(
     }
 
     let json_array = serde_json::Value::Array(rows);
-    let json_str = serde_json::to_string_pretty(&json_array)?;
+    Ok(serde_json::to_string_pretty(&json_array)?)
+}
+
+/// Format result as SQL INSERT statements string
+fn format_as_sql(result: &crate::db::QueryResult) -> Result<String> {
+    let table_name = "exported_data";
+    let mut output = String::new();
+
+    // Add header comment
+    output.push_str("-- Exported data\n");
+    output.push_str(&format!("-- CREATE TABLE {} (\n", table_name));
+    for col in &result.columns {
+        output.push_str(&format!("--   {} VARCHAR(255),\n", col.name));
+    }
+    output.push_str("-- );\n\n");
+
+    // Add INSERT statements
+    for row in &result.rows {
+        let mut values = Vec::new();
+        for value in row {
+            let sql_value = match value {
+                crate::db::Value::Null => "NULL".to_string(),
+                crate::db::Value::String(s) => format!("'{}'", s.replace("'", "''")),
+                crate::db::Value::Integer(n) => n.to_string(),
+                crate::db::Value::Decimal(f) => f.to_string(),
+                crate::db::Value::Boolean(b) => if *b { "1" } else { "0" }.to_string(),
+                _ => format!("'{}'", value.display().to_string().replace("'", "''")),
+            };
+            values.push(sql_value);
+        }
+
+        let col_names: Vec<String> = result.columns.iter().map(|c| c.name.clone()).collect();
+        output.push_str(&format!(
+            "INSERT INTO {} ({}) VALUES ({});\n",
+            table_name,
+            col_names.join(", "),
+            values.join(", ")
+        ));
+    }
+
+    Ok(output)
+}
+
+/// Export results as table to file or stdout
+fn export_table<W: Write>(
+    result: &crate::db::QueryResult,
+    file: Option<&str>,
+    append: bool,
+    writer: &mut W,
+) -> Result<()> {
+    use std::fs::OpenOptions;
+    use std::io::BufWriter;
+
+    let content = format_as_table(result)?;
 
     if let Some(filepath) = file {
-        match File::create(filepath) {
+        let file_handle = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .append(append)
+            .truncate(!append)
+            .open(filepath);
+
+        match file_handle {
+            Ok(f) => {
+                use std::io::Write as _;
+                let mut file_writer = BufWriter::new(f);
+                file_writer.write_all(content.as_bytes())?;
+                writeln!(writer, "Exported {} rows to {}", result.row_count, filepath)?;
+            }
+            Err(e) => {
+                writeln!(writer, "Error: Cannot write to {}: {}", filepath, e)?;
+            }
+        }
+    } else {
+        // Output to stdout
+        write!(writer, "{}", content)?;
+    }
+
+    Ok(())
+}
+
+/// Export results as CSV
+fn export_csv<W: Write>(
+    result: &crate::db::QueryResult,
+    file: Option<&str>,
+    append: bool,
+    writer: &mut W,
+) -> Result<()> {
+    use std::fs::OpenOptions;
+    use std::io::BufWriter;
+
+    let csv_content = format_as_csv(result)?;
+
+    // Write to file or stdout
+    if let Some(filepath) = file {
+        let file_handle = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .append(append)
+            .truncate(!append)
+            .open(filepath);
+
+        match file_handle {
+            Ok(f) => {
+                use std::io::Write as _;
+                let mut file_writer = BufWriter::new(f);
+                file_writer.write_all(csv_content.as_bytes())?;
+                writeln!(writer, "Exported {} rows to {}", result.row_count, filepath)?;
+            }
+            Err(e) => {
+                writeln!(writer, "Error: Cannot write to {}: {}", filepath, e)?;
+            }
+        }
+    } else {
+        // Output to stdout
+        write!(writer, "{}", csv_content)?;
+    }
+
+    Ok(())
+}
+
+/// Export results as JSON
+fn export_json<W: Write>(
+    result: &crate::db::QueryResult,
+    file: Option<&str>,
+    append: bool,
+    writer: &mut W,
+) -> Result<()> {
+    use std::fs::OpenOptions;
+    use std::io::BufWriter;
+
+    let json_str = format_as_json(result)?;
+
+    if let Some(filepath) = file {
+        let file_handle = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .append(append)
+            .truncate(!append)
+            .open(filepath);
+
+        match file_handle {
             Ok(f) => {
                 use std::io::Write as _;
                 let mut file_writer = BufWriter::new(f);
@@ -930,51 +1259,23 @@ fn export_json<W: Write>(
 fn export_sql<W: Write>(
     result: &crate::db::QueryResult,
     file: Option<&str>,
+    append: bool,
     writer: &mut W,
 ) -> Result<()> {
-    use std::fs::File;
+    use std::fs::OpenOptions;
     use std::io::BufWriter;
 
-    // For now, use a generic table name
-    // In the future, we could parse this from the last query
-    let table_name = "exported_data";
-
-    let mut sql_content = String::new();
-
-    // Add CREATE TABLE statement
-    sql_content.push_str(&format!("-- Exported data\n"));
-    sql_content.push_str(&format!("-- CREATE TABLE {} (\n", table_name));
-    for col in &result.columns {
-        sql_content.push_str(&format!("--   {} VARCHAR(255),\n", col.name));
-    }
-    sql_content.push_str(&format!("-- );\n\n"));
-
-    // Add INSERT statements
-    for row in &result.rows {
-        let mut values = Vec::new();
-        for value in row {
-            let sql_value = match value {
-                crate::db::Value::Null => "NULL".to_string(),
-                crate::db::Value::String(s) => format!("'{}'", s.replace("'", "''")),
-                crate::db::Value::Integer(n) => n.to_string(),
-                crate::db::Value::Decimal(f) => f.to_string(),
-                crate::db::Value::Boolean(b) => if *b { "1" } else { "0" }.to_string(),
-                _ => format!("'{}'", value.display().to_string().replace("'", "''")),
-            };
-            values.push(sql_value);
-        }
-
-        let col_names: Vec<String> = result.columns.iter().map(|c| c.name.clone()).collect();
-        sql_content.push_str(&format!(
-            "INSERT INTO {} ({}) VALUES ({});\n",
-            table_name,
-            col_names.join(", "),
-            values.join(", ")
-        ));
-    }
+    let sql_content = format_as_sql(result)?;
 
     if let Some(filepath) = file {
-        match File::create(filepath) {
+        let file_handle = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .append(append)
+            .truncate(!append)
+            .open(filepath);
+
+        match file_handle {
             Ok(f) => {
                 use std::io::Write as _;
                 let mut file_writer = BufWriter::new(f);
@@ -1097,5 +1398,119 @@ mod tests {
         assert_eq!(truncate_string("this is a long string", 10), "this is...");
         assert_eq!(truncate_string("test", 3), "...");
         assert_eq!(truncate_string("ab", 2), "ab");
+    }
+
+    // Sprint 12: Clipboard export tests
+    #[test]
+    fn test_parse_export_args_clipboard_first() {
+        let args = vec!["clipboard", "csv"];
+        let (format, dest, append) = parse_export_args(&args);
+        assert_eq!(format, "csv");
+        assert!(matches!(dest, ExportDestination::Clipboard));
+        assert!(!append);
+    }
+
+    #[test]
+    fn test_parse_export_args_clipboard_last() {
+        let args = vec!["json", "clipboard"];
+        let (format, dest, append) = parse_export_args(&args);
+        assert_eq!(format, "json");
+        assert!(matches!(dest, ExportDestination::Clipboard));
+        assert!(!append);
+    }
+
+    #[test]
+    fn test_parse_export_args_file() {
+        let args = vec!["csv", "output.csv"];
+        let (format, dest, append) = parse_export_args(&args);
+        assert_eq!(format, "csv");
+        match dest {
+            ExportDestination::File(path) => assert_eq!(path, "output.csv"),
+            _ => panic!("Expected File destination"),
+        }
+        assert!(!append);
+    }
+
+    #[test]
+    fn test_parse_export_args_file_with_append() {
+        let args = vec!["csv", "--append", "output.csv"];
+        let (format, dest, append) = parse_export_args(&args);
+        assert_eq!(format, "csv");
+        match dest {
+            ExportDestination::File(path) => assert_eq!(path, "output.csv"),
+            _ => panic!("Expected File destination"),
+        }
+        assert!(append);
+    }
+
+    #[test]
+    fn test_parse_export_args_default_format() {
+        let args = vec!["clipboard"];
+        let (format, dest, append) = parse_export_args(&args);
+        assert_eq!(format, "table"); // Default format
+        assert!(matches!(dest, ExportDestination::Clipboard));
+        assert!(!append);
+    }
+
+    #[test]
+    fn test_parse_export_args_format_only() {
+        let args = vec!["json"];
+        let (format, dest, append) = parse_export_args(&args);
+        assert_eq!(format, "json");
+        assert!(matches!(dest, ExportDestination::Stdout));
+        assert!(!append);
+    }
+
+    #[test]
+    fn test_format_as_csv() {
+        use crate::db::{QueryResult, ColumnMetadata, TeradataType, Value};
+
+        let result = QueryResult {
+            columns: vec![
+                ColumnMetadata {
+                    name: "id".to_string(),
+                    data_type: TeradataType::Integer,
+                    nullable: false,
+                },
+                ColumnMetadata {
+                    name: "name".to_string(),
+                    data_type: TeradataType::Varchar,
+                    nullable: true,
+                },
+            ],
+            rows: vec![
+                vec![Value::Integer(1), Value::String("Alice".to_string())],
+                vec![Value::Integer(2), Value::String("Bob, Jr.".to_string())],
+            ],
+            row_count: 2,
+            execution_time: Duration::from_millis(10),
+        };
+
+        let csv = format_as_csv(&result).unwrap();
+        assert!(csv.contains("id,name"));
+        assert!(csv.contains("1,Alice"));
+        assert!(csv.contains("2,\"Bob, Jr.\""));
+    }
+
+    #[test]
+    fn test_format_as_json() {
+        use crate::db::{QueryResult, ColumnMetadata, TeradataType, Value};
+
+        let result = QueryResult {
+            columns: vec![
+                ColumnMetadata {
+                    name: "id".to_string(),
+                    data_type: TeradataType::Integer,
+                    nullable: false,
+                },
+            ],
+            rows: vec![vec![Value::Integer(42)]],
+            row_count: 1,
+            execution_time: Duration::from_millis(10),
+        };
+
+        let json = format_as_json(&result).unwrap();
+        assert!(json.contains("\"id\""));
+        assert!(json.contains("42"));
     }
 }

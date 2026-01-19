@@ -31,6 +31,12 @@ pub struct ReplState {
     /// Last query result (for /export command)
     last_result: Option<QueryResult>,
 
+    /// Last SQL query executed (for /export full dataset - Sprint 12)
+    last_sql: Option<String>,
+
+    /// Whether last result was limited by default REPL limit (Sprint 12)
+    was_limited: bool,
+
     /// Whether result paging is enabled (Sprint 6)
     pager_enabled: bool,
 
@@ -55,6 +61,8 @@ impl ReplState {
             total_rows: 0,
             connection_info,
             last_result: None,
+            last_sql: None,
+            was_limited: false,
             pager_enabled: true,
             colors_enabled: atty::is(atty::Stream::Stdout), // Enable colors for TTY
             metadata_cache: MetadataCache::new(database),
@@ -153,6 +161,22 @@ impl ReplState {
     /// Get reference to last query result
     pub fn last_result(&self) -> Option<&QueryResult> {
         self.last_result.as_ref()
+    }
+
+    /// Set the last SQL query and whether it was limited (Sprint 12)
+    pub fn set_last_query(&mut self, sql: String, was_limited: bool) {
+        self.last_sql = Some(sql);
+        self.was_limited = was_limited;
+    }
+
+    /// Get the last SQL query
+    pub fn last_sql(&self) -> Option<&str> {
+        self.last_sql.as_deref()
+    }
+
+    /// Check if the last result was limited by default REPL limit
+    pub fn was_last_result_limited(&self) -> bool {
+        self.was_limited
     }
 
     /// Set pager enabled/disabled (Sprint 6)

@@ -1,6 +1,6 @@
 [package]
 name = "tq"
-version = "1.6.0"
+version = "1.6.1"
 edition = "2021"
 authors = ["Teradata Query Contributors"]
 description = "A fast, lightweight command-line client for Teradata databases"
@@ -53,6 +53,7 @@ nu-ansi-term = "0.50"
 # Sprint 8: Custom pager using crossterm directly (removed minus dependency)
 crossterm = "0.28"
 unicode-width = "0.2"
+arboard = { version = "3.6.1", features = ["image-data"] }
 
 [dev-dependencies]
 assert_cmd = "2.0"
