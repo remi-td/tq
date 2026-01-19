@@ -2,26 +2,38 @@
 //!
 //! Provides customized prompts for the tq interactive shell.
 //! The prompt changes based on the current state (normal vs multi-line input).
+//!
+//! Sprint 13: Prompts now use Teradata orange (#F37021) per branding guidelines.
 
 use super::state::ReplState;
 use reedline::{Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus};
 use std::borrow::Cow;
 
 /// Custom prompt for the tq REPL
+///
+/// Sprint 13: Prompts colored in Teradata orange per branding-guidelines.md
 #[derive(Clone)]
 pub struct TqPrompt {
-    /// Base prompt text
+    /// Base prompt text (with ANSI color codes)
     normal_prompt: String,
-    /// Continuation prompt for multi-line input
+    /// Continuation prompt for multi-line input (with ANSI color codes)
     continuation_prompt: String,
 }
 
 impl TqPrompt {
-    /// Create a new TqPrompt with default values
+    /// Create a new TqPrompt with Teradata orange colored prompts
+    ///
+    /// Sprint 13: Per branding-guidelines.md, prompts should be in Teradata orange (#F37021)
     pub fn new() -> Self {
+        // Teradata orange RGB: 243, 112, 33
+        // ANSI 24-bit color escape: \x1b[38;2;R;G;Bm
+        // Reset escape: \x1b[0m
+        let orange_start = "\x1b[38;2;243;112;33m";
+        let reset = "\x1b[0m";
+
         Self {
-            normal_prompt: "tq> ".to_string(),
-            continuation_prompt: "...> ".to_string(),
+            normal_prompt: format!("{}tq> {}", orange_start, reset),
+            continuation_prompt: format!("{}...> {}", orange_start, reset),
         }
     }
 
@@ -108,7 +120,10 @@ mod tests {
         let state = ReplState::new(config);
 
         let stateful = prompt.for_state(&state);
-        assert_eq!(stateful.render_prompt_left(), "tq> ");
+        // Sprint 13: Prompt now includes Teradata orange ANSI color codes
+        let rendered = stateful.render_prompt_left();
+        assert!(rendered.contains("tq> "), "Prompt should contain 'tq> '");
+        assert!(rendered.contains("\x1b[38;2;243;112;33m"), "Prompt should have Teradata orange color");
     }
 
     #[test]
@@ -119,6 +134,9 @@ mod tests {
         state.append_input("SELECT");
 
         let stateful = prompt.for_state(&state);
-        assert_eq!(stateful.render_prompt_left(), "...> ");
+        // Sprint 13: Continuation prompt now includes Teradata orange ANSI color codes
+        let rendered = stateful.render_prompt_left();
+        assert!(rendered.contains("...> "), "Prompt should contain '...> '");
+        assert!(rendered.contains("\x1b[38;2;243;112;33m"), "Prompt should have Teradata orange color");
     }
 }

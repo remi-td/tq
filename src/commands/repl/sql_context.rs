@@ -78,7 +78,11 @@ pub fn analyze_context(line: &str, cursor_pos: usize) -> CompletionContext {
 
     // Normalize: collapse whitespace
     let normalized = normalize_sql(text);
-    let upper = normalized.to_uppercase();
+
+    // Sprint 13: Expand common keyword abbreviations before uppercase conversion
+    // This helps recognize "sel * from " as "SELECT * FROM "
+    let expanded = expand_keyword_abbreviations(&normalized);
+    let upper = expanded.to_uppercase();
 
     // Get the last token/word
     let last_word = get_last_word(text);
@@ -219,6 +223,41 @@ fn is_column_context(upper: &str, last_word: &str, tables: &[TableReference]) ->
 /// Normalize SQL by collapsing whitespace
 fn normalize_sql(sql: &str) -> String {
     sql.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Expand common SQL keyword abbreviations
+///
+/// Sprint 13: Helps context detection recognize partial keywords like "sel" as "SELECT"
+/// so that "sel * from " is properly understood as "SELECT * FROM " for table completion.
+fn expand_keyword_abbreviations(sql: &str) -> String {
+    let words: Vec<&str> = sql.split_whitespace().collect();
+    let mut expanded = Vec::new();
+
+    for word in words {
+        let word_upper = word.to_uppercase();
+        let replacement = match word_upper.as_str() {
+            // Common abbreviations that users type
+            "SEL" => "SELECT",
+            "FR" => "FROM",
+            "WHE" => "WHERE",
+            "ORD" => "ORDER",
+            "GRP" | "GRO" => "GROUP",
+            "INS" => "INSERT",
+            "UPD" => "UPDATE",
+            "DEL" => "DELETE",
+            "CRE" => "CREATE",
+            "DRO" => "DROP",
+            "ALT" => "ALTER",
+            _ => {
+                // Keep original word if no match
+                expanded.push(word.to_string());
+                continue;
+            }
+        };
+        expanded.push(replacement.to_string());
+    }
+
+    expanded.join(" ")
 }
 
 /// Get the last word/token before cursor

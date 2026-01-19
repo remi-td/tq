@@ -238,7 +238,17 @@ impl MetadataCompleter {
     }
 
     /// Get keyword completions
+    ///
+    /// Sprint 13 Fix: When prefix is empty, don't show all keywords.
+    /// Empty prefix happens after typing "sel " (with trailing space).
+    /// This was causing all keywords to appear instead of contextual completions.
     fn complete_keywords(&self, prefix: &str) -> Vec<Suggestion> {
+        // Sprint 13: If prefix is empty, return empty list
+        // This prevents showing all keywords after partial keywords like "sel "
+        if prefix.is_empty() {
+            return Vec::new();
+        }
+
         let prefix_upper = prefix.to_uppercase();
 
         self.keywords
@@ -591,9 +601,35 @@ impl Completer for MetadataCompleter {
 
         log::debug!("Completion context: {:?} (full_text len: {}, pos: {})", context, full_text.len(), adjusted_pos);
 
+        // Sprint 13 Bug Fix: Calculate the correct span based on context
+        // The span determines what part of the line gets replaced when a completion is selected.
+        // We must use the CURRENT LINE positions (not full_text) since reedline operates on the current line.
+        let last_word = get_last_word(line);
+
+        // Sprint 13 Bug Fix: Calculate span correctly based on context type BEFORE consuming context
+        // For schema-qualified completions (e.g., "DBC."), the span must cover "DBC." not just ""
+        // For table/column prefixes, the span covers the prefix
+        let (start, end) = match &context {
+            CompletionContext::SchemaQualifiedTable { schema, prefix } => {
+                // Span should cover "schema." or "schema.prefix"
+                let replacement_len = schema.len() + 1 + prefix.len(); // +1 for the dot
+                let start_pos = pos.saturating_sub(replacement_len);
+                (start_pos, pos)
+            }
+            CompletionContext::ColumnName { table_qualifier: Some(qualifier), prefix, .. } => {
+                // Span should cover "qualifier." or "qualifier.prefix"
+                let replacement_len = qualifier.len() + 1 + prefix.len(); // +1 for the dot
+                let start_pos = pos.saturating_sub(replacement_len);
+                (start_pos, pos)
+            }
+            _ => {
+                // For simple table/keyword completions, use last_word length
+                self.calculate_span(line, last_word.len())
+            }
+        };
+
         let mut suggestions = match context {
             CompletionContext::Keyword => {
-                let last_word = get_last_word(line);
                 self.complete_keywords(last_word)
             }
 
@@ -619,10 +655,6 @@ impl Completer for MetadataCompleter {
                 self.complete_columns(&tables, &prefix, None)
             }
         };
-
-        // Fix span for all suggestions based on actual line position
-        let last_word = get_last_word(line);
-        let (start, end) = self.calculate_span(line, last_word.len());
 
         for sug in &mut suggestions {
             sug.span = reedline::Span { start, end };

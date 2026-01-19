@@ -1,7 +1,7 @@
 # tq (Teradata Query) - Specifications
 
-**Version:** 1.6.1
-**Status:** Active Development - Sprint 12 Complete
+**Version:** 1.7.0-dev (Sprint 13 In Progress)
+**Status:** Active Development - Sprint 13 In Progress
 **Last Updated:** 2026-01-19
 
 ---
@@ -95,15 +95,24 @@
 
 | Feature | Status | Command | Sprint | Priority |
 |---------|--------|---------|--------|----------|
-| Table formatting | 🔧 In Repair | All table output | 6 | P0 |
+| Table formatting | ✅ Implemented | All table output | 6 | P0 |
 | Tab completion (keywords) | ✅ Implemented | Tab key | 6 | P1 |
 | Tab completion (tables) | 🔧 In Repair | Tab key | 7 | P0 |
 | Tab completion (columns) | 🔧 In Repair | Tab key | 7 | P1 |
-| Tab completion (multi-line) | ✅ Implemented | Across line breaks | 9 | P0 |
-| `/export` metacommand | ✅ Implemented | `/export [format] [file]` | 6 | P1 |
+| Tab completion (multi-line) | 🔧 In Repair | Across line breaks | 9 | P0 |
+| `/export` metacommand | 🚧 In Progress | `/export <format> [dest]` | 13 | P1 |
 | `/pager on\|off` metacommand | ✅ Implemented | `/pager on\|off` | 6 | P2 |
 | `/colors` metacommand | ✅ Implemented | `/colors on\|off` | 6 | P2 |
 | `/logon` metacommand | ✅ Implemented | `/logon [connection-string]` | 7 | P1 |
+
+#### Phase 4 - Quality & Branding (Sprint 11-13)
+
+| Feature | Status | Command | Sprint | Priority |
+|---------|--------|---------|--------|----------|
+| Professional branding | 🚧 In Progress | Logo, colors, naming | 13 | P1 |
+| Interactive test framework | 🚧 In Progress | expectrl-based tests | 13 | P0 |
+| Export to clipboard | ✅ Implemented | `/export <fmt> clipboard` | 12 | P1 |
+| Export full dataset | ✅ Implemented | Re-execute without limit | 12 | P1 |
 
 ### Batch Mode (Sprint 10) ✅ Foundation Complete
 
@@ -343,15 +352,52 @@
 
 ---
 
-### Sprint 13+: Advanced Features & Configuration 📋 Future
+### Sprint 13: Quality Crisis Recovery + Interactive Testing Framework 🚧 In Progress
+**Goal:** Fix critical tab completion and branding bugs with proper interactive testing, restore user trust
+
+**Sprint Theme:** "Test What Users See, Not Just What Code Does"
+
+**Status:** 🚧 In Progress
+**Start Date:** 2026-01-19
+**Target Completion:** 2026-01-19
+
+**Scope:**
+
+**P0 - Critical (Must Have):**
+1. **Interactive Testing Framework** - Implement expectrl-based tests for REPL features
+2. **Fix Tab Completion (All Three Issues)** - Database/table completion, cursor insertion, reserved word completion
+3. **Fix Logo Branding Issues** - Comprehensive branding guidelines + correct logo implementation
+
+**P1 - High Priority (Should Have):**
+4. **Verify Export Full Dataset** - Confirm feature works or fix if broken
+5. **Simplify Export Command Syntax** - `/export <format> [file|clipboard]` for clarity
+6. **Build Warning Cleanup** - Fix 4 warnings from Sprint 12
+
+**P2 - Medium Priority (Nice to Have):**
+7. **Connection String Validation** - Add validation with helpful error messages
+
+**Sprint Planning:** [Sprint 13 Planning](../sprints/sprint-13-planning.md)
+
+**Key Documents:**
+- [Branding Guidelines](detailed-specifications/branding-guidelines.md) - Complete visual identity specification
+- [Export Syntax Design](../sprints/export-syntax-simplification-design.md) - Simplified export command design
+- [Tab Completion Failure Analysis](../sprints/tab-completion-failure-analysis.md) - Root cause analysis of 4 sprint failures
+
+**Critical Success Factors:**
+- Interactive tests BEFORE claiming tab completion fixed
+- User validation MANDATORY for all REPL features
+- Zero technical debt tolerance
+- 100% test pass rate (unit + integration + interactive)
+
+---
+
+### Sprint 14+: Advanced Features & Configuration 📋 Future
 **Goals:**
 - Transaction control (`--atomic` flag)
 - Variable substitution
 - Streaming large results
 - Configuration files and connection profiles
 - Additional completion features (functions, schemas)
-- Interactive testing framework (expectrl)
-- Build warning cleanup
 
 ---
 
@@ -387,6 +433,10 @@ Complete technical specifications are organized by domain:
 - **[Error Handling](detailed-specifications/error-handling.md)**
   Error messages, troubleshooting guidance, and exit codes
 
+### Branding & Visual Identity
+- **[Branding Guidelines](detailed-specifications/branding-guidelines.md)**
+  Logo design, color specifications, naming conventions, and terminal rendering standards
+
 ### Performance
 - **[Performance Considerations](detailed-specifications/performance.md)**
   Startup time, query execution, memory usage, and streaming
@@ -397,6 +447,7 @@ Complete technical specifications are organized by domain:
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
+| 2026-01-19 | 1.7.0-dev | Sprint 13: Mark features as 🚧 In Progress, add branding guidelines, add Sprint 13 roadmap section | CLI UX Designer Agent |
 | 2026-01-18 | 1.6.0 | Sprint 11: Mark table display and tab completion as 🔧 In Repair, add Sprint 11 roadmap section | CLI UX Designer Agent |
 | 2026-01-18 | 1.5.1-dev | Sprint 8: Mark broken features as 🔧 In Repair, add Sprint 8 roadmap, add 🔧 to legend | CLI UX Designer Agent |
 | 2026-01-19 | 1.5.0-dev | Sprint 7 design phase: marked table/column completion and /logon as 🚧 In Progress | CLI UX Designer Agent |

@@ -231,17 +231,37 @@ fn print_banner<W: Write>(
 ) -> Result<()> {
     let config = completion_state.client().config();
 
-    // Sprint 12: Add branding with ASCII logo and Teradata orange (#F37021)
-    // Teradata orange RGB: 243, 112, 33
+    // Sprint 13: Redesigned logo per branding-guidelines.md
+    // - Tool name: tq (lowercase)
+    // - 't' in Teradata orange (#F37021 = RGB 243, 112, 33)
+    // - 'q' in default terminal color
+    // - Uses block character █ (U+2588)
+    // - Perfectly aligned (no offset)
     let orange = Color::Rgb(243, 112, 33);
 
     writeln!(writer)?;
-    writeln!(writer, "{}", orange.paint("  _____"));
-    writeln!(writer, "{}", orange.paint(" |_   _|__ _"));
-    writeln!(writer, "{}", orange.paint("   | |/ _` |"));
-    writeln!(writer, "{}", orange.paint("   | | (_| |"));
-    writeln!(writer, "{}   {}", orange.paint("   |_|\\__, |"), orange.bold().paint("Teradata Query Tool"))?;
-    writeln!(writer, "{}     v{}", orange.paint("      |_|"), env!("CARGO_PKG_VERSION"))?;
+    // Logo using block characters - 't' in orange, 'q' in default
+    writeln!(writer, " {}   {}",
+        orange.paint("████████"),
+        "████")?;
+    writeln!(writer, "    {}     {}",
+        orange.paint("██"),
+        "██  ██")?;
+    writeln!(writer, "    {}     {}",
+        orange.paint("██"),
+        "██  ██")?;
+    writeln!(writer, "    {}     {}",
+        orange.paint("██"),
+        "██ ▄██")?;
+    writeln!(writer, "    {}      {}",
+        orange.paint("██"),
+        "████")?;
+    writeln!(writer)?;
+    // Tool name: 't' in orange, 'q' in default, followed by version
+    writeln!(writer, " {}{}  v{}",
+        orange.bold().paint("t"),
+        "q",
+        env!("CARGO_PKG_VERSION"))?;
     writeln!(writer)?;
     writeln!(writer, "Connected to {}:{}", config.host, config.port)?;
     writeln!(writer, "Database: {}", config.database)?;

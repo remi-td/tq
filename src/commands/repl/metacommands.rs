@@ -67,20 +67,19 @@ pub fn handle_metacommand<W: Write>(
             }
         }
 
-        // Export command (Sprint 6, Sprint 12: clipboard support only)
+        // Export command (Sprint 6, Sprint 12, Sprint 13: simplified syntax)
         // Note: Old handler - no full dataset export (client not available for re-execution)
         "export" => {
             if args.is_empty() {
-                writeln!(writer, "Usage: /export <format> [file]")?;
-                writeln!(writer, "       /export <format> clipboard")?;
-                writeln!(writer, "       /export clipboard [format]")?;
-                writeln!(writer, "       /export <format> --append [file]")?;
+                writeln!(writer, "Usage: /export <format> [destination]")?;
                 writeln!(writer)?;
-                writeln!(writer, "Formats: table (default), csv, json, sql")?;
+                writeln!(writer, "Formats: table, csv, json, sql")?;
+                writeln!(writer, "Destination: file path or 'clipboard' (optional, defaults to stdout)")?;
+                writeln!(writer)?;
                 writeln!(writer, "Examples:")?;
-                writeln!(writer, "  /export csv results.csv")?;
-                writeln!(writer, "  /export clipboard csv")?;
-                writeln!(writer, "  /export json clipboard")?;
+                writeln!(writer, "  /export csv results.csv  Export to file")?;
+                writeln!(writer, "  /export json clipboard   Copy JSON to clipboard")?;
+                writeln!(writer, "  /export table            Print table to stdout")?;
             } else {
                 execute_export(state, None, writer, &args)?;
             }
@@ -210,22 +209,21 @@ pub fn handle_metacommand_with_state<W: Write>(
             }
         }
 
-        // Export command (Sprint 6, Sprint 12: clipboard support + full dataset export)
+        // Export command (Sprint 6, Sprint 12, Sprint 13: simplified syntax)
         "export" => {
             if args.is_empty() {
-                writeln!(writer, "Usage: /export <format> [file]")?;
-                writeln!(writer, "       /export <format> clipboard")?;
-                writeln!(writer, "       /export clipboard [format]")?;
-                writeln!(writer, "       /export <format> --append [file]")?;
+                writeln!(writer, "Usage: /export <format> [destination]")?;
                 writeln!(writer)?;
-                writeln!(writer, "Formats: table (default), csv, json, sql")?;
+                writeln!(writer, "Formats: table, csv, json, sql")?;
+                writeln!(writer, "Destination: file path or 'clipboard' (optional, defaults to stdout)")?;
+                writeln!(writer)?;
                 writeln!(writer, "Examples:")?;
-                writeln!(writer, "  /export csv results.csv")?;
-                writeln!(writer, "  /export clipboard csv")?;
-                writeln!(writer, "  /export json clipboard")?;
+                writeln!(writer, "  /export csv results.csv  Export to file")?;
+                writeln!(writer, "  /export json clipboard   Copy JSON to clipboard")?;
+                writeln!(writer, "  /export table            Print table to stdout")?;
                 writeln!(writer)?;
                 writeln!(writer, "Note: File exports include ALL rows (no limit),")?;
-                writeln!(writer, "      clipboard exports use currently displayed rows.")?;
+                writeln!(writer, "      clipboard/stdout exports use currently displayed rows.")?;
             } else {
                 execute_export(state, Some(completion_state.client()), writer, &args)?;
             }
@@ -338,11 +336,11 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "  /describe <table>, /d  Show table structure")?;
     writeln!(
         writer,
-        "  /export <fmt> [file]   Export last result (table, csv, json, sql)"
+        "  /export <fmt> [dest]   Export result (csv, json, table, sql)"
     )?;
     writeln!(
         writer,
-        "  /export clipboard      Copy last result to clipboard"
+        "                         dest: file path or 'clipboard'"
     )?;
     writeln!(
         writer,
@@ -488,11 +486,11 @@ fn print_help<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "  /describe <table>, /d  Show table structure")?;
     writeln!(
         writer,
-        "  /export <fmt> [file]   Export last result (table, csv, json, sql)"
+        "  /export <fmt> [dest]   Export result (csv, json, table, sql)"
     )?;
     writeln!(
         writer,
-        "  /export clipboard      Copy last result to clipboard"
+        "                         dest: file path or 'clipboard'"
     )?;
     writeln!(
         writer,
@@ -771,17 +769,22 @@ fn truncate_string(s: &str, max_len: usize) -> String {
     }
 }
 
-/// Execute the /export metacommand (Sprint 6, Sprint 12: clipboard support + full dataset)
+/// Execute the /export metacommand (Sprint 6, Sprint 12, Sprint 13)
 ///
 /// Exports the last query result to a file or clipboard in various formats.
 /// When exporting to a file and the result was limited, re-executes the query
 /// to get the full dataset.
 ///
-/// Syntax:
-///   /export <format> [file]
-///   /export <format> clipboard
-///   /export clipboard [format]
-///   /export <format> --append [file]
+/// Sprint 13: Simplified syntax
+///   /export <format> [destination]
+///
+/// Where:
+///   format: table, csv, json, sql (REQUIRED)
+///   destination: file path or 'clipboard' (OPTIONAL, defaults to stdout)
+///
+/// Deprecated (still works with warnings):
+///   /export clipboard <format>  -> Use /export <format> clipboard
+///   /export <format> --append   -> Append mode removed
 fn execute_export<W: Write>(
     state: &ReplState,
     client: Option<&DatabaseClient>,
@@ -794,17 +797,27 @@ fn execute_export<W: Write>(
         None => {
             writeln!(writer)?;
             writeln!(writer, "Error: No query results to export.")?;
-            writeln!(
-                writer,
-                "Execute a query first, then use /export to save the results."
-            )?;
+            writeln!(writer, "  Run a SELECT query first, then use /export")?;
             writeln!(writer)?;
             return Ok(());
         }
     };
 
     // Parse arguments to determine: format, destination (file/clipboard), append flag
-    let (format, destination, append) = parse_export_args(args);
+    let (format, destination, append, deprecation) = parse_export_args(args);
+
+    // Show deprecation warnings (Sprint 13)
+    match deprecation {
+        DeprecationWarning::ClipboardFirst => {
+            writeln!(writer)?;
+            writeln!(writer, "Warning: Deprecated syntax: Use '/export {} clipboard' instead", format)?;
+        }
+        DeprecationWarning::AppendMode => {
+            writeln!(writer)?;
+            writeln!(writer, "Warning: --append mode is deprecated and will be removed in a future version")?;
+        }
+        DeprecationWarning::None => {}
+    }
 
     // Validate format
     let format_lower = format.to_lowercase();
@@ -914,49 +927,72 @@ enum ExportDestination<'a> {
     Stdout,
 }
 
+/// Deprecation warning for export syntax
+enum DeprecationWarning {
+    None,
+    ClipboardFirst,
+    AppendMode,
+}
+
 /// Parse export command arguments
 ///
-/// Returns (format, destination, append_flag)
-fn parse_export_args<'a>(args: &'a [&str]) -> (String, ExportDestination<'a>, bool) {
+/// Sprint 13: Simplified syntax per export-syntax-simplification-design.md
+///
+/// New unified syntax: /export <format> [destination]
+/// - format: table, csv, json, sql (REQUIRED)
+/// - destination: file path or 'clipboard' (OPTIONAL, defaults to stdout)
+///
+/// Deprecated syntax (still supported with warnings):
+/// - /export clipboard <format>  -> Use /export <format> clipboard instead
+/// - /export <format> --append   -> Append mode removed
+///
+/// Returns (format, destination, append_flag, deprecation_warning)
+fn parse_export_args<'a>(args: &'a [&str]) -> (String, ExportDestination<'a>, bool, DeprecationWarning) {
     let mut format = "table".to_string(); // default format
     let mut destination = ExportDestination::Stdout;
     let mut append = false;
+    let mut deprecation = DeprecationWarning::None;
 
-    // Check if "clipboard" appears in args
-    let clipboard_idx = args.iter().position(|&arg| arg.eq_ignore_ascii_case("clipboard"));
-
-    // Check if "--append" appears in args
-    let append_idx = args.iter().position(|&arg| arg == "--append");
-    if append_idx.is_some() {
+    // Check if "--append" appears in args (deprecated)
+    if args.iter().any(|&arg| arg == "--append") {
         append = true;
+        deprecation = DeprecationWarning::AppendMode;
     }
 
-    if let Some(clip_idx) = clipboard_idx {
-        destination = ExportDestination::Clipboard;
+    // Filter out flags to get positional args only
+    let positional: Vec<&str> = args.iter()
+        .filter(|&&arg| !arg.starts_with("--"))
+        .copied()
+        .collect();
 
-        // Find format: the argument that isn't "clipboard" and isn't "--append"
-        for (i, &arg) in args.iter().enumerate() {
-            if i != clip_idx && Some(i) != append_idx && !arg.starts_with("--") {
-                format = arg.to_string();
-                break;
-            }
+    // Check if first positional is "clipboard" (deprecated syntax: /export clipboard <format>)
+    if !positional.is_empty() && positional[0].eq_ignore_ascii_case("clipboard") {
+        destination = ExportDestination::Clipboard;
+        deprecation = DeprecationWarning::ClipboardFirst;
+
+        // Second positional (if present) is the format
+        if positional.len() > 1 {
+            format = positional[1].to_string();
         }
     } else {
-        // No clipboard - first arg is format, second (if present and not --append) is file
-        if !args.is_empty() {
-            format = args[0].to_string();
+        // New syntax: /export <format> [destination]
+        // First positional is format
+        if !positional.is_empty() {
+            format = positional[0].to_string();
         }
 
-        // Find file path: first arg that isn't the format and isn't --append
-        for (i, &arg) in args.iter().enumerate().skip(1) {
-            if Some(i) != append_idx && !arg.starts_with("--") {
-                destination = ExportDestination::File(arg);
-                break;
+        // Second positional (if present) is destination
+        if positional.len() > 1 {
+            let dest_arg = positional[1];
+            if dest_arg.eq_ignore_ascii_case("clipboard") {
+                destination = ExportDestination::Clipboard;
+            } else {
+                destination = ExportDestination::File(dest_arg);
             }
         }
     }
 
-    (format, destination, append)
+    (format, destination, append, deprecation)
 }
 
 /// Export results to clipboard (Sprint 12)
@@ -1400,65 +1436,75 @@ mod tests {
         assert_eq!(truncate_string("ab", 2), "ab");
     }
 
-    // Sprint 12: Clipboard export tests
+    // Sprint 12/13: Export argument parsing tests
     #[test]
-    fn test_parse_export_args_clipboard_first() {
+    fn test_parse_export_args_clipboard_first_deprecated() {
+        // Sprint 13: Old syntax (deprecated but still supported)
         let args = vec!["clipboard", "csv"];
-        let (format, dest, append) = parse_export_args(&args);
+        let (format, dest, append, deprecation) = parse_export_args(&args);
         assert_eq!(format, "csv");
         assert!(matches!(dest, ExportDestination::Clipboard));
         assert!(!append);
+        assert!(matches!(deprecation, DeprecationWarning::ClipboardFirst));
     }
 
     #[test]
-    fn test_parse_export_args_clipboard_last() {
+    fn test_parse_export_args_clipboard_last_new_syntax() {
+        // Sprint 13: New syntax (preferred)
         let args = vec!["json", "clipboard"];
-        let (format, dest, append) = parse_export_args(&args);
+        let (format, dest, append, deprecation) = parse_export_args(&args);
         assert_eq!(format, "json");
         assert!(matches!(dest, ExportDestination::Clipboard));
         assert!(!append);
+        assert!(matches!(deprecation, DeprecationWarning::None));
     }
 
     #[test]
     fn test_parse_export_args_file() {
         let args = vec!["csv", "output.csv"];
-        let (format, dest, append) = parse_export_args(&args);
+        let (format, dest, append, deprecation) = parse_export_args(&args);
         assert_eq!(format, "csv");
         match dest {
             ExportDestination::File(path) => assert_eq!(path, "output.csv"),
             _ => panic!("Expected File destination"),
         }
         assert!(!append);
+        assert!(matches!(deprecation, DeprecationWarning::None));
     }
 
     #[test]
-    fn test_parse_export_args_file_with_append() {
+    fn test_parse_export_args_file_with_append_deprecated() {
+        // Sprint 13: Append mode is deprecated
         let args = vec!["csv", "--append", "output.csv"];
-        let (format, dest, append) = parse_export_args(&args);
+        let (format, dest, append, deprecation) = parse_export_args(&args);
         assert_eq!(format, "csv");
         match dest {
             ExportDestination::File(path) => assert_eq!(path, "output.csv"),
             _ => panic!("Expected File destination"),
         }
         assert!(append);
+        assert!(matches!(deprecation, DeprecationWarning::AppendMode));
     }
 
     #[test]
-    fn test_parse_export_args_default_format() {
+    fn test_parse_export_args_default_format_clipboard_deprecated() {
+        // Sprint 13: "clipboard" first is deprecated
         let args = vec!["clipboard"];
-        let (format, dest, append) = parse_export_args(&args);
-        assert_eq!(format, "table"); // Default format
+        let (format, dest, append, deprecation) = parse_export_args(&args);
+        assert_eq!(format, "table"); // Default format when only "clipboard" specified
         assert!(matches!(dest, ExportDestination::Clipboard));
         assert!(!append);
+        assert!(matches!(deprecation, DeprecationWarning::ClipboardFirst));
     }
 
     #[test]
     fn test_parse_export_args_format_only() {
         let args = vec!["json"];
-        let (format, dest, append) = parse_export_args(&args);
+        let (format, dest, append, deprecation) = parse_export_args(&args);
         assert_eq!(format, "json");
         assert!(matches!(dest, ExportDestination::Stdout));
         assert!(!append);
+        assert!(matches!(deprecation, DeprecationWarning::None));
     }
 
     #[test]
