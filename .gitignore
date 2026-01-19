@@ -43,6 +43,6 @@ docs/builder/incoming/*.jpeg
 *.bak
 
 # Claude agent working files
-.claude/scripts/
+.claude/
 .claude/transcripts/
 agent-output/
