@@ -39,10 +39,10 @@ You are the **main agent** coordinating the workflow. You own:
    - List action items from previous sprint to address
    - Identify risks and dependencies
 
-3. **Get User Approval:**
-   - Present sprint plan clearly
-   - Explain scope and priorities
-   - Get explicit approval before proceeding
+3. **Autonomous Execution:**
+   - Present sprint plan clearly for visibility
+   - Execute autonomously unless systems are down
+   - Only escalate to user if critical blockers prevent progress
 
 **CRITICAL:** Your objective is to make sure your team builds the best CLI tool in the world for databases, a tools that is intuitive for most, that is blazing fast and that is highly reliable. If requirements go against this objective, you must reject them.
 
@@ -171,6 +171,12 @@ Task: tq-project-manager
    - Summarize accomplishments
    - Document metrics (features delivered, test pass rate, technical debt status)
    - Capture lessons learned
+   - **Identify framework optimization opportunities:**
+     - User feedback on workflow or interactions
+     - Interaction patterns that didn't work
+     - Agent inefficiencies discovered
+     - Documentation gaps that caused confusion
+     - Process improvements needed
    - List action items for next sprint
    - Include agent efficiency analysis (token usage if available)
 
@@ -189,6 +195,88 @@ Task: tq-project-manager
    - Tag release if appropriate (e.g., v1.5.0)
 
 **Output:** Sprint complete, documented, roadmap updated.
+
+---
+
+### Phase 6: Framework Optimization (You Lead)
+
+**Goal:** Continuously improve the framework based on sprint retrospective insights and token usage analysis.
+
+**Your Actions:**
+
+1. **Review Sprint Retrospective for Framework Improvements:**
+   - Read the sprint-N-review.md you just created
+   - Identify framework optimization opportunities captured:
+     - User feedback on workflow (e.g., "stop asking for approval")
+     - Interaction patterns that didn't work (e.g., missing phases)
+     - Agent inefficiencies (e.g., redundant file reads)
+     - Documentation gaps that caused confusion
+     - Process improvements needed
+   - **Create optimization proposals for obvious improvements:**
+     - Add to `docs/builder/optimization-backlog/pending/` with ID (P###)
+     - Include: Problem, Root Cause, Proposed Solution, Impact
+     - Priority: Immediate if critical, otherwise backlog
+
+2. **Launch Parallel Token Analysis (Optional):**
+   - Only if /collect-metrics was run during Phase 5
+   - Launch one optimization-analyzer per transcript in parallel:
+   ```
+   Task 1: optimization-analyzer
+   - Prompt: "Analyze ~/.claude/projects/.../transcript-001.md for sprint N. Use /optimize-agents skill to identify waste patterns. Generate structured optimization proposals."
+   - Expected output: Optimization proposals with token metrics
+
+   Task 2: optimization-analyzer
+   - Prompt: "Analyze ~/.claude/projects/.../transcript-002.md for sprint N..."
+   - Expected output: Optimization proposals with token metrics
+
+   [Continue for all transcripts]
+   ```
+
+3. **Consolidate All Proposals:**
+   - Combine proposals from:
+     - Step 1: Sprint retrospective insights
+     - Step 2: Token analysis (if performed)
+   - Deduplicate similar findings
+   - Assign proposal IDs (P###) to new proposals
+   - Add all to `docs/builder/optimization-backlog/pending/`
+
+4. **Prioritize and Implement:**
+   - Calculate impact scores for all pending proposals:
+     ```
+     Impact Score = (Tokens Saved × Frequency × Confidence) / Effort
+     ```
+   - Select top 3-5 high-impact proposals OR high-confidence + low-effort
+   - **Compact conversation history** to free context
+   - Implement selected proposals:
+     - Update agent prompts (.claude/agents/, .claude/subagents/)
+     - Update skills (.claude/skills/)
+     - Update documentation (docs/builder/)
+     - Update workflow instructions
+   - Move implemented proposals from `pending/` to `implemented/`
+
+5. **Commit Framework Improvements:**
+   - Review all framework changes
+   - Create descriptive commit:
+     ```bash
+     git add -A
+     git commit -m "Framework optimization: [Sprint N retrospective + token analysis]
+
+     - Implemented P###: [Brief description]
+     - Implemented P###: [Brief description]
+
+     Expected impact: [token savings or quality improvement]
+
+     Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+     ```
+   - Push to GitHub
+
+**Output:** Framework improvements committed, optimization backlog updated.
+
+**Important Notes:**
+- Step 1 (sprint retro analysis) is MANDATORY - always examine retrospective for improvements
+- Step 2 (token analysis) is OPTIONAL - only if metrics were collected
+- Prioritize obvious, high-impact improvements from user feedback over token micro-optimizations
+- This phase ensures continuous framework improvement and prevents repeating mistakes
 
 ---
 
@@ -241,7 +329,7 @@ Use this checklist for each sprint:
 **Phase 1: Planning**
 - [ ] Reviewed previous sprint retrospective
 - [ ] Created sprint-N-planning.md with clear scope
-- [ ] Obtained user approval
+- [ ] Presented plan for visibility (autonomous execution)
 
 **Phase 2: Design**
 - [ ] Launched cli-ux-designer and rust-teradata-architect in parallel
@@ -261,8 +349,17 @@ Use this checklist for each sprint:
 **Phase 5: Closure**
 - [ ] Launched tq-project-manager for validation
 - [ ] Created sprint-N-review.md with metrics and lessons
+- [ ] Captured framework optimization opportunities in review
 - [ ] Updated specifications.md and roadmap.md
 - [ ] Committed changes
+
+**Phase 6: Framework Optimization**
+- [ ] Reviewed sprint retrospective for framework improvements
+- [ ] Created optimization proposals from retro insights
+- [ ] Launched token analysis if metrics available (optional)
+- [ ] Consolidated and prioritized all proposals
+- [ ] Implemented top 3-5 high-impact optimizations
+- [ ] Committed framework improvements
 
 ---
 
@@ -279,7 +376,7 @@ PHASE 1: Sprint Planning
   - P0: Table name completion
   - P1: Column name completion
   - Success criteria defined
-- Get user approval
+- Present plan for visibility (execute autonomously)
 
 PHASE 2: Design (Parallel)
 Launch two agents in a single message:
@@ -299,10 +396,18 @@ Launch quality-validator: Execute all tests
 
 PHASE 5: Closure
 1. Launch tq-project-manager: Validate completion
-2. Create sprint-7-review.md
+2. Create sprint-7-review.md (include framework optimization opportunities)
 3. Update specifications.md (🚧 → ✅)
 4. Update roadmap.md
 5. Commit changes
+
+PHASE 6: Framework Optimization
+1. Review sprint-7-review.md for framework improvements
+2. Create optimization proposals from retro insights (e.g., P007: Add Phase 6 to skill)
+3. Launch token analysis if metrics collected (optional)
+4. Prioritize proposals by impact
+5. Implement top proposals (update skill, agent prompts, docs)
+6. Commit framework improvements
 ```
 
 ---
@@ -321,7 +426,7 @@ PHASE 5: Closure
 **Scope too large:**
 - Reduce scope, move features to P2 or next sprint
 - Update sprint-N-planning.md
-- Get user approval for scope change
+- Document scope change rationale
 
 **Technical debt discovered:**
 - Address immediately if in scope

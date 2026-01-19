@@ -33,78 +33,24 @@ This project is developed exclusively by Claude Code using the skills and agents
 
 The project follows a structured sprint-driven approach coordinated by the **main Claude agent** (not a sub-agent). The main agent orchestrates specialized sub-agents through parallel execution for maximum efficiency.
 
-**Use the `/sprint-coordinator` skill** when starting a new sprint or coordinating sprint phases.
+**IMPORTANT: Use the `/sprint-coordinator` skill when starting a new sprint or coordinating sprint phases.**
 
-#### Sprint Workflow Overview
+The sprint-coordinator skill (`.claude/skills/sprint-coordinator/SKILL.md`) defines the complete 6-phase workflow:
 
-```
-1. Sprint Planning (Main Agent)
-   - Check docs/builder/incoming/ for new feature requests/bugs
-   - Review previous sprint retrospective
-   ↓ Creates: sprint-N-planning.md
+1. **Sprint Planning** - Review context, create sprint plan, execute autonomously
+2. **Parallel Design** - cli-ux-designer + rust-teradata-architect in parallel
+3. **Parallel Implementation** - rust-teradata-architect + quality-validator in parallel
+4. **Test Execution & Fix Loop** - quality-validator executes tests, iterate until 100% pass
+5. **Sprint Closure** - tq-project-manager validates, create sprint review, update roadmap
+6. **Framework Optimization** - Review retro for improvements, optional token analysis, implement optimizations
 
-2. Parallel Design (Main Agent Coordinates)
-   ├─→ cli-ux-designer: Detailed specs
-   └─→ rust-teradata-architect: Technical feasibility
-   ↓ Main agent synthesizes outputs
-
-2.5. Database Connectivity Check (Main Agent)
-   - Verify .env file exists and TQ_LOGON is configured
-   - Run: ./target/release/tq ping
-   - If fails: STOP and ask user to start test database
-   ↓ Only proceed when database is verified
-
-3. Parallel Implementation (Main Agent Coordinates)
-   ├─→ rust-teradata-architect: Implementation
-   └─→ quality-validator: Test case design
-   ↓ Main agent reviews outputs
-
-4. Test Execution & Fix Loop (Main Agent Coordinates)
-   └─→ quality-validator: Execute tests
-   ↓ If failures:
-       ├─→ rust-teradata-architect: Fix issues
-       └─→ quality-validator: Re-run tests
-       ↓ Loop until 100% pass rate
-
-5. Sprint Closure (Main Agent Coordinates)
-   ├─→ tq-project-manager: Validate completion + commit/push to GitHub
-   ├─→ Main agent: Sprint review + specifications update
-   ├─→ /collect-metrics: Extract token usage data (2-3 min)
-   └─→ Main agent: Update docs/user/roadmap.md
-
-6. Framework Optimization (End of every sprint)
-   ├─→ Step 1: Close sprint work
-   │   └─→ tq-project-manager: Commit & push feature code
-   │
-   ├─→ Step 2: Parallel optimization analysis (using Task tool)
-   │   ├─→ Task(optimization-analyzer): Analyze transcript-001.md for sprint N
-   │   ├─→ Task(optimization-analyzer): Analyze transcript-002.md for sprint N
-   │   ├─→ Task(optimization-analyzer): Analyze transcript-003.md for sprint N
-   │   └─→ ... (Variable number based on agent invocations in sprint)
-   │   Note: Each agent analyzes one transcript in isolated context
-   │
-   ├─→ Step 3: Consolidate proposals into backlog
-   │   └─→ Main agent: Review outputs, deduplicate, assign IDs (P###)
-   │       Add to docs/builder/optimization-backlog/pending/
-   │
-   ├─→ Step 4: Prioritize & implement optimizations
-   │   ├─→ Main agent: Calculate impact scores for all proposals
-   │   ├─→ Main agent: Select top 3-5 high-impact proposals
-   │   ├─→ Main agent: Compact conversation history
-   │   └─→ Main agent: Implement selected proposals
-   │       Move implemented proposals to optimization-backlog/implemented/
-   │
-   └─→ Step 5: Commit framework improvements
-       └─→ Main agent: Commit & push with descriptive message
-```
-
-#### Key Principles
-
-1. **Main Agent Coordinates:** The primary Claude agent owns the workflow and makes all decisions
-2. **Maximize Parallelism:** Launch independent sub-agents in a single message with multiple Task calls
-3. **Context Isolation:** Sub-agents handle verbose work; main conversation stays clean
-4. **Quality Focus:** Zero technical debt tolerance, 100% test pass rate before sprint closure
-5. **Documentation-Driven:** Every sprint produces planning and review documents
+**Key Principles:**
+- **Main Agent Coordinates:** The primary Claude agent owns the workflow and makes all decisions
+- **Maximize Parallelism:** Launch independent sub-agents in a single message with multiple Task calls
+- **Context Isolation:** Sub-agents handle verbose work; main conversation stays clean
+- **Quality Focus:** Zero technical debt tolerance, 100% test pass rate before sprint closure
+- **Documentation-Driven:** Every sprint produces planning and review documents
+- **Continuous Improvement:** Phase 6 ensures framework learns from each sprint
 
 #### Specialized Sub-Agent Roles
 
@@ -140,67 +86,11 @@ The project follows a structured sprint-driven approach coordinated by the **mai
 
 Each sprint produces two key documents:
 - **`docs/builder/sprints/sprint-N-planning.md`**: Scope, objectives, acceptance criteria (created at sprint start)
-- **`docs/builder/sprints/sprint-N-review.md`**: Retrospective, metrics, lessons learned (created at sprint end)
+- **`docs/builder/sprints/sprint-N-review.md`**: Retrospective, metrics, lessons learned, framework optimization opportunities (created at sprint end)
 
 These documents provide shared context for all agents and track sprint progress.
 
-#### Self-Improvement System
-
-The framework continuously optimizes itself through metrics-driven analysis and a structured optimization backlog:
-
-**Every Sprint - Collect Metrics (Phase 5)**
-- Use `/collect-metrics <sprint-num>` during Sprint Closure
-- Extracts token usage from subagent transcripts
-- Generates `sprint-N-metrics.md` with factual data
-- Duration: 2-3 minutes
-
-**Every Sprint - Analyze & Optimize (Phase 6)**
-1. **Parallel Analysis:** Launch `optimization-analyzer` agents for each transcript
-   - Each agent identifies waste patterns using `/optimize-agents` skill
-   - Generates structured proposals with metrics (tokens saved, frequency, confidence)
-   - Returns proposals to main agent
-
-2. **Consolidation:** Main agent processes all proposals
-   - Deduplicates similar findings across transcripts
-   - Assigns proposal IDs (P001, P002, etc.)
-   - Adds to `docs/builder/optimization-backlog/pending/`
-
-3. **Prioritization:** Calculate impact scores
-   ```
-   Impact Score = (Tokens Saved × Frequency Weight × Confidence Weight) / Implementation Effort
-   ```
-   - Select top 3-5 proposals for immediate implementation
-   - Prioritize: High impact OR (high confidence + small effort)
-
-4. **Implementation:** Main agent implements selected proposals
-   - Makes concrete file changes (agent prompts, documentation, workflow)
-   - Moves proposals from `pending/` to `implemented/`
-   - Commits framework improvements
-
-5. **Validation:** Next sprint verifies impact
-   - Metrics should show expected token reductions
-   - Quality maintained or improved
-   - Document results in proposal files
-
-**What Gets Optimized:**
-- **Agent prompts:** Eliminate redundant reads, add missing context
-- **Documentation:** Fill gaps causing exploration/questions
-- **Workflow:** Improve parallelism, reduce rework loops
-- **Quality processes:** Prevent recurring bugs/failures
-
-**Key Components:**
-- `.claude/subagents/optimization-analyzer.md` - Analyzes single transcript for waste
-- `.claude/skills/optimize-agents/SKILL.md` - Analysis framework and workflow
-- `.claude/skills/optimize-agents/references/waste-patterns.md` - Pattern catalog
-- `docs/builder/optimization-backlog/` - Structured backlog with proposals
-- `.claude/skills/collect-metrics/SKILL.md` - Metrics extraction
-
-**Expected Outcomes:**
-- 30-50% token reduction after 3-4 optimization cycles
-- Zero quality failures through improved processes
-- Faster sprint execution via better parallelism
-- Continuously improving agent efficiency
-- Data-driven, measurable improvements
+See the sprint-coordinator skill for complete details on Phase 6: Framework Optimization, which implements continuous improvement through sprint retrospective analysis and optional token metrics.
 
 ### Master specification documents
 
