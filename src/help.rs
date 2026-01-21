@@ -1,0 +1,57 @@
+//! Extended help content for tq
+//!
+//! This module provides detailed help text for configuration and credential topics.
+//! Help content is embedded at compile time from separate text files for maintainability.
+
+/// Get help content for configuration
+///
+/// Returns detailed help about configuration file format, profiles, and settings.
+pub fn config_help() -> &'static str {
+    include_str!("help/config.txt")
+}
+
+/// Get help content for credentials
+///
+/// Returns detailed help about password management and security best practices.
+pub fn credentials_help() -> &'static str {
+    include_str!("help/credentials.txt")
+}
+
+/// Get general help when no topic is specified
+///
+/// Returns a list of available help topics.
+pub fn general_help() -> &'static str {
+    "Available help topics:\n\n  \
+     tq help config       Configuration file format and usage\n  \
+     tq help credentials  Password and credential management\n\n\
+     For command help, use:\n  \
+     tq <command> --help\n"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_help_not_empty() {
+        let help = config_help();
+        assert!(!help.is_empty());
+        assert!(help.contains("CONFIGURATION FILE"));
+        assert!(help.contains("profiles"));
+    }
+
+    #[test]
+    fn test_credentials_help_not_empty() {
+        let help = credentials_help();
+        assert!(!help.is_empty());
+        assert!(help.contains("PASSWORD"));
+        assert!(help.contains("0600"));
+    }
+
+    #[test]
+    fn test_general_help_lists_topics() {
+        let help = general_help();
+        assert!(help.contains("config"));
+        assert!(help.contains("credentials"));
+    }
+}

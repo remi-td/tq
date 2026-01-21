@@ -1,9 +1,9 @@
 # Command-Line Interface Design
 
-**Version:** 1.1.0
-**Last Updated:** 2026-01-18
+**Version:** 1.2.0
+**Last Updated:** 2026-01-21
 **Owner:** cli-ux-designer agent
-**Status:** Active Specification
+**Status:** Active Specification (Sprint 17 Updates)
 
 ---
 
@@ -38,6 +38,13 @@ The CLI follows these principles:
 tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 ```
 
+**Available Commands:**
+- `help [topic]` - Display help information
+- `ping` - Test database connectivity
+- `query` - Execute SQL queries
+- `repl` - Start interactive mode
+- `profiles` - List connection profiles
+
 ## 4.3 Global Options
 
 | Option | Short | Type | Default | Description |
@@ -50,12 +57,52 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 | `--verbose` | `-v` | flag | false | Verbose output (repeatable: `-vv`, `-vvv`) |
 | `--quiet` | `-q` | flag | false | Suppress non-essential output |
 | `--color` | - | enum | `auto` | Color output: `auto`, `always`, `never` |
+| `--profile` | - | string | - | Select connection profile from config file |
 | `--help` | `-h` | flag | - | Show help |
 | `--version` | `-V` | flag | - | Show version |
 
 ## 4.4 Commands
 
-### 4.4.1 `ping` - Test Connectivity
+### 4.4.1 `help` - Display Help Information
+
+**Purpose**: Display comprehensive help for specific topics
+
+**Usage**:
+```bash
+tq help [TOPIC]
+```
+
+**Topics**:
+| Topic | Description |
+|-------|-------------|
+| (none) | Show general help (equivalent to `tq --help`) |
+| `config` | Configuration file format and usage |
+| `credentials` | Password and credential management |
+
+**Examples**:
+```bash
+# General help
+tq help
+
+# Configuration help
+tq help config
+
+# Credentials help
+tq help credentials
+
+# Unknown topic handling
+tq help unknown
+# Error: Unknown help topic 'unknown'
+# Available topics: config, credentials
+```
+
+**Exit Codes**:
+- `0`: Help displayed successfully
+- `2`: Unknown topic
+
+---
+
+### 4.4.2 `ping` - Test Connectivity
 
 **Purpose**: Verify database connection and measure latency
 
@@ -105,7 +152,7 @@ Troubleshooting:
 
 ---
 
-### 4.4.2 `query` - Execute SQL
+### 4.4.3 `query` - Execute SQL
 
 **Purpose**: Execute a SQL query and display results
 
@@ -187,7 +234,7 @@ user_id,username,created_at
 
 ---
 
-### 4.4.3 `repl` - Interactive Mode (Future)
+### 4.4.4 `repl` - Interactive Mode
 
 **Purpose**: Start an interactive Read-Eval-Print Loop session
 
@@ -219,6 +266,92 @@ tq repl --no-history
 **Exit Codes**:
 - `0`: Normal exit
 - `1`: Connection error or fatal error
+
+---
+
+### 4.4.5 `profiles` - List Connection Profiles
+
+**Purpose**: Display all available connection profiles from the configuration file
+
+**Usage**:
+```bash
+tq profiles
+```
+
+**Options**: None
+
+**Examples**:
+```bash
+# List all profiles
+tq profiles
+```
+
+**Output (With Profiles)**:
+```
+Available profiles (from ~/.tq/config.toml):
+
+  dev
+    Host:     dev.company.com:1025
+    Database: development
+    User:     alice
+    Logmech:  TD2
+
+  prod
+    Host:     prod.company.com:1025
+    Database: production
+    User:     alice
+    Logmech:  LDAP
+
+  local
+    Host:     localhost:1025
+    Database: testdb
+    User:     dbc
+    Logmech:  TD2
+
+Use: tq --profile <name> <command>
+```
+
+**Output (No Config File)**:
+```
+No configuration file found at ~/.tq/config.toml
+
+To create a configuration file with profiles:
+  mkdir -p ~/.tq
+  cat > ~/.tq/config.toml <<EOF
+  [profiles.dev]
+  host = "dev.company.com"
+  port = 1025
+  database = "development"
+  user = "alice"
+  password_file = "~/.tq/passwords/dev"
+  EOF
+
+See 'tq help config' for more information
+```
+
+**Output (No Profiles Defined)**:
+```
+No profiles defined in ~/.tq/config.toml
+
+To add a profile, edit ~/.tq/config.toml:
+  [profiles.dev]
+  host = "dev.company.com"
+  port = 1025
+  database = "development"
+  user = "alice"
+  password_file = "~/.tq/passwords/dev"
+
+See 'tq help config' for more information
+```
+
+**Security Considerations**:
+- Password fields are NEVER displayed
+- Only partial connection information is shown
+- Password files paths are not displayed (security by obscurity)
+
+**Exit Codes**:
+- `0`: Profiles listed successfully (or no profiles found)
+- `1`: Configuration file parsing error
 
 ---
 
@@ -313,10 +446,11 @@ A fast, lightweight command-line client for Teradata databases
 Usage: tq [OPTIONS] <COMMAND>
 
 Commands:
-  ping   Test database connectivity
-  query  Execute a SQL query
-  repl   Start interactive mode [future]
-  help   Print this message or help for a subcommand
+  ping      Test database connectivity
+  query     Execute a SQL query
+  repl      Start interactive mode
+  profiles  List available connection profiles
+  help      Print help information or help for a topic
 
 Global Options:
   -l, --logon <LOGON>
@@ -368,11 +502,20 @@ Configuration:
     export TQ_LOGON="user:pass@host:1025/db"
     tq ping
 
-  Or create ~/.config/tq/config.toml:
-    host = "myhost"
+  Or create ~/.tq/config.toml with connection profiles:
+    [profiles.dev]
+    host = "dev.company.com"
     port = 1025
-    user = "myuser"
-    database = "mydb"
+    database = "development"
+    user = "alice"
+    password_file = "~/.tq/passwords/dev"
+
+  List available profiles:
+    tq profiles
+
+  Get detailed configuration help:
+    tq help config
+    tq help credentials
 
 For more information, visit: https://github.com/yourusername/tq
 ```

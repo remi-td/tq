@@ -1,7 +1,7 @@
 # tq (Teradata Query) - Specifications
 
-**Version:** 1.6.1 (Sprint 16 In Progress)
-**Status:** Active Development - Sprint 16 Configuration Features
+**Version:** 1.7.0-dev (Sprint 17 In Progress)
+**Status:** Active Development - Sprint 17 Configuration UX Completion
 **Last Updated:** 2026-01-21
 
 ---
@@ -130,18 +130,32 @@
 | Transaction control | 📋 Planned | 11+ | P2 |
 | Variable substitution | 📋 Planned | 11+ | P2 |
 
-### Configuration (Sprint 16) 🚧 In Progress
+### Configuration (Sprint 16-17)
+
+| Feature | Status | Priority | Sprint |
+|---------|--------|----------|--------|
+| User config file (`~/.tq/config.toml`) | ✅📝 Implemented and tested | P1 | 16 |
+| Connection profiles | ✅📝 Implemented and tested | P1 | 16 |
+| Default preferences (format, editor_mode, etc) | ✅📝 Implemented and tested | P1 | 16 |
+| `--profile <name>` flag | ✅📝 Implemented and tested | P2 | 16 |
+| `tq help config` subcommand | 🚧 In Progress | P0 | 17 |
+| `tq help credentials` subcommand | 🚧 In Progress | P0 | 17 |
+| `tq profiles` command | 🚧 In Progress | P1 | 17 |
+| Password file permission enforcement | 🚧 In Progress | P1 | 17 |
+| Security check ordering fix | 🚧 In Progress | P0 | 17 |
+| Project config file (`.tq.toml`) | 📋 Planned | P1 | 18+ |
+| Profile editing commands | 📋 Planned | P1 | 18+ |
+| Keyring integration | 📋 Planned | P2 | 18+ |
+| Config validation command | 📋 Planned | P2 | 18+ |
+
+### Help System (Sprint 17) 🚧 In Progress
 
 | Feature | Status | Priority |
 |---------|--------|----------|
-| User config file (`~/.tq/config.toml`) | 🚧 In Progress | P1 |
-| Connection profiles | 🚧 In Progress | P1 |
-| Default preferences (format, editor_mode, etc) | 🚧 In Progress | P1 |
-| `--profile <name>` flag | 🚧 In Progress | P2 |
-| Project config file (`.tq.toml`) | 📋 Planned | P1 |
-| Profile management commands | 📋 Planned | P1 |
-| Keyring integration | 📋 Planned | P2 |
-| Config validation command | 📋 Planned | P2 |
+| `tq help` (general) | ✅📝 Implemented and tested | P0 |
+| `tq help config` subcommand | 🚧 In Progress | P0 |
+| `tq help credentials` subcommand | 🚧 In Progress | P0 |
+| Help topic routing | 🚧 In Progress | P0 |
 
 **Legend:**
 - ✅📝 Implemented and tested
@@ -459,26 +473,53 @@
 
 ---
 
-### Sprint 16: Interactive Test Validation & Configuration Foundation 🚧 In Progress
+### Sprint 16: Interactive Test Validation & Configuration Foundation ✅ Complete
 **Goal:** Validate Sprint 13-15 interactive tests with live database, then establish configuration file foundation for connection profiles and user preferences
 
 **Sprint Theme:** "Validation First, Then Configuration" - Complete test validation work from Sprint 15, then return to feature development with full confidence.
 
-**Status:** In Progress
+**Status:** ✅ Complete
 **Start Date:** 2026-01-21
+**Completion Date:** 2026-01-21
 
-**Objectives:**
-1. **P0: Interactive Test Execution Validation** - Execute all 20 interactive tests with live Teradata database
-2. **P0: Coverage Metrics Documentation** - Clarify automated vs total coverage (~85% including interactive)
-3. **P1: User Configuration File** - Implement `~/.tq/config.toml` with connection profiles and defaults
-4. **P1: Configuration Specification Completion** - Complete detailed specification for configuration management
-5. **P2: Profile Selection CLI Flag** - Add `--profile <name>` flag for profile selection
+**Delivered:**
+1. ✅ Interactive Test Execution Validation - All 20 interactive tests passing with live database
+2. ✅ Coverage Metrics Documentation - Automated vs total coverage documented
+3. ✅ User Configuration File - `~/.tq/config.toml` with connection profiles and defaults
+4. ✅ Configuration Specification Completion - Detailed specification complete (v2.0.0)
+5. ✅ Profile Selection CLI Flag - `--profile <name>` flag implemented and tested
+
+**Test Results:**
+- Unit Tests: 272/272 passed (100%)
+- Integration Tests: All passed
+- Code Quality: Zero warnings
+- Technical Debt: Zero
 
 **Sprint Planning:** [Sprint 16 Planning](../sprints/sprint-16-planning.md)
+**Sprint Review:** [Sprint 16 Review](../sprints/sprint-16-review.md)
 
 ---
 
-### Sprint 17+: Advanced Features 📋 Future
+### Sprint 17: Configuration UX Completion 🚧 In Progress
+**Goal:** Complete the configuration user experience by implementing help subcommands, fixing security issues, and adding profile management commands
+
+**Sprint Theme:** "Configuration UX Polish" - Building on Sprint 16's configuration foundation to deliver a complete, secure, and user-friendly configuration experience.
+
+**Status:** 🚧 In Progress
+**Start Date:** 2026-01-21
+
+**Objectives:**
+1. **P0: Help Subcommands** - Implement `tq help config` and `tq help credentials`
+2. **P0: Security Check Ordering Fix** - Fix security check ordering in password file reading
+3. **P1: Password File Permission Enforcement** - Enforce (not warn) 0600 permissions on password files
+4. **P1: Profile Listing Command** - Add `tq profiles` command to list available profiles
+5. **P2: Logmech Parsing Refactoring** - Eliminate code duplication
+
+**Sprint Planning:** [Sprint 17 Planning](../sprints/sprint-17-planning.md)
+
+---
+
+### Sprint 18+: Advanced Features 📋 Future
 **Goals:**
 - Transaction control (`--atomic` flag)
 - Variable substitution
@@ -535,6 +576,7 @@ Complete technical specifications are organized by domain:
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
+| 2026-01-21 | 1.7.0-dev | Sprint 17 Phase 2: Marked Sprint 16 as Complete, added Sprint 17 roadmap section, marked help subcommands and profiles command as 🚧 In Progress, added Help System section | cli-ux-designer |
 | 2026-01-21 | 1.6.1 | Sprint 16 Phase 2: Configuration features marked 🚧 In Progress, added Sprint 16 roadmap section with detailed objectives, updated version status | cli-ux-designer |
 | 2026-01-21 | 1.6.1 | Sprint 15 Complete: Marked Sprint 15 as ✅ Complete with all objectives delivered, updated status to Ready for Sprint 16, added Sprint 15 Review link | Sprint Coordinator |
 | 2026-01-21 | 1.6.1 | Sprint 15 Phase 2: Added test status indicators (✅📝 implemented+tested, ✅❓ needs testing), marked Sprint 15 as In Progress, added Sprint 15 roadmap section | CLI UX Designer Agent |

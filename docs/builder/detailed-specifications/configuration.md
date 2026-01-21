@@ -1,9 +1,9 @@
 # Configuration and Credential Management
 
-**Version:** 2.0.0
+**Version:** 2.1.0
 **Last Updated:** 2026-01-21
 **Owner:** cli-ux-designer agent
-**Status:** Active Specification (Sprint 16)
+**Status:** Active Specification (Sprint 17 Updates)
 
 ---
 
@@ -177,14 +177,22 @@ timing = true
 For security, `tq` checks the config file permissions:
 
 - **Recommended**: `0600` (read/write for owner only)
-- **Accepted**: `0644` (world-readable, since passwords should not be inline)
-- **Rejected**: `0666` or similar (world-writable)
+- **Accepted**: `0644` (world-readable) - Config files typically don't contain secrets
+- **Rejected**: World-writable permissions (`0666`, `0777`, etc.)
 
-**Warning issued if too permissive:**
+**Warning issued if too permissive (not enforced):**
 ```
 Warning: Configuration file ~/.tq/config.toml has permissive permissions (0644)
 Recommendation: chmod 0600 ~/.tq/config.toml
 ```
+
+**Note:** Config file permissions issue a **warning** (not an error) because:
+- Config files should not contain passwords (use `password_file` instead)
+- Profiles contain non-sensitive connection metadata (hostnames, usernames)
+- Shared environments may have legitimate reasons for team-readable configs
+- tq specification prohibits inline passwords in config files
+
+For password files, permissions are **strictly enforced** (see section 7.6.3)
 
 ---
 
@@ -249,13 +257,39 @@ TQ_DATABASE=testing tq --profile dev --database production query "SELECT 1"
 
 ### 7.4.4 Listing Profiles
 
-Users can see available profiles using the `--help` flag or by checking their config file.
+Users can see available profiles using the `tq profiles` command (Sprint 17):
 
-**Future enhancement** (not Sprint 16):
 ```bash
-# List all profiles (Sprint 17+)
-tq profile list
+# List all profiles
+tq profiles
 ```
+
+**Output format:**
+```
+Available profiles (from ~/.tq/config.toml):
+
+  dev
+    Host:     dev.company.com:1025
+    Database: development
+    User:     alice
+    Logmech:  TD2
+
+  prod
+    Host:     prod.company.com:1025
+    Database: production
+    User:     alice
+    Logmech:  LDAP
+```
+
+**Security:**
+- Password fields are NEVER displayed
+- Password file paths are not shown
+- Only connection metadata is revealed
+
+**Error cases:**
+- No config file: Helpful message with setup instructions
+- Config file exists but no profiles: Message with example profile
+- Config parse error: Standard error message with fix guidance
 
 ---
 
@@ -364,18 +398,29 @@ chmod 0600 ~/.tq/passwords/dev
 # password_file = "~/.tq/passwords/dev"
 ```
 
-**File permissions:**
-- **Required**: Owner read-only (`0600`) or owner read-write (`0600`)
-- **Rejected**: Group or world readable/writable
+**File permissions enforcement (Sprint 17):**
 
-If permissions are too permissive, `tq` refuses to read the file:
+Password file permissions are **strictly enforced** for security:
+
+- **Required**: Owner read-only or read-write (`0600`)
+- **Rejected**: Any permissions allowing group or world access (`0644`, `0666`, etc.)
+
+If permissions are too permissive, `tq` **refuses to read the file** and exits with an error:
 ```
 Error: Password file has insecure permissions: ~/.tq/passwords/dev
-Current permissions: 0644
-Required permissions: 0600
+Current permissions: 0644 (readable by group and others)
+Required permissions: 0600 (owner read-write only)
+
+Security risk: Password file is readable by other users
 
 Fix: chmod 0600 ~/.tq/passwords/dev
 ```
+
+**Rationale for enforcement (not warning):**
+- Passwords stored in world-readable files are a critical security vulnerability
+- tq prioritizes security over convenience
+- Error provides clear remediation command
+- Prevents accidental credential exposure in shared environments
 
 ### 7.6.4 Interactive Password Prompt
 
@@ -550,8 +595,14 @@ Fix: chmod 0600 ~/.tq/passwords/dev
 
 ### 7.8.1 Configuration Overview Help
 
+The `tq help config` subcommand provides comprehensive configuration documentation:
+
 ```bash
 $ tq help config
+```
+
+**Output:**
+```
 tq Configuration
 
 CONFIGURATION FILE
@@ -584,6 +635,18 @@ PRECEDENCE ORDER
       3. Environment variables (TQ_*)
       4. Command-line arguments
 
+PROFILE FIELDS
+    Required:
+      host              Database hostname
+
+    Optional:
+      port              Database port (default: 1025)
+      database          Database name
+      user              Username
+      logmech           Auth mechanism: TD2, LDAP, KRB5, TDNEGO (default: TD2)
+      password_file     Path to password file
+      timeout           Connection timeout (default: "30s")
+
 EXAMPLES
     # Use a connection profile
     tq --profile dev query "SELECT CURRENT_DATE"
@@ -592,7 +655,13 @@ EXAMPLES
     tq --profile dev --database staging query "SELECT 1"
 
     # List available profiles
-    cat ~/.tq/config.toml | grep '^\[profiles\.'
+    tq profiles
+
+SECURITY BEST PRACTICES
+    - Never store passwords directly in config file
+    - Always use password_file field pointing to 0600 file
+    - Config file permissions: 0600 recommended (0644 acceptable)
+    - Password file permissions: 0600 required (enforced)
 
 See 'tq help credentials' for password management
 ```
@@ -614,8 +683,14 @@ CONFIGURATION:
 
 ### 7.8.3 Credentials Help
 
+The `tq help credentials` subcommand provides comprehensive password management guidance:
+
 ```bash
 $ tq help credentials
+```
+
+**Output:**
+```
 tq Credential Management
 
 PASSWORD SECURITY
@@ -636,6 +711,15 @@ PASSWORD FILES
 
     Required permissions: 0600 (owner read-write only)
 
+    tq ENFORCES password file permissions. Files with incorrect permissions
+    will be rejected with an error (not a warning).
+
+CREATING A PASSWORD FILE
+    mkdir -p ~/.tq/passwords
+    chmod 0700 ~/.tq/passwords
+    echo "your_password" > ~/.tq/passwords/dev
+    chmod 0600 ~/.tq/passwords/dev
+
 PASSWORD SOURCES (priority order)
     1. Connection string (discouraged): user:pass@host
     2. --password-file flag
@@ -647,6 +731,13 @@ INTERACTIVE PROMPT
     If no password is provided, tq prompts securely:
       $ tq -l "user@host" query "SELECT 1"
       Password: ****
+
+SECURITY ENFORCEMENT
+    Password files must have 0600 permissions. tq will refuse to read
+    password files with group or world access.
+
+    Config files issue warnings for permissive permissions but are not
+    blocked (since they should not contain passwords).
 
 See 'tq help config' for configuration details
 ```
@@ -847,6 +938,7 @@ tq --profile dev repl
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
+| 2026-01-21 | 2.1.0 | Sprint 17: Clarified password file permission enforcement (error) vs config file permissions (warning), added tq profiles command, updated help subcommand details | cli-ux-designer |
 | 2026-01-21 | 2.0.0 | Complete Sprint 16 specification: detailed configuration file format, profiles, precedence rules, error handling, help text, examples | cli-ux-designer |
 | 2026-01-18 | 1.1.0 | Minor updates to existing structure | cli-ux-designer |
 | 2026-01-16 | 1.0.0 | Initial configuration specification | cli-ux-designer |

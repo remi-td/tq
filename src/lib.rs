@@ -70,11 +70,13 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod format;
+pub mod help;
 pub mod sql;
 
 // Re-export commonly used types for convenience
 pub use cli::{
-    Cli, Command, GlobalOpts, LogonMechanism, OutputFormat, PingArgs, QueryArgs, ReplArgs,
+    Cli, Command, GlobalOpts, HelpArgs, HelpTopic, LogonMechanism, OutputFormat, PingArgs,
+    QueryArgs, ReplArgs,
 };
 pub use config::Config;
 pub use db::{

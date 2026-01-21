@@ -15,6 +15,7 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(name = "tq")]
 #[command(author, version, about)]
+#[command(disable_help_subcommand = true)]  // Disable default help subcommand so we can use our own
 #[command(
     long_about = "tq is a fast, lightweight command-line client for Teradata databases.\n\n\
                   It follows UNIX philosophy: do one thing well, compose with other tools.\n\n\
@@ -62,7 +63,7 @@ CONFIGURATION:\n  \
     password_file = \"~/.tq/passwords/prod\"\n\n  \
     Then use: tq --profile dev query \"SELECT 1\"\n\n  \
     Config file location: ~/.tq/config.toml (macOS/Linux)\n  \
-    For help on configuration: tq help config (coming in Sprint 17)\n\n\
+    For help on configuration: tq help config\n\n\
 For more information, visit: https://github.com/remi-td/tq")]
 pub struct Cli {
     /// Global options that apply to all commands
@@ -190,6 +191,37 @@ pub enum Command {
     /// Start an interactive Read-Eval-Print Loop for executing SQL queries.
     /// Supports multi-line input, command history, and metacommands.
     Repl(ReplArgs),
+
+    /// Show detailed help on a topic
+    ///
+    /// Display extended help for configuration, credentials, or other topics.
+    /// Use without a topic to see available help topics.
+    Help(HelpArgs),
+
+    /// List available connection profiles
+    ///
+    /// Display all connection profiles defined in the configuration file.
+    /// Shows profile names and partial connection info (no passwords).
+    Profiles,
+}
+
+/// Arguments for the help command
+#[derive(Parser, Debug)]
+pub struct HelpArgs {
+    /// Help topic to display
+    ///
+    /// Available topics: config, credentials
+    #[arg(value_name = "TOPIC")]
+    pub topic: Option<HelpTopic>,
+}
+
+/// Available help topics
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum HelpTopic {
+    /// Configuration file format and usage
+    Config,
+    /// Password and credential management
+    Credentials,
 }
 
 /// Arguments for the ping command
@@ -652,5 +684,53 @@ mod tests {
         } else {
             panic!("Expected Query command");
         }
+    }
+
+    #[test]
+    fn test_cli_help_no_topic() {
+        let args = vec!["tq", "help"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Help(args) = cli.command {
+            assert!(args.topic.is_none());
+        } else {
+            panic!("Expected Help command");
+        }
+    }
+
+    #[test]
+    fn test_cli_help_config_topic() {
+        let args = vec!["tq", "help", "config"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Help(args) = cli.command {
+            assert_eq!(args.topic, Some(HelpTopic::Config));
+        } else {
+            panic!("Expected Help command");
+        }
+    }
+
+    #[test]
+    fn test_cli_help_credentials_topic() {
+        let args = vec!["tq", "help", "credentials"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Help(args) = cli.command {
+            assert_eq!(args.topic, Some(HelpTopic::Credentials));
+        } else {
+            panic!("Expected Help command");
+        }
+    }
+
+    #[test]
+    fn test_cli_help_invalid_topic() {
+        let args = vec!["tq", "help", "invalid"];
+        let result = Cli::try_parse_from(args);
+        // Should fail because "invalid" is not a valid HelpTopic
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cli_profiles_command() {
+        let args = vec!["tq", "profiles"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert!(matches!(cli.command, Command::Profiles));
     }
 }

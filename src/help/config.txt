@@ -1,0 +1,61 @@
+tq Configuration
+
+CONFIGURATION FILE
+    tq looks for a user configuration file at:
+      ~/.tq/config.toml  (macOS/Linux)
+      %USERPROFILE%\.tq\config.toml  (Windows)
+
+    The configuration file is optional. If not present, built-in defaults are used.
+
+FILE FORMAT (TOML)
+    [defaults]
+    format = "table"              # Output format: table, json, csv
+    editor_mode = "emacs"         # REPL editor: emacs, vi
+    syntax_highlighting = true    # Enable SQL syntax highlighting
+    paging = true                 # Enable result paging
+    timing = false                # Show query execution time
+
+    [profiles.dev]
+    host = "dev.company.com"
+    port = 1025
+    database = "development"
+    user = "alice"
+    logmech = "TD2"
+    password_file = "~/.tq/passwords/dev"
+
+PRECEDENCE ORDER
+    Configuration is loaded in this order (later overrides earlier):
+      1. Built-in defaults
+      2. User config file (~/.tq/config.toml)
+      3. Environment variables (TQ_*)
+      4. Command-line arguments
+
+PROFILE FIELDS
+    Required:
+      host              Database hostname
+
+    Optional:
+      port              Database port (default: 1025)
+      database          Database name
+      user              Username
+      logmech           Auth mechanism: TD2, LDAP, KRB5, TDNEGO (default: TD2)
+      password_file     Path to password file
+      timeout           Connection timeout (default: "30s")
+
+EXAMPLES
+    # Use a connection profile
+    tq --profile dev query "SELECT CURRENT_DATE"
+
+    # Override profile database
+    tq --profile dev --database staging query "SELECT 1"
+
+    # List available profiles
+    tq profiles
+
+SECURITY BEST PRACTICES
+    - Never store passwords directly in config file
+    - Always use password_file field pointing to 0600 file
+    - Config file permissions: 0600 recommended (0644 acceptable)
+    - Password file permissions: 0600 required (enforced)
+
+See 'tq help credentials' for password management

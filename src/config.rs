@@ -139,12 +139,12 @@ impl Config {
         let figment = Figment::new()
             // Built-in defaults
             .merge(Serialized::defaults(Config::default()))
-            // System config
-            .merge(Toml::file("/etc/tq/config.toml").nested())
-            // User config
-            .merge(Toml::file(Self::user_config_path()).nested())
-            // Project config
-            .merge(Toml::file(".tq.toml").nested())
+            // System config (no .nested() - we want standard TOML section parsing)
+            .merge(Toml::file("/etc/tq/config.toml"))
+            // User config (no .nested() - profiles are [profiles.name] sections, not figment profiles)
+            .merge(Toml::file(Self::user_config_path()))
+            // Project config (no .nested() - same reasoning)
+            .merge(Toml::file(".tq.toml"))
             // Environment variables (TQ_HOST, TQ_PORT, etc.)
             .merge(Env::prefixed("TQ_").split("_").lowercase(false));
 
@@ -231,8 +231,19 @@ impl Config {
     }
 }
 
-/// Parse logon mechanism from string
-fn parse_logmech(s: &str) -> Result<LogonMechanism> {
+/// Parse logon mechanism from string (case-insensitive)
+///
+/// # Examples
+///
+/// ```
+/// use tq::config::parse_logmech;
+/// use tq::cli::LogonMechanism;
+///
+/// assert_eq!(parse_logmech("TD2").unwrap(), LogonMechanism::Td2);
+/// assert_eq!(parse_logmech("ldap").unwrap(), LogonMechanism::Ldap);
+/// assert!(parse_logmech("invalid").is_err());
+/// ```
+pub fn parse_logmech(s: &str) -> Result<LogonMechanism> {
     match s.to_uppercase().as_str() {
         "TD2" => Ok(LogonMechanism::Td2),
         "LDAP" => Ok(LogonMechanism::Ldap),

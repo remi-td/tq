@@ -8,11 +8,11 @@ use clap::Parser;
 use std::io::{self};
 use std::process::ExitCode;
 
-use tq::cli::{Cli, Command, GlobalOpts};
-use tq::config::Config;
+use tq::cli::{Cli, Command, GlobalOpts, HelpTopic};
+use tq::config::{parse_logmech, Config};
 use tq::db::{parse_duration, ConnectionConfig, DatabaseClient};
 use tq::error::TqError;
-use tq::{commands, Result};
+use tq::{commands, help, Result};
 
 fn main() -> ExitCode {
     // Load environment variables from .env file if present
@@ -51,7 +51,18 @@ fn run(cli: Cli) -> Result<()> {
         Config::default()
     });
 
-    // Build connection configuration
+    // Handle commands that don't require database connection
+    match &cli.command {
+        Command::Help(args) => {
+            return handle_help(args);
+        }
+        Command::Profiles => {
+            return handle_profiles(&config);
+        }
+        _ => {}
+    }
+
+    // Build connection configuration for database commands
     let password_override = read_password_if_needed(&cli.global)?;
     let conn_config = build_connection_config(&cli.global, &config, password_override)?;
 
@@ -62,7 +73,7 @@ fn run(cli: Cli) -> Result<()> {
     let use_color = cli.global.color.should_use_color();
     let verbose = cli.global.verbose > 0;
 
-    // Execute command
+    // Execute database commands
     match cli.command {
         Command::Ping(args) => {
             let mut stdout = io::stdout();
@@ -84,8 +95,69 @@ fn run(cli: Cli) -> Result<()> {
             // Sprint 7: Pass ownership of client to REPL for /logon support
             commands::repl(client, &args, &mut stdout, use_color, verbose)?;
         }
+        // Help and Profiles already handled above
+        Command::Help(_) | Command::Profiles => unreachable!(),
     }
 
+    Ok(())
+}
+
+/// Handle the help command
+fn handle_help(args: &tq::HelpArgs) -> Result<()> {
+    let content = match args.topic {
+        Some(HelpTopic::Config) => help::config_help(),
+        Some(HelpTopic::Credentials) => help::credentials_help(),
+        None => help::general_help(),
+    };
+
+    println!("{}", content);
+    Ok(())
+}
+
+/// Handle the profiles command
+fn handle_profiles(config: &Config) -> Result<()> {
+    if config.profiles.is_empty() {
+        println!("No profiles defined.\n");
+        println!(
+            "To create a profile, add to {}:\n",
+            Config::user_config_path().display()
+        );
+        println!("  [profiles.myprofile]");
+        println!("  host = \"myhost.example.com\"");
+        println!("  port = 1025");
+        println!("  database = \"mydb\"");
+        println!("  user = \"myuser\"");
+        println!("  password_file = \"~/.tq/passwords/myprofile\"");
+        return Ok(());
+    }
+
+    println!("Available profiles:\n");
+
+    // Sort profiles alphabetically for consistent output
+    let mut profile_names: Vec<_> = config.profiles.keys().collect();
+    profile_names.sort();
+
+    for name in profile_names {
+        let profile = config.profiles.get(name).unwrap();
+        let host = profile.host.as_deref().unwrap_or("<not set>");
+        let database = profile.database.as_deref().unwrap_or("<not set>");
+        let user = profile.user.as_deref().unwrap_or("<not set>");
+
+        println!("  {}", name);
+        println!("    Host:     {}", host);
+        println!("    Database: {}", database);
+        println!("    User:     {}", user);
+
+        // Show logmech if not default
+        if let Some(ref logmech) = profile.logmech {
+            if logmech.to_uppercase() != "TD2" {
+                println!("    Logmech:  {}", logmech);
+            }
+        }
+        println!();
+    }
+
+    println!("Use: tq --profile <name> <command>");
     Ok(())
 }
 
@@ -95,20 +167,24 @@ fn read_password_if_needed(global: &GlobalOpts) -> Result<Option<String>> {
         return Ok(None);
     };
 
-    // Read password from file
+    // SECURITY: Validate file permissions BEFORE reading file content
+    // This prevents loading sensitive data from insecure files
+    #[cfg(unix)]
+    validate_password_file_permissions(password_file)?;
+
+    // Read password from file only after permission validation passes
     let password = std::fs::read_to_string(password_file).map_err(|e| TqError::FileReadError {
         path: password_file.clone(),
         source: e,
     })?;
 
-    // Validate file permissions on Unix
-    #[cfg(unix)]
-    validate_password_file_permissions(password_file)?;
-
     Ok(Some(password.trim().to_string()))
 }
 
 /// Validate password file has secure permissions on Unix
+///
+/// Returns error if file permissions allow group or world access.
+/// This enforces the security requirement that password files have 0600 permissions.
 #[cfg(unix)]
 fn validate_password_file_permissions(path: &std::path::Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -120,12 +196,19 @@ fn validate_password_file_permissions(path: &std::path::Path) -> Result<()> {
 
     let mode = metadata.permissions().mode() & 0o777;
 
+    // SECURITY: Enforce (not just warn) that password files have 0600 permissions
+    // Files with group or world access are rejected to prevent credential exposure
     if mode & 0o077 != 0 {
-        log::warn!(
-            "Password file '{}' has insecure permissions {:o}. Recommended: 0600",
+        return Err(TqError::InvalidConfig(format!(
+            "Password file '{}' has insecure permissions {:04o}. Required: 0600.\n\
+             \n\
+             Security risk: File is readable by other users on this system.\n\
+             \n\
+             Fix: chmod 0600 {}",
             path.display(),
-            mode
-        );
+            mode,
+            path.display()
+        )));
     }
 
     Ok(())
@@ -164,7 +247,8 @@ fn build_connection_from_profile(
     profile_name: &str,
     password_override: Option<String>,
 ) -> Result<ConnectionConfig> {
-    use tq::config::{expand_home_dir, read_password_from_file};
+    use tq::config::expand_home_dir;
+    use tq::config::read_password_from_file;
 
     // Get the profile
     let profile = config.get_profile(profile_name).ok_or_else(|| {
@@ -236,13 +320,7 @@ fn build_connection_from_profile(
 
     // Parse logmech from profile or use CLI default
     let logmech = if let Some(ref lm) = profile.logmech {
-        match lm.to_uppercase().as_str() {
-            "TD2" => tq::cli::LogonMechanism::Td2,
-            "LDAP" => tq::cli::LogonMechanism::Ldap,
-            "KRB5" => tq::cli::LogonMechanism::Krb5,
-            "TDNEGO" => tq::cli::LogonMechanism::Tdnego,
-            _ => return Err(TqError::InvalidLogonMechanism(lm.clone())),
-        }
+        parse_logmech(lm)?
     } else {
         global.logmech
     };

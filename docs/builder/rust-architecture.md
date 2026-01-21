@@ -1,10 +1,22 @@
 # tq CLI - Rust Architecture and Implementation Guide
 
-**Version:** 1.4.0
+**Version:** 1.5.0
 **Status:** Production Ready
-**Last Updated:** 2026-01-18
+**Last Updated:** 2026-01-21
 
-## Recent Changes (Sprint 8)
+## Recent Changes (Sprint 17)
+
+### Architecture Additions
+- **Help Content Management**: Added `src/help.rs` module pattern for extended help topics (Section 15)
+- **Security Patterns**: Documented file permission validation order requirements (Section 16)
+
+### Security Improvements
+- **Permission Check Order**: Established pattern to validate file permissions BEFORE reading content
+- **Permission Enforcement**: Changed from warning to error for insecure password file permissions
+
+---
+
+## Previous Changes (Sprint 8)
 
 ### Bug Fixes
 - **Table Formatting**: Changed from `ContentArrangement::Dynamic` to `ContentArrangement::DynamicFullWidth` with terminal width detection. Tables now properly expand to use available terminal width.
@@ -2195,6 +2207,126 @@ cargo tarpaulin --out Html
 # Run benchmarks
 cargo bench
 ```
+
+---
+
+## 15. Help Content Management (Sprint 17)
+
+### 15.1 Help Content Architecture
+
+Extended help content for topics like configuration and credential management is managed through a dedicated help module:
+
+```
+src/
+├── help.rs                 # Help content functions
+└── help/
+    ├── config.txt          # Configuration help text
+    └── credentials.txt     # Credential management help text
+```
+
+### 15.2 Help Module Pattern
+
+```rust
+// src/help.rs
+
+/// Get help content for configuration
+pub fn config_help() -> &'static str {
+    include_str!("help/config.txt")
+}
+
+/// Get help content for credentials
+pub fn credentials_help() -> &'static str {
+    include_str!("help/credentials.txt")
+}
+
+/// Get general help (when no topic specified)
+pub fn general_help() -> &'static str {
+    "Available help topics:\n\n\
+     tq help config       Configuration file format and usage\n\
+     tq help credentials  Password and credential management\n"
+}
+```
+
+**Design Rationale:**
+- `include_str!()` embeds content at compile time (no runtime file I/O)
+- Separate `.txt` files keep help content maintainable
+- Content sourced from specification documents ensures consistency
+
+### 15.3 Help Command Integration
+
+The `Help` subcommand uses clap's `ValueEnum` for topic validation:
+
+```rust
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    // ... existing commands
+    Help(HelpArgs),
+}
+
+#[derive(Parser, Debug)]
+pub struct HelpArgs {
+    #[arg(value_name = "TOPIC")]
+    pub topic: Option<HelpTopic>,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum HelpTopic {
+    Config,
+    Credentials,
+}
+```
+
+---
+
+## 16. Security Patterns (Sprint 17)
+
+### 16.1 File Permission Validation Order
+
+**CRITICAL:** When reading sensitive files (passwords, credentials), ALWAYS validate file permissions BEFORE reading file content:
+
+```rust
+// CORRECT: Validate permissions FIRST
+fn read_sensitive_file(path: &Path) -> Result<String> {
+    // 1. Check permissions (fail fast if insecure)
+    validate_file_permissions(path)?;
+
+    // 2. Read content only after validation passes
+    let content = std::fs::read_to_string(path)?;
+    Ok(content)
+}
+
+// INCORRECT: Reading before validation
+fn read_sensitive_file_wrong(path: &Path) -> Result<String> {
+    // BUG: Content loaded before permission check
+    let content = std::fs::read_to_string(path)?;
+    validate_file_permissions(path)?;  // Too late!
+    Ok(content)
+}
+```
+
+**Rationale:** Reading insecure files before validation exposes sensitive data in memory even when the operation ultimately fails.
+
+### 16.2 Permission Enforcement vs Warning
+
+For password files, the tool MUST enforce permissions rather than just warn:
+
+```rust
+// CORRECT: Return error for insecure permissions
+if mode & 0o077 != 0 {
+    return Err(TqError::InvalidConfig(format!(
+        "Password file '{}' has insecure permissions {:04o}. Required: 0600.\n\
+         Fix: chmod 0600 {}",
+        path.display(), mode, path.display()
+    )));
+}
+
+// INCORRECT: Warn but continue
+if mode & 0o077 != 0 {
+    log::warn!("Insecure permissions");  // User may not see this!
+}
+```
+
+**Rationale:** Warnings can be ignored or missed. Security requirements must be enforced with hard failures.
 
 ---
 

@@ -245,7 +245,6 @@ When adding new completion features:
 
 **Validation:**
 In Sprint 9 metrics, check that metadata.rs reads decrease to 1-2.
-```
 
 ### Step 6: Prioritize Actions
 
@@ -291,7 +290,7 @@ Generate a concrete action list:
 **Owner:** Main agent or rust-teradata-architect
 **Details:** [Full content provided in Optimization #1 above]
 
-## P1 - High Priority (Implement in Sprint 9-10)
+## P1 - High Priority (Implement asap)
 
 ### Action 3: Optimize rust-teradata-architect Prompt
 **Files:** `.claude/subagents/rust-teradata-architect.md`
@@ -305,30 +304,12 @@ Generate a concrete action list:
 **Expected impact:** 5-7K token reduction (more efficient test documentation)
 **Effort:** 1 hour
 
-## P2 - Medium Priority (Implement in Sprint 10-11)
+## P2 - Medium Priority (plan to implement)
 
 [Continue for all identified optimizations]
-
-## Implementation Timeline
-
-**Sprint 9:**
-- [ ] P0 Action 1: Database check mandatory (15 min)
-- [ ] P0 Action 2: Architecture docs module overviews (2-3 hours)
-- [ ] P1 Action 3: Architect prompt optimization (30 min)
-- [ ] Measure impact in Sprint 9 metrics
-
-**Sprint 10:**
-- [ ] P1 Action 4: Test case YAML template (1 hour)
-- [ ] P2 Actions if Sprint 9 showed positive results
-- [ ] Continue measuring
-
-**Sprint 11:**
-- [ ] Remaining P2 actions
-- [ ] Quarterly review: Did optimizations work?
-- [ ] Refine waste patterns catalog based on results
 ```
 
-### Step 8: Present Findings to User
+### Step 8: Summarize results
 
 Summarize in a concise report:
 
@@ -376,60 +357,6 @@ Summarize in a concise report:
 
 1. **Review implementation plan** (see full plan above)
 2. **Prioritize P0 actions** for immediate implementation
-3. **Implement in Sprint 9** and measure results
-4. **Iterate based on Sprint 9 metrics**
+3. **Plan for implementation of next actions**
 
-Would you like me to:
-- [ ] Implement P0 actions now (30 min - 3 hours)
-- [ ] Create detailed content for documentation updates
-- [ ] Generate specific agent prompt edits
-- [ ] Set up validation metrics for Sprint 9
 ```
-
-## Important Notes
-
-### This Skill Uses Opus Model
-
-Why Opus?
-- Requires complex pattern recognition across large datasets
-- Needs to generate detailed, accurate documentation content
-- Must apply waste patterns catalog logic systematically
-- Outputs are high-leverage (impact entire framework)
-
-### Context: Fork
-
-Runs in separate context to avoid polluting main conversation with verbose analysis.
-
-### Human Approval Required
-
-This skill generates **recommendations**, not automatic changes. User reviews and approves before implementation.
-
-### Iterative Improvement
-
-After each round of optimizations:
-1. Measure impact in next sprint metrics
-2. Validate expected reductions achieved
-3. Refine waste patterns catalog with new learnings
-4. Remove ineffective recommendations
-
-## Expected Outcomes
-
-After 2-3 optimization cycles:
-
-- **Token Usage:** 30-50% reduction from baseline
-- **Quality:** Zero rework sprints
-- **Speed:** 30-50% faster sprint completion
-- **Cache Efficiency:** >60% cache hit rate
-- **Agent Efficiency:** <2 fix iterations per sprint
-
-## Meta-Learning
-
-This skill enables the framework to **optimize itself**:
-
-- Sprint N: Collect metrics
-- Analysis: Identify waste patterns
-- Sprint N+1: Apply optimizations, measure impact
-- Refinement: Keep what works, discard what doesn't
-- Sprint N+2: New baseline, new optimization cycle
-
-The framework continuously improves through measured experimentation.

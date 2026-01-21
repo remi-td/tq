@@ -1,9 +1,9 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.6.0 (Sprint 8)
-**Last Updated:** 2026-01-18
-**Base Commit:** e0ec05a
+**Version:** 1.7.0 (Sprint 17)
+**Last Updated:** 2026-01-21
+**Base Commit:** [Sprint 17 implementation]
 
 ## Overview
 
@@ -40,6 +40,9 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 - **TC039**: REPL /logon Metacommand - State Preservation
 - **TC040**: REPL /logon Metacommand - Authentication Mechanisms
 - **TC041**: REPL /logon Metacommand - Performance and Timeout
+- **TC-HELP-001**: Help Config Subcommand - Display Configuration Documentation (Sprint 17)
+- **TC-HELP-002**: Help Credentials Subcommand - Display Password Management Guide (Sprint 17)
+- **TC-PROFILES-001**: List Profiles from Config File (Sprint 17)
 
 ### Error-Handling
 - **TC002**: Ping Command - Connection Failure
@@ -48,6 +51,9 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 - **TC029**: REPL Tab Completion - Table Metadata Error Handling
 - **TC034**: REPL Tab Completion - Column Metadata Error Handling
 - **TC038**: REPL /logon Metacommand - Connection Failure Handling
+- **TC-HELP-003**: Help Unknown Topic - Error Handling (Sprint 17)
+- **TC-PROFILES-002**: No Config File - Error Handling (Sprint 17)
+- **TC-PROFILES-003**: Config Exists But No Profiles - Error Handling (Sprint 17)
 
 ### Usability
 - **TC013**: CLI Help and Version Information
@@ -85,8 +91,37 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 ### Error-Handling (Sprint 8 Additions)
 - **TC052**: Tab Completion - Error Messages When Metadata Query Fails
 
+### Sprint 17: Configuration UX Completion
+
+**Sprint 17 Test Cases (9 total):**
+
+#### Help Subcommands (P0)
+- **TC-HELP-001**: Help Config - Displays configuration documentation
+- **TC-HELP-002**: Help Credentials - Displays password management guide
+- **TC-HELP-003**: Help Unknown Topic - Error handling with available topics list
+
+#### Profile Listing Command (P1)
+- **TC-PROFILES-001**: List profiles from config file
+- **TC-PROFILES-002**: No config file - Error handling with setup instructions
+- **TC-PROFILES-003**: Config exists but no profiles - Error handling with add instructions
+
+#### Security Enhancements (P0/P1)
+- **TC-SECURITY-001**: Password file 0644 permissions **REJECTED** (enforcement)
+- **TC-SECURITY-002**: Config file 0644 permissions **WARNED** (different policy)
+- **TC-SECURITY-003**: Security check ordering - Permission check before file read
+
+**Sprint 17 Test Strategy:**
+- **Test Count**: 9 integration tests (all required)
+- **No Database Needed**: All Sprint 17 features are CLI-only
+- **No Interactive Tests**: All features are batch mode commands
+- **Security Focus**: Multiple tests validate password protection and enforcement
+- **Regression**: Full test suite must pass (280+ tests from Sprint 16)
+
 ### Security
 - **TC022**: Security - No Password Exposure
+- **TC-SECURITY-001**: Password File Permission Enforcement - 0644 Rejected (Sprint 17)
+- **TC-SECURITY-002**: Config File Permission Warning - 0644 Allowed (Sprint 17)
+- **TC-SECURITY-003**: Security Check Ordering - Permission Check Before File Read (Sprint 17)
 
 ## Test Priority Matrix
 
@@ -114,6 +149,10 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 | TC052 | Tab Completion - Error Handling | Error-Handling (Sprint 8) |
 | TC057 | Paging - j/k Keys | Functionality (Sprint 8) |
 | TC062 | Paging - Exit with q/Esc | Functionality (Sprint 8) |
+| TC-HELP-001 | Help Config Subcommand | Functionality (Sprint 17) |
+| TC-HELP-002 | Help Credentials Subcommand | Functionality (Sprint 17) |
+| TC-SECURITY-001 | Password File 0644 Rejected | Security (Sprint 17) |
+| TC-SECURITY-003 | Security Check Ordering | Security (Sprint 17) |
 
 ### High Priority (Important Features)
 | Test ID | Feature | Category |
@@ -148,6 +187,11 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 | TC061 | Paging - Position Indicator | Usability (Sprint 8) |
 | TC063 | Paging - /pager on/off | Functionality (Sprint 8) |
 | TC064 | LIMIT Hint - Correct Syntax | Usability (Sprint 8) |
+| TC-HELP-003 | Help Unknown Topic Error | Error-Handling (Sprint 17) |
+| TC-PROFILES-001 | List Profiles | Functionality (Sprint 17) |
+| TC-PROFILES-002 | No Config File Error | Error-Handling (Sprint 17) |
+| TC-PROFILES-003 | No Profiles Error | Error-Handling (Sprint 17) |
+| TC-SECURITY-002 | Config File 0644 Warning | Security (Sprint 17) |
 
 ### Medium Priority (Quality of Life)
 | Test ID | Feature | Category |
