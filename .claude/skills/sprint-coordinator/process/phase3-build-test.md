@@ -6,8 +6,10 @@
 ## Warmup (for Sub-Agents)
 This phase follows Design (Phase 2). At this point:
 - Specifications in `detailed-specifications/*.md` are finalized.
-- Architecture in `rust-architecture.md` is approved.
-- You are working in parallel with another agent.
+- Architecture in `rust-architecture.md` is updated and approved.
+- For each feature, you will task the following agents to run in parallel:
+   - the `rust-teradata-architect`  agent to implement the feature
+   - the `quality-validator` agent to implement the test case
 
 ## Process
 
@@ -16,20 +18,34 @@ This phase follows Design (Phase 2). At this point:
 Launch BOTH agents in a **single message with multiple Task calls**:
 
 1. **`rust-teradata-architect`**:
-   - Instruction: "Implement the features defined in `detailed-specifications/*.md` for Sprint N. Follow patterns in `rust-architecture.md`. Run `cargo check` and `cargo clippy` before returning. Return a summary of what was implemented."
+   - Instruction: "Implement the features defined in  `docs/builder/sprints/sprint-N-planning.md` as per `detailed-specifications/*.md` for Sprint N using the design outlined in `detailed-design/*.md`. Follow patterns in `rust-architecture.md`. Compile and run the tool to validate that your feature is implemented. Return a summary of what was implemented."
 
 2. **`quality-validator`**:
-   - Instruction: "Design and implement tests for the features in Sprint N. Use the specifications in `detailed-specifications/*.md`. **CRITICAL: EXECUTE ALL TESTS including ignored tests with --ignored flag. Include test execution output as proof. Code review is NOT execution.** Return a report with pass/fail counts. Use the template in `.claude/templates/quality-report-template.md`."
+   - Instruction: "Design and implement tests for the features in Sprint N as per `docs/builder/sprints/sprint-N-planning.md`. Use the specifications in `detailed-specifications/*.md`. Document your strategy in `tests/strategy/` based on `tests/strategy/test-strategy-template.md`. Add test cases in `tests/cases` and use `tests/README.md`
 
 ### Step 2: Collect Results
 
 Wait for both agents to complete. Expect:
 - From Architect: Summary of implemented code.
-- From Validator: Test report with structured verdict.
+- From Validator: Confirmation that the test strategy for the sprint is developed and cases created.
 
-### Step 3: Evaluate
+### Step 3: Validate
 
-**CRITICAL VERIFICATION - Check the Validator's report:**
+Calidate that the strategy defined for the sprint in `tests/strategy/` addresses the features in this sprint. If not provide feedback to the `quality-validator` and request adjustments. Repeat this process until the strategy is correct.
+
+### Step 4: Execute tests
+
+We need to execute all tests and address bug fixes, for this, we will run the `quality-validator` and `rust-teradata-architect` in a loop.
+
+Untill all test cases are passed, run a tet round (I denotates the round number, starting 1):
+1. Run **`quality-validator`**:
+   - Instruction: "Execute the test cases for Sprint N, iteration I as per the strategy you defined in `tests/strategy/` and executing the test cases in `tests/cases`. Produce a test evidence `tests/results/sprint-N/test-evidence-I.md` and write or update the test report in `tests/results/sprint-N/`
+2. Validate test evidence: if all tests are passed, end loop.
+3. Run **`rust-teradata-architect`**:
+   - Instruction: "Fix bugs identified in test evidence `tests/results/sprint-N/test-evidence-I.md` or provide justification.
+4. Wait for the `rust-teradata-architect` agent to complete its tasks. If justification is provided, pass it to the `quality-validator` next round with the following message: "Developer provided explanation {justification message} for issue {test case reference}. Revise the test case if you accept or add justification in test evidence'.
+
+**CRITICAL VERIFICATION - Check the Validator's report:** `tests/results/sprint-N/`
 
 **FIRST: Verify tests were EXECUTED, not just reviewed**
 - Does report include actual test execution output?
@@ -48,5 +64,7 @@ Wait for both agents to complete. Expect:
 
 ## Output
 - Implemented code in `src/`.
-- Test report in `tests/results/.../REPORT.md`.
-- Proceed to Phase 4 if all tests pass.
+- Test strategy in `tests/strategy/`.
+- Test cases in `tests/cases/`.
+- Test evidence and results in `tests/results/sprint-N/` 
+- Proceed to Phase 4.

@@ -1,6 +1,6 @@
 # Current bug and urgent issues
 
-Created on 2026-01-21 at 14:43
+Updated on 2026-01-21 at 17:43
 
 ## Logo and branding
 
@@ -13,6 +13,16 @@ So let's use the closest xterm-256 match to #F37021 is typically color index 202
 ## Tab Completion STTILL DOESN'T WORK PROPERLY
 The tab completion is still not working properly. This time it looks like some debug traces are left in.. this is embarassing.
 ![alt text](image-1.png)
+
+```
+tq> ? sel * from 
+Page 1: records 0=== TAB COMPLETION DEBUG ===
+                                             Input line: "d"
+                                                            Cursor pos: 12
+                                                                          Full text (with accumulated): "d"
+tq> ? sel * from d
+tq> ? sel * from db
+```
 
 Right now, I need to press `tab` and then start typing my keyword, and I see it appearing. When I press enter, it's inserted at the beginning of my line, whoch makes no sense whatsoever. You need to go back to the drawing board on this one and start from scaratch.
 
