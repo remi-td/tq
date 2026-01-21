@@ -1,6 +1,6 @@
 # Current bug and urgent issues
 
-Created on 2026-01-18 at 20:15
+Created on 2026-01-21 at 14:43
 
 ## Logo and branding
 
@@ -11,16 +11,12 @@ The problem is that some terminals do not support truecolor (24-bit)....
 So let's use the closest xterm-256 match to #F37021 is typically color index 202 (RGB ≈ 255,95,0). That’s not perfect (ΔR +12, ΔG −17, ΔB −33), but it will look similar to teradata orange. 
 
 ## Tab Completion STTILL DOESN'T WORK PROPERLY
+The tab completion is still not working properly. This time it looks like some debug traces are left in.. this is embarassing.
+![alt text](image-1.png)
 
-This is the third sprint where you failed to implement tab completion properly.![alt text](completion.png)
-![alt text](image.png)
+Right now, I need to press `tab` and then start typing my keyword, and I see it appearing. When I press enter, it's inserted at the beginning of my line, whoch makes no sense whatsoever. You need to go back to the drawing board on this one and start from scaratch.
 
-This does't work on special words either. eg. `sel * fr`+tab gives me all possible reserved words! (obviously this should automatically complete with `FROM` as this is the only possible word).
-eg. tab after
-  `select * from ` gives keywords when it should be databasenames, selecting a keyword inserts it at the beginning of the
-  current line instead of where my cursor ar at, etc... These were right a few sprint ago!
-
-This has exactly the same issue as last sprint, and the two before that...
+At the very least make sure that the database / table / column names completions are working first. This is the most important. Remember the requirements about smartly caching hte metadata so you don't load everything....
 
 ## Export needs enhancements
 Two key enhancements that I need you to prioritize:
