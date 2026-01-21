@@ -75,7 +75,20 @@ Validate against `definitions/done.md`:
 - No new TODOs?
 - Docs synchronized?
 
-If all pass: `git commit`, `git push`, create sprint review.
+If all pass: `git commit`, `git push`. Then proceed to Phase 5.
+
+### Phase 5: Retrospective
+> **Read:** `process/phase5-review.md`
+
+**CRITICAL: You MUST use the `/sprint-reviewer` skill. Do NOT manually create review.**
+
+Use Skill tool to invoke `sprint-reviewer`:
+- Launches 3 agents in parallel for comprehensive review
+- Collects token/cost metrics
+- Uses proper template
+- Creates consolidated sprint-N-review.md
+
+**DO NOT skip this phase. Token metrics are required for framework optimization.**
 
 ## Execution Principles
 

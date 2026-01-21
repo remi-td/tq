@@ -52,39 +52,28 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 git push origin main
 ```
 
-### Step 4: Create Sprint Review
-
-Create `docs/builder/sprints/sprint-N-review.md`:
-
-```markdown
-# Sprint N Review
-
-## Summary
-- **Sprint Type**: [Feature | Maintenance]
-- **Objectives**: [From planning doc]
-- **Delivered**: [What was shipped]
-
-## Quality Metrics
-- Tests: X passed, 0 failed
-- Code Coverage: [If available]
-
-## Lessons Learned
-- [What went well]
-- [What could improve]
-- [Framework observations for Phase 0 of next sprint]
-
-## Next Sprint Recommendations
-- [Suggested focus areas]
-```
-
-### Step 5: Update Roadmap
+### Step 4: Update Roadmap (Quick Status Update)
 
 Update `specifications.md`:
-- Mark completed features as ✅.
-- Update sprint roadmap section.
+- Mark sprint status as ✅ Complete
+- Update version status
+
+**NOTE:** Full sprint review will be created in Phase 5 using sprint-reviewer skill.
+
+### Step 5: Proceed to Phase 5
+
+**CRITICAL: Do NOT skip Phase 5**
+
+Phase 4 commits the code. Phase 5 creates the comprehensive retrospective.
+
+Read `process/phase5-review.md` and:
+- Invoke the `/sprint-reviewer` skill
+- Do NOT manually create sprint-N-review.md
+- Sprint-reviewer will launch 3 parallel agent reviews
+- Sprint-reviewer will collect token/cost metrics
+- Sprint-reviewer will use proper template
 
 ## Output
-- Code committed and pushed.
-- Sprint review created.
-- Roadmap updated.
-- Ready for next sprint's Phase 0.
+- Code committed and pushed ✅
+- Specifications.md updated with sprint completion ✅
+- **Ready for Phase 5 (Retrospective)**
