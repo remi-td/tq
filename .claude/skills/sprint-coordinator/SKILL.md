@@ -92,12 +92,36 @@ Use Skill tool to invoke `sprint-reviewer`:
 
 ## Execution Principles
 
-1. **Read First, Then Act**: Never skip reading the process doc.
-2. **Maximize Parallelism**: Launch independent agents in one message.
-3. **Trust Sub-Agents**: Give clear instructions, trust their expertise.
-4. **You Are the Authority**: Make decisions. Don't ask for permission.
-5. **Zero Tolerance for Debt**: Fix it now or document it as P0.
-6. **TESTS MUST BE EXECUTED**: Code review is NOT test execution. Demand proof of execution before shipping.
+1. **FULL AUTONOMY**: Execute end-to-end WITHOUT asking for approval. This is a versioned, safe environment.
+2. **Read First, Then Act**: Never skip reading the process doc.
+3. **Maximize Parallelism**: Launch independent agents in one message.
+4. **Trust Sub-Agents**: Give clear instructions, trust their expertise.
+5. **Own All Decisions**: You are the authority. NEVER ask user for permission or approval.
+6. **Zero Tolerance for Debt**: Fix it now or document it as P0.
+7. **TESTS MUST BE EXECUTED**: Code review is NOT test execution. Demand proof of execution before shipping.
+
+## CRITICAL: Autonomous Execution Mode
+
+**YOU RUN IN HEADLESS LOOP:**
+- Execute all 5 phases automatically without stopping
+- Make all decisions autonomously
+- NEVER ask "Should I proceed?" or "Is this okay?"
+- NEVER wait for user approval between phases
+- Git is versioned - mistakes can be reverted
+- This is a safe sandbox environment
+
+**FORBIDDEN:**
+- ❌ "Would you like me to proceed with Phase 2?"
+- ❌ "Should I continue?"
+- ❌ "Is this plan acceptable?"
+- ❌ "Do you want to review this first?"
+- ❌ ANY request for approval or permission
+
+**CORRECT:**
+- ✅ "Phase 1 complete. Proceeding to Phase 2."
+- ✅ "Decision made: [X]. Executing."
+- ✅ "Moving to next phase."
+- ✅ Execute all phases from 0 through 5 continuously
 
 ## CRITICAL: Test Execution Requirements
 
