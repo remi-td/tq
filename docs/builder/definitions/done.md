@@ -44,18 +44,29 @@ A sprint is "done" when all items in this definition are complete. The Sprint Co
 
 ### 2.1 Test Coverage
 
-- [ ] **Unit tests:** 100% pass rate required
-- [ ] **Integration tests:** 100% pass rate required
-- [ ] **Interactive tests:** 100% pass rate required (if REPL features)
+**CRITICAL: TESTS MUST BE EXECUTED, NOT CODE REVIEWED**
+- [ ] **ALL tests EXECUTED and produced output** - Code review is NOT execution
+- [ ] **Unit tests:** 100% execution + 100% pass rate required
+- [ ] **Integration tests:** 100% execution + 100% pass rate required
+- [ ] **Interactive tests:** 100% execution + 100% pass rate required (if REPL features)
+- [ ] **Tests with `#[ignore]` flag:** MUST be run with `cargo test -- --ignored`
+- [ ] **Test execution proof included in quality report** - Actual cargo test output required
 - [ ] Every acceptance criterion has at least one test
 - [ ] Edge cases tested
 - [ ] Error conditions tested
 
+**BLOCKING: If tests cannot be executed (no database, no credentials):**
+- [ ] Sprint MUST be marked as BLOCKED
+- [ ] Cannot ship based on "tests look correct in code review"
+- [ ] Must fix environment/setup before proceeding
+
 **CRITICAL REQUIREMENT FOR REPL FEATURES:**
 - [ ] **Interactive tests MANDATORY** - Unit tests alone are insufficient for REPL features
+- [ ] **Interactive tests MUST BE EXECUTED** - Not code reviewed
 - [ ] Interactive tests verify semantic correctness (not just mechanics)
 - [ ] Interactive tests use live database (where applicable)
 - [ ] Interactive tests validate visual layout (where applicable)
+- [ ] Run with: `cargo test --test interactive_tests -- --ignored`
 
 ### 2.2 Build Quality
 

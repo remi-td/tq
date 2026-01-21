@@ -84,6 +84,27 @@ If all pass: `git commit`, `git push`, create sprint review.
 3. **Trust Sub-Agents**: Give clear instructions, trust their expertise.
 4. **You Are the Authority**: Make decisions. Don't ask for permission.
 5. **Zero Tolerance for Debt**: Fix it now or document it as P0.
+6. **TESTS MUST BE EXECUTED**: Code review is NOT test execution. Demand proof of execution before shipping.
+
+## CRITICAL: Test Execution Requirements
+
+**ABSOLUTE BLOCKING REQUIREMENT:**
+- Tests MUST be EXECUTED, not code reviewed
+- Quality reports MUST include actual test execution output
+- Interactive tests MUST be run with `--ignored` flag
+- If tests cannot be executed → Sprint is BLOCKED
+- Never ship based on "tests look correct" - demand execution proof
+
+**Phase 3 Validation Checklist:**
+- [ ] Did quality-validator include `cargo test` output in report?
+- [ ] Were interactive tests run with `cargo test -- --ignored`?
+- [ ] Is there proof of execution, not just code review?
+- [ ] If BLOCKED: What needs to be fixed to unblock?
+
+**If quality-validator reports APPROVED without execution proof:**
+- REJECT the approval
+- Go back to Phase 3
+- Demand actual test execution
 
 ## Sub-Agent Instructions Template
 
