@@ -483,7 +483,7 @@ tq> SELECT COUNT(*) FROM employees WHERE dept = 'IT';
 
 ## 5.6 Tab Completion
 
-### 5.6.1 Keyword Completion (Sprint 6)
+### 5.6.1 Keyword Completion (Sprint 6) [IMPLEMENTED]
 
 **Purpose**: Enable fast SQL writing with auto-completion of SQL keywords.
 
@@ -547,7 +547,7 @@ tq> SEL<TAB>
 - Second Tab cycles through alternatives
 - Keywords are case-insensitive internally but match user's casing
 
-### 5.6.2 Table Name Completion (Sprint 7 - Sprint 8 Fixes)
+### 5.6.2 Table Name Completion (Sprint 7 - Sprint 8 Fixes) [IMPLEMENTED]
 
 **Purpose**: Enable users to discover and navigate database tables through tab completion, reducing typos and improving query writing speed. Properly handles Teradata's `database.table` qualified naming convention.
 
@@ -903,7 +903,7 @@ tq> SELECT * FROM new<TAB>
 15. After `/logon` → Cache cleared, new connection context
 16. Large database (1000+ tables) → Pagination or truncation with count
 
-### 5.6.3 Column Name Completion (Sprint 7)
+### 5.6.3 Column Name Completion (Sprint 7) [IMPLEMENTED]
 
 **Purpose**: Enable users to discover and reference column names through tab completion, improving query accuracy and reducing the need to run `/describe` commands.
 
@@ -1163,7 +1163,7 @@ email  | b@test.com
 active | false
 ```
 
-### 5.7.2 Large Result Handling & Result Paging
+### 5.7.2 Large Result Handling & Result Paging [SPECIFIED]
 
 **Version:** 2.0 (Sprint 8 Redesign)
 **Status:** Redesigned to fix critical UX issues
@@ -1627,7 +1627,7 @@ Metacommands provide non-SQL functionality. They start with `/` or `\` and execu
 | `/reconnect` | - | Reconnect to current database | `/reconnect` |
 | `/ping` | - | Test connection | `/ping` |
 
-**`/logon` Metacommand Specification** (Sprint 7)
+**`/logon` Metacommand Specification** (Sprint 7) [IMPLEMENTED]
 
 **Purpose**: Allow users to switch database connections dynamically without exiting the REPL, essential for users who work with multiple databases or environments.
 
@@ -1966,7 +1966,7 @@ Notes:
 See also: /ping, /reconnect, /session
 ```
 
-**`/ping` Metacommand Specification** (FR-118)
+**`/ping` Metacommand Specification** (FR-118) [IMPLEMENTED]
 
 **Purpose**: Test database connection health from within a REPL session without exiting.
 
@@ -2033,7 +2033,7 @@ Suggestions:
 | `/list schemas` | `\dn` | List schemas | `/list schemas` |
 | `/show indexes <table>` | `\di` | Show table indexes | `/show indexes employees` |
 
-**`/describe` Metacommand Specification** (FR-115)
+**`/describe` Metacommand Specification** (FR-115) [IMPLEMENTED]
 
 **Purpose**: Display comprehensive table structure information within REPL without writing SQL queries.
 

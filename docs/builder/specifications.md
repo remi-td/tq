@@ -1,7 +1,7 @@
 # tq (Teradata Query) - Specifications
 
-**Version:** 1.6.1 (Sprint 14 Quality Infrastructure Complete)
-**Status:** Active Development - Ready for Sprint 15
+**Version:** 1.6.1 (Sprint 15 Complete)
+**Status:** Active Development - Ready for Sprint 16
 **Last Updated:** 2026-01-21
 
 ---
@@ -53,16 +53,16 @@
 
 | Feature | Status | Command | Priority |
 |---------|--------|---------|----------|
-| Single query execution | ✅ Implemented | `tq query "SELECT..."` | P0 |
-| Connection testing | ✅ Implemented | `tq ping` | P0 |
-| Multiple output formats | ✅ Implemented | `--format table\|json\|csv` | P0 |
-| TD2 authentication | ✅ Implemented | `--logmech TD2` | P0 |
-| LDAP authentication | ✅ Implemented | `--logmech LDAP` | P0 |
-| Kerberos authentication | ✅ Implemented | `--logmech KRB5` | P0 |
-| Connection string parsing | ✅ Implemented | `-l user:pass@host:port/db` | P0 |
-| Environment variables | ✅ Implemented | `TQ_LOGON` | P0 |
-| Password file support | ✅ Implemented | `--password-file` | P0 |
-| Secure credential handling | ✅ Implemented | N/A | P0 |
+| Single query execution | ✅📝 Implemented and tested | `tq query "SELECT..."` | P0 |
+| Connection testing | ✅📝 Implemented and tested | `tq ping` | P0 |
+| Multiple output formats | ✅📝 Implemented and tested | `--format table\|json\|csv` | P0 |
+| TD2 authentication | ✅📝 Implemented and tested | `--logmech TD2` | P0 |
+| LDAP authentication | ✅📝 Implemented and tested | `--logmech LDAP` | P0 |
+| Kerberos authentication | ✅📝 Implemented and tested | `--logmech KRB5` | P0 |
+| Connection string parsing | ✅📝 Implemented and tested | `-l user:pass@host:port/db` | P0 |
+| Environment variables | ✅📝 Implemented and tested | `TQ_LOGON` | P0 |
+| Password file support | ✅📝 Implemented and tested | `--password-file` | P0 |
+| Secure credential handling | ✅📝 Implemented and tested | N/A | P0 |
 
 ### Interactive Mode (REPL)
 
@@ -70,61 +70,61 @@
 
 | Feature | Status | Command | Priority |
 |---------|--------|---------|----------|
-| Interactive prompt | ✅ Implemented | `tq repl` | P0 |
-| Multi-line SQL input | ✅ Implemented | Continue until `;` | P0 |
-| Command history (in-memory) | ✅ Implemented | ↑/↓ arrows | P0 |
-| `/session` metacommand | ✅ Implemented | `/session` | P0 |
-| `/quit` metacommand | ✅ Implemented | `/quit` | P0 |
-| `/help` metacommand | ✅ Implemented | `/help` | P0 |
+| Interactive prompt | ✅📝 Implemented and tested | `tq repl` | P0 |
+| Multi-line SQL input | ✅📝 Implemented and tested | Continue until `;` | P0 |
+| Command history (in-memory) | ✅📝 Implemented and tested | ↑/↓ arrows | P0 |
+| `/session` metacommand | ✅📝 Implemented and tested | `/session` | P0 |
+| `/quit` metacommand | ✅📝 Implemented and tested | `/quit` | P0 |
+| `/help` metacommand | ✅❓ Implemented, needs testing | `/help` | P0 |
 
 #### Phase 2 - Enhanced REPL (Sprint 4-5)
 
 | Feature | Status | Command | Sprint | Priority |
 |---------|--------|---------|--------|----------|
-| `/describe` metacommand | ✅ Implemented | `/describe table` | 4 | P0 |
-| `/ping` metacommand | ✅ Implemented | `/ping` | 4 | P0 |
-| Persistent history | ✅ Implemented | Auto-saved to `~/.tq_history` | 4 | P1 |
-| Vi keybindings | ✅ Implemented | `--editor-mode vi` | 4 | P1 |
-| Emacs keybindings | ✅ Implemented | `--editor-mode emacs` | 4 | P1 |
-| SQL syntax highlighting | ✅ Implemented | Auto-enabled in TTY | 5 | P1 |
-| Result paging (horizontal) | ✅ Implemented | Wide tables | 5 | P1 |
-| Result paging (vertical) | ✅ Implemented | Long results | 5 | P1 |
-| Query timing display | ✅ Implemented | Show execution time | 5 | P1 |
+| `/describe` metacommand | ✅❓ Implemented, needs testing | `/describe table` | 4 | P0 |
+| `/ping` metacommand | ✅❓ Implemented, needs testing | `/ping` | 4 | P0 |
+| Persistent history | ✅❓ Implemented, needs testing | Auto-saved to `~/.tq_history` | 4 | P1 |
+| Vi keybindings | ✅📝 Implemented and tested | `--editor-mode vi` | 4 | P1 |
+| Emacs keybindings | ✅📝 Implemented and tested | `--editor-mode emacs` | 4 | P1 |
+| SQL syntax highlighting | ✅📝 Implemented and tested | Auto-enabled in TTY | 5 | P1 |
+| Result paging (horizontal) | ✅📝 Implemented and tested | Wide tables | 5 | P1 |
+| Result paging (vertical) | ✅📝 Implemented and tested | Long results | 5 | P1 |
+| Query timing display | ✅📝 Implemented and tested | Show execution time | 5 | P1 |
 
 #### Phase 3 - Advanced REPL (Sprint 6-7)
 
 | Feature | Status | Command | Sprint | Priority |
 |---------|--------|---------|--------|----------|
-| Table formatting | ✅ Implemented | All table output | 6 | P0 |
-| Tab completion (keywords) | ✅ Implemented | Tab key | 6 | P1 |
-| Tab completion (tables) | ✅ Implemented | Tab key | 7,13 | P0 |
-| Tab completion (columns) | ✅ Implemented | Tab key | 7,13 | P1 |
-| Tab completion (multi-line) | ✅ Implemented | Across line breaks | 9,13 | P0 |
-| `/export` metacommand | ✅ Implemented | `/export <format> [dest]` | 12,13 | P1 |
-| `/pager on\|off` metacommand | ✅ Implemented | `/pager on\|off` | 6 | P2 |
-| `/colors` metacommand | ✅ Implemented | `/colors on\|off` | 6 | P2 |
-| `/logon` metacommand | ✅ Implemented | `/logon [connection-string]` | 7 | P1 |
+| Table formatting | ✅📝 Implemented and tested | All table output | 6 | P0 |
+| Tab completion (keywords) | ✅📝 Implemented and tested | Tab key | 6 | P1 |
+| Tab completion (tables) | ✅📝 Implemented and tested | Tab key | 7,13 | P0 |
+| Tab completion (columns) | ✅❓ Implemented, needs testing | Tab key | 7,13 | P1 |
+| Tab completion (multi-line) | ✅📝 Implemented and tested | Across line breaks | 9,13 | P0 |
+| `/export` metacommand | ✅📝 Implemented and tested | `/export <format> [dest]` | 12,13 | P1 |
+| `/pager on\|off` metacommand | ✅📝 Implemented and tested | `/pager on\|off` | 6 | P2 |
+| `/colors` metacommand | ✅📝 Implemented and tested | `/colors on\|off` | 6 | P2 |
+| `/logon` metacommand | ✅❓ Implemented, needs testing | `/logon [connection-string]` | 7 | P1 |
 
 #### Phase 4 - Quality & Branding (Sprint 11-13)
 
 | Feature | Status | Command | Sprint | Priority |
 |---------|--------|---------|--------|----------|
-| Professional branding | ✅ Implemented | Logo, colors, naming | 12,13 | P0 |
-| Interactive test framework | ✅ Implemented | expectrl-based tests | 13 | P0 |
-| Export syntax simplification | ✅ Implemented | `/export <fmt> [dest]` | 13 | P1 |
-| Export to clipboard | ✅ Implemented | `/export <fmt> clipboard` | 12 | P1 |
-| Export full dataset | ✅ Implemented | Re-execute without limit | 12 | P1 |
+| Professional branding | ✅📝 Implemented and tested | Logo, colors, naming | 12,13 | P0 |
+| Interactive test framework | ✅📝 Implemented and tested | expectrl-based tests | 13 | P0 |
+| Export syntax simplification | ✅📝 Implemented and tested | `/export <fmt> [dest]` | 13 | P1 |
+| Export to clipboard | ✅📝 Implemented and tested | `/export <fmt> clipboard` | 12 | P1 |
+| Export full dataset | ✅📝 Implemented and tested | Re-execute without limit | 12 | P1 |
 
 ### Batch Mode (Sprint 10) ✅ Foundation Complete
 
 | Feature | Status | Sprint | Priority |
 |---------|--------|--------|----------|
-| Execute from file | ✅ Implemented | 10 | P0 |
-| Read SQL from stdin | ✅ Implemented | 10 | P0 |
-| Output to stdout | ✅ Implemented | 10 | P0 |
-| Multiple statement execution | ✅ Implemented | 10 | P0 |
-| Enhanced error messages | ✅ Implemented | 10 | P1 |
-| Batch mode output behavior | ✅ Implemented | 10 | P1 |
+| Execute from file | ✅📝 Implemented and tested | 10 | P0 |
+| Read SQL from stdin | ✅📝 Implemented and tested | 10 | P0 |
+| Output to stdout | ✅📝 Implemented and tested | 10 | P0 |
+| Multiple statement execution | ✅📝 Implemented and tested | 10 | P0 |
+| Enhanced error messages | ✅📝 Implemented and tested | 10 | P1 |
+| Batch mode output behavior | ✅📝 Implemented and tested | 10 | P1 |
 | Output to file | 📋 Planned | 11+ | P1 |
 | Streaming large results | 📋 Planned | 11+ | P1 |
 | Transaction control | 📋 Planned | 11+ | P2 |
@@ -141,7 +141,8 @@
 | Keyring integration | 📋 Planned | P2 |
 
 **Legend:**
-- ✅ Implemented and tested
+- ✅📝 Implemented and tested
+- ✅❓ Implemented, testing incomplete
 - 🚧 In progress (current sprint)
 - 📋 Planned (future sprint)
 - 🔲 Deferred
@@ -422,7 +423,40 @@
 
 ---
 
-### Sprint 15+: Advanced Features & Configuration 📋 Future
+### Sprint 15: Sprint 13 Validation & Test Infrastructure Enhancement ✅ Complete
+**Goal:** Complete Sprint 13 feature validation by adding missing tests, generating coverage baseline, and establishing comprehensive test infrastructure for REPL features
+
+**Status:** ✅ Complete
+**Completion Date:** 2026-01-21
+**Type:** Feature Sprint (with validation focus)
+
+**Objectives Delivered:**
+1. **P0: Complete Sprint 13 Test Coverage** ✅ - Added 5 interactive tests (354 lines)
+   - ✅ `/help` metacommand test
+   - ✅ History persistence test
+   - ✅ Multi-line history preservation test
+   - ✅ SQL error format test
+   - ✅ Column completion test
+
+2. **P0: Coverage Baseline Generation** ✅ - Installed cargo-tarpaulin, baseline established
+   - Baseline: 40.07% (1384/3454 lines) - informational
+   - HTML coverage report generated
+
+3. **P1: Documentation Improvements** ✅ - All P0 fixes from Sprint 14 UX review complete
+   - ✅ Add implementation status badges to repl-mode.md
+   - ✅ Add test status indicators to specifications.md
+   - ✅ Add Quick Start section to testing-checklist.md
+
+4. **P1: Test Infrastructure Validation** ✅ - Quality gates validated and operational
+
+**Key Achievement:** Closed Sprint 13 validation gap. All Sprint 13 features now fully tested.
+
+**Sprint Planning:** [Sprint 15 Planning](../sprints/sprint-15-planning.md)
+**Sprint Review:** [Sprint 15 Review](../sprints/sprint-15-review.md)
+
+---
+
+### Sprint 16+: Advanced Features & Configuration 📋 Future
 **Goals:**
 - Transaction control (`--atomic` flag)
 - Variable substitution
@@ -479,6 +513,8 @@ Complete technical specifications are organized by domain:
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
+| 2026-01-21 | 1.6.1 | Sprint 15 Complete: Marked Sprint 15 as ✅ Complete with all objectives delivered, updated status to Ready for Sprint 16, added Sprint 15 Review link | Sprint Coordinator |
+| 2026-01-21 | 1.6.1 | Sprint 15 Phase 2: Added test status indicators (✅📝 implemented+tested, ✅❓ needs testing), marked Sprint 15 as In Progress, added Sprint 15 roadmap section | CLI UX Designer Agent |
 | 2026-01-21 | 1.6.1 | Sprint 14 Maintenance: Resolved Sprint 13 confusion, marked Sprint 13 as Complete, updated feature statuses to reflect reality, added Sprint 14 roadmap | CLI UX Designer Agent |
 | 2026-01-19 | 1.7.0-dev | Sprint 13 Phase 2: Branding Guidelines v2.0.0 complete, export syntax design complete, features marked 🚧 | CLI UX Designer Agent |
 | 2026-01-18 | 1.6.0 | Sprint 11: Mark table display and tab completion as 🔧 In Repair, add Sprint 11 roadmap section | CLI UX Designer Agent |

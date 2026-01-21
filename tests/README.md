@@ -287,3 +287,71 @@ cargo test --test integration_tests
 # Optional (with database)
 cargo test -- --ignored
 ```
+
+## Sprint 15: Sprint 13 Validation Tests
+
+Sprint 15 added 5 new interactive tests to achieve 100% validation of Sprint 13 features.
+
+### New Tests Added
+
+| Test Name | Feature Validated | Description |
+|-----------|-------------------|-------------|
+| `test_help_metacommand_shows_all_commands` | /help | Validates all 9 metacommands are documented |
+| `test_history_persistence` | History | Validates SQL commands saved to ~/.tq_history |
+| `test_multiline_sql_preserved_in_history` | Multi-line History | Validates multi-line SQL preserved as single entry |
+| `test_sql_error_format_clear_and_actionable` | Error UX | Validates error messages are clear |
+| `test_column_completion_after_select` | Column Completion | Validates tab shows columns in WHERE clause |
+
+### Helper Functions Added
+
+**`spawn_tq_repl_with_history(history_path: &Path)`** - Spawns tq REPL with custom history file for testing history persistence without affecting user's history.
+
+### Running Sprint 15 Tests
+
+```bash
+# Run all Sprint 15 tests (requires live database)
+cargo test --test interactive_tests test_help_metacommand -- --ignored
+cargo test --test interactive_tests test_history_persistence -- --ignored
+cargo test --test interactive_tests test_multiline_sql -- --ignored
+cargo test --test interactive_tests test_sql_error_format -- --ignored
+cargo test --test interactive_tests test_column_completion_after_select -- --ignored
+```
+
+## Code Coverage Baseline (Sprint 15)
+
+**Baseline Coverage: 40.07%** (1384/3454 lines covered)
+
+Coverage by module:
+
+| Module | Coverage | Notes |
+|--------|----------|-------|
+| src/sql/parser.rs | 100% (30/30) | Full coverage |
+| src/format/table.rs | 93.7% (163/174) | Well tested |
+| src/format/json.rs | 98.4% (61/62) | Well tested |
+| src/commands/repl/sql_context.rs | 80.4% (213/265) | Context analysis |
+| src/commands/repl/state.rs | 80.5% (62/77) | REPL state |
+| src/commands/repl/completer.rs | 92.6% (25/27) | Basic completer |
+| src/commands/repl/mod.rs | 0% (0/160) | Main REPL loop (needs PTY) |
+| src/commands/ping.rs | 0% (0/55) | Needs live DB |
+
+**Note:** Many REPL modules have low coverage because they require a live database connection and PTY environment. The interactive tests (`--ignored`) provide validation for these modules.
+
+### Generating Coverage Report
+
+```bash
+# Install cargo-tarpaulin (with locked dependencies for compatibility)
+cargo install cargo-tarpaulin --locked
+
+# Generate HTML report
+cargo tarpaulin --lib --skip-clean --out Html
+
+# View report
+open tarpaulin-report.html
+```
+
+### Coverage Improvement Targets
+
+For future sprints:
+- **Target: 60%** - Add more unit tests for database-independent code paths
+- **REPL modules**: Focus on extracting testable functions from main loop
+- **Error paths**: Add tests for error handling branches

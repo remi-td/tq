@@ -15,6 +15,25 @@ This checklist ensures testing requirements are validated at each phase of the s
 
 ---
 
+## Quick Start: 3 Key Questions Per Phase
+
+### Phase 2: Design
+1. What test infrastructure does this feature need?
+2. Does the infrastructure exist and work?
+3. Can I write tests today for this feature class?
+
+### Phase 3: Build & Test
+1. Does each acceptance criterion have a test?
+2. Are my tests high quality (independent, deterministic, clear)?
+3. Did I test what users see (not just what code does)?
+
+### Phase 4: Ship
+1. Do all tests still pass (100% pass rate)?
+2. Did I perform manual smoke testing?
+3. Does the feature match the specification?
+
+---
+
 ## Phase 2: Design - Test Infrastructure Availability Check
 
 **Goal:** Ensure test infrastructure exists BEFORE implementation begins.
