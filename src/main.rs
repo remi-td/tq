@@ -148,6 +148,116 @@ fn build_connection_config(
         );
     }
 
-    // Otherwise, try to build from config file
+    // If --profile is specified, load from that profile
+    if let Some(ref profile_name) = global.profile {
+        return build_connection_from_profile(global, config, profile_name, password_override);
+    }
+
+    // Otherwise, try to build from config file default connection
     config.build_connection_config(global, password_override)
+}
+
+/// Build connection configuration from a named profile
+fn build_connection_from_profile(
+    global: &GlobalOpts,
+    config: &Config,
+    profile_name: &str,
+    password_override: Option<String>,
+) -> Result<ConnectionConfig> {
+    use tq::config::{expand_home_dir, read_password_from_file};
+
+    // Get the profile
+    let profile = config.get_profile(profile_name).ok_or_else(|| {
+        let available: Vec<_> = config.profiles.keys().collect();
+        if available.is_empty() {
+            TqError::InvalidConfig(format!(
+                "Profile '{}' not found. No profiles defined in config file.\n\
+                 \n\
+                 To create a profile, add to ~/.tq/config.toml:\n\
+                 \n\
+                 [profiles.{}]\n\
+                 host = \"your-host.example.com\"\n\
+                 database = \"your_database\"\n\
+                 user = \"your_username\"\n\
+                 password_file = \"~/.tq/passwords/{}\"",
+                profile_name, profile_name, profile_name
+            ))
+        } else {
+            TqError::InvalidConfig(format!(
+                "Profile '{}' not found.\n\
+                 \n\
+                 Available profiles:\n  - {}\n\
+                 \n\
+                 Use --profile <name> to select one.",
+                profile_name,
+                available
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n  - ")
+            ))
+        }
+    })?;
+
+    // Determine password: CLI override > profile password_file > prompt
+    let password = if let Some(pw) = password_override {
+        Some(secrecy::Secret::new(pw))
+    } else if let Some(ref pw_file) = profile.password_file {
+        let expanded = expand_home_dir(pw_file);
+        Some(secrecy::Secret::new(read_password_from_file(&expanded)?))
+    } else {
+        None // Will prompt interactively if needed
+    };
+
+    // Build connection from profile settings
+    let host = profile
+        .host
+        .clone()
+        .ok_or_else(|| TqError::InvalidConfig(format!(
+            "Profile '{}' is missing required field 'host'",
+            profile_name
+        )))?;
+
+    let port = profile.port.unwrap_or(1025);
+
+    let database = profile.database.clone().ok_or_else(|| {
+        TqError::InvalidConfig(format!(
+            "Profile '{}' is missing required field 'database'",
+            profile_name
+        ))
+    })?;
+
+    let user = profile.user.clone().ok_or_else(|| {
+        TqError::InvalidConfig(format!(
+            "Profile '{}' is missing required field 'user'",
+            profile_name
+        ))
+    })?;
+
+    // Parse logmech from profile or use CLI default
+    let logmech = if let Some(ref lm) = profile.logmech {
+        match lm.to_uppercase().as_str() {
+            "TD2" => tq::cli::LogonMechanism::Td2,
+            "LDAP" => tq::cli::LogonMechanism::Ldap,
+            "KRB5" => tq::cli::LogonMechanism::Krb5,
+            "TDNEGO" => tq::cli::LogonMechanism::Tdnego,
+            _ => return Err(TqError::InvalidLogonMechanism(lm.clone())),
+        }
+    } else {
+        global.logmech
+    };
+
+    // Parse timeout from profile or use CLI default
+    let timeout_str = profile.timeout.as_deref().unwrap_or(&global.timeout);
+    let timeout = parse_duration(timeout_str)?;
+
+    Ok(ConnectionConfig {
+        host,
+        port,
+        database,
+        user,
+        password,
+        logmech,
+        timeout,
+    })
 }

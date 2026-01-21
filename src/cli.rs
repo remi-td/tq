@@ -35,9 +35,11 @@ use std::path::PathBuf;
     tq query --format json \"SELECT * FROM data\" > data.json\n\n  \
     # Export to CSV\n  \
     tq query --format csv \"SELECT * FROM sales\" --output sales.csv\n\n  \
+    # Use a connection profile\n  \
+    tq --profile dev query \"SELECT CURRENT_DATE\"\n\n  \
     # Secure password handling\n  \
-    echo \"password\" > ~/.tq_pass && chmod 0600 ~/.tq_pass\n  \
-    tq -l \"user@host:1025/db\" --password-file ~/.tq_pass query \"SELECT 1\"\n\n  \
+    echo \"password\" > ~/.tq/passwords/dev && chmod 0600 ~/.tq/passwords/dev\n  \
+    tq -l \"user@host:1025/db\" --password-file ~/.tq/passwords/dev query \"SELECT 1\"\n\n  \
     # Read query from file\n  \
     tq query --file script.sql\n\n  \
     # Read from stdin\n  \
@@ -45,12 +47,22 @@ use std::path::PathBuf;
 CONFIGURATION:\n  \
     Set TQ_LOGON environment variable to avoid repeating connection string:\n    \
     export TQ_LOGON=\"user:pass@host:1025/db\"\n\n  \
-    Or create ~/.config/tq/config.toml:\n    \
-    [connection]\n    \
-    host = \"myhost\"\n    \
+    Or create ~/.tq/config.toml with connection profiles:\n    \
+    [profiles.dev]\n    \
+    host = \"dev.company.com\"\n    \
     port = 1025\n    \
-    user = \"myuser\"\n    \
-    database = \"mydb\"\n\n\
+    database = \"development\"\n    \
+    user = \"alice\"\n    \
+    password_file = \"~/.tq/passwords/dev\"\n\n    \
+    [profiles.prod]\n    \
+    host = \"prod.company.com\"\n    \
+    database = \"production\"\n    \
+    user = \"alice\"\n    \
+    logmech = \"LDAP\"\n    \
+    password_file = \"~/.tq/passwords/prod\"\n\n  \
+    Then use: tq --profile dev query \"SELECT 1\"\n\n  \
+    Config file location: ~/.tq/config.toml (macOS/Linux)\n  \
+    For help on configuration: tq help config (coming in Sprint 17)\n\n\
 For more information, visit: https://github.com/remi-td/tq")]
 pub struct Cli {
     /// Global options that apply to all commands
@@ -71,6 +83,20 @@ pub struct GlobalOpts {
     /// TQ_PASSWORD environment variable, or prompted interactively.
     #[arg(short = 'l', long, env = "TQ_LOGON", global = true)]
     pub logon: Option<String>,
+
+    /// Select connection profile from config file
+    ///
+    /// Profiles are defined in ~/.tq/config.toml under [profiles.<name>].
+    /// Profile settings can be overridden by other CLI flags and environment variables.
+    ///
+    /// Example config:
+    ///   [profiles.dev]
+    ///   host = "dev.company.com"
+    ///   database = "development"
+    ///   user = "alice"
+    ///   password_file = "~/.tq/passwords/dev"
+    #[arg(long, env = "TQ_PROFILE", value_name = "NAME", global = true)]
+    pub profile: Option<String>,
 
     /// Read password from file (recommended for security)
     ///
@@ -589,6 +615,42 @@ mod tests {
             assert!(args.no_history);
         } else {
             panic!("Expected Repl command");
+        }
+    }
+
+    #[test]
+    fn test_cli_with_profile() {
+        let args = vec!["tq", "--profile", "dev", "ping"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert_eq!(cli.global.profile, Some("dev".to_string()));
+        assert!(matches!(cli.command, Command::Ping(_)));
+    }
+
+    #[test]
+    fn test_cli_with_profile_and_logon() {
+        // Both can be specified - logon takes precedence in the connection logic
+        let args = vec![
+            "tq",
+            "--profile",
+            "dev",
+            "--logon",
+            "user:pass@host:1025/db",
+            "ping",
+        ];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert_eq!(cli.global.profile, Some("dev".to_string()));
+        assert_eq!(cli.global.logon, Some("user:pass@host:1025/db".to_string()));
+    }
+
+    #[test]
+    fn test_cli_profile_with_query() {
+        let args = vec!["tq", "--profile", "prod", "query", "SELECT 1"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert_eq!(cli.global.profile, Some("prod".to_string()));
+        if let Command::Query(args) = cli.command {
+            assert_eq!(args.query, Some("SELECT 1".to_string()));
+        } else {
+            panic!("Expected Query command");
         }
     }
 }

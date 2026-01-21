@@ -58,6 +58,9 @@ pub struct ConnectionSettings {
 
     /// Connection timeout (e.g., "30s")
     pub timeout: Option<String>,
+
+    /// Path to password file (supports ~ for home directory)
+    pub password_file: Option<PathBuf>,
 }
 
 impl Default for ConnectionSettings {
@@ -69,6 +72,7 @@ impl Default for ConnectionSettings {
             user: None,
             logmech: Some("TD2".to_string()),
             timeout: Some("30s".to_string()),
+            password_file: None,
         }
     }
 }
@@ -152,10 +156,14 @@ impl Config {
     }
 
     /// Get user config file path
+    ///
+    /// Returns ~/.tq/config.toml on macOS/Linux, %USERPROFILE%\.tq\config.toml on Windows
     pub fn user_config_path() -> PathBuf {
-        directories::ProjectDirs::from("", "", "tq")
-            .map(|d| d.config_dir().join("config.toml"))
-            .unwrap_or_else(|| PathBuf::from("~/.config/tq/config.toml"))
+        if let Some(user_dirs) = directories::UserDirs::new() {
+            user_dirs.home_dir().join(".tq").join("config.toml")
+        } else {
+            PathBuf::from("~/.tq/config.toml")
+        }
     }
 
     /// Get a connection profile by name
@@ -234,6 +242,62 @@ fn parse_logmech(s: &str) -> Result<LogonMechanism> {
     }
 }
 
+/// Expand ~ to home directory in a path
+pub fn expand_home_dir(path: &std::path::Path) -> PathBuf {
+    if let Some(path_str) = path.to_str() {
+        if path_str.starts_with("~/") || path_str == "~" {
+            if let Some(home) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
+                if path_str == "~" {
+                    return home;
+                }
+                return home.join(&path_str[2..]);
+            }
+        }
+    }
+    path.to_path_buf()
+}
+
+/// Read password from file with security checks
+///
+/// Verifies file permissions are secure (0600) before reading.
+/// Expands ~ in the path to home directory.
+pub fn read_password_from_file(path: &std::path::Path) -> Result<String> {
+    let expanded_path = expand_home_dir(path);
+
+    // Check file permissions on Unix
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let metadata = std::fs::metadata(&expanded_path).map_err(|e| TqError::FileReadError {
+            path: expanded_path.clone(),
+            source: e,
+        })?;
+
+        let mode = metadata.permissions().mode() & 0o777;
+
+        // Reject if group or world readable/writable
+        if mode & 0o077 != 0 {
+            return Err(TqError::InvalidConfig(format!(
+                "Password file '{}' has insecure permissions {:04o}. Required: 0600.\n\
+                 Fix: chmod 0600 {}",
+                expanded_path.display(),
+                mode,
+                expanded_path.display()
+            )));
+        }
+    }
+
+    // Read the password
+    let password = std::fs::read_to_string(&expanded_path).map_err(|e| TqError::FileReadError {
+        path: expanded_path.clone(),
+        source: e,
+    })?;
+
+    // Return trimmed password (remove trailing newline)
+    Ok(password.trim().to_string())
+}
+
 /// Get output format from config and CLI
 pub fn resolve_output_format(_config: &Config, cli_format: OutputFormat) -> OutputFormat {
     // CLI takes precedence
@@ -282,5 +346,84 @@ mod tests {
         assert_eq!(settings.port, Some(1025));
         assert!(settings.host.is_none());
         assert!(settings.user.is_none());
+        assert!(settings.password_file.is_none());
+    }
+
+    #[test]
+    fn test_expand_home_dir_with_tilde() {
+        let path = std::path::Path::new("~/test/file.txt");
+        let expanded = expand_home_dir(path);
+
+        // Should not start with ~ anymore
+        let expanded_str = expanded.to_str().unwrap();
+        assert!(!expanded_str.starts_with("~"));
+        // Should end with test/file.txt
+        assert!(expanded_str.ends_with("test/file.txt"));
+    }
+
+    #[test]
+    fn test_expand_home_dir_without_tilde() {
+        let path = std::path::Path::new("/absolute/path/file.txt");
+        let expanded = expand_home_dir(path);
+        assert_eq!(expanded, std::path::PathBuf::from("/absolute/path/file.txt"));
+    }
+
+    #[test]
+    fn test_expand_home_dir_tilde_only() {
+        let path = std::path::Path::new("~");
+        let expanded = expand_home_dir(path);
+
+        // Should be home directory (not "~")
+        let expanded_str = expanded.to_str().unwrap();
+        assert!(!expanded_str.contains("~"));
+    }
+
+    #[test]
+    fn test_user_config_path_in_tq_dir() {
+        let path = Config::user_config_path();
+        // Should be in .tq directory
+        let path_str = path.to_str().unwrap();
+        assert!(path_str.contains(".tq"));
+        assert!(path_str.ends_with("config.toml"));
+    }
+
+    #[test]
+    fn test_config_with_profiles() {
+        let mut config = Config::default();
+        let profile = ConnectionSettings {
+            host: Some("test.example.com".to_string()),
+            database: Some("testdb".to_string()),
+            user: Some("testuser".to_string()),
+            password_file: Some(PathBuf::from("~/.tq/passwords/test")),
+            ..Default::default()
+        };
+
+        config.profiles.insert("test".to_string(), profile);
+
+        // Should be able to get the profile
+        let retrieved = config.get_profile("test");
+        assert!(retrieved.is_some());
+        let p = retrieved.unwrap();
+        assert_eq!(p.host.as_deref(), Some("test.example.com"));
+        assert_eq!(
+            p.password_file.as_ref().map(|p| p.to_str().unwrap()),
+            Some("~/.tq/passwords/test")
+        );
+
+        // Non-existent profile returns None
+        assert!(config.get_profile("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_read_password_file_not_found() {
+        let path = std::path::Path::new("/nonexistent/password/file");
+        let result = read_password_from_file(path);
+        assert!(result.is_err());
+        // Should be a FileReadError
+        if let Err(TqError::FileReadError { path: p, .. }) = result {
+            assert!(p.to_str().unwrap().contains("nonexistent"));
+        } else {
+            panic!("Expected FileReadError");
+        }
     }
 }

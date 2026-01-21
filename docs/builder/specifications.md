@@ -1,7 +1,7 @@
 # tq (Teradata Query) - Specifications
 
-**Version:** 1.6.1 (Sprint 15 Complete)
-**Status:** Active Development - Ready for Sprint 16
+**Version:** 1.6.1 (Sprint 16 In Progress)
+**Status:** Active Development - Sprint 16 Configuration Features
 **Last Updated:** 2026-01-21
 
 ---
@@ -130,15 +130,18 @@
 | Transaction control | 📋 Planned | 11+ | P2 |
 | Variable substitution | 📋 Planned | 11+ | P2 |
 
-### Configuration 📋 Planned
+### Configuration (Sprint 16) 🚧 In Progress
 
 | Feature | Status | Priority |
 |---------|--------|----------|
-| User config file | 📋 Planned | P1 |
-| Project config file | 📋 Planned | P1 |
-| Connection profiles | 📋 Planned | P1 |
-| Default format preference | 📋 Planned | P2 |
+| User config file (`~/.tq/config.toml`) | 🚧 In Progress | P1 |
+| Connection profiles | 🚧 In Progress | P1 |
+| Default preferences (format, editor_mode, etc) | 🚧 In Progress | P1 |
+| `--profile <name>` flag | 🚧 In Progress | P2 |
+| Project config file (`.tq.toml`) | 📋 Planned | P1 |
+| Profile management commands | 📋 Planned | P1 |
 | Keyring integration | 📋 Planned | P2 |
+| Config validation command | 📋 Planned | P2 |
 
 **Legend:**
 - ✅📝 Implemented and tested
@@ -456,12 +459,31 @@
 
 ---
 
-### Sprint 16+: Advanced Features & Configuration 📋 Future
+### Sprint 16: Interactive Test Validation & Configuration Foundation 🚧 In Progress
+**Goal:** Validate Sprint 13-15 interactive tests with live database, then establish configuration file foundation for connection profiles and user preferences
+
+**Sprint Theme:** "Validation First, Then Configuration" - Complete test validation work from Sprint 15, then return to feature development with full confidence.
+
+**Status:** In Progress
+**Start Date:** 2026-01-21
+
+**Objectives:**
+1. **P0: Interactive Test Execution Validation** - Execute all 20 interactive tests with live Teradata database
+2. **P0: Coverage Metrics Documentation** - Clarify automated vs total coverage (~85% including interactive)
+3. **P1: User Configuration File** - Implement `~/.tq/config.toml` with connection profiles and defaults
+4. **P1: Configuration Specification Completion** - Complete detailed specification for configuration management
+5. **P2: Profile Selection CLI Flag** - Add `--profile <name>` flag for profile selection
+
+**Sprint Planning:** [Sprint 16 Planning](../sprints/sprint-16-planning.md)
+
+---
+
+### Sprint 17+: Advanced Features 📋 Future
 **Goals:**
 - Transaction control (`--atomic` flag)
 - Variable substitution
 - Streaming large results
-- Configuration files and connection profiles
+- Project-level config file (`.tq.toml`)
 - Additional completion features (functions, schemas)
 
 ---
@@ -513,6 +535,7 @@ Complete technical specifications are organized by domain:
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
+| 2026-01-21 | 1.6.1 | Sprint 16 Phase 2: Configuration features marked 🚧 In Progress, added Sprint 16 roadmap section with detailed objectives, updated version status | cli-ux-designer |
 | 2026-01-21 | 1.6.1 | Sprint 15 Complete: Marked Sprint 15 as ✅ Complete with all objectives delivered, updated status to Ready for Sprint 16, added Sprint 15 Review link | Sprint Coordinator |
 | 2026-01-21 | 1.6.1 | Sprint 15 Phase 2: Added test status indicators (✅📝 implemented+tested, ✅❓ needs testing), marked Sprint 15 as In Progress, added Sprint 15 roadmap section | CLI UX Designer Agent |
 | 2026-01-21 | 1.6.1 | Sprint 14 Maintenance: Resolved Sprint 13 confusion, marked Sprint 13 as Complete, updated feature statuses to reflect reality, added Sprint 14 roadmap | CLI UX Designer Agent |
