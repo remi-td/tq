@@ -231,33 +231,18 @@ fn print_banner<W: Write>(
 ) -> Result<()> {
     let config = completion_state.client().config();
 
-    // Sprint 13: Redesigned logo per branding-guidelines.md
-    // - Tool name: tq (lowercase)
-    // - 't' in Teradata orange (#F37021 = RGB 243, 112, 33)
-    // - 'q' in default terminal color
-    // - Uses block character █ (U+2588)
-    // - Perfectly aligned (no offset)
-    let orange = Color::Rgb(243, 112, 33);
+    // Sprint 18: Simple lowercase "tq" text with subtitle (no ASCII art blocks)
+    // - Tool name: tq (lowercase, bold, Teradata orange)
+    // - Teradata orange: #F37021, xterm-256 color 202
+    let orange = Color::Fixed(202);
 
     writeln!(writer)?;
-    // Logo using block characters - 't' in orange, 'q' in default
-    let q_block_top = "████";
-    let q_block_mid = "██  ██";
-    let q_block_low = "██ ▄██";
-    let q_block_bot = "████";
-    writeln!(writer, " {}   {}", orange.paint("████████"), q_block_top)?;
-    writeln!(writer, "    {}     {}", orange.paint("██"), q_block_mid)?;
-    writeln!(writer, "    {}     {}", orange.paint("██"), q_block_mid)?;
-    writeln!(writer, "    {}     {}", orange.paint("██"), q_block_low)?;
-    writeln!(writer, "    {}      {}", orange.paint("██"), q_block_bot)?;
-    writeln!(writer)?;
-    // Tool name: 't' in orange, 'q' in default, followed by version
-    let q_letter = "q";
+    // Simple "tq" in Teradata orange (bold for visibility)
+    writeln!(writer, "{}", orange.bold().paint("tq"))?;
+    // Subtitle with version
     writeln!(
         writer,
-        " {}{}  v{}",
-        orange.bold().paint("t"),
-        q_letter,
+        "Teradata Query tool v{}",
         env!("CARGO_PKG_VERSION")
     )?;
     writeln!(writer)?;

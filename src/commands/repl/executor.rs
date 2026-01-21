@@ -64,7 +64,9 @@ pub fn execute_sql<W: Write>(
     let execution_time = start.elapsed();
 
     let row_count = result.row_count;
-    let limited = apply_limit && row_count == default_limit;
+    // If we applied a limit, we potentially don't have the full dataset
+    // (even if row_count < default_limit, we used execute_with_limit which may not fetch all rows)
+    let limited = apply_limit;
 
     // Configure formatting
     let format_options = FormatOptions::default()
@@ -85,7 +87,7 @@ pub fn execute_sql<W: Write>(
         writeln!(writer)?;
         writeln!(
             writer,
-            "Showing first {} rows. Use TOP N or SAMPLE N for different results.",
+            "Result limited to {} rows. Use TOP N or SAMPLE N in query for different limit, or /export to save all rows to file.",
             default_limit
         )?;
     }
@@ -144,7 +146,9 @@ pub fn execute_sql_with_state<W: Write>(
     let execution_time = start.elapsed();
 
     let row_count = result.row_count;
-    let limited = apply_limit && row_count == default_limit;
+    // If we applied a limit, we potentially don't have the full dataset
+    // (even if row_count < default_limit, we used execute_with_limit which may not fetch all rows)
+    let limited = apply_limit;
 
     // Store result in state for /export command (Sprint 6)
     let result_clone = result.clone();
@@ -180,7 +184,7 @@ pub fn execute_sql_with_state<W: Write>(
         writeln!(writer)?;
         writeln!(
             writer,
-            "Showing first {} rows. Use TOP N or SAMPLE N for different results.",
+            "Result limited to {} rows. Use TOP N or SAMPLE N in query for different limit, or /export to save all rows to file.",
             default_limit
         )?;
     }

@@ -215,18 +215,14 @@ pub fn handle_metacommand_with_state<W: Write>(
         // Export command (Sprint 6, Sprint 12, Sprint 13: simplified syntax)
         "export" => {
             if args.is_empty() {
-                writeln!(writer, "Usage: /export <format> [destination]")?;
+                writeln!(writer, "Usage: /export <format> [file|clipboard]")?;
                 writeln!(writer)?;
                 writeln!(writer, "Formats: table, csv, json, sql")?;
-                writeln!(
-                    writer,
-                    "Destination: file path or 'clipboard' (optional, defaults to stdout)"
-                )?;
                 writeln!(writer)?;
                 writeln!(writer, "Examples:")?;
-                writeln!(writer, "  /export csv results.csv  Export to file")?;
-                writeln!(writer, "  /export json clipboard   Copy JSON to clipboard")?;
-                writeln!(writer, "  /export table            Print table to stdout")?;
+                writeln!(writer, "  /export csv results.csv    Export to file")?;
+                writeln!(writer, "  /export json clipboard     Copy JSON to clipboard")?;
+                writeln!(writer, "  /export table              Print table to stdout")?;
                 writeln!(writer)?;
                 writeln!(writer, "Note: File exports include ALL rows (no limit),")?;
                 writeln!(
@@ -345,11 +341,7 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "  /describe <table>, /d  Show table structure")?;
     writeln!(
         writer,
-        "  /export <fmt> [dest]   Export result (csv, json, table, sql)"
-    )?;
-    writeln!(
-        writer,
-        "                         dest: file path or 'clipboard'"
+        "  /export <fmt> [file|clipboard]  Export result (csv, json, table, sql)"
     )?;
     writeln!(
         writer,
@@ -495,11 +487,7 @@ fn print_help<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "  /describe <table>, /d  Show table structure")?;
     writeln!(
         writer,
-        "  /export <fmt> [dest]   Export result (csv, json, table, sql)"
-    )?;
-    writeln!(
-        writer,
-        "                         dest: file path or 'clipboard'"
+        "  /export <fmt> [file|clipboard]  Export result (csv, json, table, sql)"
     )?;
     writeln!(
         writer,

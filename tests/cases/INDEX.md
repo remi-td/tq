@@ -1,9 +1,9 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.7.0 (Sprint 17)
+**Version:** 1.7.0 (Sprint 18 - Maintenance)
 **Last Updated:** 2026-01-21
-**Base Commit:** [Sprint 17 implementation]
+**Base Commit:** [Sprint 18 - Critical Bug Fixes]
 
 ## Overview
 
@@ -117,6 +117,28 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 - **Security Focus**: Multiple tests validate password protection and enforcement
 - **Regression**: Full test suite must pass (280+ tests from Sprint 16)
 
+### Sprint 18: Critical Bug Fixes (Maintenance Sprint)
+
+**Sprint 18 Test Cases (6 total):**
+
+#### Logo Fix (P0 - CRITICAL)
+- **TC-LOGO-001**: Logo Display - Lowercase "tq" with Subtitle
+
+#### Tab Completion Rebuild (P0 - CRITICAL)
+- **TC-COMPLETION-001**: Tab Completion - Database Names After FROM
+- **TC-COMPLETION-002**: Tab Completion - Table Names After FROM
+- **TC-COMPLETION-003**: Tab Completion - Column Names in SELECT and WHERE
+- **TC-COMPLETION-004**: Tab Completion - Qualified Name Completion (database.table)
+- **TC-COMPLETION-005**: Tab Completion - Verify NO Keyword Completion
+
+**Sprint 18 Test Strategy:**
+- **Test Count**: 6 manual test cases (all critical)
+- **Type**: Maintenance Sprint (CRISIS) - fixing blocking production bugs
+- **Database Required**: Yes (for tab completion metadata queries)
+- **Interactive Tests Required**: Yes (all features are REPL-based)
+- **Focus**: Logo branding fix + tab completion rebuild from scratch
+- **Acceptance**: Both P0 bugs must be 100% fixed, no regressions
+
 ### Security
 - **TC022**: Security - No Password Exposure
 - **TC-SECURITY-001**: Password File Permission Enforcement - 0644 Rejected (Sprint 17)
@@ -192,6 +214,12 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 | TC-PROFILES-002 | No Config File Error | Error-Handling (Sprint 17) |
 | TC-PROFILES-003 | No Profiles Error | Error-Handling (Sprint 17) |
 | TC-SECURITY-002 | Config File 0644 Warning | Security (Sprint 17) |
+| TC-LOGO-001 | Logo Display - Lowercase "tq" | Functionality (Sprint 18) |
+| TC-COMPLETION-001 | Database Completion After FROM | Functionality (Sprint 18) |
+| TC-COMPLETION-002 | Table Completion After FROM | Functionality (Sprint 18) |
+| TC-COMPLETION-003 | Column Completion in SELECT/WHERE | Functionality (Sprint 18) |
+| TC-COMPLETION-004 | Qualified Name Completion | Functionality (Sprint 18) |
+| TC-COMPLETION-005 | NO Keyword Completion | Functionality (Sprint 18) |
 
 ### Medium Priority (Quality of Life)
 | Test ID | Feature | Category |

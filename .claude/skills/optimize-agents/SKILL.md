@@ -12,7 +12,7 @@ context: fork
 
 Deep analysis of sprint metrics to identify where time/tokens are wasted and generate concrete optimization actions.
 
-**Input:** Historical sprint metrics files (`sprint-*-metrics.md`)
+**Input:** Historical sprint metrics files (`docs/builder/sprints/sprint-N-metrics.md`)
 **Output:** Specific file edits to improve agents, docs, tools, and workflows
 **Model:** Opus (requires complex analysis and decision-making)
 
@@ -263,7 +263,7 @@ Rank all identified optimizations by:
 
 ### Step 7: Create Implementation Plan
 
-Generate a concrete action list:
+Generate a concrete action list, save it in `docs/builder/sprints/sprint-N-planning.md` (where N is the sprint number), for example:
 
 ```markdown
 # Framework Optimization Plan
@@ -271,7 +271,7 @@ Generate a concrete action list:
 **Based on:** Sprint 6-8 metrics analysis
 **Total Expected Impact:** 35-50K token reduction per sprint (30-40%)
 
-## P0 - Critical (Implement in Sprint 9)
+## P0 - Critical (Implement now)
 
 ### Action 1: Make Phase 3.5 Database Check Mandatory
 **Files:** `.claude/skills/sprint-coordinator/SKILL.md`
@@ -309,54 +309,5 @@ Generate a concrete action list:
 [Continue for all identified optimizations]
 ```
 
-### Step 8: Summarize results
-
-Summarize in a concise report:
-
-```markdown
-# Framework Optimization Analysis Complete
-
-## Metrics Analyzed
-- Sprint 6: [X] tokens, [issues]
-- Sprint 7: [Y] tokens, [issues]
-- Sprint 8: [Z] tokens, [quality failure]
-
-## Key Findings
-
-### 1. Quality Failure Pattern (P0 - Critical)
-**Issue:** Sprint 8 features marked complete but broken
-**Root Cause:** Manual tests skipped, database unavailable during testing
-**Fix:** Make Phase 3.5 mandatory, enforce manual test documentation
-**Impact:** Prevents 20-40K token rework per quality failure
-
-### 2. Inefficient Agent: rust-teradata-architect (P0)
-**Issue:** Reads same files 4-5 times per sprint (12-15K wasted tokens)
-**Root Cause:** Missing module architecture documentation
-**Fix:** Add module overviews to rust-architecture.md
-**Impact:** 10-15K token reduction per sprint
-
-### 3. Low Cache Hit Rate: cli-ux-designer (P1)
-**Issue:** 22% cache hit rate (paying 10x more than necessary)
-**Root Cause:** Volatile specification formats
-**Fix:** Create stable spec templates, separate variable content
-**Impact:** 5-8K token reduction per sprint
-
-### 4. Sequential Execution (P1)
-**Issue:** Phases run sequentially when parallel possible
-**Root Cause:** Sprint-coordinator not launching agents in parallel
-**Fix:** Update workflow with explicit parallelism instructions
-**Impact:** 30-50% faster sprints (indirect token savings)
-
-## Total Expected Impact
-
-**Token Reduction:** 35-50K per sprint (30-40% reduction)
-**Quality Improvement:** Zero rework sprints (Sprint 8 pattern eliminated)
-**Time Savings:** 1-2 days faster sprint completion
-
-## Recommended Next Steps
-
-1. **Review implementation plan** (see full plan above)
-2. **Prioritize P0 actions** for immediate implementation
-3. **Plan for implementation of next actions**
-
-```
+### Step 7: Implementation
+Implement changes in agent prompts, skills or directly Claude.md for Critical and High Priority action items.

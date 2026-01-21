@@ -26,6 +26,7 @@ Execute the 5-phase sprint workflow, launching specialized sub-agents as needed,
 ## How to Execute
 
 **CRITICAL**: Before each phase, **READ THE PROCESS DOCUMENT** for that phase. Do NOT rely on memory.
+**CRITICAL**: Never skip any phase, no matter the urgency. If urgency, then reduce the number of features to the minimum.
 
 ### Phase 0: Reality Check
 > **Read:** `process/phase0-reality-check.md`

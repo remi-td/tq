@@ -14,14 +14,6 @@ Simple, fast extraction of token usage data from subagent transcripts. Adds fact
 **What this does:** Data collection only
 **What this does NOT do:** Analysis, interpretation, or recommendations
 
-## When to Use
-
-Use during **Phase 5: Sprint Closure** after sprint review document is created.
-
-```
-/collect-metrics <sprint-number>
-```
-
 ## Workflow
 
 ### Step 1: Find Current Session ID
@@ -50,7 +42,7 @@ This creates: `docs/builder/sprints/sprint-N-metrics.md`
 
 ### Step 3: Add Metrics to Sprint Review
 
-Read the generated metrics file and add a new section to the sprint review:
+Read the generated metrics file and create a fully detailed report in: `docs/builder/sprints/sprint-N-metrics.md`
 
 ```markdown
 ## Token Usage Metrics
@@ -58,20 +50,17 @@ Read the generated metrics file and add a new section to the sprint review:
 **Data Source:** Session `<session-id>`
 **Collection Date:** <date>
 
-[Paste the "Sprint Summary" section from sprint-N-metrics.md]
+[Sprint summary]
 
 ### By Agent
 
-[Paste agent breakdown from sprint-N-metrics.md]
+[summary by agent]
 
-### Historical Comparison
+### By Agent and Phase
+[summary by agent and phase]
 
-| Metric | Sprint N-2 | Sprint N-1 | Sprint N | Trend |
-|--------|------------|------------|----------|-------|
-| Total Tokens | [from past] | [from past] | [current] | [↑/↓/→] |
-| Estimated Cost | [from past] | [from past] | [current] | [↑/↓/→] |
-
-**Note:** Full metrics analysis and optimization recommendations will be generated separately using `/optimize-agents` skill.
+### Details
+[Full details from the report file]
 ```
 
 ### Step 4: Report Completion
@@ -82,14 +71,11 @@ Inform the user:
 ✅ Metrics collected for Sprint N
 
 **Metrics file created:** docs/builder/sprints/sprint-N-metrics.md
-**Sprint review updated:** docs/builder/sprints/sprint-N-review.md
 
 **Key numbers:**
 - Total tokens: [X]
 - Estimated cost: $[Y]
 - Cache hit rate: [Z]%
-
-To generate optimization recommendations, use: /optimize-agents
 ```
 
 ## Important Notes

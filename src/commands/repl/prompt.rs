@@ -24,11 +24,12 @@ impl TqPrompt {
     /// Create a new TqPrompt with Teradata orange colored prompts
     ///
     /// Sprint 13: Per branding-guidelines.md, prompts should be in Teradata orange (#F37021)
+    /// Uses xterm-256 color 202 for better terminal compatibility
     pub fn new() -> Self {
-        // Teradata orange RGB: 243, 112, 33
-        // ANSI 24-bit color escape: \x1b[38;2;R;G;Bm
+        // Teradata orange: xterm-256 color 202 (closest match to #F37021)
+        // ANSI 256-color escape: \x1b[38;5;Nm where N is the color index
         // Reset escape: \x1b[0m
-        let orange_start = "\x1b[38;2;243;112;33m";
+        let orange_start = "\x1b[38;5;202m";
         let reset = "\x1b[0m";
 
         Self {
@@ -120,12 +121,12 @@ mod tests {
         let state = ReplState::new(config);
 
         let stateful = prompt.for_state(&state);
-        // Sprint 13: Prompt now includes Teradata orange ANSI color codes
+        // Sprint 13: Prompt now includes Teradata orange ANSI color codes (xterm-256 color 202)
         let rendered = stateful.render_prompt_left();
         assert!(rendered.contains("tq> "), "Prompt should contain 'tq> '");
         assert!(
-            rendered.contains("\x1b[38;2;243;112;33m"),
-            "Prompt should have Teradata orange color"
+            rendered.contains("\x1b[38;5;202m"),
+            "Prompt should have Teradata orange color (xterm-256 202)"
         );
     }
 
@@ -137,12 +138,12 @@ mod tests {
         state.append_input("SELECT");
 
         let stateful = prompt.for_state(&state);
-        // Sprint 13: Continuation prompt now includes Teradata orange ANSI color codes
+        // Sprint 13: Continuation prompt now includes Teradata orange ANSI color codes (xterm-256 color 202)
         let rendered = stateful.render_prompt_left();
         assert!(rendered.contains("...> "), "Prompt should contain '...> '");
         assert!(
-            rendered.contains("\x1b[38;2;243;112;33m"),
-            "Prompt should have Teradata orange color"
+            rendered.contains("\x1b[38;5;202m"),
+            "Prompt should have Teradata orange color (xterm-256 202)"
         );
     }
 }

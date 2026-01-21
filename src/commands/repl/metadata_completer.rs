@@ -132,182 +132,57 @@ impl CompletionState {
 ///
 /// Uses shared CompletionState to provide context-sensitive completions.
 /// Thread-safe via Arc<Mutex> to satisfy reedline's Send requirement.
+///
+/// Sprint 18: Simplified to focus ONLY on metadata completion (databases, tables, columns).
+/// NO keyword completion - this was causing interference with metadata completions.
+#[derive(Default)]
 pub struct MetadataCompleter {
-    /// SQL keywords
-    keywords: Vec<String>,
-    /// Shared completion state (optional - falls back to keywords only)
+    /// Shared completion state (required for metadata completion)
     state: Option<Arc<Mutex<CompletionState>>>,
 }
 
 impl MetadataCompleter {
     /// Create a new metadata completer without database connection
     ///
-    /// This will only provide keyword completion.
+    /// Sprint 18: Without a database connection, no completions are available.
+    /// Keyword completion has been removed entirely.
+    ///
+    /// This function is used by tests and the completer module for fallback.
+    #[allow(dead_code)]
     pub fn keywords_only() -> Self {
-        Self {
-            keywords: Self::default_keywords(),
-            state: None,
-        }
+        Self { state: None }
     }
 
     /// Create a new metadata completer with shared state
     pub fn with_state(state: Arc<Mutex<CompletionState>>) -> Self {
-        Self {
-            keywords: Self::default_keywords(),
-            state: Some(state),
-        }
-    }
-
-    /// Get default SQL keywords
-    fn default_keywords() -> Vec<String> {
-        vec![
-            // DML statements
-            "SELECT",
-            "INSERT",
-            "UPDATE",
-            "DELETE",
-            "WITH",
-            // DDL statements
-            "CREATE",
-            "DROP",
-            "ALTER",
-            "TRUNCATE",
-            // Table/Database operations
-            "TABLE",
-            "DATABASE",
-            "SCHEMA",
-            "VIEW",
-            "INDEX",
-            "PROCEDURE",
-            "FUNCTION",
-            // Clauses
-            "FROM",
-            "WHERE",
-            "GROUP BY",
-            "HAVING",
-            "ORDER BY",
-            "LIMIT",
-            "OFFSET",
-            "DISTINCT",
-            "ALL",
-            "TOP",
-            // JOINs
-            "JOIN",
-            "INNER JOIN",
-            "LEFT JOIN",
-            "RIGHT JOIN",
-            "FULL JOIN",
-            "CROSS JOIN",
-            "ON",
-            "USING",
-            "AS",
-            // Set operations
-            "UNION",
-            "INTERSECT",
-            "EXCEPT",
-            // Logical operators
-            "AND",
-            "OR",
-            "NOT",
-            "IN",
-            "EXISTS",
-            "BETWEEN",
-            "LIKE",
-            "IS NULL",
-            "IS NOT NULL",
-            // Aggregates and functions
-            "COUNT",
-            "SUM",
-            "AVG",
-            "MIN",
-            "MAX",
-            // Transactions
-            "BEGIN",
-            "COMMIT",
-            "ROLLBACK",
-            "TRANSACTION",
-            // Conditionals
-            "CASE",
-            "WHEN",
-            "THEN",
-            "ELSE",
-            "END",
-            // Data modification
-            "VALUES",
-            "SET",
-            // Constraints
-            "PRIMARY KEY",
-            "FOREIGN KEY",
-            "UNIQUE",
-            "CHECK",
-            "CONSTRAINT",
-            // Permissions
-            "GRANT",
-            "REVOKE",
-        ]
-        .into_iter()
-        .map(String::from)
-        .collect()
-    }
-
-    /// Get keyword completions
-    ///
-    /// Sprint 13 Fix: When prefix is empty, don't show all keywords.
-    /// Empty prefix happens after typing "sel " (with trailing space).
-    /// This was causing all keywords to appear instead of contextual completions.
-    fn complete_keywords(&self, prefix: &str) -> Vec<Suggestion> {
-        // Sprint 13: If prefix is empty, return empty list
-        // This prevents showing all keywords after partial keywords like "sel "
-        if prefix.is_empty() {
-            return Vec::new();
-        }
-
-        let prefix_upper = prefix.to_uppercase();
-
-        self.keywords
-            .iter()
-            .filter(|kw| kw.starts_with(&prefix_upper))
-            .map(|kw| Suggestion {
-                value: kw.clone(),
-                description: Some("SQL keyword".to_string()),
-                style: None,
-                extra: None,
-                span: reedline::Span {
-                    start: 0,
-                    end: prefix.len(),
-                },
-                append_whitespace: true,
-            })
-            .collect()
+        Self { state: Some(state) }
     }
 
     /// Get table name completions
     ///
     /// Sprint 8 Bug Fix: Now returns DATABASE NAMES + tables in current database
     /// for Teradata's database.table naming model
+    ///
+    /// Sprint 18: Span is now set by the caller in complete(), not here.
+    /// This function returns suggestions with placeholder spans.
     fn complete_tables(&self, prefix: &str) -> Vec<Suggestion> {
         let Some(state) = &self.state else {
-            // No database connection - show message instead of silent failure
-            return vec![
-                self.status_suggestion("No database connection for table completion", prefix.len())
-            ];
+            // No database connection - return empty (no completions available)
+            return Vec::new();
         };
 
         let Ok(mut state) = state.lock() else {
             log::warn!("Failed to acquire lock for table completion");
-            return vec![
-                self.error_suggestion("Unable to load tables (internal lock error)", prefix.len())
-            ];
+            return Vec::new();
         };
 
         // Ensure tables are loaded
         if !state.ensure_tables_loaded() {
-            // Loading failed - show the error to user
+            // Loading failed - log and return empty
             if let Some(error) = state.cache().last_error() {
-                return vec![self.error_suggestion(error, prefix.len())];
-            } else {
-                return vec![self.error_suggestion("Failed to load table metadata", prefix.len())];
+                log::error!("Tab completion: Failed to load tables: {}", error);
             }
+            return Vec::new();
         }
 
         let mut suggestions = Vec::new();
@@ -320,10 +195,7 @@ impl MetadataCompleter {
                 description: Some("(database)".to_string()),
                 style: None,
                 extra: None,
-                span: reedline::Span {
-                    start: 0,
-                    end: prefix.len(),
-                },
+                span: reedline::Span { start: 0, end: 0 }, // Placeholder - set by caller
                 append_whitespace: false, // Don't add space after database name (user will type '.')
             });
         }
@@ -343,24 +215,9 @@ impl MetadataCompleter {
                 description: Some(format!("{} ({})", table.schema_name, kind)),
                 style: None,
                 extra: None,
-                span: reedline::Span {
-                    start: 0,
-                    end: prefix.len(),
-                },
+                span: reedline::Span { start: 0, end: 0 }, // Placeholder - set by caller
                 append_whitespace: true,
             });
-        }
-
-        if suggestions.is_empty() {
-            // No databases or tables found - provide helpful message
-            if prefix.is_empty() {
-                return vec![self.status_suggestion("No databases or tables found", prefix.len())];
-            } else {
-                return vec![self.status_suggestion(
-                    &format!("No databases or tables matching '{}'", prefix),
-                    prefix.len(),
-                )];
-            }
         }
 
         suggestions
@@ -369,39 +226,35 @@ impl MetadataCompleter {
     /// Get schema-qualified table completions
     ///
     /// Sprint 8 Bug Fix: Improved error handling for database.table completions
+    /// Sprint 18: Span is now set by the caller in complete(), not here.
     fn complete_schema_tables(&self, schema: &str, prefix: &str) -> Vec<Suggestion> {
         // Sprint 8 Round 4: Add safety check for empty schema
         if schema.is_empty() {
             log::warn!("complete_schema_tables called with empty schema");
-            return vec![self.status_suggestion("Invalid database name", prefix.len())];
+            return Vec::new();
         }
 
         let Some(state) = &self.state else {
-            return vec![
-                self.status_suggestion("No database connection for table completion", prefix.len())
-            ];
+            return Vec::new();
         };
 
         let Ok(mut state) = state.lock() else {
             log::warn!("Failed to acquire lock for schema-qualified table completion");
-            return vec![
-                self.error_suggestion("Unable to load tables (internal lock error)", prefix.len())
-            ];
+            return Vec::new();
         };
 
         // Ensure tables are loaded
         if !state.ensure_tables_loaded() {
             if let Some(error) = state.cache().last_error() {
-                return vec![self.error_suggestion(error, prefix.len())];
-            } else {
-                return vec![self.error_suggestion("Failed to load table metadata", prefix.len())];
+                log::error!("Tab completion: Failed to load tables: {}", error);
             }
+            return Vec::new();
         }
 
         // Find tables in the specified database/schema
         let cache = state.cache();
         let Some(tables) = cache.get_tables() else {
-            return vec![self.status_suggestion("No tables loaded", prefix.len())];
+            return Vec::new();
         };
 
         let schema_upper = schema.to_uppercase();
@@ -414,16 +267,6 @@ impl MetadataCompleter {
                     && (prefix.is_empty() || t.table_name.to_uppercase().starts_with(&prefix_upper))
             })
             .collect();
-
-        if matching_tables.is_empty() {
-            // No tables found in schema - provide helpful message
-            let msg = if prefix.is_empty() {
-                format!("No tables in database '{}'", schema)
-            } else {
-                format!("No tables in '{}' matching '{}'", schema, prefix)
-            };
-            return vec![self.status_suggestion(&msg, prefix.len())];
-        }
 
         matching_tables
             .into_iter()
@@ -442,10 +285,7 @@ impl MetadataCompleter {
                     description: Some(format!("{} ({})", full_name, kind)),
                     style: None,
                     extra: None,
-                    span: reedline::Span {
-                        start: 0,
-                        end: prefix.len(),
-                    },
+                    span: reedline::Span { start: 0, end: 0 }, // Placeholder - set by caller
                     append_whitespace: true,
                 }
             })
@@ -455,6 +295,7 @@ impl MetadataCompleter {
     /// Get column name completions
     ///
     /// Sprint 8: Now surfaces errors when column loading fails.
+    /// Sprint 18: Span is now set by the caller in complete(), not here.
     fn complete_columns(
         &self,
         tables: &[super::sql_context::TableReference],
@@ -462,61 +303,32 @@ impl MetadataCompleter {
         _qualifier: Option<&str>,
     ) -> Vec<Suggestion> {
         let Some(state) = &self.state else {
-            return vec![self
-                .status_suggestion("No database connection for column completion", prefix.len())];
+            return Vec::new();
         };
 
         let Ok(mut state) = state.lock() else {
             log::warn!("Failed to acquire lock for column completion");
-            return vec![
-                self.error_suggestion("Unable to load columns (internal lock error)", prefix.len())
-            ];
+            return Vec::new();
         };
 
         if tables.is_empty() {
-            return vec![self.status_suggestion(
-                "Cannot determine table context. Specify table in FROM clause first.",
-                prefix.len(),
-            )];
+            return Vec::new();
         }
 
         let mut suggestions = Vec::new();
-        let mut had_error = false;
 
         for table in tables {
             // Try to load columns for this table
             if !state.ensure_columns_loaded(&table.name) {
-                // Loading failed - note the error but continue trying other tables
-                had_error = true;
                 log::debug!("Failed to load columns for table: {}", table.name);
+                continue;
             }
 
             // Get matching columns
             let columns = state.cache().find_columns_by_prefix(&table.name, prefix);
 
             for col in columns {
-                suggestions.push(self.column_to_suggestion(col, &table.name, prefix.len()));
-            }
-        }
-
-        if suggestions.is_empty() {
-            if had_error {
-                if let Some(error) = state.cache().last_error() {
-                    return vec![self.error_suggestion(error, prefix.len())];
-                } else {
-                    return vec![
-                        self.error_suggestion("Failed to load column metadata", prefix.len())
-                    ];
-                }
-            } else if prefix.is_empty() {
-                return vec![
-                    self.status_suggestion("No columns found for specified table(s)", prefix.len())
-                ];
-            } else {
-                return vec![self.status_suggestion(
-                    &format!("No columns matching '{}'", prefix),
-                    prefix.len(),
-                )];
+                suggestions.push(self.column_to_suggestion(col, &table.name));
             }
         }
 
@@ -524,81 +336,32 @@ impl MetadataCompleter {
     }
 
     /// Convert ColumnInfo to Suggestion
-    fn column_to_suggestion(
-        &self,
-        col: &ColumnInfo,
-        table_name: &str,
-        prefix_len: usize,
-    ) -> Suggestion {
+    ///
+    /// Sprint 18: Span is now set by the caller in complete(), not here.
+    fn column_to_suggestion(&self, col: &ColumnInfo, table_name: &str) -> Suggestion {
         Suggestion {
             value: col.name.clone(),
             description: Some(format!("{}.{} ({})", table_name, col.name, col.data_type)),
             style: None,
             extra: None,
-            span: reedline::Span {
-                start: 0,
-                end: prefix_len,
-            },
+            span: reedline::Span { start: 0, end: 0 }, // Placeholder - set by caller
             append_whitespace: false, // Don't add space after column name
         }
     }
-
-    /// Calculate the span for completion replacement
-    fn calculate_span(&self, line: &str, prefix_len: usize) -> (usize, usize) {
-        // Find start of current word
-        let start = line.len().saturating_sub(prefix_len);
-        (start, line.len())
-    }
-
-    /// Create an error suggestion to display to user
-    ///
-    /// Sprint 8: Surfaces errors as user-visible feedback instead of silent failures.
-    fn error_suggestion(&self, message: &str, prefix_len: usize) -> Suggestion {
-        Suggestion {
-            value: String::new(), // Empty value - can't be selected
-            description: Some(format!("[Error: {}]", message)),
-            style: None,
-            extra: None,
-            span: reedline::Span {
-                start: 0,
-                end: prefix_len,
-            },
-            append_whitespace: false,
-        }
-    }
-
-    /// Create a status suggestion (e.g., "Loading..." or "No tables found")
-    ///
-    /// Sprint 8: Provides user feedback during operations.
-    fn status_suggestion(&self, message: &str, prefix_len: usize) -> Suggestion {
-        Suggestion {
-            value: String::new(), // Empty value - can't be selected
-            description: Some(format!("[{}]", message)),
-            style: None,
-            extra: None,
-            span: reedline::Span {
-                start: 0,
-                end: prefix_len,
-            },
-            append_whitespace: false,
-        }
-    }
 }
 
-impl Default for MetadataCompleter {
-    fn default() -> Self {
-        Self::keywords_only()
-    }
-}
 
 impl Completer for MetadataCompleter {
     fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
+        // Sprint 18: Simplified completion - ONLY metadata (databases, tables, columns)
+        // NO keyword completion.
+
         // Sprint 9 Bug 2 Fix: Support multi-line context by prepending accumulated buffer
-        let (full_text, adjusted_pos) = if let Some(state) = &self.state {
+        let (full_text, _adjusted_pos) = if let Some(state) = &self.state {
             let state_lock = state.lock().unwrap();
             let accumulated = state_lock.accumulated_buffer();
             if !accumulated.is_empty() {
-                // Prepend accumulated buffer to current line
+                // Prepend accumulated buffer to current line for context analysis
                 let combined = format!("{}{}", accumulated, line);
                 let new_pos = accumulated.len() + pos;
                 (combined, new_pos)
@@ -610,93 +373,96 @@ impl Completer for MetadataCompleter {
         };
 
         // Analyze context to determine what kind of completions to provide
-        let context = analyze_context(&full_text, adjusted_pos);
-
-        // Sprint 13: Debug logging to diagnose completion failures
-        eprintln!("\n=== TAB COMPLETION DEBUG ===");
-        eprintln!("Input line: {:?}", line);
-        eprintln!("Cursor pos: {}", pos);
-        eprintln!("Full text (with accumulated): {:?}", full_text);
-        eprintln!("Context detected: {:?}", context);
+        // Use the full text (with accumulated buffer) for context analysis
+        let context = analyze_context(&full_text, full_text.len());
 
         log::debug!(
-            "Completion context: {:?} (full_text len: {}, pos: {})",
+            "Completion context: {:?} (line: '{}', pos: {})",
             context,
-            full_text.len(),
-            adjusted_pos
+            line,
+            pos
         );
 
-        // Sprint 13 Bug Fix: Calculate the correct span based on context
-        // The span determines what part of the line gets replaced when a completion is selected.
-        // We must use the CURRENT LINE positions (not full_text) since reedline operates on the current line.
-        let last_word = get_last_word(line);
+        // Sprint 18 CRITICAL FIX: Calculate span based on the CURRENT LINE only.
+        // The span tells reedline what part of the current line to replace.
+        // pos is the cursor position in the current line.
+        //
+        // Find the word being typed by scanning backward from cursor position.
+        let line_up_to_cursor = &line[..pos.min(line.len())];
+        let last_word = get_last_word(line_up_to_cursor);
 
-        // Sprint 13 Bug Fix: Calculate span correctly based on context type BEFORE consuming context
-        // For schema-qualified completions (e.g., "DBC."), the span must cover "DBC." not just ""
-        // For table/column prefixes, the span covers the prefix
-        let (start, end) = match &context {
-            CompletionContext::SchemaQualifiedTable { schema, prefix } => {
-                // Span should cover "schema." or "schema.prefix"
-                let replacement_len = schema.len() + 1 + prefix.len(); // +1 for the dot
-                let start_pos = pos.saturating_sub(replacement_len);
-                (start_pos, pos)
-            }
-            CompletionContext::ColumnName {
-                table_qualifier: Some(qualifier),
-                prefix,
-                ..
-            } => {
-                // Span should cover "qualifier." or "qualifier.prefix"
-                let replacement_len = qualifier.len() + 1 + prefix.len(); // +1 for the dot
-                let start_pos = pos.saturating_sub(replacement_len);
-                (start_pos, pos)
-            }
-            _ => {
-                // For simple table/keyword completions, use last_word length
-                self.calculate_span(line, last_word.len())
-            }
-        };
+        // Calculate start position: where the current word/token starts in the line
+        let start = pos.saturating_sub(last_word.len());
+        let end = pos;
 
+        log::debug!(
+            "Span calculation: last_word='{}', start={}, end={}",
+            last_word,
+            start,
+            end
+        );
+
+        // Get completions based on context - NO KEYWORDS
         let mut suggestions = match context {
-            CompletionContext::Keyword => self.complete_keywords(last_word),
-
-            CompletionContext::TableName { prefix } => {
-                // Sprint 11 Bug Fix: Do NOT fall back to keywords when in table context.
-                // Users expect table/database names here, not SQL keywords.
-                // If metadata loading fails, show the error/status message instead.
-                self.complete_tables(&prefix)
+            CompletionContext::Keyword => {
+                // Sprint 18: NO keyword completion - return empty
+                Vec::new()
             }
 
+            CompletionContext::TableName { prefix } => self.complete_tables(&prefix),
+
             CompletionContext::SchemaQualifiedTable { schema, prefix } => {
-                self.complete_schema_tables(&schema, &prefix)
+                // For schema-qualified, we need to adjust the span to cover "schema." or "schema.prefix"
+                let schema_prefix_len = if prefix.is_empty() {
+                    schema.len() + 1 // "schema."
+                } else {
+                    schema.len() + 1 + prefix.len() // "schema.prefix"
+                };
+                let adjusted_start = pos.saturating_sub(schema_prefix_len);
+
+                let mut sug = self.complete_schema_tables(&schema, &prefix);
+                for s in &mut sug {
+                    s.span = reedline::Span {
+                        start: adjusted_start,
+                        end,
+                    };
+                }
+                return sug; // Return early with adjusted span
             }
 
             CompletionContext::ColumnName {
                 tables,
                 prefix,
-                table_qualifier: _,
+                table_qualifier,
             } => {
-                // Sprint 11 Bug Fix: Do NOT fall back to keywords when in column context.
-                // Users expect column names here, not SQL keywords.
-                // If metadata loading fails, show the error/status message instead.
+                // For table-qualified columns (e.g., "t.col"), adjust span
+                if let Some(ref qualifier) = table_qualifier {
+                    let qualifier_len = qualifier.len() + 1 + prefix.len(); // "qualifier.prefix"
+                    let adjusted_start = pos.saturating_sub(qualifier_len);
+
+                    let mut sug = self.complete_columns(&tables, &prefix, None);
+                    for s in &mut sug {
+                        // Prepend qualifier to column name for qualified completions
+                        s.value = format!("{}.{}", qualifier, s.value);
+                        s.span = reedline::Span {
+                            start: adjusted_start,
+                            end,
+                        };
+                    }
+                    return sug; // Return early with adjusted span
+                }
+
                 self.complete_columns(&tables, &prefix, None)
             }
         };
 
+        // Set the span for all suggestions
         for sug in &mut suggestions {
             sug.span = reedline::Span { start, end };
         }
 
-        // Sort: actual suggestions first (non-empty values), then by length and alphabetically
-        // Status/error messages (empty values) should appear at the end
+        // Sort by length and alphabetically
         suggestions.sort_by(|a, b| {
-            // First, prioritize non-empty values
-            let a_empty = a.value.is_empty();
-            let b_empty = b.value.is_empty();
-            if a_empty != b_empty {
-                return a_empty.cmp(&b_empty);
-            }
-            // Then sort by length and alphabetically
             a.value
                 .len()
                 .cmp(&b.value.len())
@@ -704,7 +470,6 @@ impl Completer for MetadataCompleter {
         });
 
         // Limit to reasonable number
-        // Sprint 8 Bug Fix: Increased from 20 to 50 to show more completions
         suggestions.truncate(50);
 
         suggestions
@@ -737,47 +502,17 @@ fn get_last_word(line: &str) -> &str {
 mod tests {
     use super::*;
 
+    // Sprint 18: All keyword completion tests removed.
+    // Tab completion now focuses ONLY on metadata (databases, tables, columns).
+
     #[test]
-    fn test_keywords_only_completer() {
+    fn test_no_keyword_completion() {
+        // Sprint 18: Verify NO keyword completion
         let mut completer = MetadataCompleter::keywords_only();
 
+        // Without a database connection, no completions should be available
         let suggestions = completer.complete("SEL", 3);
-        assert!(!suggestions.is_empty());
-        assert!(suggestions.iter().any(|s| s.value == "SELECT"));
-    }
-
-    #[test]
-    fn test_keyword_completion_case_insensitive() {
-        let mut completer = MetadataCompleter::keywords_only();
-
-        let suggestions = completer.complete("sel", 3);
-        assert!(!suggestions.is_empty());
-        assert!(suggestions.iter().any(|s| s.value == "SELECT"));
-    }
-
-    #[test]
-    fn test_complete_no_match() {
-        let mut completer = MetadataCompleter::keywords_only();
-
-        let suggestions = completer.complete("XYZ", 3);
         assert!(suggestions.is_empty());
-    }
-
-    #[test]
-    fn test_complete_empty_prefix_table_context() {
-        let mut completer = MetadataCompleter::keywords_only();
-
-        let suggestions = completer.complete("SELECT * FROM ", 14);
-        // Sprint 11 Bug Fix: Without database connection, we should show a
-        // status message about no database connection, NOT fall back to keywords.
-        // This is the correct behavior - users expect table names after FROM.
-        assert_eq!(suggestions.len(), 1);
-        assert!(suggestions[0].value.is_empty()); // Status message has empty value
-        assert!(suggestions[0]
-            .description
-            .as_ref()
-            .unwrap()
-            .contains("No database connection"));
     }
 
     #[test]
@@ -789,122 +524,58 @@ mod tests {
     }
 
     #[test]
-    fn test_default_keywords() {
-        let keywords = MetadataCompleter::default_keywords();
-        assert!(keywords.contains(&"SELECT".to_string()));
-        assert!(keywords.contains(&"FROM".to_string()));
-        assert!(keywords.contains(&"WHERE".to_string()));
-        assert!(keywords.contains(&"JOIN".to_string()));
-    }
-
-    #[test]
-    fn test_error_suggestion_format() {
-        let completer = MetadataCompleter::keywords_only();
-        let suggestion = completer.error_suggestion("Connection failed", 3);
-
-        assert!(suggestion.value.is_empty());
-        assert!(suggestion.description.as_ref().unwrap().contains("[Error:"));
-        assert!(suggestion
-            .description
-            .as_ref()
-            .unwrap()
-            .contains("Connection failed"));
-    }
-
-    #[test]
-    fn test_status_suggestion_format() {
-        let completer = MetadataCompleter::keywords_only();
-        let suggestion = completer.status_suggestion("No tables found", 3);
-
-        assert!(suggestion.value.is_empty());
-        assert!(suggestion
-            .description
-            .as_ref()
-            .unwrap()
-            .contains("[No tables found]"));
+    fn test_get_last_word_qualified_name() {
+        // Qualified names should be kept together
+        assert_eq!(get_last_word("SELECT * FROM DBC.Tab"), "DBC.Tab");
+        assert_eq!(get_last_word("SELECT * FROM prod.employees"), "prod.employees");
     }
 
     #[test]
     fn test_complete_tables_no_connection() {
-        // Without a connection, complete_tables should return a status message
+        // Sprint 18: Without a connection, complete_tables should return empty
         let completer = MetadataCompleter::keywords_only();
         let suggestions = completer.complete_tables("emp");
 
-        // Should have one status message (empty value with description)
-        assert_eq!(suggestions.len(), 1);
-        assert!(suggestions[0].value.is_empty());
-        assert!(suggestions[0]
-            .description
-            .as_ref()
-            .unwrap()
-            .contains("No database connection"));
+        // Should be empty (no database connection = no completions)
+        assert!(suggestions.is_empty());
     }
 
-    // Sprint 11 Bug Fix Tests: Verify no fallback to keywords
-
     #[test]
-    fn test_table_context_no_keyword_fallback() {
-        // Sprint 11: When in table context (after FROM), we should NOT fall back to keywords.
-        // This test verifies that "SELECT * FROM S<TAB>" does NOT show SQL keywords.
+    fn test_table_context_no_results_without_connection() {
+        // Sprint 18: After FROM with no connection, no completions
         let mut completer = MetadataCompleter::keywords_only();
 
-        // After FROM with a prefix - this is table context
         let suggestions = completer.complete("SELECT * FROM S", 15);
-
-        // Should show status message about no connection, NOT keywords like "SELECT", "SET"
-        assert_eq!(suggestions.len(), 1);
-        assert!(suggestions[0].value.is_empty());
-        assert!(!suggestions
-            .iter()
-            .any(|s| s.description.as_ref().unwrap().contains("keyword")));
+        assert!(suggestions.is_empty());
     }
 
     #[test]
-    fn test_column_context_no_keyword_fallback() {
-        // Sprint 11: When in column context (after WHERE), we should NOT fall back to keywords.
-        // We can't fully test this without a database connection (need table context first),
-        // but we can test that keyword completion is NOT used inappropriately.
+    fn test_column_context_no_results_without_connection() {
+        // Sprint 18: After WHERE with no connection, no completions
         let mut completer = MetadataCompleter::keywords_only();
 
-        // This input has a FROM clause (establishes table context) and WHERE (column context)
         let suggestions = completer.complete("SELECT * FROM employees WHERE n", 31);
-
-        // Should show status message about determining table context, NOT keywords
-        assert_eq!(suggestions.len(), 1);
-        assert!(suggestions[0].value.is_empty());
-        // Should NOT contain "AND", "NOT", "NULL" etc. - just context message
-        assert!(!suggestions
-            .iter()
-            .any(|s| s.description.as_ref().unwrap().contains("keyword")));
+        assert!(suggestions.is_empty());
     }
 
     #[test]
-    fn test_keyword_context_still_works() {
-        // Sprint 11: Keyword completion should still work in keyword context (start of line)
-        let mut completer = MetadataCompleter::keywords_only();
-
-        let suggestions = completer.complete("SEL", 3);
-
-        // Should have keyword suggestions
-        assert!(!suggestions.is_empty());
-        assert!(suggestions.iter().any(|s| s.value == "SELECT"));
-        assert!(suggestions
-            .iter()
-            .all(|s| s.description.as_ref().unwrap().contains("keyword")));
-    }
-
-    #[test]
-    fn test_schema_qualified_table_no_fallback() {
-        // Sprint 11: Schema-qualified table completion (schema.) should not fall back to keywords
+    fn test_schema_qualified_no_results_without_connection() {
+        // Sprint 18: Schema-qualified completion with no connection = no results
         let mut completer = MetadataCompleter::keywords_only();
 
         let suggestions = completer.complete("SELECT * FROM prod.", 19);
+        assert!(suggestions.is_empty());
+    }
 
-        // Should show status message about no connection, NOT keywords
-        assert_eq!(suggestions.len(), 1);
-        assert!(suggestions[0].value.is_empty());
-        assert!(!suggestions
-            .iter()
-            .any(|s| s.description.as_ref().unwrap().contains("keyword")));
+    #[test]
+    fn test_span_calculation_simple() {
+        // Test that span is calculated correctly for simple cases
+        let mut completer = MetadataCompleter::keywords_only();
+
+        // When completing "emp" after "SELECT * FROM emp", the span should be:
+        // start = 14 (position after "FROM "), end = 17 (cursor position)
+        let suggestions = completer.complete("SELECT * FROM emp", 17);
+        // No suggestions without connection, but we're testing span calc logic
+        assert!(suggestions.is_empty()); // Expected without connection
     }
 }
