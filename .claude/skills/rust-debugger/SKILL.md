@@ -1,6 +1,6 @@
 ---
 name: rust-code-debugger
-description: Diagnoses and fixes Rust compile errors, borrow-checker issues, runtime panics, and logic bugs with clear explanations and idiomatic solutions.
+description: Diagnoses and fixes Rust compile errors, borrow-checker issues, and runtime panics. Use when encountering compilation errors, debugging runtime issues, or fixing borrow-checker conflicts.
 ---
 
 # Rust Code Debugger

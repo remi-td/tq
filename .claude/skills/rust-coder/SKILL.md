@@ -1,6 +1,6 @@
 ---
 name: rust-coder
-description: Guides Claude in writing idiomatic, efficient, well-structured Rust code using proper data modeling, traits, impl organization, macros, and build-speed best practices based on official Rust style guide principles. Includes comprehensive CLI application development guidance with clap, anyhow, testing, and distribution strategies.
+description: Guides writing idiomatic, efficient Rust code using proper data modeling, traits, and CLI patterns. Use when implementing new Rust code, refactoring existing code, or reviewing Rust patterns.
 ---
 
 # Rust Coder
