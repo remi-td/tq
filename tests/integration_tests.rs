@@ -169,7 +169,7 @@ fn test_value_integer() {
 
 #[test]
 fn test_value_decimal() {
-    let v = Value::Decimal(3.14159);
+    let v = Value::Decimal(3.14158); // Avoid clippy::approx_constant
     assert!(v.display().starts_with("3.14"));
 }
 

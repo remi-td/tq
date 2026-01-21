@@ -220,9 +220,6 @@ const SQL_FUNCTIONS: &[&str] = &[
     "DECODE",
 ];
 
-/// SQL operators that get special highlighting
-const SQL_OPERATORS: &[&str] = &["AND", "OR", "NOT", "IN", "EXISTS", "BETWEEN", "LIKE", "IS"];
-
 /// SQL syntax highlighter implementing reedline's Highlighter trait
 #[derive(Clone)]
 pub struct SqlHighlighter {
@@ -282,12 +279,6 @@ impl SqlHighlighter {
     fn is_function(word: &str) -> bool {
         let upper = word.to_uppercase();
         SQL_FUNCTIONS.contains(&upper.as_str())
-    }
-
-    /// Check if a word is a SQL operator keyword
-    fn is_operator_keyword(word: &str) -> bool {
-        let upper = word.to_uppercase();
-        SQL_OPERATORS.contains(&upper.as_str())
     }
 
     /// Tokenize and highlight SQL text
@@ -415,14 +406,9 @@ impl SqlHighlighter {
         if self.is_number(word) {
             styled.push((self.number_style, word.to_string()));
         }
-        // Check if it's a keyword
+        // Check if it's a keyword (includes operator keywords, all get same style)
         else if Self::is_keyword(word) {
-            // Operator keywords get different treatment
-            if Self::is_operator_keyword(word) {
-                styled.push((self.keyword_style, word.to_string()));
-            } else {
-                styled.push((self.keyword_style, word.to_string()));
-            }
+            styled.push((self.keyword_style, word.to_string()));
         }
         // Check if it's a function (word followed by parenthesis would be checked
         // at call site, but we highlight known functions anyway)

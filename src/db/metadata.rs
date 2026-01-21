@@ -239,7 +239,7 @@ impl MetadataCache {
                 let mut tables = Vec::with_capacity(result.row_count);
 
                 for row in &result.rows {
-                    let schema = row.get(0).map(|v| v.display()).unwrap_or_default();
+                    let schema = row.first().map(|v| v.display()).unwrap_or_default();
                     let table = row.get(1).map(|v| v.display()).unwrap_or_default();
                     let kind = row.get(2).map(|v| v.display()).unwrap_or_default();
 
@@ -319,7 +319,7 @@ impl MetadataCache {
                 let mut columns = Vec::with_capacity(result.row_count);
 
                 for row in &result.rows {
-                    let name = row.get(0).map(|v| v.display()).unwrap_or_default();
+                    let name = row.first().map(|v| v.display()).unwrap_or_default();
                     let data_type = row.get(1).map(|v| v.display()).unwrap_or_default();
                     let nullable = row.get(2).map(|v| v.display() == "1").unwrap_or(true);
 

@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Complete application configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     /// Connection settings
@@ -35,17 +35,6 @@ pub struct Config {
     /// Named connection profiles
     #[serde(default)]
     pub profiles: HashMap<String, ConnectionSettings>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            connection: ConnectionSettings::default(),
-            output: OutputSettings::default(),
-            repl: ReplSettings::default(),
-            profiles: HashMap::new(),
-        }
-    }
 }
 
 /// Connection-related settings

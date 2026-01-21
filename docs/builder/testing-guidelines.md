@@ -1,6 +1,194 @@
 # Testing Guidelines for tq
 
-This document provides testing methodology, patterns, and best practices for validating the tq CLI tool. It serves as a quick reference for designing and executing quality validation tests.
+**Version:** 3.0.0
+**Last Updated:** 2026-01-21
+**Purpose:** Testing methodology, patterns, and best practices for validating the tq CLI tool
+
+This document provides comprehensive testing guidance for the Quality Validator agent and serves as a quick reference for designing and executing quality validation tests.
+
+---
+
+## Core Testing Philosophy
+
+### Test What Users See, Not Just What Code Does
+
+**Key Principle from Sprint 13:** Tests must validate the user experience, not just the implementation mechanics.
+
+**Bad Testing Approach:**
+- Test verifies Tab key triggers completion mechanism
+- Test checks that output contains some text
+- Test confirms function returns without error
+
+**Good Testing Approach:**
+- Test verifies Tab after FROM shows database names (not keywords)
+- Test checks that output contains semantically correct content
+- Test confirms function returns the correct result for the use case
+
+**Why This Matters:**
+- Sprint 11 bugs: Tab completion showed "(SQL keyword)" instead of table names - tests passed because mechanism worked, but content was wrong
+- Sprint 11 bugs: Table display had broken alignment - tests passed because columns existed, but layout was broken
+- **Unit tests validate code logic. Interactive tests validate user experience.**
+
+### The Testing Contract
+
+> "If a feature is specified, it has a test. If a test exists, it passes. If it passes, the spec is accurate."
+
+This contract ensures:
+1. No untested features ship
+2. Test failures mean real problems (not false positives)
+3. Specifications reflect implementation reality
+
+---
+
+## Test Type Classification
+
+### When to Use Which Test Type
+
+Understanding when to use unit vs integration vs interactive tests is critical for effective validation.
+
+#### Unit Tests
+
+**Purpose:** Validate individual functions, logic, and algorithms in isolation.
+
+**Use For:**
+- Pure functions (input → output, no side effects)
+- Data transformations and parsing
+- Business logic and calculations
+- Error handling logic
+- Type conversions
+
+**Characteristics:**
+- Fast execution (<1ms per test)
+- No external dependencies (mock database, file I/O, network)
+- Deterministic (same input = same output always)
+- Test single function/module in isolation
+
+**Examples:**
+```rust
+// Good: Unit test for SQL parsing logic
+#[test]
+fn test_parse_connection_string() {
+    let result = parse_connection_string("user:pass@host:1025/db");
+    assert_eq!(result.user, "user");
+    assert_eq!(result.host, "host");
+}
+
+// Good: Unit test for format conversion
+#[test]
+fn test_format_table_cell() {
+    let cell = format_cell("test", 10, Alignment::Left);
+    assert_eq!(cell, "test      ");
+}
+```
+
+**When NOT to Use:**
+- Testing REPL interactive features (use interactive tests)
+- Testing database queries (use integration tests)
+- Testing user-facing behavior (use integration or interactive tests)
+
+#### Integration Tests
+
+**Purpose:** Validate end-to-end workflows with real external dependencies.
+
+**Use For:**
+- CLI command execution (full invocation)
+- Database query execution with real connections
+- File I/O operations
+- Pipeline integration (stdin/stdout)
+- Output format validation (JSON, CSV, table)
+- Exit code correctness
+
+**Characteristics:**
+- Slower execution (100ms-1s per test)
+- Real external dependencies (database, file system)
+- Test entire workflow from command input to output
+- May require test fixtures or test database
+
+**Examples:**
+```rust
+// Good: Integration test for query command
+#[test]
+fn test_query_command_json_output() {
+    let output = Command::new("./target/release/tq")
+        .arg("query")
+        .arg("SELECT 1 AS test")
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(0));
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json[0]["test"], 1);
+}
+```
+
+**When NOT to Use:**
+- Testing pure logic functions (use unit tests)
+- Testing REPL interactive behavior (use interactive tests)
+- When test database not available (use unit tests with mocks)
+
+#### Interactive Tests (REPL Features ONLY)
+
+**Purpose:** Validate REPL interactive features as users experience them.
+
+**Use For:**
+- Tab completion content and context awareness
+- Multi-line editing and line preservation
+- Prompt rendering (colors, format)
+- History persistence and recall
+- Metacommands (output and side effects)
+- Table display alignment and truncation
+- Syntax highlighting appearance
+- Error message display
+
+**Characteristics:**
+- Slowest execution (1-5s per test)
+- Spawns real tq REPL process
+- Simulates keyboard input (Tab, Enter, arrows)
+- Captures and parses visual output
+- **MANDATORY for all REPL features**
+
+**Examples:**
+```rust
+// Good: Interactive test for tab completion
+#[test]
+fn test_tab_completion_after_from_shows_databases() {
+    let mut repl = spawn_repl().unwrap();
+
+    repl.send_line("SELECT * FROM ").unwrap();
+    repl.send(Key::Tab).unwrap();
+
+    let output = repl.read_until_prompt().unwrap();
+
+    // Verify semantic correctness
+    assert!(output.contains("my_database"), "Should show database names");
+    assert!(!output.contains("SELECT"), "Should NOT show SQL keywords");
+    assert!(!output.contains("(SQL keyword)"), "Should NOT show placeholder text");
+}
+```
+
+**When NOT to Use:**
+- Testing batch mode commands (use integration tests)
+- Testing pure logic (use unit tests)
+- When interactive test framework not available (build it first)
+
+### Decision Tree: Which Test Type?
+
+```
+Is it a REPL interactive feature?
+├─ YES → Interactive Test (mandatory)
+│         + Integration test for underlying logic
+│         + Unit tests for parsing/formatting
+│
+└─ NO → Does it require database/file I/O?
+    ├─ YES → Integration Test
+    │         + Unit tests for logic components
+    │
+    └─ NO → Unit Test
+```
+
+---
 
 ## Testing Approach
 
@@ -972,11 +1160,19 @@ echo "SELECT 1" | ./target/release/tq query
 
 ---
 
-**Document Version**: 2.0
-**Last Updated**: 2026-01-18
-**Based on**: tq Sprint 11 testing (commit a1c02cd)
-**Author**: quality-validator agent
+---
 
-**Version History:**
-- v2.0 (2026-01-18): Sprint 11 lessons added - visual/interactive feature testing requirements
-- v1.0 (2026-01-17): Initial version from Sprint 10 testing
+## Document History
+
+| Date | Version | Changes | Author |
+|------|---------|---------|--------|
+| 2026-01-21 | 3.0.0 | Added "Test What Users See" philosophy, test type classification decision tree, interactive testing requirements clarified | CLI UX Designer |
+| 2026-01-18 | 2.0.0 | Sprint 11 lessons added - visual/interactive feature testing requirements | Quality Validator |
+| 2026-01-17 | 1.0.0 | Initial version from Sprint 10 testing | Quality Validator |
+
+---
+
+**See Also:**
+- [Testing Checklist](testing-checklist.md) - Phase-specific testing requirements
+- [Definition of Done](definitions/done.md) - Sprint completion criteria
+- Interactive test examples: `tests/interactive_tests.rs`

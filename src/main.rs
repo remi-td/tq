@@ -1,3 +1,4 @@
+#![deny(warnings)]
 //! tq - Teradata Query CLI
 //!
 //! Entry point for the tq command-line tool.

@@ -123,7 +123,10 @@ mod tests {
         // Sprint 13: Prompt now includes Teradata orange ANSI color codes
         let rendered = stateful.render_prompt_left();
         assert!(rendered.contains("tq> "), "Prompt should contain 'tq> '");
-        assert!(rendered.contains("\x1b[38;2;243;112;33m"), "Prompt should have Teradata orange color");
+        assert!(
+            rendered.contains("\x1b[38;2;243;112;33m"),
+            "Prompt should have Teradata orange color"
+        );
     }
 
     #[test]
@@ -137,6 +140,9 @@ mod tests {
         // Sprint 13: Continuation prompt now includes Teradata orange ANSI color codes
         let rendered = stateful.render_prompt_left();
         assert!(rendered.contains("...> "), "Prompt should contain '...> '");
-        assert!(rendered.contains("\x1b[38;2;243;112;33m"), "Prompt should have Teradata orange color");
+        assert!(
+            rendered.contains("\x1b[38;2;243;112;33m"),
+            "Prompt should have Teradata orange color"
+        );
     }
 }

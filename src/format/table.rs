@@ -138,7 +138,7 @@ fn select_visible_columns(
         let remaining_columns = total_columns - idx - 1;
         if remaining_columns > 0 {
             // Not the last column - need room for truncation indicator
-            if new_width + truncation_width + 1 <= term_width {
+            if new_width + truncation_width < term_width {
                 // +1 for right border
                 visible.push(idx);
                 widths.push(col_width);
@@ -148,7 +148,7 @@ fn select_visible_columns(
             }
         } else {
             // Last column - no truncation indicator needed
-            if new_width + 1 <= term_width {
+            if new_width < term_width {
                 // +1 for right border
                 visible.push(idx);
                 widths.push(col_width);
@@ -160,10 +160,7 @@ fn select_visible_columns(
 
     // Ensure at least one column is shown
     if visible.is_empty() && !column_names.is_empty() {
-        let values: Vec<String> = column_values
-            .iter()
-            .map(|row| row[0].clone())
-            .collect();
+        let values: Vec<String> = column_values.iter().map(|row| row[0].clone()).collect();
         let col_width = calculate_column_width(&column_names[0], &values, 100);
         visible.push(0);
         widths.push(col_width);
@@ -305,7 +302,11 @@ fn render_header_row(
     // Add truncation indicator
     if selection.hidden_count > 0 {
         let indicator = format!("(+{} cols)", selection.hidden_count);
-        row.push_str(&format!(" {:width$}", indicator, width = truncation_width - 2));
+        row.push_str(&format!(
+            " {:width$}",
+            indicator,
+            width = truncation_width - 2
+        ));
         row.push_str(" │");
     }
 

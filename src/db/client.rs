@@ -441,7 +441,10 @@ impl DatabaseClient {
                 clean_error
             )
         } else if error.contains("timeout") || error.contains("Timeout") {
-            format!("Connection timeout. Check network connectivity. {}", clean_error)
+            format!(
+                "Connection timeout. Check network connectivity. {}",
+                clean_error
+            )
         } else if error.contains("Invalid credentials")
             || error.contains("Logon failed")
             || error.contains("Authentication")
@@ -816,7 +819,10 @@ mod tests {
         // Test with full Go stack trace
         let error_with_trace = "[Version 20.0.49] [Session 1429] [Teradata Database] [Error 3707] Syntax error\n at gosqldriver/teradatasql.formatError ErrorUtil.go:101\n at gosqldriver/teradatasql.(*teradataConnection).formatDatabaseError ErrorUtil.go:210";
         let cleaned = strip_go_stack_trace(error_with_trace);
-        assert_eq!(cleaned, "[Version 20.0.49] [Session 1429] [Teradata Database] [Error 3707] Syntax error");
+        assert_eq!(
+            cleaned,
+            "[Version 20.0.49] [Session 1429] [Teradata Database] [Error 3707] Syntax error"
+        );
         assert!(!cleaned.contains(" at "));
         assert!(!cleaned.contains("gosqldriver"));
 

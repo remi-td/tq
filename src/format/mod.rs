@@ -15,7 +15,7 @@ use crate::error::Result;
 use std::io::Write;
 
 /// Format options combining all format-specific options
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FormatOptions {
     /// Table formatting options
     pub table: table::TableOptions,
@@ -23,16 +23,6 @@ pub struct FormatOptions {
     pub json: json::JsonOptions,
     /// CSV formatting options
     pub csv: csv::CsvOptions,
-}
-
-impl Default for FormatOptions {
-    fn default() -> Self {
-        Self {
-            table: table::TableOptions::default(),
-            json: json::JsonOptions::default(),
-            csv: csv::CsvOptions::default(),
-        }
-    }
 }
 
 impl FormatOptions {

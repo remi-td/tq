@@ -1,3 +1,4 @@
+#![deny(warnings)]
 //! # tq - Teradata Query
 //!
 //! A fast, lightweight command-line client for Teradata databases.

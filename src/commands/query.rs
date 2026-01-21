@@ -89,10 +89,7 @@ impl BatchExecutionError {
         );
 
         // Add statement preview
-        msg.push_str(&format!(
-            "\nStatement: {}\n",
-            self.statement.preview(80)
-        ));
+        msg.push_str(&format!("\nStatement: {}\n", self.statement.preview(80)));
 
         // Add execution context
         if self.successful_count > 0 {
@@ -329,7 +326,8 @@ fn execute_batch<W: Write>(
                     )?;
 
                     // Add separator between result sets for readability
-                    if statement.statement_number < total_count && args.format == OutputFormat::Table
+                    if statement.statement_number < total_count
+                        && args.format == OutputFormat::Table
                     {
                         writeln!(writer)?;
                     }
@@ -607,7 +605,10 @@ mod tests {
         assert_eq!(get_statement_type("CREATE TABLE t (x INT)"), "CREATE");
         // Comments are skipped to find the real statement type
         assert_eq!(get_statement_type("-- Comment\nSELECT 1"), "SELECT");
-        assert_eq!(get_statement_type("/* Block comment */\nUPDATE t SET x = 1"), "UPDATE");
+        assert_eq!(
+            get_statement_type("/* Block comment */\nUPDATE t SET x = 1"),
+            "UPDATE"
+        );
     }
 
     #[test]

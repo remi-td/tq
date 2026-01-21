@@ -10,7 +10,7 @@ use std::time::Duration;
 
 /// Helper to spawn tq REPL with standard test flags
 fn spawn_tq_repl() -> expectrl::Session {
-    let bin_path = assert_cmd::cargo::cargo_bin("tq");
+    let bin_path = assert_cmd::cargo::cargo_bin!("tq");
     let cmd = format!(
         "{} repl --no-syntax-highlight --no-pager",
         bin_path.display()
@@ -172,7 +172,9 @@ fn test_execute_simple_query() {
 
     // Check for cursor position error (PTY limitation)
     if output.contains("cursor position") {
-        eprintln!("Warning: Cursor position detection failed in PTY - skipping query result validation");
+        eprintln!(
+            "Warning: Cursor position detection failed in PTY - skipping query result validation"
+        );
         p.send("\x03").expect("Failed to send Ctrl-C");
         std::thread::sleep(Duration::from_millis(200));
         p.send_line("/quit").expect("Failed to send quit");
@@ -185,7 +187,10 @@ fn test_execute_simple_query() {
         let has_column = output.contains("test_value") || output.contains("TEST_VALUE");
         let has_value = output.contains("1");
         if !has_column || !has_value {
-            eprintln!("Warning: Expected 'test_value' column and '1' value, got: {}", output);
+            eprintln!(
+                "Warning: Expected 'test_value' column and '1' value, got: {}",
+                output
+            );
         }
     }
 
@@ -235,10 +240,16 @@ fn test_tab_completion_shows_tables_not_keywords() {
     let output = read_available_output(&mut p);
 
     // Check for bug behavior: SQL keywords should NOT appear
-    assert!(!output.contains("(SQL keyword)"),
-        "Bug detected: Tab completion showing SQL keywords instead of tables. Output: {}", output);
-    assert!(!output.contains("SELECT") || output.contains("SELECT *"),
-        "Bug detected: SELECT keyword shown in completion. Output: {}", output);
+    assert!(
+        !output.contains("(SQL keyword)"),
+        "Bug detected: Tab completion showing SQL keywords instead of tables. Output: {}",
+        output
+    );
+    assert!(
+        !output.contains("SELECT") || output.contains("SELECT *"),
+        "Bug detected: SELECT keyword shown in completion. Output: {}",
+        output
+    );
 
     // Clear and exit
     p.send("\x03").expect("Failed to send Ctrl-C"); // Cancel current input
@@ -280,17 +291,20 @@ fn test_tab_completion_dbc_tables() {
     let output = read_available_output(&mut p);
 
     // Primary assertion: Should NOT show SQL keywords - this is the bug we're testing for
-    assert!(!output.contains("(SQL keyword)"),
-        "Bug detected: Tab completion showing SQL keywords for DBC.. Output: {}", output);
+    assert!(
+        !output.contains("(SQL keyword)"),
+        "Bug detected: Tab completion showing SQL keywords for DBC.. Output: {}",
+        output
+    );
 
     // In PTY environments, completion menu rendering may have issues with cursor position
     // The key validation is that keywords don't appear - the positive assertion is secondary
-    let has_dbc_tables = output.contains("Tables") ||
-                          output.contains("Columns") ||
-                          output.contains("Databases") ||
-                          output.contains("(table)") ||
-                          output.contains("(view)") ||
-                          output.contains("DBC.");
+    let has_dbc_tables = output.contains("Tables")
+        || output.contains("Columns")
+        || output.contains("Databases")
+        || output.contains("(table)")
+        || output.contains("(view)")
+        || output.contains("DBC.");
     let has_status_message = output.contains("[") && output.contains("]");
     let has_cursor_error = output.contains("cursor position");
 
@@ -349,7 +363,9 @@ fn test_wide_table_truncation_in_tty() {
     if has_cursor_error {
         // PTY environment limitation - reedline cannot detect terminal size
         // Skip the rest of the test but log a warning
-        eprintln!("Warning: Cursor position detection failed in PTY - skipping table format validation");
+        eprintln!(
+            "Warning: Cursor position detection failed in PTY - skipping table format validation"
+        );
         eprintln!("This is a known limitation when running reedline in expectrl's pseudo-terminal");
 
         // Still exit cleanly
@@ -361,32 +377,36 @@ fn test_wide_table_truncation_in_tty() {
     }
 
     // Verify the output is formatted as a table (has box-drawing characters)
-    let has_table_format = output.contains("│") ||
-                           output.contains("|") ||
-                           output.contains("─") ||
-                           output.contains("-");
-    assert!(has_table_format, "Expected table formatting, got: {}", output);
+    let has_table_format = output.contains("│")
+        || output.contains("|")
+        || output.contains("─")
+        || output.contains("-");
+    assert!(
+        has_table_format,
+        "Expected table formatting, got: {}",
+        output
+    );
 
     // Verify truncation indicator is present (wide table should be truncated)
     // The indicator format is "(+n cols)" where n is the number of hidden columns
     let has_truncation_indicator = output.contains("(+") && output.contains(" cols)");
 
     // Also verify the hidden columns message appears
-    let has_hidden_message = output.contains("columns hidden") ||
-                             output.contains("Use --format");
+    let has_hidden_message = output.contains("columns hidden") || output.contains("Use --format");
 
     // In TTY mode, we expect truncation for wide tables
     // Note: If running in non-TTY mode (CI), all columns are shown
     if has_truncation_indicator || has_hidden_message {
         // Good - truncation is working
-        assert!(true, "Truncation indicator found - bug fix working");
+        // Truncation indicator found - bug fix working
     } else {
         // Verify that output is not chaotic (has consistent structure)
         // A chaotic output would have misaligned columns or scattered data
         let lines: Vec<&str> = output.lines().collect();
 
         // Count lines that look like proper table rows (contain column separators)
-        let table_rows: Vec<&str> = lines.iter()
+        let table_rows: Vec<&str> = lines
+            .iter()
             .filter(|line| line.contains('│') || line.contains('|'))
             .cloned()
             .collect();
@@ -395,7 +415,7 @@ fn test_wide_table_truncation_in_tty() {
         // This is acceptable - the bug was about TTY mode chaos
         if !table_rows.is_empty() {
             // Table structure looks consistent
-            assert!(true, "Table has consistent structure in batch mode");
+            // Table has consistent structure in batch mode
         } else {
             // Could be batch mode without box drawing
             eprintln!("Warning: No table structure detected, output may be in simple format");
@@ -432,7 +452,9 @@ fn test_narrow_query_no_truncation() {
 
     // Check for cursor position error (PTY limitation)
     if output.contains("cursor position") {
-        eprintln!("Warning: Cursor position detection failed in PTY - skipping narrow query validation");
+        eprintln!(
+            "Warning: Cursor position detection failed in PTY - skipping narrow query validation"
+        );
         p.send("\x03").expect("Failed to send Ctrl-C");
         std::thread::sleep(Duration::from_millis(200));
         p.send_line("/quit").expect("Failed to send quit");
@@ -442,8 +464,11 @@ fn test_narrow_query_no_truncation() {
 
     // Should NOT have truncation for simple queries
     let has_truncation = output.contains("(+") && output.contains(" cols)");
-    assert!(!has_truncation,
-        "Unexpected truncation for narrow query. Output: {}", output);
+    assert!(
+        !has_truncation,
+        "Unexpected truncation for narrow query. Output: {}",
+        output
+    );
 
     // Should have the expected result (if output was captured)
     if !output.is_empty() && !output.contains("Error") {
@@ -451,7 +476,10 @@ fn test_narrow_query_no_truncation() {
         let has_id = output.contains("id") || output.contains("ID");
         let has_value = output.contains("1");
         if !has_id || !has_value {
-            eprintln!("Warning: Expected 'id' column and value '1', got: {}", output);
+            eprintln!(
+                "Warning: Expected 'id' column and value '1', got: {}",
+                output
+            );
         }
     }
 
@@ -485,7 +513,8 @@ fn test_multiline_tab_completion_context_preserved() {
     let _ = read_available_output(&mut p);
 
     // Type first line of multi-line query (no semicolon = incomplete)
-    p.send("SELECT * FROM DBC.").expect("Failed to send first line");
+    p.send("SELECT * FROM DBC.")
+        .expect("Failed to send first line");
     std::thread::sleep(Duration::from_millis(300));
 
     // Press Enter to go to continuation line (query is incomplete)
@@ -506,11 +535,17 @@ fn test_multiline_tab_completion_context_preserved() {
     // Check for cursor position error (PTY limitation)
     if output.contains("cursor position") {
         eprintln!("Warning: Cursor position detection failed in PTY - skipping multiline completion validation");
-        eprintln!("However, validating that NO SQL keywords appeared in output (primary bug check)");
+        eprintln!(
+            "However, validating that NO SQL keywords appeared in output (primary bug check)"
+        );
 
         // Even with cursor errors, we can still check for keyword spam
         let has_keyword_spam = output.contains("(SQL keyword)");
-        assert!(!has_keyword_spam, "Bug: SQL keywords appeared despite cursor error: {}", output);
+        assert!(
+            !has_keyword_spam,
+            "Bug: SQL keywords appeared despite cursor error: {}",
+            output
+        );
 
         // Clean exit
         p.send("\x03").expect("Failed to send Ctrl-C");
@@ -523,15 +558,21 @@ fn test_multiline_tab_completion_context_preserved() {
     }
 
     // Should NOT show SQL keywords (the bug behavior)
-    assert!(!output.contains("(SQL keyword)"),
-        "Bug detected: Multi-line context lost, showing SQL keywords. Output: {}", output);
+    assert!(
+        !output.contains("(SQL keyword)"),
+        "Bug detected: Multi-line context lost, showing SQL keywords. Output: {}",
+        output
+    );
 
     // Should recognize DBC context and show DBC tables/views starting with T
     // (TablesV, TableTextV, etc.) or at least not show generic keywords
     // Note: If metadata fails to load, we accept status messages
     let has_keywords_like_transaction = output.contains("TRANSACTION") && !output.contains("DBC");
-    assert!(!has_keywords_like_transaction,
-        "Bug detected: Showing TRANSACTION keyword instead of DBC.Tables. Output: {}", output);
+    assert!(
+        !has_keywords_like_transaction,
+        "Bug detected: Showing TRANSACTION keyword instead of DBC.Tables. Output: {}",
+        output
+    );
 
     // Cancel and exit
     p.send("\x03").expect("Failed to send Ctrl-C");
@@ -590,7 +631,7 @@ fn test_database_completion_after_from_visual() {
     let has_inappropriate_keywords = keyword_list.iter().any(|kw| {
         // Check if keyword appears as a completion option (not as part of our input)
         let pattern = format!("{} ", kw); // Keywords in completion menu usually have space or description
-        output.contains(&pattern) && !output.contains(&format!("SELECT * FROM"))
+        output.contains(&pattern) && !output.contains("SELECT * FROM")
     });
 
     // Build assertion message with details
@@ -653,12 +694,15 @@ fn test_completion_cursor_position() {
 
     // The line should look like "SELECT * FROM DBC" or similar
     // NOT like "DBCSELECT" or with text duplicated
-    let has_bad_insertion = output.contains("DBCSELECT") ||
-                            output.contains("DBC SELECT") ||
-                            (output.contains("DBC") && output.contains("SELECT * FROM DB"));
+    let has_bad_insertion = output.contains("DBCSELECT")
+        || output.contains("DBC SELECT")
+        || (output.contains("DBC") && output.contains("SELECT * FROM DB"));
 
     if has_bad_insertion {
-        eprintln!("Bug detected: Completion inserted at wrong position. Output: {}", output);
+        eprintln!(
+            "Bug detected: Completion inserted at wrong position. Output: {}",
+            output
+        );
     }
 
     // Clean up - use Ctrl-C multiple times to ensure we exit cleanly
@@ -709,9 +753,8 @@ fn test_reserved_word_completion_select() {
 
     // The completion should show SELECT, not just show everything
     // If we see many unrelated keywords, that's a problem
-    let has_too_many_options = output.contains("FROM") &&
-                               output.contains("WHERE") &&
-                               output.contains("GROUP");
+    let has_too_many_options =
+        output.contains("FROM") && output.contains("WHERE") && output.contains("GROUP");
 
     if !has_select {
         eprintln!("Warning: SELECT not found in completion output");
@@ -759,7 +802,10 @@ fn test_reserved_word_from_completion() {
     let has_from = output.to_uppercase().contains("FROM");
 
     if !has_from {
-        eprintln!("Warning: FROM not found in completion output for 'fr' prefix. Output: {}", output);
+        eprintln!(
+            "Warning: FROM not found in completion output for 'fr' prefix. Output: {}",
+            output
+        );
     }
 
     // Clean up
@@ -819,14 +865,17 @@ fn test_multiline_completion_context_maintained() {
          Output: {}", output);
 
     // Check for positive indicators that context was recognized
-    let has_dbc_context = output.contains("DBC") ||
-                          output.contains("(table)") ||
-                          output.contains("(view)") ||
-                          output.contains("Tables") ||
-                          output.contains("["); // Status message indicator
+    let has_dbc_context = output.contains("DBC")
+        || output.contains("(table)")
+        || output.contains("(view)")
+        || output.contains("Tables")
+        || output.contains("["); // Status message indicator
 
     if !has_dbc_context {
-        eprintln!("Warning: DBC context may not be recognized. Output: {}", output);
+        eprintln!(
+            "Warning: DBC context may not be recognized. Output: {}",
+            output
+        );
     }
 
     // Clean up - multiple Ctrl-C to exit multiline mode

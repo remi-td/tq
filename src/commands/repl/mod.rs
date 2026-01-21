@@ -25,12 +25,12 @@ use crate::cli::{EditorMode, ReplArgs};
 use crate::db::DatabaseClient;
 use crate::error::Result;
 use metadata_completer::{CompletionState, MetadataCompleter};
+use nu_ansi_term::Color;
 use reedline::{
     default_emacs_keybindings, default_vi_insert_keybindings, default_vi_normal_keybindings,
-    EditMode, Emacs, FileBackedHistory, KeyCode, KeyModifiers, Keybindings,
-    ListMenu, MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal, Vi,
+    EditMode, Emacs, FileBackedHistory, KeyCode, KeyModifiers, Keybindings, ListMenu, MenuBuilder,
+    Reedline, ReedlineEvent, ReedlineMenu, Signal, Vi,
 };
-use nu_ansi_term::Color;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -189,17 +189,17 @@ fn add_completion_keybinding(keybindings: &mut Keybindings) {
 /// Resolve the history file path
 ///
 /// Handles ~ expansion and environment variables
-fn resolve_history_path(path: &PathBuf) -> PathBuf {
+fn resolve_history_path(path: &std::path::Path) -> PathBuf {
     // Check for environment variable override first
     if let Ok(env_path) = std::env::var("TQ_HISTORY_FILE") {
-        return expand_tilde(&PathBuf::from(env_path));
+        return expand_tilde(std::path::Path::new(&env_path));
     }
 
     expand_tilde(path)
 }
 
 /// Expand ~ to the user's home directory
-fn expand_tilde(path: &PathBuf) -> PathBuf {
+fn expand_tilde(path: &std::path::Path) -> PathBuf {
     let path_str = path.to_string_lossy();
 
     if path_str.starts_with("~/") || path_str == "~" {
@@ -211,7 +211,7 @@ fn expand_tilde(path: &PathBuf) -> PathBuf {
         }
     }
 
-    path.clone()
+    path.to_path_buf()
 }
 
 /// Home directory helper using the directories crate
@@ -241,27 +241,25 @@ fn print_banner<W: Write>(
 
     writeln!(writer)?;
     // Logo using block characters - 't' in orange, 'q' in default
-    writeln!(writer, " {}   {}",
-        orange.paint("████████"),
-        "████")?;
-    writeln!(writer, "    {}     {}",
-        orange.paint("██"),
-        "██  ██")?;
-    writeln!(writer, "    {}     {}",
-        orange.paint("██"),
-        "██  ██")?;
-    writeln!(writer, "    {}     {}",
-        orange.paint("██"),
-        "██ ▄██")?;
-    writeln!(writer, "    {}      {}",
-        orange.paint("██"),
-        "████")?;
+    let q_block_top = "████";
+    let q_block_mid = "██  ██";
+    let q_block_low = "██ ▄██";
+    let q_block_bot = "████";
+    writeln!(writer, " {}   {}", orange.paint("████████"), q_block_top)?;
+    writeln!(writer, "    {}     {}", orange.paint("██"), q_block_mid)?;
+    writeln!(writer, "    {}     {}", orange.paint("██"), q_block_mid)?;
+    writeln!(writer, "    {}     {}", orange.paint("██"), q_block_low)?;
+    writeln!(writer, "    {}      {}", orange.paint("██"), q_block_bot)?;
     writeln!(writer)?;
     // Tool name: 't' in orange, 'q' in default, followed by version
-    writeln!(writer, " {}{}  v{}",
+    let q_letter = "q";
+    writeln!(
+        writer,
+        " {}{}  v{}",
         orange.bold().paint("t"),
-        "q",
-        env!("CARGO_PKG_VERSION"))?;
+        q_letter,
+        env!("CARGO_PKG_VERSION")
+    )?;
     writeln!(writer)?;
     writeln!(writer, "Connected to {}:{}", config.host, config.port)?;
     writeln!(writer, "Database: {}", config.database)?;

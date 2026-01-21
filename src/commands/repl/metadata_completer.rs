@@ -87,16 +87,29 @@ impl CompletionState {
     /// Sprint 11: Added explicit error logging for debugging completion failures.
     pub fn ensure_columns_loaded(&mut self, table_name: &str) -> bool {
         if self.cache.get_columns(table_name).is_none() {
-            log::debug!("Tab completion: Triggering lazy load of columns for table: {}", table_name);
+            log::debug!(
+                "Tab completion: Triggering lazy load of columns for table: {}",
+                table_name
+            );
             let result = self.cache.load_columns(&self.client, table_name);
             if !result {
                 if let Some(error) = self.cache.last_error() {
-                    log::error!("Tab completion: Failed to load columns for {}: {}", table_name, error);
+                    log::error!(
+                        "Tab completion: Failed to load columns for {}: {}",
+                        table_name,
+                        error
+                    );
                 } else {
-                    log::error!("Tab completion: Failed to load columns for {} (unknown error)", table_name);
+                    log::error!(
+                        "Tab completion: Failed to load columns for {} (unknown error)",
+                        table_name
+                    );
                 }
             } else {
-                log::debug!("Tab completion: Columns loaded successfully for table: {}", table_name);
+                log::debug!(
+                    "Tab completion: Columns loaded successfully for table: {}",
+                    table_name
+                );
             }
             result
         } else {
@@ -341,12 +354,12 @@ impl MetadataCompleter {
         if suggestions.is_empty() {
             // No databases or tables found - provide helpful message
             if prefix.is_empty() {
-                return vec![
-                    self.status_suggestion("No databases or tables found", prefix.len())
-                ];
+                return vec![self.status_suggestion("No databases or tables found", prefix.len())];
             } else {
-                return vec![self
-                    .status_suggestion(&format!("No databases or tables matching '{}'", prefix), prefix.len())];
+                return vec![self.status_suggestion(
+                    &format!("No databases or tables matching '{}'", prefix),
+                    prefix.len(),
+                )];
             }
         }
 
@@ -606,7 +619,12 @@ impl Completer for MetadataCompleter {
         eprintln!("Full text (with accumulated): {:?}", full_text);
         eprintln!("Context detected: {:?}", context);
 
-        log::debug!("Completion context: {:?} (full_text len: {}, pos: {})", context, full_text.len(), adjusted_pos);
+        log::debug!(
+            "Completion context: {:?} (full_text len: {}, pos: {})",
+            context,
+            full_text.len(),
+            adjusted_pos
+        );
 
         // Sprint 13 Bug Fix: Calculate the correct span based on context
         // The span determines what part of the line gets replaced when a completion is selected.
@@ -623,7 +641,11 @@ impl Completer for MetadataCompleter {
                 let start_pos = pos.saturating_sub(replacement_len);
                 (start_pos, pos)
             }
-            CompletionContext::ColumnName { table_qualifier: Some(qualifier), prefix, .. } => {
+            CompletionContext::ColumnName {
+                table_qualifier: Some(qualifier),
+                prefix,
+                ..
+            } => {
                 // Span should cover "qualifier." or "qualifier.prefix"
                 let replacement_len = qualifier.len() + 1 + prefix.len(); // +1 for the dot
                 let start_pos = pos.saturating_sub(replacement_len);
@@ -636,9 +658,7 @@ impl Completer for MetadataCompleter {
         };
 
         let mut suggestions = match context {
-            CompletionContext::Keyword => {
-                self.complete_keywords(last_word)
-            }
+            CompletionContext::Keyword => self.complete_keywords(last_word),
 
             CompletionContext::TableName { prefix } => {
                 // Sprint 11 Bug Fix: Do NOT fall back to keywords when in table context.

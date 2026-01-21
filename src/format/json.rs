@@ -256,7 +256,7 @@ mod tests {
         ];
         let rows = vec![vec![
             Value::Integer(42),
-            Value::Decimal(3.14),
+            Value::Decimal(3.15), // Avoid clippy::approx_constant
             Value::Boolean(true),
             Value::String("hello".into()),
         ]];

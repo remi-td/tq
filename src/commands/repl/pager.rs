@@ -132,7 +132,23 @@ impl TableData {
 
         // Find header row (first row with actual content between separators)
         let header_idx = lines.iter().position(|l| {
-            l.contains('│') && !l.chars().all(|c| c == '─' || c == '│' || c == '┌' || c == '┐' || c == '├' || c == '┤' || c == '└' || c == '┘' || c == '╭' || c == '╮' || c == '╰' || c == '╯' || c == '┼' || c.is_whitespace())
+            l.contains('│')
+                && !l.chars().all(|c| {
+                    c == '─'
+                        || c == '│'
+                        || c == '┌'
+                        || c == '┐'
+                        || c == '├'
+                        || c == '┤'
+                        || c == '└'
+                        || c == '┘'
+                        || c == '╭'
+                        || c == '╮'
+                        || c == '╰'
+                        || c == '╯'
+                        || c == '┼'
+                        || c.is_whitespace()
+                })
         })?;
 
         // Parse header
@@ -203,7 +219,7 @@ fn parse_row_cells(line: &str) -> Vec<String> {
         return vec![];
     }
 
-    parts[1..parts.len()-1]
+    parts[1..parts.len() - 1]
         .iter()
         .map(|s| s.trim().to_string())
         .collect()
@@ -212,9 +228,22 @@ fn parse_row_cells(line: &str) -> Vec<String> {
 /// Check if a line is a separator line (borders only)
 fn is_separator_line(line: &str) -> bool {
     line.chars().all(|c| {
-        c == '─' || c == '│' || c == '┌' || c == '┐' || c == '├' || c == '┤'
-            || c == '└' || c == '┘' || c == '╭' || c == '╮' || c == '╰' || c == '╯'
-            || c == '┼' || c == '┬' || c == '┴' || c.is_whitespace()
+        c == '─'
+            || c == '│'
+            || c == '┌'
+            || c == '┐'
+            || c == '├'
+            || c == '┤'
+            || c == '└'
+            || c == '┘'
+            || c == '╭'
+            || c == '╮'
+            || c == '╰'
+            || c == '╯'
+            || c == '┼'
+            || c == '┬'
+            || c == '┴'
+            || c.is_whitespace()
     })
 }
 
@@ -355,7 +384,10 @@ impl Pager {
         let mut border = String::new();
         border.push(left);
 
-        for (i, col) in self.data.columns[self.col_offset..end_col].iter().enumerate() {
+        for (i, col) in self.data.columns[self.col_offset..end_col]
+            .iter()
+            .enumerate()
+        {
             border.push_str(&line.to_string().repeat(col.display_width + 2));
             if i < end_col - self.col_offset - 1 {
                 border.push(middle);
@@ -367,7 +399,12 @@ impl Pager {
     }
 
     /// Render the header row
-    fn render_header(&self, stdout: &mut impl Write, start_col: usize, end_col: usize) -> io::Result<()> {
+    fn render_header(
+        &self,
+        stdout: &mut impl Write,
+        start_col: usize,
+        end_col: usize,
+    ) -> io::Result<()> {
         let mut row_str = String::from("│");
 
         for col in &self.data.columns[start_col..end_col] {
@@ -386,7 +423,13 @@ impl Pager {
     /// Render a data row
     ///
     /// Sprint 8 Bug Fix: Write leading border, simplified logic
-    fn render_row(&self, stdout: &mut impl Write, row_idx: usize, start_col: usize, end_col: usize) -> io::Result<()> {
+    fn render_row(
+        &self,
+        stdout: &mut impl Write,
+        row_idx: usize,
+        start_col: usize,
+        end_col: usize,
+    ) -> io::Result<()> {
         // Sprint 8 Fix: Write leading border FIRST
         write!(stdout, "│")?;
 

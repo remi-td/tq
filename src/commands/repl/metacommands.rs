@@ -63,7 +63,7 @@ pub fn handle_metacommand<W: Write>(
                 writeln!(writer, "Usage: /describe <table_name>")?;
                 writeln!(writer, "       /describe <database>.<table_name>")?;
             } else {
-                execute_describe(client, &args[0], writer)?;
+                execute_describe(client, args[0], writer)?;
             }
         }
 
@@ -74,7 +74,10 @@ pub fn handle_metacommand<W: Write>(
                 writeln!(writer, "Usage: /export <format> [destination]")?;
                 writeln!(writer)?;
                 writeln!(writer, "Formats: table, csv, json, sql")?;
-                writeln!(writer, "Destination: file path or 'clipboard' (optional, defaults to stdout)")?;
+                writeln!(
+                    writer,
+                    "Destination: file path or 'clipboard' (optional, defaults to stdout)"
+                )?;
                 writeln!(writer)?;
                 writeln!(writer, "Examples:")?;
                 writeln!(writer, "  /export csv results.csv  Export to file")?;
@@ -205,7 +208,7 @@ pub fn handle_metacommand_with_state<W: Write>(
                 writeln!(writer, "Usage: /describe <table_name>")?;
                 writeln!(writer, "       /describe <database>.<table_name>")?;
             } else {
-                execute_describe(completion_state.client(), &args[0], writer)?;
+                execute_describe(completion_state.client(), args[0], writer)?;
             }
         }
 
@@ -215,7 +218,10 @@ pub fn handle_metacommand_with_state<W: Write>(
                 writeln!(writer, "Usage: /export <format> [destination]")?;
                 writeln!(writer)?;
                 writeln!(writer, "Formats: table, csv, json, sql")?;
-                writeln!(writer, "Destination: file path or 'clipboard' (optional, defaults to stdout)")?;
+                writeln!(
+                    writer,
+                    "Destination: file path or 'clipboard' (optional, defaults to stdout)"
+                )?;
                 writeln!(writer)?;
                 writeln!(writer, "Examples:")?;
                 writeln!(writer, "  /export csv results.csv  Export to file")?;
@@ -223,7 +229,10 @@ pub fn handle_metacommand_with_state<W: Write>(
                 writeln!(writer, "  /export table            Print table to stdout")?;
                 writeln!(writer)?;
                 writeln!(writer, "Note: File exports include ALL rows (no limit),")?;
-                writeln!(writer, "      clipboard/stdout exports use currently displayed rows.")?;
+                writeln!(
+                    writer,
+                    "      clipboard/stdout exports use currently displayed rows."
+                )?;
             } else {
                 execute_export(state, Some(completion_state.client()), writer, &args)?;
             }
@@ -308,7 +317,7 @@ pub fn handle_metacommand_with_state<W: Write>(
                 writeln!(writer, "  /logon bob@192.168.1.100:1025/staging")?;
                 writeln!(writer)?;
             } else {
-                execute_logon(&args[0], state, completion_state, writer)?;
+                execute_logon(args[0], state, completion_state, writer)?;
             }
         }
 
@@ -696,7 +705,7 @@ fn execute_describe<W: Write>(
 
                 // Display each column
                 for row in &result.rows {
-                    let col_name = row.get(0).map(|v| v.display()).unwrap_or_default();
+                    let col_name = row.first().map(|v| v.display()).unwrap_or_default();
                     let col_type = row.get(1).map(|v| v.display()).unwrap_or_default();
                     let nullable = row
                         .get(2)
@@ -810,11 +819,18 @@ fn execute_export<W: Write>(
     match deprecation {
         DeprecationWarning::ClipboardFirst => {
             writeln!(writer)?;
-            writeln!(writer, "Warning: Deprecated syntax: Use '/export {} clipboard' instead", format)?;
+            writeln!(
+                writer,
+                "Warning: Deprecated syntax: Use '/export {} clipboard' instead",
+                format
+            )?;
         }
         DeprecationWarning::AppendMode => {
             writeln!(writer)?;
-            writeln!(writer, "Warning: --append mode is deprecated and will be removed in a future version")?;
+            writeln!(
+                writer,
+                "Warning: --append mode is deprecated and will be removed in a future version"
+            )?;
         }
         DeprecationWarning::None => {}
     }
@@ -862,7 +878,11 @@ fn execute_export<W: Write>(
                     // No client available or no SQL stored - use what we have
                     writeln!(writer)?;
                     writeln!(writer, "Warning: Cannot re-execute query for full dataset.")?;
-                    writeln!(writer, "Exporting limited results ({} rows).", result.row_count)?;
+                    writeln!(
+                        writer,
+                        "Exporting limited results ({} rows).",
+                        result.row_count
+                    )?;
                     Box::new(result.clone())
                 }
             }
@@ -947,7 +967,9 @@ enum DeprecationWarning {
 /// - /export <format> --append   -> Append mode removed
 ///
 /// Returns (format, destination, append_flag, deprecation_warning)
-fn parse_export_args<'a>(args: &'a [&str]) -> (String, ExportDestination<'a>, bool, DeprecationWarning) {
+fn parse_export_args<'a>(
+    args: &'a [&str],
+) -> (String, ExportDestination<'a>, bool, DeprecationWarning) {
     let mut format = "table".to_string(); // default format
     let mut destination = ExportDestination::Stdout;
     let mut append = false;
@@ -960,7 +982,8 @@ fn parse_export_args<'a>(args: &'a [&str]) -> (String, ExportDestination<'a>, bo
     }
 
     // Filter out flags to get positional args only
-    let positional: Vec<&str> = args.iter()
+    let positional: Vec<&str> = args
+        .iter()
         .filter(|&&arg| !arg.starts_with("--"))
         .copied()
         .collect();
@@ -1011,32 +1034,32 @@ fn export_to_clipboard<W: Write>(
         "csv" => format_as_csv(result)?,
         "json" => format_as_json(result)?,
         "sql" => format_as_sql(result)?,
-        _ => return Err(crate::error::TqError::InvalidConfig(
-            format!("Unsupported format for clipboard: {}", format)
-        ).into()),
+        _ => {
+            return Err(crate::error::TqError::InvalidConfig(format!(
+                "Unsupported format for clipboard: {}",
+                format
+            )))
+        }
     };
 
     // Copy to clipboard
     match Clipboard::new() {
-        Ok(mut clipboard) => {
-            match clipboard.set_text(&content) {
-                Ok(_) => {
-                    writeln!(writer)?;
-                    writeln!(
-                        writer,
-                        "Exported {} rows to clipboard ({})",
-                        result.row_count,
-                        format
-                    )?;
-                }
-                Err(e) => {
-                    writeln!(writer)?;
-                    writeln!(writer, "Error: Failed to copy to clipboard: {}", e)?;
-                    writeln!(writer)?;
-                    writeln!(writer, "The clipboard may not be available on this system.")?;
-                }
+        Ok(mut clipboard) => match clipboard.set_text(&content) {
+            Ok(_) => {
+                writeln!(writer)?;
+                writeln!(
+                    writer,
+                    "Exported {} rows to clipboard ({})",
+                    result.row_count, format
+                )?;
             }
-        }
+            Err(e) => {
+                writeln!(writer)?;
+                writeln!(writer, "Error: Failed to copy to clipboard: {}", e)?;
+                writeln!(writer)?;
+                writeln!(writer, "The clipboard may not be available on this system.")?;
+            }
+        },
         Err(e) => {
             writeln!(writer)?;
             writeln!(writer, "Error: Clipboard not available: {}", e)?;
@@ -1052,7 +1075,7 @@ fn export_to_clipboard<W: Write>(
 
 /// Format result as table string
 fn format_as_table(result: &crate::db::QueryResult) -> Result<String> {
-    use comfy_table::{Table, ContentArrangement, presets};
+    use comfy_table::{presets, ContentArrangement, Table};
 
     let mut table = Table::new();
     table.load_preset(presets::UTF8_FULL);
@@ -1509,7 +1532,7 @@ mod tests {
 
     #[test]
     fn test_format_as_csv() {
-        use crate::db::{QueryResult, ColumnMetadata, TeradataType, Value};
+        use crate::db::{ColumnMetadata, QueryResult, TeradataType, Value};
 
         let result = QueryResult {
             columns: vec![
@@ -1540,16 +1563,14 @@ mod tests {
 
     #[test]
     fn test_format_as_json() {
-        use crate::db::{QueryResult, ColumnMetadata, TeradataType, Value};
+        use crate::db::{ColumnMetadata, QueryResult, TeradataType, Value};
 
         let result = QueryResult {
-            columns: vec![
-                ColumnMetadata {
-                    name: "id".to_string(),
-                    data_type: TeradataType::Integer,
-                    nullable: false,
-                },
-            ],
+            columns: vec![ColumnMetadata {
+                name: "id".to_string(),
+                data_type: TeradataType::Integer,
+                nullable: false,
+            }],
             rows: vec![vec![Value::Integer(42)]],
             row_count: 1,
             execution_time: Duration::from_millis(10),

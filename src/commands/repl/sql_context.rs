@@ -84,11 +84,6 @@ pub fn analyze_context(line: &str, cursor_pos: usize) -> CompletionContext {
     let expanded = expand_keyword_abbreviations(&normalized);
     let upper = expanded.to_uppercase();
 
-    // Sprint 13: Debug logging
-    eprintln!("  Normalized: {:?}", normalized);
-    eprintln!("  Expanded: {:?}", expanded);
-    eprintln!("  Upper: {:?}", upper);
-
     // Get the last token/word
     let last_word = get_last_word(text);
 
@@ -101,7 +96,7 @@ pub fn analyze_context(line: &str, cursor_pos: usize) -> CompletionContext {
     }
 
     // Check for schema-qualified completion in FROM context (typing after "schema.")
-    if let Some(ctx) = check_schema_qualified(&upper, &last_word, text) {
+    if let Some(ctx) = check_schema_qualified(&upper, last_word, text) {
         return ctx;
     }
 
@@ -109,7 +104,7 @@ pub fn analyze_context(line: &str, cursor_pos: usize) -> CompletionContext {
     // We need to find the most recent significant keyword
 
     // Check for table name context (FROM, JOIN, UPDATE, INSERT INTO)
-    if is_table_context(&upper, &last_word) {
+    if is_table_context(&upper, last_word) {
         return CompletionContext::TableName {
             prefix: last_word.to_string(),
         };
@@ -117,7 +112,7 @@ pub fn analyze_context(line: &str, cursor_pos: usize) -> CompletionContext {
 
     // Check for column context (WHERE, SELECT with FROM, etc.)
     if let Some(tables) = extract_table_references(&normalized) {
-        if is_column_context(&upper, &last_word, &tables) {
+        if is_column_context(&upper, last_word, &tables) {
             return CompletionContext::ColumnName {
                 tables,
                 prefix: last_word.to_string(),
@@ -335,8 +330,7 @@ fn check_table_alias_qualified_with_tables(
     let last_word = get_last_word(original);
 
     // Check for "alias." pattern
-    if last_word.ends_with('.') {
-        let alias = &last_word[..last_word.len() - 1];
+    if let Some(alias) = last_word.strip_suffix('.') {
         let alias_upper = alias.to_uppercase();
 
         // Check if this is a known alias
@@ -357,7 +351,7 @@ fn check_table_alias_qualified_with_tables(
             let table_name_upper = table
                 .name
                 .split('.')
-                .last()
+                .next_back()
                 .unwrap_or(&table.name)
                 .to_uppercase();
             if table_name_upper == alias_upper || table.name.to_uppercase() == alias_upper {
@@ -388,7 +382,7 @@ fn check_table_alias_qualified_with_tables(
                     || table
                         .name
                         .split('.')
-                        .last()
+                        .next_back()
                         .unwrap_or(&table.name)
                         .to_uppercase()
                         == alias_upper;

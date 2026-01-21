@@ -156,20 +156,20 @@ impl TeradataType {
     /// Map from JDBC-style type code to TeradataType
     pub fn from_type_code(code: i32) -> Self {
         match code {
-            -6 | -5 => TeradataType::BigInt,  // TINYINT, BIGINT
-            4 => TeradataType::Integer,       // INTEGER
-            5 => TeradataType::SmallInt,      // SMALLINT
-            2 | 3 => TeradataType::Decimal,   // NUMERIC, DECIMAL
-            6 | 7 | 8 => TeradataType::Float, // FLOAT, REAL, DOUBLE
-            1 => TeradataType::Char,          // CHAR
-            12 => TeradataType::Varchar,      // VARCHAR
-            91 => TeradataType::Date,         // DATE
-            92 => TeradataType::Time,         // TIME
-            93 => TeradataType::Timestamp,    // TIMESTAMP
-            16 => TeradataType::Boolean,      // BOOLEAN
-            2004 => TeradataType::Blob,       // BLOB
-            2005 => TeradataType::Clob,       // CLOB
-            -2 | -3 => TeradataType::Byte,    // BINARY, VARBINARY
+            -6 | -5 => TeradataType::BigInt, // TINYINT, BIGINT
+            4 => TeradataType::Integer,      // INTEGER
+            5 => TeradataType::SmallInt,     // SMALLINT
+            2 | 3 => TeradataType::Decimal,  // NUMERIC, DECIMAL
+            6..=8 => TeradataType::Float,    // FLOAT, REAL, DOUBLE
+            1 => TeradataType::Char,         // CHAR
+            12 => TeradataType::Varchar,     // VARCHAR
+            91 => TeradataType::Date,        // DATE
+            92 => TeradataType::Time,        // TIME
+            93 => TeradataType::Timestamp,   // TIMESTAMP
+            16 => TeradataType::Boolean,     // BOOLEAN
+            2004 => TeradataType::Blob,      // BLOB
+            2005 => TeradataType::Clob,      // CLOB
+            -2 | -3 => TeradataType::Byte,   // BINARY, VARBINARY
             _ => TeradataType::Unknown,
         }
     }
@@ -286,7 +286,7 @@ mod tests {
         assert_eq!(Value::Null.display(), "[NULL]");
         assert_eq!(Value::Boolean(true).display(), "true");
         assert_eq!(Value::Integer(42).display(), "42");
-        assert_eq!(Value::Decimal(3.14).display(), "3.14");
+        assert_eq!(Value::Decimal(3.15).display(), "3.15"); // Avoid clippy::approx_constant
         assert_eq!(Value::String("hello".into()).display(), "hello");
         assert_eq!(Value::Date("2024-01-15".into()).display(), "2024-01-15");
     }
@@ -312,7 +312,7 @@ mod tests {
     #[test]
     fn test_value_is_numeric() {
         assert!(Value::Integer(42).is_numeric());
-        assert!(Value::Decimal(3.14).is_numeric());
+        assert!(Value::Decimal(3.15).is_numeric()); // Avoid clippy::approx_constant
         assert!(!Value::String("42".into()).is_numeric());
         assert!(!Value::Null.is_numeric());
     }
