@@ -599,6 +599,13 @@ impl Completer for MetadataCompleter {
         // Analyze context to determine what kind of completions to provide
         let context = analyze_context(&full_text, adjusted_pos);
 
+        // Sprint 13: Debug logging to diagnose completion failures
+        eprintln!("\n=== TAB COMPLETION DEBUG ===");
+        eprintln!("Input line: {:?}", line);
+        eprintln!("Cursor pos: {}", pos);
+        eprintln!("Full text (with accumulated): {:?}", full_text);
+        eprintln!("Context detected: {:?}", context);
+
         log::debug!("Completion context: {:?} (full_text len: {}, pos: {})", context, full_text.len(), adjusted_pos);
 
         // Sprint 13 Bug Fix: Calculate the correct span based on context

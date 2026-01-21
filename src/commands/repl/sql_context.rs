@@ -84,6 +84,11 @@ pub fn analyze_context(line: &str, cursor_pos: usize) -> CompletionContext {
     let expanded = expand_keyword_abbreviations(&normalized);
     let upper = expanded.to_uppercase();
 
+    // Sprint 13: Debug logging
+    eprintln!("  Normalized: {:?}", normalized);
+    eprintln!("  Expanded: {:?}", expanded);
+    eprintln!("  Upper: {:?}", upper);
+
     // Get the last token/word
     let last_word = get_last_word(text);
 

@@ -124,32 +124,15 @@ Expected: Auto-completes to "FROM" (only valid keyword)
 
 ### P1 - High Priority (Should Have)
 
-#### Feature 4: Verify and Fix Export Full Dataset
+#### ~~Feature 4: Verify and Fix Export Full Dataset~~ ✅ VERIFIED WORKING
 
-**Description:** Verify export full dataset feature actually works as specified, fix if broken.
+**Status:** User confirmed that export full dataset is working correctly as of 2026-01-19.
 
-**User Report:**
-```
-"THIS STILL DOESN'T WORK PROPERLY: Export should allow to export ALL the dataset
-to a file: if I do a `select * from mytable;` you will limit the dataset to 100
-rows... However, if I want to export to a file, I want to export ALL the dataset,
-not just the first 100 rows..."
-```
+**Original Issue:** User initially reported export only saving 100 rows instead of full dataset.
 
-**Acceptance Criteria:**
-- [ ] Manual test: Execute `SELECT * FROM large_table;` (displays 100 rows)
-- [ ] Manual test: `/export csv output.csv` (verify file contains ALL rows, not 100)
-- [ ] Manual test: Query with `TOP 50` exports exactly 50 rows (respects user limit)
-- [ ] Interactive test: Verify re-execution query logic
-- [ ] Test with table containing 1000+ rows to prove it works
-- [ ] User validation completed and approved
-- [ ] Document actual behavior in test results
+**Resolution:** Feature was working correctly. User has now verified the functionality works as expected.
 
-**Reference:** `docs/builder/incoming/open-bugs.md` (lines 59-60)
-
-**Estimated Complexity:** Low (if working) / Medium (if broken)
-
-**Note:** Sprint 12 claimed this works, but user says it doesn't. Need to verify reality.
+**No action required in this sprint.**
 
 ---
 

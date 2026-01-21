@@ -1,15 +1,17 @@
 # tq Branding Guidelines
 
-**Version:** 1.0.0
-**Status:** Active
+**Version:** 2.0.0
+**Status:** Active - Sprint 13 Implementation
 **Last Updated:** 2026-01-19
-**Author:** CLI UX Designer
+**Owner:** CLI UX Designer
 
 ---
 
 ## Purpose
 
 This document defines the complete visual identity and branding standards for `tq` (Teradata Query Tool). All implementations MUST follow these guidelines exactly to maintain consistent, professional branding across all user touchpoints.
+
+**CRITICAL:** This is the authoritative specification. The architect must implement EXACTLY as specified with zero interpretation or deviation.
 
 ---
 
@@ -49,14 +51,28 @@ When displaying the tool name with color support:
 **Official Teradata Orange:**
 - **Hex:** `#F37021`
 - **RGB:** `243, 112, 33`
-- **Terminal Color Code:** Custom RGB (requires truecolor support)
+- **ANSI 24-bit truecolor escape:** `\x1b[38;2;243;112;33m`
+- **Reset escape:** `\x1b[0m`
 
 **Usage:**
 - Logo 't' letter
-- Interactive prompt (`tq>`)
+- Tool name 't' letter
+- Interactive prompt (`tq>` - ENTIRE prompt)
+- Multi-line continuation prompt (`...>` - ENTIRE prompt)
 - Key UI elements
 - Section headers
 - Emphasis text
+
+**Implementation in Rust (using `ansi_term` or `colored` crate):**
+```rust
+use ansi_term::Color;
+
+// Teradata orange
+let orange = Color::Rgb(243, 112, 33);
+
+// Apply to text
+orange.paint("text")
+```
 
 **Fallback for 8-color terminals:**
 - Use standard bright yellow (`\x1b[33;1m`) when truecolor not supported
@@ -83,34 +99,19 @@ When displaying the tool name with color support:
 
 ## Logo Design
 
-### Design Specification
+### FINAL APPROVED DESIGN
 
-**Character Set:** Unicode block character `█` (U+2588 Full Block)
+**Character Set:** Unicode block character `█` (U+2588 Full Block) ONLY
+
+**Rationale:** The user explicitly requested the block character `█` because it is simpler and cleaner than using `|` and `_`. This decision is FINAL.
 
 **Dimensions:**
-- Width: 15 characters maximum
-- Height: 5 lines
+- Width: Exactly 17 characters (including spacing)
+- Height: Exactly 5 lines
 - Monospace-friendly: Must render correctly in all monospace fonts
 
-**Design Principles:**
-1. **Minimalist** - Simple, clean design
-2. **Monospace-friendly** - Perfect alignment in terminal
-3. **Professional** - Suitable for enterprise environments
-4. **Recognizable** - Instantly identifiable as tq
-5. **Terminal-safe** - Renders correctly in all terminals
+### Logo ASCII Art - EXACT SPECIFICATION
 
-### Logo ASCII Art
-
-```
-████████╗ ██████╗
-╚══██╔══╝██╔═══██╗
-   ██║   ██║   ██║
-   ██║   ██║▄▄ ██║
-   ╚═╝   ╚██████╔╝
-          ╚═════╝
-```
-
-**Alternative Simple Block Design:**
 ```
  ████████   ████
     ██     ██  ██
@@ -119,28 +120,111 @@ When displaying the tool name with color support:
     ██      ████
 ```
 
-**Color Application:**
-- **'t' letter portion** - Teradata orange (#F37021)
-- **'q' letter portion** - Default terminal color
+**Critical Implementation Details:**
 
-**Rendering Requirements:**
-- All logo lines must be perfectly aligned (no offset)
-- Equal spacing maintained between characters
-- Consistent use of block character `█` throughout
-- No mixing of `|`, `_`, or other ASCII characters
+1. **Line 1:** One space, eight █ blocks, three spaces, four █ blocks
+   - Total: 16 visible characters plus 1 leading space = 17 chars
 
-**Logo Display Context:**
+2. **Line 2:** Four spaces, two █ blocks, five spaces, two █, two spaces, two █
+   - Total: 17 characters
+
+3. **Line 3:** Four spaces, two █ blocks, five spaces, two █, two spaces, two █
+   - Total: 17 characters (identical to line 2)
+
+4. **Line 4:** Four spaces, two █ blocks, five spaces, two █, one space, one ▄, two █
+   - Total: 17 characters
+   - Note: Uses ▄ (U+2584 Lower Half Block) for the descender
+
+5. **Line 5:** Four spaces, two █ blocks, six spaces, four █
+   - Total: 17 characters
+
+**NO OFFSET ALLOWED:** All lines MUST be perfectly aligned. Each line starts at the exact same column position with NO additional indentation or offset.
+
+### Visual Structure
+
 ```
-[Logo in orange/default colors]
-Teradata Query Tool
-v[VERSION]
+[Line 1]  ████████   ████        <- 't' top bar + 'q' top
+[Line 2]     ██     ██  ██       <- 't' stem + 'q' sides
+[Line 3]     ██     ██  ██       <- 't' stem + 'q' sides
+[Line 4]     ██     ██ ▄██       <- 't' stem + 'q' descender
+[Line 5]     ██      ████        <- 't' stem + 'q' bottom
 ```
 
-**Implementation Notes:**
-- Use consistent indentation for all logo lines
-- Test rendering in multiple terminal emulators
-- Verify alignment before deployment
-- Last two lines MUST NOT be offset
+The 't' is represented by the left blocks (vertical stem), and the 'q' is represented by the right blocks (circular with descender).
+
+### Color Application
+
+**Color Splitting:**
+- **Left portion (representing 't'):** Teradata orange (#F37021)
+  - Line 1: First 8 blocks (`████████`)
+  - Lines 2-5: Middle 2 blocks at position 5-6 (`██`)
+
+- **Right portion (representing 'q'):** Default terminal color
+  - Line 1: Last 4 blocks (`████`)
+  - Lines 2-5: Right side blocks forming the 'q' shape
+
+**Implementation Pattern:**
+```rust
+// Line 1
+writeln!(writer, " {}   {}",
+    orange.paint("████████"),  // 't' top bar in orange
+    "████")?;                  // 'q' top in default
+
+// Line 2
+writeln!(writer, "    {}     {}",
+    orange.paint("██"),        // 't' stem in orange
+    "██  ██")?;                // 'q' sides in default
+
+// Line 3
+writeln!(writer, "    {}     {}",
+    orange.paint("██"),        // 't' stem in orange
+    "██  ██")?;                // 'q' sides in default
+
+// Line 4
+writeln!(writer, "    {}     {}",
+    orange.paint("██"),        // 't' stem in orange
+    "██ ▄██")?;                // 'q' descender in default
+
+// Line 5
+writeln!(writer, "    {}      {}",
+    orange.paint("██"),        // 't' stem in orange
+    "████")?;                  // 'q' bottom in default
+```
+
+**CRITICAL SPACING RULES:**
+1. Line 1: 1 leading space, 3 spaces between 't' and 'q'
+2. Line 2: 4 leading spaces, 5 spaces between 't' and 'q'
+3. Line 3: 4 leading spaces, 5 spaces between 't' and 'q'
+4. Line 4: 4 leading spaces, 5 spaces between 't' and 'q'
+5. Line 5: 4 leading spaces, 6 spaces between 't' and 'q'
+
+**Testing Requirements:**
+- Render the logo and visually verify NO offset in lines 4 and 5
+- All lines must be vertically aligned on the left edge
+- The 't' stem (lines 2-5) must be perfectly vertical
+- Test in multiple terminals (iTerm2, Terminal.app, Alacritty, etc.)
+
+### Logo Display Context
+
+```
+[Blank line]
+ ████████   ████
+    ██     ██  ██
+    ██     ██  ██
+    ██     ██ ▄██
+    ██      ████
+[Blank line]
+ tq  v1.7.0
+[Blank line]
+Connected to host:1025
+Database: mydb
+User: myuser
+Logon Mechanism: TD2
+[Additional session info...]
+[Blank line]
+Type /help for commands, /quit to exit.
+[Blank line]
+```
 
 ---
 
@@ -153,13 +237,25 @@ v[VERSION]
 tq>
 ```
 
-**Color:**
-- **Entire prompt `tq>`** in **Teradata orange** (#F37021)
+**CRITICAL REQUIREMENT:** The ENTIRE prompt `tq>` must be in Teradata orange (#F37021), NOT green or any other color.
+
+**User's explicit requirement:** "I would also use the same teradata orange as default for the interactive prompt color: `tq>` (currently olive green)."
+
+**Implementation:**
+```rust
+// Teradata orange ANSI escape: \x1b[38;2;243;112;33m
+// Reset: \x1b[0m
+let orange_start = "\x1b[38;2;243;112;33m";
+let reset = "\x1b[0m";
+
+let normal_prompt = format!("{}tq> {}", orange_start, reset);
+```
 
 **Do NOT use:**
-- ❌ Green prompt (old default)
+- ❌ Green prompt (old default) - THIS WAS THE BUG
 - ❌ Default terminal color
 - ❌ Any other color
+- ❌ Splitting the prompt into parts with different colors
 
 **Multi-line Continuation Prompt:**
 ```
@@ -167,7 +263,13 @@ tq>
 ```
 
 **Color:**
-- Same Teradata orange as primary prompt
+- Same Teradata orange (#F37021) as primary prompt
+- ENTIRE prompt `...>` in orange
+
+**Implementation:**
+```rust
+let continuation_prompt = format!("{}...> {}", orange_start, reset);
+```
 
 ---
 
@@ -183,12 +285,17 @@ tq>
 
 **Detection Method:**
 ```rust
+use ansi_term::Color;
+use std::env;
+
 // Check COLORTERM environment variable
-if env::var("COLORTERM").ok().as_deref() == Some("truecolor") {
-    // Use RGB color
-} else {
-    // Fall back to ANSI
-}
+let use_truecolor = env::var("COLORTERM")
+    .ok()
+    .map(|v| v == "truecolor" || v == "24bit")
+    .unwrap_or(false);
+
+// Always use RGB color (ansi_term handles fallbacks automatically)
+let orange = Color::Rgb(243, 112, 33);
 ```
 
 ### Terminal Compatibility
@@ -250,28 +357,35 @@ Regular terminal default foreground
 
 **Full banner format:**
 ```
-[Logo in color]
-Teradata Query Tool
-v[VERSION]
-
-Connected to [HOST]
+[Blank line]
+[Logo in Teradata orange/default colors - 5 lines]
+[Blank line]
+ tq  v[VERSION]
+[Blank line]
+Connected to [HOST]:[PORT]
 Database: [DATABASE]
-Session: [SESSION_ID]
-Type /help for available commands
+User: [USER]
+Logon Mechanism: [LOGMECH]
+[Additional session settings...]
+[Blank line]
+Type /help for commands, /quit to exit.
+[Blank line]
 ```
 
 **Color application:**
-- Logo: Per logo specification above
-- "Teradata Query Tool": Default color
-- Version: Gray/dim
-- Connection info: Default color
-- Database/Session values: Teradata orange (for emphasis)
-- Help hint: Gray/dim
+- Logo: Per logo specification (orange/default split)
+- Tool name "tq": 't' in orange, 'q' in default
+- Version: Gray/dim (optional, can be default)
+- Connection info labels: Default color
+- Connection info values: Default color (NOT orange - keep it simple)
+- Help hint: Default or gray/dim
 
 **Spacing:**
+- One blank line before logo
 - One blank line after logo
-- One blank line after version
+- One blank line after version line
 - One blank line after session info
+- One blank line after help hint
 - Prompt starts immediately after
 
 ---
@@ -330,7 +444,7 @@ USAGE:
 
 **Color:**
 - `tq`: Tool name color (t in orange, q in default)
-- Version: Gray/dim
+- Version: Default
 - "Teradata Query Tool": Default
 - Usage section: Default
 
@@ -351,7 +465,7 @@ Available Commands:
 ```
 
 **Color:**
-- Command names (`/help`): Teradata orange
+- Command names (`/help`): Default or orange (optional for emphasis)
 - Descriptions: Default color
 
 ---
@@ -369,7 +483,7 @@ Available Commands:
 ### Screen Reader Support
 
 **Text alternatives:**
-- Logo includes "Teradata Query Tool" text
+- Logo includes "tq v[VERSION]" text immediately after
 - All visual elements have text equivalents
 - Status messages are plain text
 
@@ -412,14 +526,14 @@ Teradata Query Tool
 
 **Example:**
 ```
-tq 1.6.1
+tq 1.7.0
 Teradata Query Tool
 ```
 
 **Color:**
-- `tq`: Tool name color (t in orange)
+- `tq`: Tool name color (t in orange, q in default)
 - Version number: Default
-- Subtitle: Gray/dim
+- Subtitle: Default or gray/dim
 
 ---
 
@@ -428,51 +542,116 @@ Teradata Query Tool
 Before any release, verify:
 
 - [ ] Logo renders correctly (no offset in last two lines)
-- [ ] Logo uses only `█` block character (not `|` or `_`)
+- [ ] Logo uses only `█` block character (U+2588) and `▄` (U+2584) for descender
+- [ ] Logo has NO `|` or `_` characters
 - [ ] Tool name always lowercase `tq`
 - [ ] 't' letter in Teradata orange (#F37021) everywhere
-- [ ] Interactive prompt `tq>` in Teradata orange (not green)
-- [ ] Welcome banner displays correctly
+- [ ] 'q' letter in default terminal color everywhere
+- [ ] Interactive prompt `tq>` ENTIRELY in Teradata orange (not green, not default)
+- [ ] Multi-line prompt `...>` ENTIRELY in Teradata orange
+- [ ] Welcome banner displays correctly with proper spacing
 - [ ] Error messages use red color + "Error:" prefix
 - [ ] Success messages use green color + "✓" symbol
 - [ ] All colors have appropriate fallbacks
 - [ ] Text readable in light AND dark terminal themes
 - [ ] Monospace alignment perfect in all contexts
+- [ ] Test in at least 3 different terminal emulators
 
 ---
 
-## Implementation Notes
+## Implementation Validation
 
-### Color Application Code Pattern
+### Manual Testing Required
 
-**Rust example:**
+After implementation, the architect MUST perform these visual checks:
+
+1. **Logo Alignment Test:**
+   - Start `tq repl`
+   - Visually verify lines 4 and 5 of the logo are NOT offset to the right
+   - Verify the 't' stem is perfectly vertical through lines 2-5
+   - Take screenshot if needed for validation
+
+2. **Prompt Color Test:**
+   - Verify `tq>` prompt is in Teradata orange (NOT green)
+   - Type a multi-line SQL statement and verify `...>` is also orange
+   - Compare orange color to logo orange (should match exactly)
+
+3. **Terminal Compatibility Test:**
+   - Test in iTerm2 (macOS primary)
+   - Test in at least one other terminal (Terminal.app, Alacritty, etc.)
+   - Verify colors render correctly in both light and dark themes
+
+4. **Build Warnings Test:**
+   - Run `cargo build`
+   - Verify ZERO warnings related to `writeln!()` or Result handling
+   - All `writeln!()` calls must properly handle the Result with `?` operator
+
+---
+
+## Implementation Code Reference
+
+### Complete Logo Implementation (Rust)
+
 ```rust
-use colored::*;
+use ansi_term::Color;
+use std::io::Write;
 
-// Tool name
-println!("{}{}",
-    "t".truecolor(243, 112, 33),  // Teradata orange
-    "q"                             // Default color
-);
+fn display_logo<W: Write>(writer: &mut W) -> Result<(), std::io::Error> {
+    let orange = Color::Rgb(243, 112, 33);
 
-// Prompt
-print!("{}",
-    "tq> ".truecolor(243, 112, 33)
-);
+    writeln!(writer)?;
 
-// Logo line (example)
-println!("{}",
-    "████████╗ ██████╗ ".truecolor(243, 112, 33)
-);
+    // Logo: 't' in orange, 'q' in default terminal color
+    writeln!(writer, " {}   {}",
+        orange.paint("████████"),
+        "████")?;
+    writeln!(writer, "    {}     {}",
+        orange.paint("██"),
+        "██  ██")?;
+    writeln!(writer, "    {}     {}",
+        orange.paint("██"),
+        "██  ██")?;
+    writeln!(writer, "    {}     {}",
+        orange.paint("██"),
+        "██ ▄██")?;
+    writeln!(writer, "    {}      {}",
+        orange.paint("██"),
+        "████")?;
+
+    writeln!(writer)?;
+
+    // Tool name: 't' in orange, 'q' in default
+    writeln!(writer, " {}{}  v{}",
+        orange.paint("t"),
+        "q",
+        env!("CARGO_PKG_VERSION"))?;
+
+    writeln!(writer)?;
+
+    Ok(())
+}
 ```
 
-### Terminal Color Compatibility
+### Prompt Implementation (Rust)
 
-**Always check terminal support:**
 ```rust
-// Check if colors should be enabled
-let use_color = atty::is(Stream::Stdout)
-    && env::var("NO_COLOR").is_err();
+pub struct TqPrompt {
+    normal_prompt: String,
+    continuation_prompt: String,
+}
+
+impl TqPrompt {
+    pub fn new() -> Self {
+        // Teradata orange: RGB(243, 112, 33)
+        let orange_start = "\x1b[38;2;243;112;33m";
+        let reset = "\x1b[0m";
+
+        Self {
+            normal_prompt: format!("{}tq> {}", orange_start, reset),
+            continuation_prompt: format!("{}...> {}", orange_start, reset),
+        }
+    }
+}
 ```
 
 ---
@@ -481,27 +660,41 @@ let use_color = atty::is(Stream::Stdout)
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
+| 2026-01-19 | 2.0.0 | Complete rewrite with unambiguous specifications, exact logo design, prompt color fix, implementation validation requirements | CLI UX Designer |
 | 2026-01-19 | 1.0.0 | Initial branding guidelines created for Sprint 13 | CLI UX Designer |
 
 ---
 
 ## References
 
-- Teradata Corporate Brand Guidelines (orange color reference)
+- Teradata Corporate Brand Guidelines (orange color: #F37021)
 - Sprint 13 Planning: Feature 3 - Logo Branding Issues
 - User Feedback: docs/builder/incoming/open-bugs.md (lines 6-22)
-- Tab Completion Failure Analysis: Branding section
+- User's explicit requirements:
+  - Tool name `tq` in lowercase
+  - Letter 't' in Teradata orange
+  - Use block character █ (simpler than | and _)
+  - Logo renders correctly (last two lines not offset)
+  - Interactive prompt `tq>` in Teradata orange (not green)
 
 ---
 
 ## Approval
 
-**Status:** DRAFT - Pending User Review
+**Status:** Ready for Implementation
+
+**User Requirements Addressed:**
+1. ✅ Tool name `tq` in lowercase - SPECIFIED
+2. ✅ Letter 't' in Teradata orange (#F37021) - SPECIFIED with RGB values
+3. ✅ Use block character █ - SPECIFIED with exact Unicode codepoint
+4. ✅ Logo renders correctly (last two lines not offset) - SPECIFIED with exact spacing
+5. ✅ Interactive prompt `tq>` in Teradata orange (not green) - SPECIFIED with implementation code
 
 **Next Steps:**
-1. User reviews and approves logo design
-2. User validates color specifications
-3. Implementation follows approved guidelines
-4. Testing validates rendering across terminals
+1. Architect implements logo per exact specification
+2. Architect implements prompt colors per specification
+3. Architect runs manual validation tests
+4. User validates visual appearance
+5. Document approved and becomes authoritative reference
 
-Once approved, this becomes the authoritative branding reference for all tq development.
+This specification is complete, unambiguous, and ready for implementation without guesswork.

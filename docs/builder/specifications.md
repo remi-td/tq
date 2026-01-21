@@ -109,8 +109,9 @@
 
 | Feature | Status | Command | Sprint | Priority |
 |---------|--------|---------|--------|----------|
-| Professional branding | 🚧 In Progress | Logo, colors, naming | 13 | P1 |
+| Professional branding | 🚧 In Progress | Logo, colors, naming | 13 | P0 |
 | Interactive test framework | 🚧 In Progress | expectrl-based tests | 13 | P0 |
+| Export syntax simplification | 🚧 In Progress | `/export <fmt> [dest]` | 13 | P1 |
 | Export to clipboard | ✅ Implemented | `/export <fmt> clipboard` | 12 | P1 |
 | Export full dataset | ✅ Implemented | Re-execute without limit | 12 | P1 |
 
@@ -379,9 +380,9 @@
 **Sprint Planning:** [Sprint 13 Planning](../sprints/sprint-13-planning.md)
 
 **Key Documents:**
-- [Branding Guidelines](detailed-specifications/branding-guidelines.md) - Complete visual identity specification
-- [Export Syntax Design](../sprints/export-syntax-simplification-design.md) - Simplified export command design
-- [Tab Completion Failure Analysis](../sprints/tab-completion-failure-analysis.md) - Root cause analysis of 4 sprint failures
+- [Branding Guidelines v2.0.0](detailed-specifications/branding-guidelines.md) - Complete visual identity specification (ready for implementation)
+- [Export Syntax Design](export-syntax-simplification-design.md) - Simplified export command design
+- [Tab Completion Failure Analysis](tab-completion-failure-analysis.md) - Root cause analysis of 4 sprint failures
 
 **Critical Success Factors:**
 - Interactive tests BEFORE claiming tab completion fixed
@@ -434,8 +435,9 @@ Complete technical specifications are organized by domain:
   Error messages, troubleshooting guidance, and exit codes
 
 ### Branding & Visual Identity
-- **[Branding Guidelines](detailed-specifications/branding-guidelines.md)**
+- **[Branding Guidelines](detailed-specifications/branding-guidelines.md)** 🚧
   Logo design, color specifications, naming conventions, and terminal rendering standards
+  - v2.0.0: Complete unambiguous specification with exact logo design and prompt colors
 
 ### Performance
 - **[Performance Considerations](detailed-specifications/performance.md)**
@@ -447,6 +449,7 @@ Complete technical specifications are organized by domain:
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
+| 2026-01-19 | 1.7.0-dev | Sprint 13 Phase 2: Branding Guidelines v2.0.0 complete, export syntax design complete, features marked 🚧 | CLI UX Designer Agent |
 | 2026-01-19 | 1.7.0-dev | Sprint 13: Mark features as 🚧 In Progress, add branding guidelines, add Sprint 13 roadmap section | CLI UX Designer Agent |
 | 2026-01-18 | 1.6.0 | Sprint 11: Mark table display and tab completion as 🔧 In Repair, add Sprint 11 roadmap section | CLI UX Designer Agent |
 | 2026-01-18 | 1.5.1-dev | Sprint 8: Mark broken features as 🔧 In Repair, add Sprint 8 roadmap, add 🔧 to legend | CLI UX Designer Agent |
