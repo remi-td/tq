@@ -2,20 +2,20 @@
 
 Updated on 2026-01-22 at 23:45
 
-## BUG 1: Logo - Need Block Characters
+## BUG 1: Logo - Need Block Characters (LOWERCASE)
 
 **Status:** ✅ FIXED (pending manual verification)
 
-The logo now uses block characters for clearer display.
+The logo now uses LOWERCASE block characters for clearer display.
 
-**New Design:**
+**New Design (LOWERCASE):**
 ```
- ▀▀█▀▀     █▀▀█
-   █      █   █
-   █      █▄▄█
+  ▄      ▄▄
+ █▀█    █  █
+  █      ▀▀█
 ```
 
-Where 't' (left) is in Teradata orange and 'q' (right) is in default color.
+This is a lowercase 't' (left) in Teradata orange and lowercase 'q' (right) in default color, using block characters for clarity.
 
 ## BUG 2: Tab Completion Shows Pager Output
 
