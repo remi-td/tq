@@ -1,8 +1,8 @@
 # tq Branding Guidelines
 
-**Version:** 2.0.0
-**Status:** Active - Sprint 13 Implementation
-**Last Updated:** 2026-01-19
+**Version:** 3.0.0
+**Status:** Active - Sprint 19 Implementation
+**Last Updated:** 2026-01-22
 **Owner:** CLI UX Designer
 
 ---
@@ -99,132 +99,176 @@ orange.paint("text")
 
 ## Logo Design
 
-### FINAL APPROVED DESIGN
+### CURRENT APPROVED DESIGN (Sprint 19+)
 
-**Character Set:** Unicode block character `█` (U+2588 Full Block) ONLY
+**Character Set:** ASCII characters `_`, `|`, `{`, `}`, `\`, `` ` ``
 
-**Rationale:** The user explicitly requested the block character `█` because it is simpler and cleaner than using `|` and `_`. This decision is FINAL.
+**Design Philosophy:** Lowercase ASCII art rendering of "tq" letters using standard ASCII characters. Information messages are displayed to the RIGHT of the logo on the same lines.
 
 **Dimensions:**
-- Width: Exactly 17 characters (including spacing)
+- Width: Logo portion approximately 12 characters, total line width varies with info messages
 - Height: Exactly 5 lines
 - Monospace-friendly: Must render correctly in all monospace fonts
 
 ### Logo ASCII Art - EXACT SPECIFICATION
 
 ```
- ████████   ████
-    ██     ██  ██
-    ██     ██  ██
-    ██     ██ ▄██
-    ██      ████
+ _
+| |_   __ _
+|  _| / _` |
+ \__|  \__, |
+          |_|
+```
+
+**Visual Structure:**
+- Lines 1-5: Lowercase "t" (left) + lowercase "q" (right)
+- The "t": Vertical stem with horizontal top bar
+- The "q": Circular body with descending tail
+
+### Implementation with Info Messages
+
+**Sprint 19+ Layout:** Info messages appear on the SAME lines as the logo, to the right:
+
+```
+ _            Teradata Query Tool v1.7.0
+| |_   __ _   Connected to host:1025
+|  _| / _` |  Database: demo_user
+ \__|  \__, |  User: demo_user
+          |_|  Default row limit: 100
 ```
 
 **Critical Implementation Details:**
 
-1. **Line 1:** One space, eight █ blocks, three spaces, four █ blocks
-   - Total: 16 visible characters plus 1 leading space = 17 chars
+The logo is implemented as two separate character arrays that are combined line-by-line:
 
-2. **Line 2:** Four spaces, two █ blocks, five spaces, two █, two spaces, two █
-   - Total: 17 characters
+**'t' portion (colored in Teradata orange):**
+```
+ _
+| |_
+|  _|
+ \__|
+```
 
-3. **Line 3:** Four spaces, two █ blocks, five spaces, two █, two spaces, two █
-   - Total: 17 characters (identical to line 2)
+**'q' portion (default terminal color):**
+```
 
-4. **Line 4:** Four spaces, two █ blocks, five spaces, two █, one space, one ▄, two █
-   - Total: 17 characters
-   - Note: Uses ▄ (U+2584 Lower Half Block) for the descender
+ __ _
+/ _` |
+\__, |
+   |_|
+```
 
-5. **Line 5:** Four spaces, two █ blocks, six spaces, four █
-   - Total: 17 characters
-
-**NO OFFSET ALLOWED:** All lines MUST be perfectly aligned. Each line starts at the exact same column position with NO additional indentation or offset.
+**Combined output:** Each line combines `[orange_t][default_q]   [info_message]`
 
 ### Visual Structure
 
 ```
-[Line 1]  ████████   ████        <- 't' top bar + 'q' top
-[Line 2]     ██     ██  ██       <- 't' stem + 'q' sides
-[Line 3]     ██     ██  ██       <- 't' stem + 'q' sides
-[Line 4]     ██     ██ ▄██       <- 't' stem + 'q' descender
-[Line 5]     ██      ████        <- 't' stem + 'q' bottom
+[Line 1]   _            <- 't' top bar
+[Line 2]  | |_   __ _   <- 't' stem + horizontal + 'q' top
+[Line 3]  |  _| / _` |  <- 't' stem + base + 'q' body
+[Line 4]   \__|  \__, | <- 't' bottom + 'q' body with tail start
+[Line 5]          |_|   <- 'q' descending tail
 ```
 
-The 't' is represented by the left blocks (vertical stem), and the 'q' is represented by the right blocks (circular with descender).
+The 't' is a lowercase letter with vertical stem and horizontal connector. The 'q' is a lowercase letter with circular body and descending tail.
 
 ### Color Application
 
 **Color Splitting:**
-- **Left portion (representing 't'):** Teradata orange (#F37021)
-  - Line 1: First 8 blocks (`████████`)
-  - Lines 2-5: Middle 2 blocks at position 5-6 (`██`)
+- **'t' portion:** Teradata orange (#F37021 / xterm-256 color 202)
+  - All characters in the 't' shape: `_`, `|`, `{`, `\`
 
-- **Right portion (representing 'q'):** Default terminal color
-  - Line 1: Last 4 blocks (`████`)
-  - Lines 2-5: Right side blocks forming the 'q' shape
+- **'q' portion:** Default terminal color
+  - All characters in the 'q' shape: `_`, `` ` ``, `/`, `|`, `{`, etc.
 
-**Implementation Pattern:**
+**Implementation Pattern (Sprint 19+):**
 ```rust
-// Line 1
-writeln!(writer, " {}   {}",
-    orange.paint("████████"),  // 't' top bar in orange
-    "████")?;                  // 'q' top in default
+use ansi_term::Color;
 
-// Line 2
-writeln!(writer, "    {}     {}",
-    orange.paint("██"),        // 't' stem in orange
-    "██  ██")?;                // 'q' sides in default
+let orange = Color::Fixed(202);  // Teradata orange
 
-// Line 3
-writeln!(writer, "    {}     {}",
-    orange.paint("██"),        // 't' stem in orange
-    "██  ██")?;                // 'q' sides in default
+let logo_t = [
+    " _    ",
+    "| |_  ",
+    "|  _| ",
+    " \\__| ",
+    "      ",
+];
 
-// Line 4
-writeln!(writer, "    {}     {}",
-    orange.paint("██"),        // 't' stem in orange
-    "██ ▄██")?;                // 'q' descender in default
+let logo_q = [
+    "      ",
+    " __ _ ",
+    "/ _` |",
+    "\\__, |",
+    "   |_|",
+];
 
-// Line 5
-writeln!(writer, "    {}      {}",
-    orange.paint("██"),        // 't' stem in orange
-    "████")?;                  // 'q' bottom in default
+// Build info lines
+let info_lines = vec![
+    format!("Teradata Query Tool v{}", env!("CARGO_PKG_VERSION")),
+    format!("Connected to {}:{}", config.host, config.port),
+    format!("Database: {}", config.database),
+    format!("User: {}", config.user),
+    format!("Default row limit: {}", args.default_limit),
+];
+
+// Print each line: [orange_t][default_q]   [info]
+for (i, (t_part, q_part)) in logo_t.iter().zip(logo_q.iter()).enumerate() {
+    let t_colored = orange.bold().paint(*t_part);
+    let info = info_lines.get(i).map(|s| s.as_str()).unwrap_or("");
+    writeln!(writer, "{}{}   {}", t_colored, q_part, info)?;
+}
 ```
 
-**CRITICAL SPACING RULES:**
-1. Line 1: 1 leading space, 3 spaces between 't' and 'q'
-2. Line 2: 4 leading spaces, 5 spaces between 't' and 'q'
-3. Line 3: 4 leading spaces, 5 spaces between 't' and 'q'
-4. Line 4: 4 leading spaces, 5 spaces between 't' and 'q'
-5. Line 5: 4 leading spaces, 6 spaces between 't' and 'q'
+**CRITICAL LAYOUT RULES:**
+1. Each line combines: `[colored_t_part][q_part]   [info_message]`
+2. Three spaces separate logo from info messages
+3. Info messages vertically aligned (all start at same column)
+4. Logo portions are fixed width (t=6 chars, q=6 chars, total 12 chars for logo)
+5. If fewer than 5 info lines, remaining logo lines print without info
 
 **Testing Requirements:**
-- Render the logo and visually verify NO offset in lines 4 and 5
-- All lines must be vertically aligned on the left edge
-- The 't' stem (lines 2-5) must be perfectly vertical
+- Render the logo and visually verify proper ASCII art shape
+- All info lines must be vertically aligned on the right
+- The 't' and 'q' shapes must be recognizable as lowercase letters
 - Test in multiple terminals (iTerm2, Terminal.app, Alacritty, etc.)
+- Verify 't' portion displays in Teradata orange
+- Verify 'q' portion displays in default terminal color
 
 ### Logo Display Context
 
 ```
 [Blank line]
- ████████   ████
-    ██     ██  ██
-    ██     ██  ██
-    ██     ██ ▄██
-    ██      ████
-[Blank line]
- tq  v1.7.0
-[Blank line]
-Connected to host:1025
-Database: mydb
-User: myuser
-Logon Mechanism: TD2
-[Additional session info...]
+ _            Teradata Query Tool v1.7.0
+| |_   __ _   Connected to mcp-host:1025
+|  _| / _` |  Database: demo_user
+ \__|  \__, |  User: demo_user
+          |_|  Default row limit: 100
 [Blank line]
 Type /help for commands, /quit to exit.
 [Blank line]
 ```
+
+### Design Evolution History
+
+**Sprint 1-12:** No logo, minimal branding
+
+**Sprint 13-17:** Uppercase block art logo using █ (U+2588) characters
+- 5 lines, 17 characters wide
+- Uppercase "T" and "Q" shapes
+- Color split: 't' in orange, 'q' in default
+- Status: **DEPRECATED**
+
+**Sprint 18:** Plain text lowercase "tq" (INCORRECT)
+- Simple text: `tq\nTeradata Query tool v1.7.0`
+- Info displayed BELOW logo
+- Status: **REVERTED in Sprint 19** (did not meet user requirements)
+
+**Sprint 19+:** Lowercase ASCII art "tq" with info on right (CURRENT)
+- ASCII characters `_|{}\` ` forming lowercase letter shapes
+- Info messages on same lines to the RIGHT of logo
+- Color split: 't' in orange, 'q' in default
+- Status: **ACTIVE** (current approved design)
 
 ---
 
@@ -660,6 +704,7 @@ impl TqPrompt {
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
+| 2026-01-22 | 3.0.0 | Updated logo specification to reflect Sprint 19 lowercase ASCII art design with info on right. Added design evolution history. Deprecated uppercase block art from v2.0.0. | CLI UX Designer |
 | 2026-01-19 | 2.0.0 | Complete rewrite with unambiguous specifications, exact logo design, prompt color fix, implementation validation requirements | CLI UX Designer |
 | 2026-01-19 | 1.0.0 | Initial branding guidelines created for Sprint 13 | CLI UX Designer |
 
