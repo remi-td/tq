@@ -8,10 +8,108 @@
 //! - Session-scoped: Cache is cleared on connection change (/logon)
 //! - Timeout handling: Queries time out after configured duration
 //! - Graceful degradation: Failures don't crash REPL
+//! - Sprint 19: Stdout suppression during queries to prevent driver debug output
 
 use crate::db::DatabaseClient;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+/// Guard that suppresses stdout during its lifetime.
+///
+/// Sprint 19: The teradatarustapi library (Go-based) prints debug output like
+/// "Page 1: records 0 - 0  total: 0  [FULL]" directly to stdout during query execution.
+/// This guard redirects stdout to /dev/null while metadata queries are running
+/// to prevent this debug output from appearing during tab completion.
+struct StdoutSuppressor {
+    #[cfg(unix)]
+    original_stdout: Option<std::os::unix::io::RawFd>,
+    #[cfg(unix)]
+    null_fd: Option<std::os::unix::io::RawFd>,
+}
+
+impl StdoutSuppressor {
+    /// Create a new suppressor and redirect stdout to /dev/null
+    fn new() -> Self {
+        #[cfg(unix)]
+        {
+            // Flush stdout before redirecting
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+
+            // Save original stdout fd
+            let original_stdout = unsafe { libc::dup(libc::STDOUT_FILENO) };
+            if original_stdout < 0 {
+                log::warn!("Failed to duplicate stdout fd");
+                return Self {
+                    original_stdout: None,
+                    null_fd: None,
+                };
+            }
+
+            // Open /dev/null
+            let null_path = std::ffi::CString::new("/dev/null").unwrap();
+            let null_fd = unsafe { libc::open(null_path.as_ptr(), libc::O_WRONLY) };
+            if null_fd < 0 {
+                log::warn!("Failed to open /dev/null");
+                unsafe { libc::close(original_stdout) };
+                return Self {
+                    original_stdout: None,
+                    null_fd: None,
+                };
+            }
+
+            // Redirect stdout to /dev/null
+            if unsafe { libc::dup2(null_fd, libc::STDOUT_FILENO) } < 0 {
+                log::warn!("Failed to redirect stdout to /dev/null");
+                unsafe {
+                    libc::close(original_stdout);
+                    libc::close(null_fd);
+                }
+                return Self {
+                    original_stdout: None,
+                    null_fd: None,
+                };
+            }
+
+            Self {
+                original_stdout: Some(original_stdout),
+                null_fd: Some(null_fd),
+            }
+        }
+
+        #[cfg(not(unix))]
+        {
+            // On non-Unix platforms, just return without suppression
+            Self {}
+        }
+    }
+}
+
+impl Drop for StdoutSuppressor {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        {
+            // Restore original stdout
+            if let (Some(original_stdout), Some(null_fd)) = (self.original_stdout, self.null_fd) {
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+
+                // Restore stdout
+                unsafe {
+                    libc::dup2(original_stdout, libc::STDOUT_FILENO);
+                    libc::close(original_stdout);
+                    libc::close(null_fd);
+                }
+            }
+        }
+    }
+}
+
+/// Execute a closure with stdout suppressed
+///
+/// Sprint 19: Used to suppress teradatarustapi debug output during metadata queries.
+fn with_stdout_suppressed<T, F: FnOnce() -> T>(f: F) -> T {
+    let _suppressor = StdoutSuppressor::new();
+    f()
+}
 
 /// Default timeout for table metadata queries (500ms)
 pub const TABLE_QUERY_TIMEOUT: Duration = Duration::from_millis(500);
@@ -234,7 +332,11 @@ impl MetadataCache {
             SAMPLE 10000
         "#;
 
-        match client.execute(sql) {
+        // Sprint 19: Suppress stdout during query execution to prevent driver debug output
+        // from appearing during tab completion
+        let query_result = with_stdout_suppressed(|| client.execute(sql));
+
+        match query_result {
             Ok(result) => {
                 let mut tables = Vec::with_capacity(result.row_count);
 
@@ -314,7 +416,11 @@ impl MetadataCache {
             )
         };
 
-        match client.execute(&sql) {
+        // Sprint 19: Suppress stdout during query execution to prevent driver debug output
+        // from appearing during tab completion
+        let query_result = with_stdout_suppressed(|| client.execute(&sql));
+
+        match query_result {
             Ok(result) => {
                 let mut columns = Vec::with_capacity(result.row_count);
 

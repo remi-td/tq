@@ -2,6 +2,34 @@
 
 This directory contains comprehensive test case definitions for the tq (Teradata Query) CLI tool.
 
+## IMPORTANT: Sprint 19 Manual Testing Requirements
+
+**Sprint 19 introduces MANDATORY manual testing based on Sprint 18 false positive lessons.**
+
+### Sprint 18 Failure Analysis
+
+Sprint 18 was APPROVED with 100% test pass rate, but user reported bugs STILL present.
+
+**Root Cause:** Automated tests validated CODE behavior, not USER experience.
+
+### Sprint 19 Testing Approach
+
+**MANDATORY for Sprint 19:**
+1. ✅ Real Terminal Testing - No PTY automation
+2. ✅ Human Visual Validation - Must see what user sees
+3. ✅ Screenshot Evidence - Visual proof required
+4. ✅ Manual Execution - No code review substitutes
+5. ✅ User Scenario Reproduction - Test exact sequences
+
+**Sprint 19 Test Cases (manual visual tests):**
+- `TC-LOGO-002.md` - Logo ASCII art verification
+- `TC-TAB-COMPLETION-001.md` - Tab completion after FROM
+- `TC-TAB-COMPLETION-002.md` - Tab completion qualified names
+
+**Key Lesson:** "100% automated test pass rate means NOTHING if tests don't validate what user sees."
+
+---
+
 ## Quick Start
 
 1. **Build tq**:
@@ -33,7 +61,7 @@ This directory contains comprehensive test case definitions for the tq (Teradata
 
 ## Test Case Files
 
-- **TC001-TC025**: Individual test case definitions
+- **TCXXX**: Individual test case definitions for each requirement
 - **INDEX.md**: Complete test catalog with coverage matrix
 - **README.md**: This file (quick start guide)
 
@@ -65,17 +93,6 @@ Each test case file contains:
 - **High**: Important features (11 test cases)
 - **Medium**: Quality of life (5 test cases)
 
-## Coverage
-
-These 25 test cases provide comprehensive coverage of:
-
-- All 10 MVP functional requirements (FR-001 through FR-010)
-- Command-line interface design principles
-- Output format specifications (table, JSON, CSV)
-- Error handling and user feedback
-- Security requirements
-- UNIX compliance
-
 ## Execution Notes
 
 ### Quick Smoke Test
@@ -96,17 +113,10 @@ Follow the recommended order in `INDEX.md`:
 5. Security
 6. Quality
 
-### Test Requirements
+### Testing REPL mode
 
-Minimum requirements:
-- tq binary (release build recommended)
-- Basic shell (bash/zsh)
-- Test database credentials configured in `.env` file or environment variables
-
-Optional tools:
-- jq (for JSON validation tests)
-- python3 with csv module (for CSV compliance tests)
-- ps command (for security tests on Unix)
+The tq tool is either run in batch mode or in REPL mode, YOU MUST TEST IN BOTH MODES.
+This may require the development of a specific tool to test the REPL mode. (update this file with the tool name and usage once created)
 
 ### Configuration Methods
 

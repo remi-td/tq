@@ -1,8 +1,7 @@
 ---
 name: collect-metrics
-description: Collects token usage metrics from sprint subagent transcripts. Use during Phase 5 (Sprint Closure) to add factual metrics to sprint review. Simple data extraction only, no analysis.
+description: Collects token usage metrics from subagent transcripts. Use to add factual metrics to analyze your agent performance. Simple data extraction only, no analysis.
 allowed-tools: Bash, Read, Write
-model: claude-sonnet-4-5-20250929
 ---
 
 # Collect Metrics Skill
@@ -31,52 +30,11 @@ echo "Using session: $SESSION_ID"
 ### Step 2: Run Metrics Extraction
 
 ```bash
-# Make script executable
-chmod +x .claude/scripts/extract-sprint-metrics.sh
-
 # Extract metrics
-./.claude/scripts/extract-sprint-metrics.sh "$SESSION_ID" <sprint-number>
+./scripts/extract-sprint-metrics.sh "$SESSION_ID" <output-file.md>
 ```
 
-This creates: `docs/builder/sprints/sprint-N-metrics.md`
-
-### Step 3: Add Metrics to Sprint Review
-
-Read the generated metrics file and create a fully detailed report in: `docs/builder/sprints/sprint-N-metrics.md`
-
-```markdown
-## Token Usage Metrics
-
-**Data Source:** Session `<session-id>`
-**Collection Date:** <date>
-
-[Sprint summary]
-
-### By Agent
-
-[summary by agent]
-
-### By Agent and Phase
-[summary by agent and phase]
-
-### Details
-[Full details from the report file]
-```
-
-### Step 4: Report Completion
-
-Inform the user:
-
-```
-✅ Metrics collected for Sprint N
-
-**Metrics file created:** docs/builder/sprints/sprint-N-metrics.md
-
-**Key numbers:**
-- Total tokens: [X]
-- Estimated cost: $[Y]
-- Cache hit rate: [Z]%
-```
+This creates a markdown file at the location specified.
 
 ## Important Notes
 
@@ -84,18 +42,3 @@ Inform the user:
 - ❌ This skill does NOT analyze or recommend changes
 - ⚡ Fast execution (~2-3 minutes)
 - 📊 Provides factual baseline for optimization
-
-## Next Step
-
-After collecting metrics, optionally run:
-```
-/optimize-agents
-```
-
-This separate skill will:
-- Analyze metrics across multiple sprints
-- Apply decision tree to identify patterns
-- Generate concrete optimization actions
-- Propose specific file edits
-
-See `optimize-agents/SKILL.md` for details.

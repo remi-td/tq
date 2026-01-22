@@ -138,6 +138,32 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 - **Interactive Tests Required**: Yes (all features are REPL-based)
 - **Focus**: Logo branding fix + tab completion rebuild from scratch
 - **Acceptance**: Both P0 bugs must be 100% fixed, no regressions
+- **Outcome**: APPROVED but user reported bugs still present (false positive)
+
+### Sprint 19: CRITICAL BUG FIXES - RETRY (Sprint 18 Failed)
+
+**Sprint 19 Context:** Sprint 18 was APPROVED but user reports SAME bugs still present.
+
+**Sprint 19 Test Cases (3 total - manual visual tests only):**
+
+#### Logo Fix - RETRY (P0 - CRITICAL)
+- **TC-LOGO-002**: Logo ASCII Art with Info on Right (Manual visual test)
+
+#### Tab Completion Fix - RETRY (P0 - CRITICAL)
+- **TC-TAB-COMPLETION-001**: Tab Completion After FROM (No Pager Output) (Manual test)
+- **TC-TAB-COMPLETION-002**: Tab Completion After Qualified Name (No Pager Output) (Manual test)
+
+**Sprint 19 Test Strategy:**
+- **Test Count**: 3 manual visual test cases (all critical)
+- **Type**: Maintenance Sprint (CRISIS - RETRY)
+- **Why Retry**: Sprint 18 tests gave FALSE POSITIVES - tests passed but bugs not fixed
+- **Database Required**: Yes (for tab completion)
+- **Real Terminal Required**: YES - PTY automation missed bugs in Sprint 18
+- **Manual Testing**: MANDATORY - No automated tests, human visual validation only
+- **Screenshot Evidence**: REQUIRED for all tests
+- **Focus**: Verify ACTUAL user experience, not code behavior
+- **Key Difference**: Tests what USER SEES, not what code returns
+- **Acceptance**: User's exact bug reports must be proven fixed with visual evidence
 
 ### Security
 - **TC022**: Security - No Password Exposure

@@ -224,6 +224,9 @@ mod dirs {
 }
 
 /// Print the startup banner with connection information
+///
+/// Sprint 19: Fixed logo display - lowercase "tq" ASCII art with 't' in Teradata orange
+/// and 'q' in white/default color. Information messages displayed to the RIGHT of the logo.
 fn print_banner<W: Write>(
     completion_state: &CompletionState,
     args: &ReplArgs,
@@ -231,52 +234,71 @@ fn print_banner<W: Write>(
 ) -> Result<()> {
     let config = completion_state.client().config();
 
-    // Sprint 18: Simple lowercase "tq" text with subtitle (no ASCII art blocks)
-    // - Tool name: tq (lowercase, bold, Teradata orange)
-    // - Teradata orange: #F37021, xterm-256 color 202
+    // Teradata orange: #F37021, xterm-256 color 202
     let orange = Color::Fixed(202);
 
-    writeln!(writer)?;
-    // Simple "tq" in Teradata orange (bold for visibility)
-    writeln!(writer, "{}", orange.bold().paint("tq"))?;
-    // Subtitle with version
-    writeln!(
-        writer,
-        "Teradata Query tool v{}",
-        env!("CARGO_PKG_VERSION")
-    )?;
-    writeln!(writer)?;
-    writeln!(writer, "Connected to {}:{}", config.host, config.port)?;
-    writeln!(writer, "Database: {}", config.database)?;
-    writeln!(writer, "User: {}", config.user)?;
-    writeln!(writer, "Logon Mechanism: {}", config.logmech)?;
+    // Build the info lines to display to the right of the logo
+    let mut info_lines: Vec<String> = Vec::new();
+    info_lines.push(format!("Teradata Query Tool v{}", env!("CARGO_PKG_VERSION")));
+    info_lines.push(format!("Connected to {}:{}", config.host, config.port));
+    info_lines.push(format!("Database: {}", config.database));
+    info_lines.push(format!("User: {}", config.user));
     if args.default_limit > 0 {
-        writeln!(writer, "Default row limit: {}", args.default_limit)?;
+        info_lines.push(format!("Default row limit: {}", args.default_limit));
     }
-    // Show editor mode
     let editor_mode_str = match args.editor_mode {
         EditorMode::Emacs => "emacs",
         EditorMode::Vi => "vi",
     };
-    writeln!(writer, "Editor mode: {}", editor_mode_str)?;
+    info_lines.push(format!("Editor mode: {}", editor_mode_str));
 
-    // Show syntax highlighting status
-    if args.no_syntax_highlight {
-        writeln!(writer, "Syntax highlighting: disabled")?;
-    } else {
-        writeln!(writer, "Syntax highlighting: enabled")?;
-    }
+    // Lowercase "tq" ASCII art - compact 4-line version
+    // 't' is in Teradata orange, 'q' is in default color
+    //
+    // Line 1:  _
+    // Line 2: | |_    __ _
+    // Line 3: |  _|  / _` |
+    // Line 4:  \__|  \__, |
+    //                   |_|
+    //
+    // The 't' part:   _
+    //                | |_
+    //                |  _|
+    //                 \__|
+    //
+    // The 'q' part:
+    //                 __ _
+    //                / _` |
+    //                \__, |
+    //                   |_|
 
-    // Show paging status
-    if args.no_pager {
-        writeln!(writer, "Result paging: disabled")?;
-    } else {
-        writeln!(writer, "Result paging: enabled")?;
-    }
+    let logo_t = [
+        " _    ",
+        "| |_  ",
+        "|  _| ",
+        " \\__| ",
+        "      ",
+    ];
 
-    // Show enhanced timing status
-    if args.enhanced_timing {
-        writeln!(writer, "Enhanced timing: enabled")?;
+    let logo_q = [
+        "      ",
+        " __ _ ",
+        "/ _` |",
+        "\\__, |",
+        "   |_|",
+    ];
+
+    writeln!(writer)?;
+
+    // Print each line of the logo with info to the right
+    for (i, (t_part, q_part)) in logo_t.iter().zip(logo_q.iter()).enumerate() {
+        // Combine 't' (orange) and 'q' (default)
+        let t_colored = orange.bold().paint(*t_part);
+
+        // Get info line if available (offset by 0 to align with first logo line)
+        let info = info_lines.get(i).map(|s| s.as_str()).unwrap_or("");
+
+        writeln!(writer, "{}{}   {}", t_colored, q_part, info)?;
     }
 
     writeln!(writer)?;

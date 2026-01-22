@@ -13,6 +13,9 @@ Execute the 5-phase sprint workflow, launching specialized sub-agents as needed,
 
 ## The 7-Phase Workflow
 
+**CRITICAL**: Before each phase, **READ THE PROCESS DOCUMENT** for that phase. Do NOT rely on memory.
+**CRITICAL**: NEVER SKIP ANY PHASE, no matter the urgency. If urgency, then reduce the number of features to the minimum.
+
 | Phase | Name | Your Action |
 |-------|------|-------------|
 | **0** | Reality Check | Review past sprints. Detect patterns. Decide: Feature or Maintenance Sprint. |
@@ -22,11 +25,6 @@ Execute the 5-phase sprint workflow, launching specialized sub-agents as needed,
 | **4** | Ship | Validate against Definition of Done. Commit, push, document. |
 | **5** | Retrospective | Create `sprint-n-retrospective.md` documenting key metrics, achievements, learnings followup actions|
 | **6** | Framework Optimization | Review retro for improvements, optional token analysis, implement agentic framework optimizations |
-
-## How to Execute
-
-**CRITICAL**: Before each phase, **READ THE PROCESS DOCUMENT** for that phase. Do NOT rely on memory.
-**CRITICAL**: Never skip any phase, no matter the urgency. If urgency, then reduce the number of features to the minimum.
 
 ### Phase 0: Reality Check
 > **Read:** `process/phase0-reality-check.md`

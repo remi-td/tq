@@ -35,20 +35,19 @@ or
 
 ## Execution scenario: produce a test strategy and test cases 
 
-
 ### Step 1: Read Specifications
 Read incoming specification files` to understand what needs to be tested.
 
 ### Step 2: Design Tests
-For each acceptance criterion, design a test that proves it works:
-- Unit tests for logic
+For each feature, design once or more tests that proves it works:
 - Integration tests for end-to-end flows
 - Edge case tests for error handling
 
 Specify the overall test strategy in `tests/strategy` using `tests/strategy/test-strategy-template.md`
+Reflect if you need new tools that may need to be developed to test specific features or accelerate your test strategy. If this is the case, you should communicate this to the coordinator so they are developped.
 
 ### Step 3: Implement Tests
-Write the test code. Use `cargo test` for Rust tests.
+Write the fully detailed individual test cases in `tests/cases` (one file per feature ,there may be more than one test per feature).
 Use the general guidelines in `tests/README.md` and update it if needed
 
 **CRITICAL: Design comprehensive tests**
@@ -63,11 +62,7 @@ Document your individual test cases in `tests/cases`, update `tests/cases/INDEX.
 
 **CRITICAL: ALL tests must be EXECUTED, not code reviewed**
 
-Run all non-ignored tests:
-```bash
-cargo test --lib          # Unit tests
-cargo test --test '*'     # Integration tests
-```
+Run all test cases defined in `tests/cases`
 
 **BLOCKING REQUIREMENT:**
 - We are developing a database tool, If database is not available, you MUST report BLOCKED status for the systems test

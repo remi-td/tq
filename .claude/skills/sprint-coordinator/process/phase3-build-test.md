@@ -18,10 +18,13 @@ This phase follows Design (Phase 2). At this point:
 Launch BOTH agents in a **single message with multiple Task calls**:
 
 1. **`rust-teradata-architect`**:
-   - Instruction: "Implement the features defined in  `docs/builder/sprints/sprint-N-planning.md` as per `detailed-specifications/*.md` for Sprint N using the design outlined in `detailed-design/*.md`. Follow patterns in `rust-architecture.md`. Compile and run the tool to validate that your feature is implemented. Return a summary of what was implemented."
+   - Instruction: "Implement the features defined in  `docs/builder/sprints/sprint-N-planning.md` as per requirements in `detailed-specifications/*.md` for Sprint N using the design outlined in `detailed-design/*.md`. Follow patterns in `rust-architecture.md`. Compile and run the tool to validate that your feature is implemented. Return a summary of what was implemented."
 
 2. **`quality-validator`**:
-   - Instruction: "Design and implement tests for the features in Sprint N as per `docs/builder/sprints/sprint-N-planning.md`. Use the specifications in `detailed-specifications/*.md`. Document your strategy in `tests/strategy/` based on `tests/strategy/test-strategy-template.md`. Add test cases in `tests/cases` and use `tests/README.md`
+   - Instruction: "Design and implement tests for the features in Sprint N as per per requirements in `docs/builder/sprints/sprint-N-planning.md`. Use the specifications in `detailed-specifications/*.md`. Document your strategy in `tests/strategy/` based on `tests/strategy/test-strategy-template.md`. Add test cases in `tests/cases` and use `tests/README.md`
+
+2. **`cli-ux-designer.md`**:
+   - Instruction: "Update the documentation for the features in Sprint N as per `docs/builder/sprints/sprint-N-planning.md`. Use the specifications in `detailed-specifications/*.md`. The documentation should be placed in `docs/user`. Make sure that the documentation is accurate, intuitive and easy to navigate.
 
 ### Step 2: Collect Results
 
