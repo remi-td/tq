@@ -14,45 +14,65 @@ use crate::db::DatabaseClient;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-/// Guard that suppresses stdout during its lifetime.
+/// Guard that suppresses stdout AND stderr during its lifetime.
 ///
 /// Sprint 19: The teradatarustapi library (Go-based) prints debug output like
-/// "Page 1: records 0 - 0  total: 0  [FULL]" directly to stdout during query execution.
-/// This guard redirects stdout to /dev/null while metadata queries are running
-/// to prevent this debug output from appearing during tab completion.
-struct StdoutSuppressor {
+/// "Page 1: records 0 - 0  total: 0  [FULL]" during query execution.
+/// Sprint 20: Enhanced to suppress BOTH stdout and stderr, as the output might
+/// go to either stream or directly to TTY.
+struct OutputSuppressor {
     #[cfg(unix)]
     original_stdout: Option<std::os::unix::io::RawFd>,
+    #[cfg(unix)]
+    original_stderr: Option<std::os::unix::io::RawFd>,
     #[cfg(unix)]
     null_fd: Option<std::os::unix::io::RawFd>,
 }
 
-impl StdoutSuppressor {
-    /// Create a new suppressor and redirect stdout to /dev/null
+impl OutputSuppressor {
+    /// Create a new suppressor and redirect stdout AND stderr to /dev/null
     fn new() -> Self {
         #[cfg(unix)]
         {
-            // Flush stdout before redirecting
+            // Flush both streams before redirecting
             let _ = std::io::Write::flush(&mut std::io::stdout());
+            let _ = std::io::Write::flush(&mut std::io::stderr());
+
+            // Open /dev/null first
+            let null_path = std::ffi::CString::new("/dev/null").unwrap();
+            let null_fd = unsafe { libc::open(null_path.as_ptr(), libc::O_WRONLY) };
+            if null_fd < 0 {
+                log::warn!("Failed to open /dev/null for output suppression");
+                return Self {
+                    original_stdout: None,
+                    original_stderr: None,
+                    null_fd: None,
+                };
+            }
 
             // Save original stdout fd
             let original_stdout = unsafe { libc::dup(libc::STDOUT_FILENO) };
             if original_stdout < 0 {
                 log::warn!("Failed to duplicate stdout fd");
+                unsafe { libc::close(null_fd) };
                 return Self {
                     original_stdout: None,
+                    original_stderr: None,
                     null_fd: None,
                 };
             }
 
-            // Open /dev/null
-            let null_path = std::ffi::CString::new("/dev/null").unwrap();
-            let null_fd = unsafe { libc::open(null_path.as_ptr(), libc::O_WRONLY) };
-            if null_fd < 0 {
-                log::warn!("Failed to open /dev/null");
-                unsafe { libc::close(original_stdout) };
+            // Save original stderr fd
+            let original_stderr = unsafe { libc::dup(libc::STDERR_FILENO) };
+            if original_stderr < 0 {
+                log::warn!("Failed to duplicate stderr fd");
+                unsafe {
+                    libc::close(original_stdout);
+                    libc::close(null_fd);
+                }
                 return Self {
                     original_stdout: None,
+                    original_stderr: None,
                     null_fd: None,
                 };
             }
@@ -62,16 +82,36 @@ impl StdoutSuppressor {
                 log::warn!("Failed to redirect stdout to /dev/null");
                 unsafe {
                     libc::close(original_stdout);
+                    libc::close(original_stderr);
                     libc::close(null_fd);
                 }
                 return Self {
                     original_stdout: None,
+                    original_stderr: None,
+                    null_fd: None,
+                };
+            }
+
+            // Redirect stderr to /dev/null
+            if unsafe { libc::dup2(null_fd, libc::STDERR_FILENO) } < 0 {
+                log::warn!("Failed to redirect stderr to /dev/null");
+                // Restore stdout before failing
+                unsafe {
+                    libc::dup2(original_stdout, libc::STDOUT_FILENO);
+                    libc::close(original_stdout);
+                    libc::close(original_stderr);
+                    libc::close(null_fd);
+                }
+                return Self {
+                    original_stdout: None,
+                    original_stderr: None,
                     null_fd: None,
                 };
             }
 
             Self {
                 original_stdout: Some(original_stdout),
+                original_stderr: Some(original_stderr),
                 null_fd: Some(null_fd),
             }
         }
@@ -84,18 +124,23 @@ impl StdoutSuppressor {
     }
 }
 
-impl Drop for StdoutSuppressor {
+impl Drop for OutputSuppressor {
     fn drop(&mut self) {
         #[cfg(unix)]
         {
-            // Restore original stdout
-            if let (Some(original_stdout), Some(null_fd)) = (self.original_stdout, self.null_fd) {
+            // Restore both stdout and stderr
+            if let (Some(original_stdout), Some(original_stderr), Some(null_fd)) =
+                (self.original_stdout, self.original_stderr, self.null_fd) {
+                // Flush both streams before restoring
                 let _ = std::io::Write::flush(&mut std::io::stdout());
+                let _ = std::io::Write::flush(&mut std::io::stderr());
 
-                // Restore stdout
+                // Restore stdout and stderr
                 unsafe {
                     libc::dup2(original_stdout, libc::STDOUT_FILENO);
+                    libc::dup2(original_stderr, libc::STDERR_FILENO);
                     libc::close(original_stdout);
+                    libc::close(original_stderr);
                     libc::close(null_fd);
                 }
             }
@@ -103,11 +148,12 @@ impl Drop for StdoutSuppressor {
     }
 }
 
-/// Execute a closure with stdout suppressed
+/// Execute a closure with stdout AND stderr suppressed
 ///
 /// Sprint 19: Used to suppress teradatarustapi debug output during metadata queries.
+/// Sprint 20: Enhanced to suppress BOTH stdout and stderr.
 fn with_stdout_suppressed<T, F: FnOnce() -> T>(f: F) -> T {
-    let _suppressor = StdoutSuppressor::new();
+    let _suppressor = OutputSuppressor::new();
     f()
 }
 
