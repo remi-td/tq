@@ -30,7 +30,7 @@ Before starting:
 
 1. **Invoke collect-metrics skill:**
    ```
-   Use Skill tool with skill: "collect-metrics", args: "<sprint-number>"
+   Use Skill tool with skill: "collect-metrics" to output the metrics in a file named `docs/builder/sprints/sprint-N-metrics.md`
    ```
 
 2. **Read generated metrics:**
