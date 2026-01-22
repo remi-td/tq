@@ -252,25 +252,25 @@ fn print_banner<W: Write>(
     };
     info_lines.push(format!("Editor mode: {}", editor_mode_str));
 
-    // Lowercase "tq" using block characters - clear and bold
-    // Sprint 20: Using block characters █ for maximum clarity
+    // LOWERCASE "tq" using block characters
+    // Sprint 20: Block-based lowercase letters for maximum clarity
     // 't' is in Teradata orange, 'q' is in default color
     //
-    // Logo design:
-    //  ▀▀█▀▀     █▀▀█
-    //    █      █   █
-    //    █      █▄▄▄█
+    // Logo design (lowercase):
+    //   ▄      ▄▄
+    //  █▀█    █  █
+    //   █     ▀▀█
     //
     let logo_t = [
-        " ▀▀█▀▀ ",
-        "   █   ",
-        "   █   ",
+        "  ▄    ",
+        " █▀█   ",
+        "  █    ",
     ];
 
     let logo_q = [
-        "  █▀▀█ ",
-        " █   █ ",
-        " █▄▄█  ",
+        "  ▄▄   ",
+        " █  █  ",
+        "  ▀▀█  ",
     ];
 
     writeln!(writer)?;
