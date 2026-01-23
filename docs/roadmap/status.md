@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-01-23
-**Current Version:** 1.7.0
-**Latest Sprint:** Sprint 19 Complete
+**Current Version:** 1.7.1
+**Latest Sprint:** Sprint 20 Complete (Bug Fixes)
 
 ---
 
@@ -79,11 +79,15 @@ All core features are complete and tested.
 
 | Feature | Status | Spec Reference | Since |
 |---------|--------|----------------|-------|
-| Professional branding | ✅ | [Branding Guidelines](../specifications/branding-guidelines.md) | v1.6.1 |
+| Professional branding | ✅ | [Branding Guidelines](../specifications/branding-guidelines.md) | v1.6.1, fixed v1.7.1 (Sprint 20) |
 | Interactive test framework | ✅ | Testing infrastructure | v1.6.1 |
 | Export syntax simplification | ✅ | [REPL Mode](../specifications/repl.md#export-commands) | v1.6.1 |
 | Export to clipboard | ✅ | [REPL Mode](../specifications/repl.md#export-to-clipboard) | v1.6.1 |
 | Export full dataset | ✅ | [REPL Mode](../specifications/repl.md#export-full-dataset) | v1.6.1 |
+
+**Sprint 20 Bug Fixes (v1.7.1):**
+- Fixed logo display: Implemented correct 9-line lowercase ASCII art (was 3-line blocks)
+- Fixed tab completion: Eliminated "Page 1: records 0 - 0" output (changed from ListMenu to ColumnarMenu)
 
 ---
 
@@ -140,8 +144,9 @@ All core features are complete and tested.
 - **Total Features**: 56
 - **Implemented**: 50 (89%)
 - **Planned**: 6 (11%)
-- **Test Pass Rate**: 100% (285/285 tests)
+- **Test Pass Rate**: 100% (234/234 unit tests)
 - **Code Coverage**: 40% (baseline established)
+- **Latest Sprint**: Sprint 20 - Bug fixes for logo and tab completion
 
 ---
 
