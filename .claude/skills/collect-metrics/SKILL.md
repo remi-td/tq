@@ -31,7 +31,7 @@ echo "Using session: $SESSION_ID"
 
 ```bash
 # Extract metrics
-./scripts/extract-sprint-metrics.sh "$SESSION_ID" <output-file.md>
+./skills/collect-metrics/scripts/extract-sprint-metrics.sh "$SESSION_ID" <output-file.md>
 ```
 
 This creates a markdown file at the location specified.
