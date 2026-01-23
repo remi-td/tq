@@ -280,22 +280,280 @@ tq> SELECT COUNT(*) FROM employees WHERE dept = 'IT';
 
 **CRITICAL REQUIREMENT:** Tab completion MUST NOT produce any pager output or database query result formatting. When pressing TAB, the user should see ONLY completion suggestions, never "Page 1: records 0 - 0 total: 0" or similar pager output.
 
-### Implementation Requirements
+### Core Requirements
 
-**Metadata Caching Strategy:**
-1. **Database names** - Cached at REPL startup or first completion request via `SELECT databasename FROM dbc.databases`
-2. **Table names** - Cached incrementally as databases are explored via `SELECT tablename FROM dbc.tablesV WHERE databasename = ?`
-3. **Column names** - Cached per table as needed via `SELECT columnname FROM dbc.columnsV WHERE tablename = ?`
+#### TC-001: Complete Database Metadata Coverage
 
-**Completion Menu Behavior:**
-- Display completion candidates in a menu format
-- Filter candidates as user types additional characters
-- Support up/down arrow key navigation through candidates
-- After selecting a database and typing `.`, automatically show tables in that database
-- Completion should be responsive (< 50ms for cached metadata, < 500ms for uncached)
+**Requirement:** All databases on the Teradata system SHALL be included in database completion suggestions, including system databases.
+
+**Specific Requirements:**
+
+1. **TC-001.1** - System database `dbc` SHALL appear in database completion suggestions
+2. **TC-001.2** - The metadata query SHALL fetch ALL databases without filtering by user access rights during the fetch operation
+3. **TC-001.3** - If access to a specific database is denied during query execution (post-fetch), the tool SHALL handle the error gracefully and continue
+4. **TC-001.4** - Database metadata SHALL be cached at REPL startup or on first completion request
+5. **TC-001.5** - Database metadata query SHALL use Teradata system catalog view that returns complete database list
+
+**Example Behavior:**
+```sql
+tq> SELECT * FROM d<TAB>
+
+Database suggestions:
+    dbc                (database - system)
+    demo_user          (database)
+    DemoNow_Monitor    (database)
+    development        (database)
+    production         (database)
+```
+
+**Acceptance Test:**
+- Type `SELECT * FROM dbc.<TAB>` and verify that `dbc` database is recognized and tables are shown
+
+---
+
+#### TC-002: Universal Table Metadata Fetching
+
+**Requirement:** Table metadata SHALL be fetched for ALL databases on the system, not just a subset. No database with tables should show "NO RECORDS FOUND" when requesting table completion.
+
+**Specific Requirements:**
+
+1. **TC-002.1** - When user types `database.<TAB>`, the tool SHALL attempt to fetch table metadata for that database if not already cached
+2. **TC-002.2** - Table fetching SHALL NOT be limited to a pre-determined list of databases
+3. **TC-002.3** - If a database has tables but metadata is not cached, pressing TAB SHALL trigger on-demand fetching
+4. **TC-002.4** - If table metadata fetch fails due to permissions, the tool SHALL display an informative message instead of "NO RECORDS FOUND"
+5. **TC-002.5** - Successfully fetched table metadata SHALL be cached for the session duration
+6. **TC-002.6** - The tool SHALL fetch tables from Teradata system catalog using queries that return complete table lists
+
+**Example Behavior:**
+
+**Success case:**
+```sql
+tq> SELECT * FROM demo_user.<TAB>
+
+Tables in 'demo_user':
+    demo_user.customer_data      (table)
+    demo_user.sales_records      (table)
+    demo_user.inventory          (table)
+```
+
+**Permission denied case:**
+```sql
+tq> SELECT * FROM restricted_db.<TAB>
+
+Error: Access denied to database 'restricted_db'
+Cannot fetch table metadata (insufficient privileges)
+```
+
+**Acceptance Test:**
+- Type `SELECT * FROM demo_user.<TAB>` and verify tables are displayed
+- Repeat for multiple different databases and verify consistent behavior
+
+---
+
+#### TC-003: TAB Key Acceptance Behavior
+
+**Requirement:** The TAB key SHALL follow standard bash/zsh completion behavior: first TAB shows completion menu, second TAB accepts the highlighted item.
+
+**Specific Requirements:**
+
+1. **TC-003.1** - First TAB press with multiple matches SHALL display completion menu with first item highlighted
+2. **TC-003.2** - Second TAB press (while menu is displayed) SHALL accept the currently highlighted item and insert it into the command line
+3. **TC-003.3** - DOWN arrow key SHALL move highlight to next item in completion menu
+4. **TC-003.4** - UP arrow key SHALL move highlight to previous item in completion menu
+5. **TC-003.5** - ENTER key SHALL accept the currently highlighted item
+6. **TC-003.6** - ESC key SHALL dismiss the completion menu without making a selection
+7. **TC-003.7** - First TAB press with single unambiguous match SHALL auto-complete immediately (no menu)
+8. **TC-003.8** - Typing additional characters SHALL filter the completion menu in real-time
+
+**Example Interaction Flow:**
+
+```sql
+# User types and presses TAB
+tq> SELECT * FROM dem<TAB>
+
+# Menu appears with first item highlighted
+demo_user          (database) ← highlighted
+DemoNow_Monitor    (database)
+
+# User presses TAB again
+tq> SELECT * FROM demo_user_
+
+# "demo_user" accepted and cursor after the name
+
+# Alternative: User presses DOWN arrow
+demo_user          (database)
+DemoNow_Monitor    (database) ← highlighted
+
+# User presses ENTER
+tq> SELECT * FROM DemoNow_Monitor_
+```
+
+**Acceptance Test:**
+- Type `SELECT * FROM d<TAB>` (shows menu)
+- Press TAB again and verify first item is inserted
+- Repeat with arrow navigation and verify highlighted item is accepted
+
+---
+
+#### TC-004: Smart Qualified Name Completion
+
+**Requirement:** When completing a database name followed by a dot, the tool SHALL automatically complete the database name (if unambiguous), append a dot, and immediately display tables in that database.
+
+**Specific Requirements:**
+
+1. **TC-004.1** - When user types partial database name + TAB after FROM/JOIN keyword, if match is unambiguous, the tool SHALL auto-complete the database name
+2. **TC-004.2** - After auto-completing database name, the tool SHALL automatically append a dot (`.`) character
+3. **TC-004.3** - After appending the dot, the tool SHALL immediately display table completion suggestions for that database (without requiring another TAB press)
+4. **TC-004.4** - If database name match is ambiguous, the tool SHALL show database completion menu first (existing behavior)
+5. **TC-004.5** - This behavior SHALL work after FROM keyword
+6. **TC-004.6** - This behavior SHALL work after JOIN keywords (INNER JOIN, LEFT JOIN, RIGHT JOIN, FULL JOIN, CROSS JOIN)
+7. **TC-004.7** - If table metadata for the database is not cached, the tool SHALL fetch it (potentially showing brief loading indicator)
+
+**Example Interaction - Unambiguous:**
+
+```sql
+# User types partial database name
+tq> SELECT * FROM dem<TAB>
+
+# If only "demo_user" matches, auto-completes to:
+tq> SELECT * FROM demo_user.
+
+# Immediately shows tables (no additional TAB needed):
+Tables in 'demo_user':
+    customer_data      (table)
+    sales_records      (table)
+    inventory          (table)
+```
+
+**Example Interaction - Ambiguous:**
+
+```sql
+# User types partial database name
+tq> SELECT * FROM dem<TAB>
+
+# If multiple databases match (demo_user, demo_prod), show menu:
+demo_user          (database)
+demo_prod          (database)
+
+# User presses TAB again to accept highlighted:
+tq> SELECT * FROM demo_user.
+
+# Tables shown automatically:
+Tables in 'demo_user':
+    customer_data      (table)
+    sales_records      (table)
+```
+
+**Example Interaction - After JOIN:**
+
+```sql
+tq> SELECT * FROM orders o JOIN dem<TAB>
+
+# Completes to:
+tq> SELECT * FROM orders o JOIN demo_user.
+
+# Shows tables:
+Tables in 'demo_user':
+    customer_data      (table)
+    sales_records      (table)
+```
+
+**Acceptance Test:**
+- Type `SELECT * FROM dem<TAB>` where "demo_user" is unambiguous
+- Verify database name completes, dot is added, and tables appear
+- Type `SELECT * FROM d<TAB>` where multiple databases match "d"
+- Verify menu appears first, then after selection, dot + tables appear
+
+---
+
+#### TC-005: Tab Completion Regression Testing Support
+
+**Requirement:** Tab completion behavior SHALL be testable through automated regression tests to prevent future defects.
+
+**Specific Requirements:**
+
+1. **TC-005.1** - Metadata fetching logic (database, table, column queries) SHALL be unit-testable in isolation
+2. **TC-005.2** - Completion suggestion generation SHALL be testable with mock metadata
+3. **TC-005.3** - The completion system SHALL provide APIs or test hooks that allow:
+   - Injecting test metadata without database connection
+   - Verifying completion suggestions for given input context
+   - Testing metadata cache behavior
+4. **TC-005.4** - Integration tests SHALL verify completion suggestions at various SQL positions:
+   - After FROM keyword
+   - After JOIN keywords
+   - After WHERE clause (column completion)
+   - After qualified names (database.table)
+5. **TC-005.5** - Tests SHALL verify no pager output appears during completion operations
+6. **TC-005.6** - Tests SHALL verify graceful error handling (permission denied, invalid database, network errors)
+7. **TC-005.7** - Where possible, PTY-based tests SHALL verify menu display and navigation behavior
+8. **TC-005.8** - Test documentation SHALL indicate which aspects are automatically testable vs. requiring manual validation
+
+**Testable Components:**
+
+**Unit Test Examples:**
+- Query parser identifies cursor context (after FROM, after JOIN, etc.)
+- Metadata cache stores and retrieves databases/tables correctly
+- Completion filter matches partial input correctly (case-insensitive, prefix matching)
+- System catalog queries return expected format
+
+**Integration Test Examples:**
+- Given metadata cache with known databases, typing `SELECT * FROM d<TAB>` returns filtered list
+- Given database "demo_user" with known tables, typing `demo_user.<TAB>` returns table list
+- Given no cached metadata for database "newdb", typing `newdb.<TAB>` triggers fetch
+- Given permission denied for database "forbidden", typing `forbidden.<TAB>` shows error message
+
+**Manual Validation Required:**
+- Visual appearance of completion menu
+- Keyboard navigation (arrow keys, TAB acceptance)
+- Menu positioning and layout in terminal
+- Color and highlighting of selected item
+
+**Acceptance Test:**
+- Automated test suite executes without failures
+- Manual validation checklist confirms visual behavior matches specification
+
+---
+
+### Metadata Caching Strategy
+
+**Database names:**
+1. Cached at REPL startup or first completion request
+2. Query: Fetch all databases from Teradata system catalog (including system databases)
+3. Cache lifetime: Entire REPL session
+
+**Table names:**
+1. Cached on-demand when database is first explored
+2. Query: Fetch all tables for specific database from Teradata system catalog
+3. Cache lifetime: Entire REPL session
+4. Behavior: If not cached, fetch on first `database.<TAB>` press
+
+**Column names:**
+1. Cached on-demand when table is first referenced
+2. Query: Fetch all columns for specific table from Teradata system catalog
+3. Cache lifetime: Entire REPL session
+
+### Completion Menu Behavior Summary
+
+This section summarizes the detailed requirements specified in TC-003 (TAB Key Acceptance Behavior).
+
+**Display:**
+- Completion candidates shown in columnar menu format
+- Each candidate labeled with type (database, table, column)
+- First item highlighted by default
+
+**Interaction:**
+- TAB key: First press shows menu, second press accepts highlighted item (see TC-003)
+- UP/DOWN arrows: Navigate through candidates
+- ENTER: Accept highlighted item
+- ESC: Dismiss menu
+- Typing: Filter candidates in real-time
+
+**Performance:**
+- Cached metadata: < 50ms response time
+- Uncached metadata: < 500ms fetch time (with optional loading indicator)
 
 **Output Suppression:**
-All metadata queries executed during tab completion MUST suppress stdout/stderr output from the Teradata driver to prevent pager output from appearing in the terminal.
+All metadata queries executed during tab completion MUST suppress stdout/stderr output from the Teradata driver to prevent pager output from appearing in the terminal (see TC-005.5).
 
 ### Keyword Completion
 

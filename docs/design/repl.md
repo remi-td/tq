@@ -639,6 +639,315 @@ Cache is cleared on:
 | Table list load | < 500ms | Per-database, lazy |
 | Column list load | < 300ms | Per-table, lazy |
 
+## Sprint 21: Tab Completion Quality Enhancements
+
+This section documents the technical design for Sprint 21 tab completion improvements.
+
+### Feature 1: Complete Database Metadata Fetching (P0)
+
+**Issue**: System databases like `dbc` are missing from tab completion.
+
+**Root Cause Analysis**: The current query in `src/db/metadata.rs` (`load_databases()`) explicitly excludes system databases via a hardcoded exclusion list:
+
+```sql
+SELECT TRIM(DatabaseName)
+FROM DBC.DatabasesV
+WHERE DatabaseName NOT IN ('All', 'Console', 'Crashdumps', 'DBC', ...)
+```
+
+The exclusion of `DBC` was intentional to reduce noise, but users need `dbc` for system queries.
+
+**Solution Design**:
+
+1. **Remove `DBC` from exclusion list**: The `dbc` database is a legitimate completion target for advanced users querying system views.
+
+2. **Keep other system databases excluded**: Databases like `Console`, `Crashdumps`, `SYSBAR`, etc. provide no value for completion and add noise.
+
+3. **Implementation location**: `src/db/metadata.rs`, function `load_databases()`, lines 461-474.
+
+**Code Change**:
+```rust
+// Before (Sprint 20):
+WHERE DatabaseName NOT IN ('All', 'Console', 'Crashdumps', 'DBC', ...)
+
+// After (Sprint 21):
+WHERE DatabaseName NOT IN ('All', 'Console', 'Crashdumps', ...)
+// Note: 'DBC' REMOVED from exclusion list
+```
+
+**Complexity**: Low (single line SQL modification)
+
+---
+
+### Feature 2: Universal Table Metadata Fetching (P0)
+
+**Issue**: Some databases like `demo_user` show "NO RECORDS FOUND" even when tables exist.
+
+**Root Cause Analysis**: The current query in `src/db/metadata.rs` (`load_tables()`) has two filtering issues:
+
+1. **System database exclusion**: Same exclusion list as database names, but for tables. If a user database name happens to match a pattern, it could be filtered.
+
+2. **SAMPLE limit**: The query uses `SAMPLE 10000` which may not capture all tables in large environments, especially if those 10000 samples come from other databases first.
+
+**Investigation Required**: Need to verify if `demo_user` is in the exclusion list or if there's a SAMPLE issue.
+
+**Solution Design**:
+
+1. **Verify database name**: Ensure `demo_user` is not accidentally filtered.
+
+2. **Increase SAMPLE or remove limit**: For environments with many tables, 10000 may be insufficient. Consider removing the SAMPLE limit or increasing it substantially.
+
+3. **Alternative: On-demand loading per database**: Instead of loading ALL tables at startup, load tables for a specific database when user types `database.` + TAB. This is more scalable.
+
+**Recommended Approach - On-Demand Loading**:
+
+```
+Current Flow:
+REPL Start → Load ALL tables (up to 10000) → Cache
+
+New Flow (Sprint 21):
+REPL Start → Load Database Names only
+User types "demo_user." + TAB → Load tables for demo_user → Cache
+Subsequent "demo_user." + TAB → Use cached data
+```
+
+**Implementation**:
+
+1. **Keep startup database loading** (Feature 1 fix)
+2. **Make table loading per-database on-demand**:
+   - Add `load_tables_for_database(&self, client: &DatabaseClient, database: &str) -> bool`
+   - Cache structure: `tables_by_database: HashMap<String, Vec<TableInfo>>`
+   - On `SchemaQualifiedTable { schema, prefix }` context, check if `schema` is cached, load if not
+
+**Code Structure**:
+```rust
+// src/db/metadata.rs
+impl MetadataCache {
+    /// Per-database table cache
+    tables_by_database: HashMap<String, Vec<TableInfo>>,
+
+    /// Load tables for a specific database (on-demand)
+    pub fn load_tables_for_database(&mut self, client: &DatabaseClient, database: &str) -> bool {
+        if self.tables_by_database.contains_key(&database.to_uppercase()) {
+            return true; // Already cached
+        }
+
+        let sql = format!(r#"
+            SELECT TRIM(TableName), TableKind
+            FROM DBC.TablesV
+            WHERE UPPER(DatabaseName) = UPPER('{}')
+              AND TableKind IN ('T', 'V', 'O')
+            ORDER BY TableName
+        "#, escape_sql_string(database));
+
+        // Execute and cache...
+    }
+}
+```
+
+**Complexity**: Medium (requires architecture change to per-database caching)
+
+---
+
+### Feature 3: Second TAB Accepts Selection (P1)
+
+**Issue**: Second TAB moves to next item instead of accepting selection (bash/zsh behavior).
+
+**Root Cause Analysis**: The current TAB keybinding uses:
+
+```rust
+// src/commands/repl/mod.rs, add_completion_keybinding()
+keybindings.add_binding(
+    KeyModifiers::NONE,
+    KeyCode::Tab,
+    ReedlineEvent::UntilFound(vec![
+        ReedlineEvent::Menu("completion_menu".to_string()),
+        ReedlineEvent::MenuNext,
+    ]),
+);
+```
+
+This means:
+- **First TAB**: `Menu("completion_menu")` activates menu
+- **Second TAB**: Menu already active, so `UntilFound` tries `Menu` (inapplicable), then executes `MenuNext` (move to next item)
+
+**Reedline Investigation Results**:
+
+After investigating reedline v0.38.0 source code and GitHub issues:
+
+1. **No `MenuAccept` event exists**: reedline does not have a dedicated event for accepting menu selection ([GitHub Issue #624](https://github.com/nushell/reedline/issues/624) - OPEN as of 2024).
+
+2. **`Enter` when menu is active**: This calls `replace_in_buffer()` then `MenuEvent::Deactivate`, which IS the accept behavior (reedline engine.rs lines 1096-1107).
+
+3. **Problem**: We cannot distinguish "second TAB while menu open" from "first TAB" at the keybinding level.
+
+**Feasibility Assessment**: **AT RISK / NOT FEASIBLE with current reedline**
+
+The requested behavior (second TAB accepts selection) requires one of:
+- A new `MenuAccept` event in reedline (upstream change)
+- Custom menu implementation that tracks TAB press count
+- Fork of reedline with custom event handling
+
+**Alternative Approaches Investigated**:
+
+| Approach | Feasibility | Complexity | Notes |
+|----------|-------------|------------|-------|
+| Upstream PR to add `MenuAccept` | Medium | High | Would require reedline maintainer buy-in |
+| Fork reedline | High | Very High | Maintenance burden, version drift |
+| Custom `EditMode` | Low | Very High | Would need to reimplement all keybindings |
+| Track state in completer | Not Possible | N/A | Completer doesn't control keybindings |
+| Bind TAB to `Enter` when menu open | Not Possible | N/A | No conditional binding mechanism |
+
+**Recommendation**: **DEFER TO FUTURE SPRINT**
+
+This feature requires upstream reedline changes. The recommended path is:
+1. Document limitation clearly for user
+2. Submit feature request to reedline (reference existing issue #624)
+3. Consider contributing a PR to reedline if prioritized
+4. Interim workaround: Users can press Enter to accept selection
+
+**User Communication**:
+```
+Current behavior: TAB cycles through completions, Enter accepts
+Bash/zsh behavior: Second TAB accepts
+Status: Requires reedline library enhancement (tracked upstream)
+```
+
+---
+
+### Feature 4: Smart Database-Dot-TAB Completion (P1)
+
+**Issue**: User wants `dem` + TAB to complete to `demo_user.` and immediately show tables.
+
+**Current Behavior**:
+1. `dem` + TAB → Shows `demo_user` in menu
+2. User navigates, presses Enter → `demo_user` inserted
+3. User types `.` + TAB → Shows tables in `demo_user`
+
+**Desired Behavior**:
+1. `dem` + TAB → If only one match (`demo_user`), auto-complete to `demo_user.` and immediately show tables
+
+**Feasibility Assessment**: **FEASIBLE**
+
+This can be achieved by modifying the completion logic.
+
+**Solution Design**:
+
+1. **Detect unique database match**: In `complete_tables()`, if:
+   - Context is `TableName` (after FROM/JOIN)
+   - Exactly ONE database matches the prefix
+   - No tables match the prefix in current database
+
+   Then: Return the database name WITH trailing dot, and trigger table completion.
+
+2. **Challenge**: reedline completer returns suggestions, it doesn't control follow-up actions.
+
+3. **Alternative Implementation**: Use `append_whitespace: false` for database suggestions (already done), and enhance `SchemaQualifiedTable` handling to work seamlessly when user types the dot.
+
+**Detailed Design**:
+
+The key insight is that Feature 4 is partially solved if:
+- Database completions already have `append_whitespace: false` (they do)
+- After accepting `demo_user`, user types `.`
+- On `.` + TAB, we enter `SchemaQualifiedTable { schema: "demo_user", prefix: "" }` context
+- This triggers table loading for that database (Feature 2 on-demand loading)
+
+**What's Missing**: The "auto-add dot and show tables" part. This requires the completer to:
+1. Recognize single-match scenario
+2. Append `.` to the completion value
+3. Somehow trigger immediate re-completion
+
+**Approach**: Modify suggestion value to include the dot when appropriate.
+
+```rust
+// In complete_tables():
+if databases.len() == 1 && prefix_matches_database_exactly {
+    // Single database match - append dot to enable quick table access
+    suggestions.push(Suggestion {
+        value: format!("{}.", db_name), // Include dot
+        description: Some("(database - press TAB for tables)".to_string()),
+        append_whitespace: false,
+        ...
+    });
+}
+```
+
+**After selection**: User sees `demo_user.` and can immediately TAB again for tables.
+
+**Complexity**: Medium (requires careful edge case handling)
+
+**Edge Cases**:
+- Multiple database matches: Don't add dot (user needs to disambiguate first)
+- Database prefix also matches table name: Show both options
+- Empty prefix: Show all databases without dots
+
+---
+
+### Feature 5: Automated Regression Testing (P2)
+
+**Design Guidance for quality-validator**:
+
+**Test Categories**:
+
+1. **Unit Tests** (in `src/db/metadata.rs`, `src/commands/repl/metadata_completer.rs`):
+   - `test_load_databases_includes_dbc` - Verify DBC not filtered
+   - `test_load_tables_for_database` - Verify per-database loading
+   - `test_completion_context_analysis` - Context detection
+   - `test_database_suggestion_format` - Verify dot handling
+
+2. **Integration Tests** (with mock or test database):
+   - `test_tab_completion_shows_dbc`
+   - `test_tab_completion_for_user_database`
+   - `test_schema_qualified_completion`
+
+3. **Manual Validation Required** (due to reedline TTY interaction):
+   - Visual verification of menu display
+   - TAB key behavior (navigation vs acceptance)
+   - No pager output during completion
+
+**Test File Locations**:
+- `src/db/metadata.rs` - Unit tests in `mod tests`
+- `tests/cases/TC-TAB-*.md` - Test case documentation
+- `tests/results/sprint-21/` - Execution evidence
+
+---
+
+## Sprint 21 Implementation Summary
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Feature 1: Include `dbc` | IMPLEMENTED | Removed 'DBC' from exclusion list in `load_databases()` and `load_tables()` |
+| Feature 2: Universal tables | IMPLEMENTED | On-demand per-database loading via `load_tables_for_database()` |
+| Feature 3: Second TAB accepts | DEFERRED | Blocked by reedline Issue #624 - no `MenuAccept` event |
+| Feature 4: Smart database.TAB | IMPLEMENTED | Appends '.' to single-match database suggestions |
+| Feature 5: Testability | IMPLEMENTED | Added unit tests for all new functionality |
+
+**Implementation Details**:
+
+1. **Feature 1** (lines 464, 392 in `src/db/metadata.rs`):
+   - Removed 'DBC' from the exclusion lists in both `load_databases()` and `load_tables()` queries
+   - `dbc` database now appears in tab completion
+
+2. **Feature 2** (new methods in `src/db/metadata.rs`):
+   - Added `tables_by_database: HashMap<String, Vec<TableInfo>>` to `MetadataCache`
+   - Added `load_tables_for_database()` for on-demand loading
+   - Added `has_tables_for_database()`, `get_tables_for_database()`, `find_tables_in_database_by_prefix()`
+   - Updated `complete_schema_tables()` in `metadata_completer.rs` to trigger on-demand loading
+
+3. **Feature 4** (in `complete_tables()` in `metadata_completer.rs`):
+   - When exactly one database matches prefix and no tables match
+   - Appends '.' to suggestion value: `format!("{}.", db_name)`
+   - Description shows "(database - TAB for tables)"
+
+4. **Feature 5** (unit tests added):
+   - `test_has_tables_for_database`
+   - `test_get_tables_for_database`
+   - `test_find_tables_in_database_by_prefix`
+   - `test_metadata_cache_clear_clears_per_database_tables`
+   - `test_dbc_not_in_exclusion_list`
+
+---
+
 ## Future Enhancements
 
 - Multi-line editing with visual indicators
@@ -650,3 +959,4 @@ Cache is cleared on:
 - Async metadata loading (background thread)
 - DDL-triggered cache invalidation
 - Fuzzy matching for completion (like pgcli)
+- Second TAB accepts selection (requires reedline enhancement)

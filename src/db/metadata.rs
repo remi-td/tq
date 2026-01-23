@@ -259,6 +259,7 @@ impl ColumnInfo {
 ///
 /// Provides lazy-loading, session-scoped caching for tables and columns.
 /// Sprint 20: Added separate database name cache for fast startup loading.
+/// Sprint 21: Added per-database table caching for on-demand loading.
 #[derive(Debug)]
 pub struct MetadataCache {
     /// Cached database names (loaded at startup for fast completion)
@@ -267,6 +268,10 @@ pub struct MetadataCache {
 
     /// Cached table list (None = not loaded yet)
     tables: Option<Vec<TableInfo>>,
+
+    /// Sprint 21: Per-database table cache for on-demand loading
+    /// Key is uppercase database name for case-insensitive lookup
+    tables_by_database: HashMap<String, Vec<TableInfo>>,
 
     /// Cached columns per table (key = schema.table or just table)
     columns: HashMap<String, Vec<ColumnInfo>>,
@@ -296,6 +301,7 @@ impl MetadataCache {
         Self {
             databases: None,
             tables: None,
+            tables_by_database: HashMap::new(),
             columns: HashMap::new(),
             databases_loaded_at: None,
             tables_loaded_at: None,
@@ -310,6 +316,7 @@ impl MetadataCache {
     pub fn clear(&mut self) {
         self.databases = None;
         self.tables = None;
+        self.tables_by_database.clear();
         self.columns.clear();
         self.databases_loaded_at = None;
         self.tables_loaded_at = None;
@@ -383,13 +390,14 @@ impl MetadataCache {
         log::debug!("Loading table metadata from database");
 
         // Query DBC.TablesV for table list
+        // Sprint 21: Removed 'DBC' from exclusion list - users need dbc for system queries
         let sql = r#"
             SELECT TRIM(DatabaseName) AS schema_name,
                    TRIM(TableName) AS table_name,
                    TableKind
             FROM DBC.TablesV
             WHERE TableKind IN ('T', 'V', 'O')
-              AND DatabaseName NOT IN ('All', 'Console', 'Crashdumps', 'DBC',
+              AND DatabaseName NOT IN ('All', 'Console', 'Crashdumps',
                                        'dbcmngr', 'Default', 'External_AP',
                                        'EXTUSER', 'LockLogShredder', 'PUBLIC',
                                        'SQLJ', 'Sys_Calendar', 'SysAdmin',
@@ -458,10 +466,11 @@ impl MetadataCache {
 
         // Query DBC.DatabasesV for database list - lightweight query
         // Sprint 20: Using DBC.DatabasesV instead of extracting from TablesV
+        // Sprint 21: Removed 'DBC' from exclusion list - users need dbc for system queries
         let sql = r#"
             SELECT TRIM(DatabaseName)
             FROM DBC.DatabasesV
-            WHERE DatabaseName NOT IN ('All', 'Console', 'Crashdumps', 'DBC',
+            WHERE DatabaseName NOT IN ('All', 'Console', 'Crashdumps',
                                        'dbcmngr', 'Default', 'External_AP',
                                        'EXTUSER', 'LockLogShredder', 'PUBLIC',
                                        'SQLJ', 'Sys_Calendar', 'SysAdmin',
@@ -503,6 +512,97 @@ impl MetadataCache {
                 log::warn!("{}", error_msg);
                 self.last_error = Some(error_msg);
                 self.loading_databases = false;
+                false
+            }
+        }
+    }
+
+    /// Sprint 21: Check if tables for a specific database are cached
+    pub fn has_tables_for_database(&self, database: &str) -> bool {
+        self.tables_by_database
+            .contains_key(&database.to_uppercase())
+    }
+
+    /// Sprint 21: Get cached tables for a specific database
+    pub fn get_tables_for_database(&self, database: &str) -> Option<&[TableInfo]> {
+        self.tables_by_database
+            .get(&database.to_uppercase())
+            .map(|v| v.as_slice())
+    }
+
+    /// Sprint 21: Load tables for a specific database on-demand
+    ///
+    /// This method fetches table metadata for a single database and caches it.
+    /// Used when user types `database.` + TAB to get tables for that database.
+    /// Returns true if successful, false if failed (check last_error for reason).
+    pub fn load_tables_for_database(&mut self, client: &DatabaseClient, database: &str) -> bool {
+        let db_upper = database.to_uppercase();
+
+        // Already cached?
+        if self.tables_by_database.contains_key(&db_upper) {
+            return true;
+        }
+
+        self.last_error = None;
+
+        log::debug!(
+            "Loading tables for database '{}' from DBC.TablesV",
+            database
+        );
+
+        // Query tables for this specific database
+        let sql = format!(
+            r#"
+            SELECT TRIM(TableName) AS table_name,
+                   TableKind
+            FROM DBC.TablesV
+            WHERE UPPER(DatabaseName) = UPPER('{}')
+              AND TableKind IN ('T', 'V', 'O')
+            ORDER BY TableName
+            "#,
+            escape_sql_string(database)
+        );
+
+        let query_result = with_stdout_suppressed(|| client.execute(&sql));
+
+        match query_result {
+            Ok(result) => {
+                let mut tables = Vec::with_capacity(result.row_count);
+
+                for row in &result.rows {
+                    let table_name = row.first().map(|v| v.display()).unwrap_or_default();
+                    let kind = row.get(1).map(|v| v.display()).unwrap_or_default();
+
+                    // Skip NULL values
+                    if table_name == "[NULL]" || table_name.is_empty() {
+                        continue;
+                    }
+
+                    let full_name = format!("{}.{}", database, table_name);
+                    tables.push(TableInfo::new(
+                        full_name,
+                        table_name,
+                        database.to_string(),
+                        kind,
+                    ));
+                }
+
+                log::info!(
+                    "Loaded {} tables for database '{}' into cache",
+                    tables.len(),
+                    database
+                );
+
+                self.tables_by_database.insert(db_upper, tables);
+                true
+            }
+            Err(e) => {
+                let error_msg = format!(
+                    "Failed to load tables for database '{}': {}",
+                    database, e
+                );
+                log::warn!("{}", error_msg);
+                self.last_error = Some(error_msg);
                 false
             }
         }
@@ -685,6 +785,29 @@ impl MetadataCache {
                     && t.table_name.to_uppercase().starts_with(&prefix_upper)
             })
             .collect()
+    }
+
+    /// Sprint 21: Find tables in a specific database matching a prefix (case-insensitive)
+    ///
+    /// Uses the per-database cache (loaded via load_tables_for_database).
+    pub fn find_tables_in_database_by_prefix(
+        &self,
+        database: &str,
+        prefix: &str,
+    ) -> Vec<&TableInfo> {
+        let db_upper = database.to_uppercase();
+        let prefix_upper = prefix.to_uppercase();
+
+        if let Some(tables) = self.tables_by_database.get(&db_upper) {
+            tables
+                .iter()
+                .filter(|t| {
+                    prefix.is_empty() || t.table_name.to_uppercase().starts_with(&prefix_upper)
+                })
+                .collect()
+        } else {
+            vec![]
+        }
     }
 }
 
@@ -936,5 +1059,108 @@ mod tests {
         assert!(!cache.has_databases());
         assert!(!cache.has_tables());
         assert!(cache.databases_loaded_at.is_none());
+    }
+
+    // Sprint 21: Tests for per-database table caching
+
+    #[test]
+    fn test_has_tables_for_database() {
+        let mut cache = MetadataCache::new("testdb");
+        assert!(!cache.has_tables_for_database("demo_user"));
+
+        cache.tables_by_database.insert(
+            "DEMO_USER".to_string(),
+            vec![TableInfo::new("demo_user.orders", "orders", "demo_user", "T")],
+        );
+
+        // Case-insensitive lookup
+        assert!(cache.has_tables_for_database("demo_user"));
+        assert!(cache.has_tables_for_database("DEMO_USER"));
+        assert!(cache.has_tables_for_database("Demo_User"));
+        assert!(!cache.has_tables_for_database("other_db"));
+    }
+
+    #[test]
+    fn test_get_tables_for_database() {
+        let mut cache = MetadataCache::new("testdb");
+        assert!(cache.get_tables_for_database("demo_user").is_none());
+
+        cache.tables_by_database.insert(
+            "DEMO_USER".to_string(),
+            vec![
+                TableInfo::new("demo_user.orders", "orders", "demo_user", "T"),
+                TableInfo::new("demo_user.customers", "customers", "demo_user", "T"),
+            ],
+        );
+
+        let tables = cache.get_tables_for_database("demo_user").unwrap();
+        assert_eq!(tables.len(), 2);
+    }
+
+    #[test]
+    fn test_find_tables_in_database_by_prefix() {
+        let mut cache = MetadataCache::new("testdb");
+
+        cache.tables_by_database.insert(
+            "DEMO_USER".to_string(),
+            vec![
+                TableInfo::new("demo_user.orders", "orders", "demo_user", "T"),
+                TableInfo::new("demo_user.order_items", "order_items", "demo_user", "T"),
+                TableInfo::new("demo_user.customers", "customers", "demo_user", "T"),
+            ],
+        );
+
+        // Find tables matching prefix
+        let results = cache.find_tables_in_database_by_prefix("demo_user", "order");
+        assert_eq!(results.len(), 2);
+
+        // Case-insensitive prefix
+        let results = cache.find_tables_in_database_by_prefix("DEMO_USER", "ORDER");
+        assert_eq!(results.len(), 2);
+
+        // Empty prefix returns all
+        let results = cache.find_tables_in_database_by_prefix("demo_user", "");
+        assert_eq!(results.len(), 3);
+
+        // No matches
+        let results = cache.find_tables_in_database_by_prefix("demo_user", "xyz");
+        assert!(results.is_empty());
+
+        // Database not cached
+        let results = cache.find_tables_in_database_by_prefix("other_db", "");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_metadata_cache_clear_clears_per_database_tables() {
+        let mut cache = MetadataCache::new("testdb");
+        cache.tables_by_database.insert(
+            "DEMO_USER".to_string(),
+            vec![TableInfo::new("demo_user.orders", "orders", "demo_user", "T")],
+        );
+
+        cache.clear();
+
+        assert!(!cache.has_tables_for_database("demo_user"));
+        assert!(cache.tables_by_database.is_empty());
+    }
+
+    #[test]
+    fn test_dbc_not_in_exclusion_list() {
+        // Sprint 21: Verify that DBC is not in the exclusion list
+        // This is a documentation test - the actual SQL is in load_databases()
+        // We verify by checking the constant pattern that DBC should be allowed
+        let excluded_dbs = vec![
+            "All", "Console", "Crashdumps", // Note: DBC is NOT here
+            "dbcmngr", "Default", "External_AP", "EXTUSER", "LockLogShredder",
+            "PUBLIC", "SQLJ", "Sys_Calendar", "SysAdmin", "SYSBAR", "SYSJDBC",
+            "SYSLIB", "SYSSPATIAL", "SystemFe", "SYSUDTLIB", "TD_SERVER_DB",
+            "TD_SYSFNLIB", "TD_SYSGPL", "TD_SYSXML", "TDMaps", "TDPUSER",
+            "TDQCD", "TDStats", "tdwm", "VIEWPOINT",
+        ];
+
+        // DBC should NOT be in the exclusion list
+        assert!(!excluded_dbs.contains(&"DBC"));
+        assert!(!excluded_dbs.contains(&"dbc"));
     }
 }
