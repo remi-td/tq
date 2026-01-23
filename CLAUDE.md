@@ -237,8 +237,11 @@ The project documentation is organized into five clear categories:
 
 **Roadmap (`docs/roadmap/`):**
 - Updated by: `sprint-coordinator`
-- When: After sprint completion (status.md), during planning (backlog.md)
-- Content: Implementation status and planning info
+- When:
+  - `status.md` - After sprint completion (Phase 4) - mark features ✅, update version numbers
+  - `backlog.md` - During planning (Phase 1) - add new items, reprioritize, remove completed features
+  - `roadmap.md` - Quarterly (Phase 0) - update strategic direction and milestones
+- Content: Implementation status and planning info (no feature details - those live in specifications)
 - Approval: Autonomous updates during sprint workflow
 
 **Sprint History (`docs/sprints/`):**
