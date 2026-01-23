@@ -294,6 +294,20 @@ pub struct QueryArgs {
     /// use TOP or SAMPLE in your SQL query.
     #[arg(short = 'n', long, value_name = "N")]
     pub limit: Option<usize>,
+
+    /// Wrap statements in a transaction (batch mode only)
+    ///
+    /// Executes BEGIN TRANSACTION before the first statement and
+    /// COMMIT on success. If any statement fails, automatically
+    /// executes ROLLBACK to revert all changes.
+    ///
+    /// Only applies to multi-statement execution from --file or stdin.
+    /// Single statement queries will show a warning and execute normally.
+    ///
+    /// Note: Cannot be used with SQL that contains explicit transaction
+    /// control (BEGIN TRANSACTION, COMMIT, ROLLBACK).
+    #[arg(long)]
+    pub atomic: bool,
 }
 
 /// Arguments for the REPL command
@@ -725,6 +739,29 @@ mod tests {
         let result = Cli::try_parse_from(args);
         // Should fail because "invalid" is not a valid HelpTopic
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cli_query_with_atomic() {
+        let args = vec!["tq", "query", "--atomic", "--file", "script.sql"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Query(args) = cli.command {
+            assert!(args.atomic);
+            assert_eq!(args.file, Some(PathBuf::from("script.sql")));
+        } else {
+            panic!("Expected Query command");
+        }
+    }
+
+    #[test]
+    fn test_cli_query_without_atomic() {
+        let args = vec!["tq", "query", "SELECT 1"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Query(args) = cli.command {
+            assert!(!args.atomic);
+        } else {
+            panic!("Expected Query command");
+        }
     }
 
     #[test]

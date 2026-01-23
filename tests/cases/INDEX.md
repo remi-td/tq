@@ -191,6 +191,47 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 - **Key Innovation**: BOTH automated and manual must pass for APPROVED verdict
 - **Acceptance**: User confirms bugs fixed + automated tests pass (100%)
 
+---
+
+### Sprint 23: Batch Mode File Output & Transaction Control
+
+**Sprint 23 Context:** Feature sprint implementing batch mode improvements with testing infrastructure enhancements.
+
+**Sprint 23 Test Cases (17 total):**
+
+#### Feature 1: Batch Mode Output to File (P0) - 9 tests
+- **TC077**: Output to File - Table Format (basic functionality)
+- **TC078**: Output to File - CSV Format (RFC 4180 compliance)
+- **TC079**: Output to File - JSON Format (type preservation)
+- **TC080**: Atomic File Writing (temp + rename pattern)
+- **TC081**: File Output Error - Permission Denied
+- **TC082**: File Output Error - Invalid Path
+- **TC083**: File Overwrite - Existing File
+- **TC084**: Large Result Sets - Streaming to File
+- **TC085**: Empty Result Set to File
+
+#### Feature 2: Batch Mode Transaction Control (P1) - 6 tests
+- **TC086**: Transaction Control - Basic Success (--atomic)
+- **TC087**: Transaction Control - Rollback on Error
+- **TC088**: Transaction Status Messages
+- **TC089**: Nested Transaction Detection
+- **TC090**: Single Statement - No Transaction
+- **TC091**: Large Transaction - Many Statements
+
+#### Integration Tests - 2 tests
+- **TC092**: Combined Feature - File Output with Atomic Transaction
+- **TC093**: Transaction with Different Output Formats
+
+**Sprint 23 Test Strategy:**
+- **Test Count**: 17 integration tests (15 required, 2 integration)
+- **Type**: Feature Sprint (hybrid - testing infrastructure + new features)
+- **Database Required**: Yes (batch mode features require live database)
+- **Test Types**: Unit tests (8-10) + Integration tests (22-27) per strategy
+- **Critical Success Factor**: Apply checklist before quality review
+- **Test Implementation**: Both unit AND integration tests required (Sprint 22 lesson)
+- **Documentation**: Test only delivered features, no deferred features documented
+- **Acceptance**: 100% test pass rate for P0 features, zero regressions
+
 ### Security
 - **TC022**: Security - No Password Exposure
 - **TC-SECURITY-001**: Password File Permission Enforcement - 0644 Rejected (Sprint 17)
@@ -227,6 +268,12 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 | TC-HELP-002 | Help Credentials Subcommand | Functionality (Sprint 17) |
 | TC-SECURITY-001 | Password File 0644 Rejected | Security (Sprint 17) |
 | TC-SECURITY-003 | Security Check Ordering | Security (Sprint 17) |
+| TC077 | Output to File - Table Format | Functionality (Sprint 23) |
+| TC078 | Output to File - CSV Format | Functionality (Sprint 23) |
+| TC079 | Output to File - JSON Format | Functionality (Sprint 23) |
+| TC080 | Atomic File Writing | Functionality (Sprint 23) |
+| TC086 | Transaction Control - Basic Success | Functionality (Sprint 23) |
+| TC087 | Transaction Rollback on Error | Functionality (Sprint 23) |
 
 ### High Priority (Important Features)
 | Test ID | Feature | Category |
@@ -272,6 +319,12 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 | TC-COMPLETION-003 | Column Completion in SELECT/WHERE | Functionality (Sprint 18) |
 | TC-COMPLETION-004 | Qualified Name Completion | Functionality (Sprint 18) |
 | TC-COMPLETION-005 | NO Keyword Completion | Functionality (Sprint 18) |
+| TC081 | File Output Error - Permission Denied | Error-Handling (Sprint 23) |
+| TC082 | File Output Error - Invalid Path | Error-Handling (Sprint 23) |
+| TC088 | Transaction Status Messages | Usability (Sprint 23) |
+| TC089 | Nested Transaction Detection | Error-Handling (Sprint 23) |
+| TC092 | File Output + Atomic Transaction | Integration (Sprint 23) |
+| TC093 | Transaction with Output Formats | Integration (Sprint 23) |
 
 ### Medium Priority (Quality of Life)
 | Test ID | Feature | Category |
@@ -290,6 +343,11 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 | TC056 | Tab Completion - Multiple Databases | Functionality (Sprint 8) |
 | TC060 | Paging - Arrow Keys | Functionality (Sprint 8) |
 | TC065 | LIMIT Hint - Help Text | Usability (Sprint 8) |
+| TC083 | File Overwrite - Existing File | Functionality (Sprint 23) |
+| TC084 | Large Result Sets - Streaming | Functionality (Sprint 23) |
+| TC085 | Empty Result Set to File | Functionality (Sprint 23) |
+| TC090 | Single Statement - No Transaction | Functionality (Sprint 23) |
+| TC091 | Large Transaction - Many Statements | Functionality (Sprint 23) |
 
 ## Feature Coverage Matrix
 
@@ -310,6 +368,8 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 | FR-116 | Table name tab completion | TC026, TC027, TC028, TC029, TC030, TC042 |
 | FR-117 | Column name tab completion | TC031, TC032, TC033, TC034, TC035, TC043 |
 | FR-118 | /logon metacommand | TC036, TC037, TC038, TC039, TC040, TC041 |
+| FR-119 | Batch mode file output | TC077, TC078, TC079, TC080, TC081, TC082, TC083, TC084, TC085 |
+| FR-120 | Batch mode transaction control | TC086, TC087, TC088, TC089, TC090, TC091 |
 
 ### Specifications Coverage
 
@@ -327,6 +387,9 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 | 5.6.2 | Table Name Completion | TC026, TC027, TC028, TC029, TC030, TC042 |
 | 5.6.3 | Column Name Completion | TC031, TC032, TC033, TC034, TC035, TC043 |
 | 5.8.1 | /logon Metacommand | TC036, TC037, TC038, TC039, TC040, TC041 |
+| batch-mode.md §4 | Output Destinations (--output flag) | TC077, TC078, TC079, TC080, TC081, TC082, TC083, TC084, TC085 |
+| batch-mode.md §8 | Transaction Control (--atomic flag) | TC086, TC087, TC088, TC089, TC090, TC091 |
+| batch-mode.md | Integration (File Output + Transactions) | TC092, TC093 |
 
 ## Test Execution Guidelines
 

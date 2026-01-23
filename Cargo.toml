@@ -42,6 +42,9 @@ env_logger = "0.11"
 base64 = "0.22"
 atty = "0.2"
 
+# File operations
+tempfile = "3.10"
+
 # Platform-specific: stdout suppression for metadata queries (Sprint 19)
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

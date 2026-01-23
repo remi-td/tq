@@ -9,9 +9,9 @@ use crate::db::DatabaseClient;
 use crate::error::{Result, TqError};
 use crate::format::{write_output_with_timing, FormatOptions};
 use crate::sql::{has_multiple_statements, parse_statements, ParsedStatement};
-use std::fs::File;
 use std::io::{self, BufReader, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
+use tempfile::NamedTempFile;
 
 // ============================================================================
 // Input Source Types
@@ -269,6 +269,21 @@ fn execute_single<W: Write>(
     Ok(())
 }
 
+/// Detect if SQL contains explicit transaction control statements
+fn contains_transaction_control(sql: &str) -> bool {
+    let sql_upper = sql.to_uppercase();
+    // Check for Teradata transaction control keywords
+    // BEGIN TRANSACTION, BT (begin transaction shorthand), COMMIT, ET (end transaction), ROLLBACK
+    sql_upper.contains("BEGIN TRANSACTION")
+        || sql_upper.contains("BEGIN TRAN")
+        || sql_upper.contains("COMMIT")
+        || sql_upper.contains("ROLLBACK")
+        // Teradata-specific: BT and ET
+        || sql_upper
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|word| word == "BT" || word == "ET")
+}
+
 /// Execute multiple SQL statements in batch mode
 fn execute_batch<W: Write>(
     client: &DatabaseClient,
@@ -286,12 +301,41 @@ fn execute_batch<W: Write>(
         eprintln!("Found {} statements to execute", total_count);
     }
 
+    // Check for --atomic flag with single statement
+    if args.atomic && total_count == 1 {
+        eprintln!(
+            "Warning: --atomic has no effect on single statements (statement executes normally)"
+        );
+    }
+
+    // Check for explicit transaction control if --atomic is used
+    if args.atomic && total_count > 1 && contains_transaction_control(sql) {
+        return Err(TqError::AtomicConflict);
+    }
+
     // Configure output formatting (no color in batch progress messages to stderr)
     let format_options = FormatOptions::default()
         .with_header(!args.no_header)
         .with_color(use_color);
 
+    // Begin transaction if atomic mode with multiple statements
+    let in_transaction = args.atomic && total_count > 1;
+    if in_transaction {
+        if verbose {
+            eprintln!("BEGIN TRANSACTION (--atomic mode)");
+        }
+        eprintln!("[Begin transaction]");
+
+        if let Err(e) = client.execute("BEGIN TRANSACTION") {
+            return Err(TqError::TransactionError {
+                operation: "BEGIN".to_string(),
+                message: format!("Failed to start transaction: {}", e),
+            });
+        }
+    }
+
     let mut successful_count = 0;
+    let mut batch_result: Result<()> = Ok(());
 
     for statement in &statements {
         // Show progress to stderr
@@ -344,11 +388,51 @@ fn execute_batch<W: Write>(
                     total_count,
                 );
 
-                // Return error with batch context
-                return Err(TqError::QueryExecution(batch_error.format_error()));
+                batch_result = Err(TqError::QueryExecution(batch_error.format_error()));
+                break;
             }
         }
     }
+
+    // Handle transaction completion
+    if in_transaction {
+        match &batch_result {
+            Ok(_) => {
+                if verbose {
+                    eprintln!("COMMIT (all statements succeeded)");
+                }
+                eprintln!("[Commit transaction]");
+
+                if let Err(e) = client.execute("COMMIT") {
+                    return Err(TqError::TransactionError {
+                        operation: "COMMIT".to_string(),
+                        message: format!(
+                            "All statements succeeded but COMMIT failed: {}",
+                            e
+                        ),
+                    });
+                }
+                eprintln!("Transaction committed");
+            }
+            Err(_) => {
+                if verbose {
+                    eprintln!("ROLLBACK (statement failed)");
+                }
+                eprintln!("[Rollback transaction]");
+
+                // Best effort rollback - don't mask original error
+                if let Err(rollback_err) = client.execute("ROLLBACK") {
+                    log::warn!("Rollback failed: {}", rollback_err);
+                    eprintln!("Warning: Rollback may have failed: {}", rollback_err);
+                } else {
+                    eprintln!("Transaction rolled back (all changes reverted)");
+                }
+            }
+        }
+    }
+
+    // Return the batch result
+    batch_result?;
 
     // Summary message
     if verbose {
@@ -358,7 +442,12 @@ fn execute_batch<W: Write>(
     Ok(())
 }
 
-/// Execute query and write to file
+/// Execute query and write to file atomically
+///
+/// Uses a temp-file-then-rename pattern for atomic writes:
+/// 1. Write to temporary file in same directory
+/// 2. Rename to final path only on success
+/// 3. Prevents partial files on error or interruption
 pub fn execute_to_file<W: Write>(
     client: &DatabaseClient,
     args: &QueryArgs,
@@ -386,19 +475,21 @@ pub fn execute_to_file<W: Write>(
         _ => has_multiple_statements(&sql),
     };
 
-    // Create output file
-    let file = File::create(output_path).map_err(|e| TqError::FileWriteError {
+    // Create temp file in same directory as output (ensures same filesystem for atomic rename)
+    let parent_dir = output_path.parent().unwrap_or(Path::new("."));
+    let temp_file = NamedTempFile::new_in(parent_dir).map_err(|e| TqError::FileWriteError {
         path: output_path.clone(),
         source: e,
     })?;
-    let mut buffered_writer = io::BufWriter::new(file);
+
+    let mut buffered_writer = io::BufWriter::new(&temp_file);
 
     // Configure formatting (no colors for file output)
     let format_options = FormatOptions::default()
         .with_header(!args.no_header)
         .with_color(false);
 
-    if use_batch {
+    let row_count = if use_batch {
         // Execute batch and write to file
         let statements = parse_statements(&sql);
         let total_count = statements.len();
@@ -440,6 +531,7 @@ pub fn execute_to_file<W: Write>(
                     if verbose {
                         eprintln!("FAILED");
                     }
+                    // Temp file will be automatically cleaned up when dropped
                     return Err(error);
                 }
             }
@@ -454,6 +546,8 @@ pub fn execute_to_file<W: Write>(
             total_count,
             output_path.display()
         )?;
+
+        total_rows
     } else {
         // Single statement execution
         let trimmed_sql = sql.trim();
@@ -468,6 +562,8 @@ pub fn execute_to_file<W: Write>(
             client.execute(trimmed_sql)?
         };
 
+        let rows = result.row_count;
+
         write_output_with_timing(
             &result,
             &mut buffered_writer,
@@ -481,9 +577,27 @@ pub fn execute_to_file<W: Write>(
         writeln!(
             status_writer,
             "Wrote {} rows to {}",
-            result.row_count,
+            rows,
             output_path.display()
         )?;
+
+        rows
+    };
+
+    // Drop the buffered writer to release the file handle before persist
+    drop(buffered_writer);
+
+    // Atomic rename to final destination
+    // persist() moves the temp file to the target path atomically
+    temp_file
+        .persist(output_path)
+        .map_err(|e| TqError::FileWriteError {
+            path: output_path.clone(),
+            source: e.error,
+        })?;
+
+    if verbose {
+        eprintln!("File written atomically ({} rows)", row_count);
     }
 
     Ok(())
@@ -561,6 +675,48 @@ fn format_statement_status(result: &crate::db::QueryResult, format: OutputFormat
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_contains_transaction_control_begin() {
+        assert!(contains_transaction_control("BEGIN TRANSACTION"));
+        assert!(contains_transaction_control("begin transaction"));
+        assert!(contains_transaction_control("BEGIN TRAN"));
+        assert!(contains_transaction_control("begin tran"));
+    }
+
+    #[test]
+    fn test_contains_transaction_control_commit_rollback() {
+        assert!(contains_transaction_control("COMMIT"));
+        assert!(contains_transaction_control("commit"));
+        assert!(contains_transaction_control("ROLLBACK"));
+        assert!(contains_transaction_control("rollback"));
+    }
+
+    #[test]
+    fn test_contains_transaction_control_teradata_shortcuts() {
+        // Teradata-specific BT and ET (begin/end transaction)
+        assert!(contains_transaction_control("BT;"));
+        assert!(contains_transaction_control("ET;"));
+        assert!(contains_transaction_control("SELECT 1; BT; INSERT..."));
+        assert!(contains_transaction_control("SELECT 1; ET; INSERT..."));
+    }
+
+    #[test]
+    fn test_contains_transaction_control_no_false_positives() {
+        // Should not match these
+        assert!(!contains_transaction_control("SELECT * FROM my_table"));
+        assert!(!contains_transaction_control("INSERT INTO t VALUES (1)"));
+        assert!(!contains_transaction_control("UPDATE t SET x = 1"));
+        // Words containing BT or ET should not match
+        assert!(!contains_transaction_control("SELECT BETTER FROM t"));
+        assert!(!contains_transaction_control("SELECT BTEQ FROM t"));
+    }
+
+    #[test]
+    fn test_contains_transaction_control_in_multi_statement() {
+        let sql = "INSERT INTO t VALUES (1);\nBEGIN TRANSACTION;\nUPDATE t SET x = 2;\nCOMMIT;";
+        assert!(contains_transaction_control(sql));
+    }
 
     #[test]
     fn test_truncate_sql_short() {

@@ -259,22 +259,129 @@ tq query "SELECT email FROM users" | sort | uniq > unique_emails.txt
 
 ### File Output (--output flag)
 
-Explicit file output with status reporting:
+The `--output` flag provides explicit file output with better error handling and status reporting than shell redirection.
 
+#### Requirements
+
+**REQ-OUT-001: Flag Syntax**
+- Flag name: `--output <PATH>` or `-o <PATH>`
+- Single argument: file path (absolute or relative)
+- Available in `query` command only
+- Not available in REPL mode
+
+**REQ-OUT-002: Path Handling**
+- Relative paths resolved from current working directory
+- Absolute paths used as-is
+- `~` expansion supported (home directory)
+- Parent directories must exist (no auto-creation)
+- Path validation performed before query execution
+
+**REQ-OUT-003: Format Support**
+- All output formats supported: `table`, `csv`, `json`
+- Format specified via `--format` flag (independent)
+- Default format is `table` (same as stdout)
+- Format must be specified before query execution
+
+**REQ-OUT-004: File Overwrite Behavior**
+
+When output file already exists:
+
+**Interactive mode (TTY):**
 ```bash
-tq query "SELECT * FROM users" --format csv --output users.csv
-# Output: Wrote 1523 rows to users.csv
+$ tq query "SELECT * FROM users" --output users.csv
+File exists: users.csv
+
+Overwrite? [y/N]: _
+```
+- Prompt user for confirmation
+- `y` or `yes` (case-insensitive): overwrite
+- `n`, `no`, or Enter: abort with exit code 2
+- Ctrl-C: abort with exit code 130
+
+**Non-interactive mode (no TTY, scripts, CI):**
+- Abort with error message and exit code 2
+- Error message: "File exists: <path>. Use --force to overwrite."
+- No prompt displayed
+
+**REQ-OUT-005: Force Overwrite**
+- Flag: `--force` or `-f`
+- Skips overwrite confirmation
+- Works in both interactive and non-interactive modes
+- Silent overwrite (no prompt, no warning)
+
+**REQ-OUT-006: Atomic Write**
+- Write to temporary file first: `<output>.tmp.<random>`
+- Rename to final path only on success
+- Prevents partial file creation on query errors
+- Temporary file cleanup on failure or interruption
+- Random suffix prevents temp file collisions
+
+**REQ-OUT-007: Status Messages**
+
+On success:
+```bash
+Wrote 1523 rows to users.csv
 ```
 
-**Compared to shell redirection:**
-- `--output`: Shows status message ("Wrote N rows to file")
-- Shell redirect (`>`): Silent, UNIX-style
-- Both work identically otherwise
+Message format:
+- "Wrote N rows to <path>" for SELECT queries
+- "Query completed, output written to <path>" for non-SELECT
+- Message goes to stderr (not stdout)
+- Suppressed by `--quiet` flag
 
-**When to use each:**
-- Scripts: Use redirect (`>`) - simpler, more standard
-- Interactive: Use `--output` - provides confirmation
-- Quiet mode: Either works (`--quiet` suppresses status message)
+**REQ-OUT-008: Error Handling**
+
+File write errors:
+```bash
+Error: Cannot write to file
+
+Could not write to: /protected/file.csv
+Reason: Permission denied
+
+Check:
+  - File path is writable
+  - Parent directory exists
+  - Sufficient disk space available
+```
+
+Error categories:
+- Permission denied (exit code 1)
+- Disk full (exit code 1)
+- Invalid path (exit code 2)
+- File exists without --force (exit code 2)
+- Parent directory does not exist (exit code 2)
+
+**REQ-OUT-009: Multi-Statement Handling**
+
+When executing multiple statements:
+- Only the LAST SELECT query result is written to file
+- Non-SELECT statements (INSERT, UPDATE, etc.) execute normally
+- Status messages for all statements go to stderr
+- If no SELECT query exists, error with exit code 2
+
+Example:
+```sql
+-- setup.sql
+CREATE TABLE temp (id INT);
+INSERT INTO temp VALUES (1), (2);
+SELECT * FROM temp;  -- This result goes to file
+DROP TABLE temp;
+```
+
+```bash
+$ tq query --file setup.sql --output result.csv
+Statement 1: CREATE TABLE - OK
+Statement 2: INSERT - OK (2 rows affected)
+Statement 3: SELECT - 2 rows returned
+Wrote 2 rows to result.csv
+Statement 4: DROP TABLE - OK
+```
+
+**REQ-OUT-010: Interaction with --quiet**
+- `--quiet` suppresses status messages
+- File is still written
+- Errors still displayed
+- Useful for silent scripting
 
 ### Error Handling
 
@@ -603,7 +710,7 @@ cat north.csv south.csv east.csv west.csv > all_regions.csv
 
 ## Transaction Control
 
-### Manual Transaction Control (Current Approach)
+### Manual Transaction Control
 
 Users can manually wrap statements in transactions:
 ```sql
@@ -618,6 +725,177 @@ COMMIT;
 ```
 
 If any statement fails, the transaction is automatically rolled back by Teradata.
+
+### Automatic Transaction Control (--atomic flag)
+
+The `--atomic` flag automatically wraps all statements in a transaction, with automatic rollback on failure.
+
+#### Requirements
+
+**REQ-TXN-001: Flag Syntax**
+- Flag name: `--atomic`
+- No arguments (boolean flag)
+- Available in `query` command only
+- Not available in REPL mode
+- Only applies to multi-statement execution (file or stdin)
+
+**REQ-TXN-002: Single Statement Behavior**
+
+When `--atomic` is used with a single statement (inline query):
+- Warning issued: "Warning: --atomic has no effect on single statements"
+- Statement executes normally (no transaction wrapper)
+- Exit code 0 (success)
+- Warning goes to stderr
+
+**REQ-TXN-003: Transaction Wrapping**
+
+With `--atomic`, the tool automatically:
+1. Executes `BEGIN TRANSACTION` before first statement
+2. Executes all user statements in sequence
+3. On success: executes `COMMIT`
+4. On error: executes `ROLLBACK`
+
+User statements never include explicit BEGIN/COMMIT/ROLLBACK.
+
+**REQ-TXN-004: Explicit Transaction Conflicts**
+
+If user statements contain explicit transaction control:
+```sql
+BEGIN TRANSACTION;
+SELECT 1;
+COMMIT;
+```
+
+With `--atomic` flag:
+- Error: "Cannot use --atomic with explicit transaction control"
+- Detection: scan for BEGIN, COMMIT, ROLLBACK, BT, ET keywords
+- Case-insensitive detection
+- Exit code 2 (usage error)
+- No statements executed
+
+**REQ-TXN-005: Execution Flow**
+
+Normal flow (success):
+```bash
+$ tq query --file script.sql --atomic
+[Begin transaction]
+Statement 1: INSERT - OK (1 row affected)
+Statement 2: UPDATE - OK (5 rows affected)
+Statement 3: SELECT - 5 rows returned
+[Commit transaction]
+
+All statements executed successfully
+Transaction committed
+```
+
+Error flow (failure):
+```bash
+$ tq query --file script.sql --atomic
+[Begin transaction]
+Statement 1: INSERT - OK (1 row affected)
+Statement 2: UPDATE - OK (5 rows affected)
+Statement 3: INVALID SQL - FAILED
+[Rollback transaction]
+
+Error: SQL syntax error in statement 3
+
+Expected something like a 'SELECT' keyword but found 'INVALID'.
+
+Transaction rolled back (all changes reverted)
+Statements executed: 1-2
+Statement failed: 3
+
+Exit code: 1
+```
+
+**REQ-TXN-006: Status Messages**
+
+Transaction messages (stderr):
+- Start: "[Begin transaction]" (verbose mode only)
+- Success: "Transaction committed"
+- Failure: "Transaction rolled back (all changes reverted)"
+- Messages suppressed by `--quiet` flag
+
+**REQ-TXN-007: Error Handling**
+
+Transaction errors:
+- BEGIN TRANSACTION fails: abort with exit code 1, no user statements executed
+- User statement fails: automatic ROLLBACK, exit code 1
+- COMMIT fails: automatic ROLLBACK attempt, exit code 1
+- ROLLBACK fails: report error but continue (Teradata handles this)
+
+**REQ-TXN-008: Interrupt Handling**
+
+On Ctrl-C during atomic execution:
+- Attempt ROLLBACK before exit
+- Display: "Interrupted. Rolling back transaction..."
+- Exit code 130 (interrupted)
+- If ROLLBACK fails, warn but still exit
+
+**REQ-TXN-009: Teradata Transaction Modes**
+
+Teradata has two transaction modes:
+1. **ANSI mode**: Explicit transactions required
+2. **Teradata mode**: Auto-commit by default
+
+The `--atomic` flag works in both modes:
+- ANSI mode: Uses BEGIN TRANSACTION/COMMIT/ROLLBACK (standard)
+- Teradata mode: Uses BT (Begin Transaction)/ET (End Transaction) commands
+- Mode detection: automatic (query database mode)
+- Fallback: try ANSI first, then Teradata syntax if ANSI fails
+
+**REQ-TXN-010: Verbose Output**
+
+With `--verbose` flag:
+```bash
+$ tq --verbose query --file script.sql --atomic
+[INFO] Transaction mode: ANSI
+[INFO] Executing: BEGIN TRANSACTION
+[Begin transaction]
+
+[INFO] Statement 1: INSERT INTO users VALUES (...)
+Statement 1: INSERT - OK (1 row affected)
+
+[INFO] Statement 2: UPDATE users SET active = 1
+Statement 2: UPDATE - OK (1 row affected)
+
+[INFO] Executing: COMMIT
+[Commit transaction]
+
+All statements executed successfully
+Transaction committed
+```
+
+**REQ-TXN-011: Interaction with --output**
+
+`--atomic` and `--output` work together:
+```bash
+tq query --file script.sql --atomic --output results.csv
+```
+
+Behavior:
+- Transaction controls entire execution
+- File written atomically (separate from transaction)
+- If query succeeds but file write fails:
+  - Transaction still commits
+  - Error reported for file write
+  - Exit code 1
+
+Rationale: File I/O is not part of database transaction.
+
+**REQ-TXN-012: Non-Transactional Statements**
+
+Some Teradata statements cannot be in transactions:
+- DDL statements (CREATE, DROP, ALTER in some modes)
+- Some utility commands
+
+If `--atomic` is used with non-transactional statements:
+- Teradata returns error: "Statement not allowed in transaction"
+- Automatic ROLLBACK attempted
+- Error message displayed
+- Exit code 1
+
+User guidance: Don't use `--atomic` with DDL-heavy scripts.
 
 ## Variable Substitution
 

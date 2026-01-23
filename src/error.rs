@@ -154,6 +154,20 @@ pub enum TqError {
     CsvError(#[from] csv::Error),
 
     // ========================================================================
+    // Transaction Errors
+    // ========================================================================
+    /// Transaction operation failed
+    #[error("Transaction {operation} failed: {message}")]
+    TransactionError {
+        operation: String,
+        message: String,
+    },
+
+    /// Explicit transaction control conflicts with --atomic flag
+    #[error("Cannot use --atomic with SQL containing explicit transaction control")]
+    AtomicConflict,
+
+    // ========================================================================
     // Internal Errors
     // ========================================================================
     /// Internal error (bug)
@@ -297,6 +311,26 @@ impl TqError {
                     path.display(),
                     source
                 )
+            }
+
+            TqError::TransactionError { operation, message } => {
+                format!(
+                    "Error: Transaction {} failed\n\n\
+                     {}\n\n\
+                     Note: When using --atomic, all changes are rolled back on error.\n\
+                     Previous statements in this batch may have been undone.",
+                    operation, message
+                )
+            }
+
+            TqError::AtomicConflict => {
+                "Error: Cannot use --atomic with explicit transaction control\n\n\
+                 Your SQL contains BEGIN TRANSACTION, COMMIT, or ROLLBACK statements.\n\
+                 The --atomic flag automatically wraps statements in a transaction.\n\n\
+                 Either:\n  \
+                 - Remove the --atomic flag and manage transactions manually, OR\n  \
+                 - Remove BEGIN/COMMIT/ROLLBACK from your SQL and let --atomic handle it"
+                    .to_string()
             }
 
             // Default: use the Display implementation
