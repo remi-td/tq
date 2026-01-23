@@ -1,7 +1,7 @@
 # Feature Backlog
 
 **Last Updated:** 2026-01-23
-**Next Sprint:** Sprint 22
+**Next Sprint:** Sprint 24
 
 ---
 
@@ -18,18 +18,6 @@ No P0 features currently in backlog. All critical features have been implemented
 ---
 
 ## P1 - High Priority (Should Have)
-
-### Batch Mode Enhancements
-
-**Output to File**
-- Direct output redirection: `tq query "..." --output results.csv`
-- Avoids shell redirection for better error handling
-- Spec: [Batch Mode - Output to File](../specifications/batch-mode.md#output-to-file)
-
-**Transaction Control**
-- `--atomic` flag for transaction wrapping
-- Automatic rollback on error
-- Spec: [Batch Mode - Transactions](../specifications/batch-mode.md#transactions)
 
 ### Configuration Management
 
