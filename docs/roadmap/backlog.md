@@ -55,17 +55,10 @@ No P0 features currently in backlog. All critical features have been implemented
 - Spec: [REPL Mode - Tab Completion Behavior](../specifications/repl.md#tab-completion-behavior)
 - Deferred from Sprint 21 due to technical limitation
 
-**Metacommand Completion**
-- Tab completion for metacommands (`/des<TAB>` → `/describe`)
-- Show available options after slash
-- Spec: [REPL Mode - Metacommand Completion](../specifications/repl.md#metacommand-completion)
-
 **Additional Schema Commands**
-- `/list databases` - List all databases
-- `/list tables [pattern]` - List tables with optional pattern
-- `/list views` - List views in current database
 - `/show indexes <table>` - Show table indexes
 - Spec: [REPL Mode - Schema Inspection](../specifications/repl.md#schema-inspection)
+- Note: `/list databases`, `/list tables`, `/list views` completed in Sprint 22 (v1.9.0)
 
 ---
 

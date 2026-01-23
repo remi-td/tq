@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-01-23
-**Current Version:** 1.8.0
-**Latest Sprint:** Sprint 21 Complete (Tab Completion Quality)
+**Current Version:** 1.9.0
+**Latest Sprint:** Sprint 22 Complete (REPL Enhancements)
 
 ---
 
@@ -95,6 +95,13 @@ All core features are complete and tested.
 - Smart qualified name completion: Single database match appends '.' and shows tables immediately
 - Automated regression tests: Comprehensive test suite with hybrid testing pattern
 
+**Sprint 22 Enhancements (v1.9.0):**
+- Metacommand tab completion: Type `/` + TAB to see all available metacommands with descriptions
+- Enhanced schema commands: `/list databases`, `/list tables [pattern]`, `/list views` for quick schema exploration
+- Glob pattern support: Filter tables with patterns like `dbc.t*` or `*_archive`
+- Short command aliases: `/l` (databases), `/dt` (tables), `/dv` (views)
+- Comprehensive user documentation: New REPL guide with examples and best practices
+
 ---
 
 ## Batch Mode
@@ -147,12 +154,12 @@ All core features are complete and tested.
 
 ## Summary Statistics
 
-- **Total Features**: 56
-- **Implemented**: 50 (89%)
-- **Planned**: 6 (11%)
-- **Test Pass Rate**: 100% (234/234 unit tests)
+- **Total Features**: 58
+- **Implemented**: 52 (90%)
+- **Planned**: 6 (10%)
+- **Test Pass Rate**: 100% (297/297 tests: 266 unit, 6 integration, 25 PTY)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 20 - Bug fixes for logo and tab completion
+- **Latest Sprint**: Sprint 22 - REPL Enhancements (Metacommand completion & Schema commands)
 
 ---
 
