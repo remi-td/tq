@@ -1,7 +1,7 @@
 # Feature Backlog
 
 **Last Updated:** 2026-01-23
-**Next Sprint:** Sprint 20
+**Next Sprint:** Sprint 22
 
 ---
 
@@ -46,6 +46,14 @@ No P0 features currently in backlog. All critical features have been implemented
 - Spec: [Configuration - Profile Management](../specifications/configuration.md#profile-management)
 
 ### REPL Enhancements
+
+**Second TAB Accepts Selection**
+- Match bash/zsh behavior: second TAB accepts highlighted completion item
+- Blocked by reedline library limitation (Issue #624 - no MenuAccept event)
+- Current workaround: Press ENTER to accept selection
+- Awaiting upstream reedline fix or contribution opportunity
+- Spec: [REPL Mode - Tab Completion Behavior](../specifications/repl.md#tab-completion-behavior)
+- Deferred from Sprint 21 due to technical limitation
 
 **Metacommand Completion**
 - Tab completion for metacommands (`/des<TAB>` → `/describe`)

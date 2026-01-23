@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-01-23
-**Current Version:** 1.7.1
-**Latest Sprint:** Sprint 20 Complete (Bug Fixes)
+**Current Version:** 1.8.0
+**Latest Sprint:** Sprint 21 Complete (Tab Completion Quality)
 
 ---
 
@@ -88,6 +88,12 @@ All core features are complete and tested.
 **Sprint 20 Bug Fixes (v1.7.1):**
 - Fixed logo display: Implemented correct 9-line lowercase ASCII art (was 3-line blocks)
 - Fixed tab completion: Eliminated "Page 1: records 0 - 0" output (changed from ListMenu to ColumnarMenu)
+
+**Sprint 21 Enhancements (v1.8.0):**
+- Tab completion quality: Include 'dbc' system database in completion menu
+- Tab completion data completeness: Universal table fetching for all databases (fixed "NO RECORDS FOUND" issue)
+- Smart qualified name completion: Single database match appends '.' and shows tables immediately
+- Automated regression tests: Comprehensive test suite with hybrid testing pattern
 
 ---
 
