@@ -15,11 +15,17 @@ Simple, fast extraction of token usage data from subagent transcripts. Adds fact
 
 ## Setup (One-time)
 
-The project uses a SessionStart hook to automatically capture the current session ID. This is configured in `.claude/settings.json` and requires no manual intervention.
+The project uses a SessionStart hook to automatically capture session information:
+- Current session ID is stored in `.claude/current-session-id.txt`
+- Session history with timestamps is appended to `.claude/session-history.txt`
+
+This is configured in `.claude/settings.json` and requires no manual intervention.
 
 ## Workflow
 
-### Option 1: Use Current Session (Recommended)
+### Single-Session Sprints
+
+For sprints completed in a single session:
 
 ```bash
 # Extract metrics for current session (captured by hook)
@@ -29,24 +35,48 @@ The project uses a SessionStart hook to automatically capture the current sessio
 ./.claude/skills/collect-metrics/scripts/extract-sprint-metrics.sh 22
 ```
 
-The session ID is automatically read from `.claude/current-session-id.txt` (populated by the SessionStart hook).
-
-### Option 2: Use Specific Session
+Or for a specific past session:
 
 ```bash
-# Extract metrics for a specific past session
+# Extract metrics for a specific session
 ./.claude/skills/collect-metrics/scripts/extract-sprint-metrics.sh <session-id> <sprint-number>
 
-# Example: Extract metrics for sprint 18 from a specific session
+# Example
 ./.claude/skills/collect-metrics/scripts/extract-sprint-metrics.sh f599ef4e-6741-40b9-8b70-54c6e6d7272e 18
 ```
 
-### Finding Past Session IDs
+### Multi-Session Sprints
+
+Sprint work often spans multiple Claude sessions. To collect complete metrics:
+
+**Step 1: List recent sessions**
 
 ```bash
-# List recent sessions for this project
-ls -t ~/.claude/projects/$(pwd | sed 's|/|-|g; s|\.|-|g')/*.jsonl | head -5
+# List sessions from last N days (default: 7)
+./.claude/skills/collect-metrics/scripts/list-recent-sessions.sh [days]
+
+# Example: List sessions from last 3 days
+./.claude/skills/collect-metrics/scripts/list-recent-sessions.sh 3
 ```
+
+This shows session IDs, timestamps, and subagent counts to help identify sprint-related sessions.
+
+**Step 2: Combine metrics from multiple sessions**
+
+```bash
+# Combine metrics from multiple sessions
+./.claude/skills/collect-metrics/scripts/combine-sprint-metrics.sh <sprint-number> <session-id-1> <session-id-2> [...]
+
+# Example: Sprint 22 used two sessions
+./.claude/skills/collect-metrics/scripts/combine-sprint-metrics.sh 22 \
+  27f6d7b5-e9d3-4034-8903-bee5e292dcf3 \
+  93583c02-d3a3-4c61-8b4f-49d9b4aac8ac
+```
+
+This produces a combined metrics file with:
+- Aggregated token usage across all sessions
+- Overall cache hit rate and costs
+- Per-session breakdown
 
 ## Output
 

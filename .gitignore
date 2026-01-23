@@ -29,23 +29,12 @@ teradatasql.*
 
 # Working files and test results
 tests/results/
-tests/*testing*.md
-tests/*regression*.md
-mvp_implementation_notes/
 
 
 # Temporary and debug files
-docs/builder/incoming/*.png
-docs/builder/incoming/*.jpg
-docs/builder/incoming/*.jpeg
 *.tmp
 *.log
 *.bak
 
 # Claude agent working files
-.claude/
-!.claude/settings.json
-!.claude/skills/
-CLAUDE.md
-.claude/transcripts/
-agent-output/
+.claude/*.txt
