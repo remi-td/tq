@@ -82,50 +82,68 @@ When displaying the tool name with color support:
 
 ### Logo ASCII Art
 
+**User's Exact Specification:**
+
 ```
- _
-| |_   __ _
-|  _| / _` |
- \__|  \__, |
-          |_|
+ __
+/\ \__
+\ \ ,_\    __
+ \ \ \/  /'__`\
+  \ \ \_/\ \L\ \
+   \ \__\ \___, \
+    \/__/\/___/\ \
+              \ \_\
+               \/_/
 ```
 
 **Visual Structure:**
-- Lines 1-5: Lowercase "t" (left) + lowercase "q" (right)
-- The "t": Vertical stem with horizontal top bar
-- The "q": Circular body with descending tail
+- Lines 1-9: Lowercase "t" (left) + lowercase "q" (right) using block characters
+- The "t": Left portion forming lowercase letter 't' shape
+- The "q": Right portion forming lowercase letter 'q' shape with descending tail
+- Character set: `_`, `/`, `\`, `|`, `` ` ``, `{`, `'`, space
+- This is the definitive ASCII art design for clarity
 
 ### Implementation with Info Messages
 
 Info messages appear on the SAME lines as the logo, to the right:
 
 ```
- _            Teradata Query Tool v1.7.0
-| |_   __ _   Connected to host:1025
-|  _| / _` |  Database: demo_user
- \__|  \__, |  User: demo_user
-          |_|  Default row limit: 100
+ __                Teradata Query Tool v1.7.0
+/\ \__             Connected to host:1025
+\ \ ,_\    __      Database: demo_user
+ \ \ \/  /'__`\    User: demo_user
+  \ \ \_/\ \L\ \   Default row limit: 100
+   \ \__\ \___, \  [additional info as needed]
+    \/__/\/___/\ \
+              \ \_\
+               \/_/
 ```
 
 **Color Application:**
 
 The logo is implemented as two separate character arrays that are combined line-by-line:
 
-**'t' portion (colored in Teradata orange):**
+**'t' portion (colored in Teradata orange - left side):**
 ```
- _
-| |_
-|  _|
- \__|
+ __
+/\ \__
+\ \ ,_\
+ \ \ \/
+  \ \ \_
+   \ \__
+    \/__
 ```
 
-**'q' portion (default terminal color):**
+**'q' portion (default terminal color - right side):**
 ```
 
- __ _
-/ _` |
-\__, |
-   |_|
+    __
+  /'__`\
+/\ \L\ \
+ \___, \
+\/___/\ \
+      \ \_\
+       \/_/
 ```
 
 **Combined output:** Each line combines `[orange_t][default_q]   [info_message]`
@@ -133,20 +151,24 @@ The logo is implemented as two separate character arrays that are combined line-
 ### Layout Rules
 
 1. Each line combines: `[colored_t_part][q_part]   [info_message]`
-2. Three spaces separate logo from info messages
+2. Spaces separate logo from info messages (adjust for readability)
 3. Info messages vertically aligned (all start at same column)
-4. Logo portions are fixed width (t=6 chars, q=6 chars, total 12 chars for logo)
-5. If fewer than 5 info lines, remaining logo lines print without info
+4. Logo is 9 lines tall
+5. If fewer than 9 info lines, remaining logo lines print without info
 
 ### Logo Display Context
 
 ```
 [Blank line]
- _            Teradata Query Tool v1.7.0
-| |_   __ _   Connected to mcp-host:1025
-|  _| / _` |  Database: demo_user
- \__|  \__, |  User: demo_user
-          |_|  Default row limit: 100
+ __                Teradata Query Tool v1.7.0
+/\ \__             Connected to mcp-host:1025
+\ \ ,_\    __      Database: demo_user
+ \ \ \/  /'__`\    User: demo_user
+  \ \ \_/\ \L\ \   Default row limit: 100
+   \ \__\ \___, \
+    \/__/\/___/\ \
+              \ \_\
+               \/_/
 [Blank line]
 Type /help for commands, /quit to exit.
 [Blank line]

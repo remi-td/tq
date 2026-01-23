@@ -34,13 +34,13 @@ Review the last 3 sprint reviews. Look for stuck issues, accumulating debt, or f
 ### Phase 1: Planning
 
 **If Feature Sprint:**
-> **Read:** `process/phase1-planning.md`
+> **Read:** `phase1-feature-planning.md`
 
 Create `docs/sprints/sprint-N-planning.md` with objectives and acceptance criteria.
-Use `references/template.md` as template.
+Use `.claude/skills/sprint-coordinator/references/sprint-planning-template.md` as template.
 
 **If Maintenance Sprint (Crisis Detected):**
-> **Read:** `process/phase1-crisis-deliberation.md`
+> **Read:** `.claude/skills/sprint-coordinator/process/phase1-maintainance-planning.md`
 
 Facilitate a 2-round multi-agent deliberation:
 1. Launch all 3 agents with the problem statement (parallel).

@@ -278,6 +278,25 @@ tq> SELECT COUNT(*) FROM employees WHERE dept = 'IT';
 
 ## Tab Completion
 
+**CRITICAL REQUIREMENT:** Tab completion MUST NOT produce any pager output or database query result formatting. When pressing TAB, the user should see ONLY completion suggestions, never "Page 1: records 0 - 0 total: 0" or similar pager output.
+
+### Implementation Requirements
+
+**Metadata Caching Strategy:**
+1. **Database names** - Cached at REPL startup or first completion request via `SELECT databasename FROM dbc.databases`
+2. **Table names** - Cached incrementally as databases are explored via `SELECT tablename FROM dbc.tablesV WHERE databasename = ?`
+3. **Column names** - Cached per table as needed via `SELECT columnname FROM dbc.columnsV WHERE tablename = ?`
+
+**Completion Menu Behavior:**
+- Display completion candidates in a menu format
+- Filter candidates as user types additional characters
+- Support up/down arrow key navigation through candidates
+- After selecting a database and typing `.`, automatically show tables in that database
+- Completion should be responsive (< 50ms for cached metadata, < 500ms for uncached)
+
+**Output Suppression:**
+All metadata queries executed during tab completion MUST suppress stdout/stderr output from the Teradata driver to prevent pager output from appearing in the terminal.
+
 ### Keyword Completion
 
 **Trigger**: Press Tab key after typing partial SQL keyword.
@@ -346,11 +365,29 @@ Tables in current database (production):
     customers    employees    orders    products    [50 more...]
 ```
 
+**Menu-based completion with filtering:**
+```sql
+tq> SELECT * FROM pro<TAB>
+production
+products
+
+[Type 'd' to filter further]
+tq> SELECT * FROM prod<TAB>
+production
+products
+
+[Arrow up/down to navigate, Enter to select]
+```
+
 **After database name + dot - Show tables in that database**:
 ```sql
 tq> SELECT * FROM production.<TAB>
 Tables in 'production':
     customers    employees    orders    products    invoices    [45 more...]
+
+[Filter by typing: 'cus' narrows to 'customers']
+tq> SELECT * FROM production.cus<TAB>
+customers
 ```
 
 **Loading States**:

@@ -59,6 +59,29 @@ impl CompletionState {
         self.cache.set_current_database(database);
     }
 
+    /// Ensure databases are loaded
+    ///
+    /// Sprint 20: Databases should be pre-loaded at startup, but this provides
+    /// a fallback in case they weren't.
+    pub fn ensure_databases_loaded(&mut self) -> bool {
+        if !self.cache.has_databases() {
+            log::debug!("Tab completion: Triggering load of database names");
+            let result = self.cache.load_databases(&self.client);
+            if !result {
+                if let Some(error) = self.cache.last_error() {
+                    log::error!("Tab completion: Failed to load databases: {}", error);
+                } else {
+                    log::error!("Tab completion: Failed to load databases (unknown error)");
+                }
+            } else {
+                log::debug!("Tab completion: Database names loaded successfully");
+            }
+            result
+        } else {
+            true
+        }
+    }
+
     /// Ensure tables are loaded, triggering lazy load if needed
     ///
     /// Sprint 11: Added explicit error logging for debugging completion failures.
@@ -85,6 +108,9 @@ impl CompletionState {
     /// Ensure columns are loaded for a table
     ///
     /// Sprint 11: Added explicit error logging for debugging completion failures.
+    /// Sprint 20: Not currently used during tab completion (to avoid queries),
+    /// but kept for future use by metacommands like /describe.
+    #[allow(dead_code)]
     pub fn ensure_columns_loaded(&mut self, table_name: &str) -> bool {
         if self.cache.get_columns(table_name).is_none() {
             log::debug!(
@@ -165,59 +191,66 @@ impl MetadataCompleter {
     ///
     /// Sprint 18: Span is now set by the caller in complete(), not here.
     /// This function returns suggestions with placeholder spans.
+    ///
+    /// Uses ONLY pre-loaded cache (NO queries during completion).
+    /// All metadata must be loaded at startup. If not cached, return empty.
     fn complete_tables(&self, prefix: &str) -> Vec<Suggestion> {
         let Some(state) = &self.state else {
             // No database connection - return empty (no completions available)
             return Vec::new();
         };
 
-        let Ok(mut state) = state.lock() else {
+        let Ok(state) = state.lock() else {
             log::warn!("Failed to acquire lock for table completion");
             return Vec::new();
         };
 
-        // Ensure tables are loaded
-        if !state.ensure_tables_loaded() {
-            // Loading failed - log and return empty
-            if let Some(error) = state.cache().last_error() {
-                log::error!("Tab completion: Failed to load tables: {}", error);
-            }
-            return Vec::new();
-        }
-
         let mut suggestions = Vec::new();
 
-        // Sprint 8 Fix: Show database names for Teradata's database.table model
-        let databases = state.cache().find_databases_by_prefix(prefix);
-        for db in databases {
-            suggestions.push(Suggestion {
-                value: db.clone(),
-                description: Some("(database)".to_string()),
-                style: None,
-                extra: None,
-                span: reedline::Span { start: 0, end: 0 }, // Placeholder - set by caller
-                append_whitespace: false, // Don't add space after database name (user will type '.')
-            });
+        // Sprint 20 Fix: Use ONLY cached database names (NO queries during completion)
+        // Databases should have been pre-loaded at startup.
+        // If not cached, we return empty rather than triggering a query.
+        if state.cache().has_databases() {
+            let databases = state.cache().find_databases_by_prefix(prefix);
+            for db in databases {
+                suggestions.push(Suggestion {
+                    value: db.clone(),
+                    description: Some("(database)".to_string()),
+                    style: None,
+                    extra: None,
+                    span: reedline::Span { start: 0, end: 0 }, // Placeholder - set by caller
+                    append_whitespace: false, // Don't add space after database name (user will type '.')
+                });
+            }
+        } else {
+            log::debug!("Tab completion: databases not cached, skipping database suggestions");
         }
 
-        // Also show tables in current database (unqualified names)
-        let tables = state.cache().find_tables_in_current_db_by_prefix(prefix);
-        for table in tables {
-            let kind = match table.table_kind.as_str() {
-                "T" => "table",
-                "V" => "view",
-                "O" => "object",
-                _ => "table",
-            };
+        // Sprint 20 Fix: Use ONLY cached table metadata (NO queries during completion)
+        // Tables should have been pre-loaded at startup.
+        // If not cached, we return empty rather than triggering a query.
+        if state.cache().has_tables() {
+            // Show tables in current database (unqualified names)
+            let tables = state.cache().find_tables_in_current_db_by_prefix(prefix);
+            for table in tables {
+                let kind = match table.table_kind.as_str() {
+                    "T" => "table",
+                    "V" => "view",
+                    "O" => "object",
+                    _ => "table",
+                };
 
-            suggestions.push(Suggestion {
-                value: table.table_name.clone(),
-                description: Some(format!("{} ({})", table.schema_name, kind)),
-                style: None,
-                extra: None,
-                span: reedline::Span { start: 0, end: 0 }, // Placeholder - set by caller
-                append_whitespace: true,
-            });
+                suggestions.push(Suggestion {
+                    value: table.table_name.clone(),
+                    description: Some(format!("{} ({})", table.schema_name, kind)),
+                    style: None,
+                    extra: None,
+                    span: reedline::Span { start: 0, end: 0 }, // Placeholder - set by caller
+                    append_whitespace: true,
+                });
+            }
+        } else {
+            log::debug!("Tab completion: tables not cached, skipping table suggestions");
         }
 
         suggestions
@@ -227,6 +260,7 @@ impl MetadataCompleter {
     ///
     /// Sprint 8 Bug Fix: Improved error handling for database.table completions
     /// Sprint 18: Span is now set by the caller in complete(), not here.
+    /// Sprint 20 Fix: Uses ONLY cached data (NO queries during completion).
     fn complete_schema_tables(&self, schema: &str, prefix: &str) -> Vec<Suggestion> {
         // Sprint 8 Round 4: Add safety check for empty schema
         if schema.is_empty() {
@@ -238,21 +272,20 @@ impl MetadataCompleter {
             return Vec::new();
         };
 
-        let Ok(mut state) = state.lock() else {
+        let Ok(state) = state.lock() else {
             log::warn!("Failed to acquire lock for schema-qualified table completion");
             return Vec::new();
         };
 
-        // Ensure tables are loaded
-        if !state.ensure_tables_loaded() {
-            if let Some(error) = state.cache().last_error() {
-                log::error!("Tab completion: Failed to load tables: {}", error);
-            }
+        // Sprint 20 Fix: Use ONLY cached tables (NO queries during completion)
+        // If tables aren't cached, return empty rather than triggering a query.
+        let cache = state.cache();
+        if !cache.has_tables() {
+            log::debug!("Tab completion: tables not cached, skipping schema-qualified suggestions");
             return Vec::new();
         }
 
         // Find tables in the specified database/schema
-        let cache = state.cache();
         let Some(tables) = cache.get_tables() else {
             return Vec::new();
         };
@@ -296,6 +329,9 @@ impl MetadataCompleter {
     ///
     /// Sprint 8: Now surfaces errors when column loading fails.
     /// Sprint 18: Span is now set by the caller in complete(), not here.
+    /// Sprint 20 Fix: Uses ONLY cached data (NO queries during completion).
+    /// Column completions are only available if columns were previously cached
+    /// (e.g., via /describe command or prior query).
     fn complete_columns(
         &self,
         tables: &[super::sql_context::TableReference],
@@ -306,7 +342,7 @@ impl MetadataCompleter {
             return Vec::new();
         };
 
-        let Ok(mut state) = state.lock() else {
+        let Ok(state) = state.lock() else {
             log::warn!("Failed to acquire lock for column completion");
             return Vec::new();
         };
@@ -318,17 +354,23 @@ impl MetadataCompleter {
         let mut suggestions = Vec::new();
 
         for table in tables {
-            // Try to load columns for this table
-            if !state.ensure_columns_loaded(&table.name) {
-                log::debug!("Failed to load columns for table: {}", table.name);
-                continue;
-            }
-
-            // Get matching columns
-            let columns = state.cache().find_columns_by_prefix(&table.name, prefix);
-
-            for col in columns {
-                suggestions.push(self.column_to_suggestion(col, &table.name));
+            // Sprint 20 Fix: Use ONLY cached columns (NO queries during completion)
+            // If columns for this table aren't cached, skip it.
+            // Columns get cached via /describe command or prior queries.
+            let cache = state.cache();
+            if let Some(columns) = cache.get_columns(&table.name) {
+                // Filter columns by prefix
+                let prefix_upper = prefix.to_uppercase();
+                for col in columns {
+                    if col.name.to_uppercase().starts_with(&prefix_upper) {
+                        suggestions.push(self.column_to_suggestion(col, &table.name));
+                    }
+                }
+            } else {
+                log::debug!(
+                    "Tab completion: columns for {} not cached, skipping column suggestions",
+                    table.name
+                );
             }
         }
 

@@ -8,7 +8,6 @@
 //! - Session-scoped: Cache is cleared on connection change (/logon)
 //! - Timeout handling: Queries time out after configured duration
 //! - Graceful degradation: Failures don't crash REPL
-//! - Sprint 19: Stdout suppression during queries to prevent driver debug output
 
 use crate::db::DatabaseClient;
 use std::collections::HashMap;
@@ -16,10 +15,9 @@ use std::time::{Duration, Instant};
 
 /// Guard that suppresses stdout AND stderr during its lifetime.
 ///
-/// Sprint 19: The teradatarustapi library (Go-based) prints debug output like
-/// "Page 1: records 0 - 0  total: 0  [FULL]" during query execution.
-/// Sprint 20: Enhanced to suppress BOTH stdout and stderr, as the output might
-/// go to either stream or directly to TTY.
+/// Note: This was originally added to suppress presumed driver debug output,
+/// but the "Page 1: records 0 - 0 total: 0" output was actually from
+/// reedline's ListMenu. Kept for potential future use but may be removable.
 struct OutputSuppressor {
     #[cfg(unix)]
     original_stdout: Option<std::os::unix::io::RawFd>,
@@ -260,13 +258,21 @@ impl ColumnInfo {
 /// Metadata cache for database objects
 ///
 /// Provides lazy-loading, session-scoped caching for tables and columns.
+/// Sprint 20: Added separate database name cache for fast startup loading.
 #[derive(Debug)]
 pub struct MetadataCache {
+    /// Cached database names (loaded at startup for fast completion)
+    /// Sprint 20: Separate from tables for lightweight startup loading
+    databases: Option<Vec<String>>,
+
     /// Cached table list (None = not loaded yet)
     tables: Option<Vec<TableInfo>>,
 
     /// Cached columns per table (key = schema.table or just table)
     columns: HashMap<String, Vec<ColumnInfo>>,
+
+    /// When the database cache was last populated
+    databases_loaded_at: Option<Instant>,
 
     /// When the table cache was last populated
     tables_loaded_at: Option<Instant>,
@@ -277,6 +283,9 @@ pub struct MetadataCache {
     /// Whether loading is in progress (to avoid concurrent loads)
     loading_tables: bool,
 
+    /// Whether database loading is in progress
+    loading_databases: bool,
+
     /// Last error message (for user feedback)
     last_error: Option<String>,
 }
@@ -285,22 +294,37 @@ impl MetadataCache {
     /// Create a new empty metadata cache
     pub fn new(current_database: impl Into<String>) -> Self {
         Self {
+            databases: None,
             tables: None,
             columns: HashMap::new(),
+            databases_loaded_at: None,
             tables_loaded_at: None,
             current_database: current_database.into(),
             loading_tables: false,
+            loading_databases: false,
             last_error: None,
         }
     }
 
     /// Clear all cached metadata (call on /logon)
     pub fn clear(&mut self) {
+        self.databases = None;
         self.tables = None;
         self.columns.clear();
+        self.databases_loaded_at = None;
         self.tables_loaded_at = None;
         self.last_error = None;
         log::debug!("Metadata cache cleared");
+    }
+
+    /// Check if databases are already cached
+    pub fn has_databases(&self) -> bool {
+        self.databases.is_some()
+    }
+
+    /// Get cached database names (returns None if not loaded)
+    pub fn get_cached_databases(&self) -> Option<&[String]> {
+        self.databases.as_deref()
     }
 
     /// Update current database context
@@ -412,6 +436,73 @@ impl MetadataCache {
                 log::warn!("{}", error_msg);
                 self.last_error = Some(error_msg);
                 self.loading_tables = false;
+                false
+            }
+        }
+    }
+
+    /// Load database names from Teradata
+    ///
+    /// Sprint 20: Lightweight query to load just database names at startup.
+    /// This is called BEFORE editor initialization to avoid TTY conflicts.
+    /// Returns true if successful, false if failed (check last_error for reason).
+    pub fn load_databases(&mut self, client: &DatabaseClient) -> bool {
+        if self.loading_databases {
+            return false;
+        }
+
+        self.loading_databases = true;
+        self.last_error = None;
+
+        log::debug!("Loading database names from DBC.DatabasesV");
+
+        // Query DBC.DatabasesV for database list - lightweight query
+        // Sprint 20: Using DBC.DatabasesV instead of extracting from TablesV
+        let sql = r#"
+            SELECT TRIM(DatabaseName)
+            FROM DBC.DatabasesV
+            WHERE DatabaseName NOT IN ('All', 'Console', 'Crashdumps', 'DBC',
+                                       'dbcmngr', 'Default', 'External_AP',
+                                       'EXTUSER', 'LockLogShredder', 'PUBLIC',
+                                       'SQLJ', 'Sys_Calendar', 'SysAdmin',
+                                       'SYSBAR', 'SYSJDBC', 'SYSLIB', 'SYSSPATIAL',
+                                       'SystemFe', 'SYSUDTLIB', 'TD_SERVER_DB',
+                                       'TD_SYSFNLIB', 'TD_SYSGPL', 'TD_SYSXML',
+                                       'TDMaps', 'TDPUSER', 'TDQCD', 'TDStats',
+                                       'tdwm', 'VIEWPOINT')
+            ORDER BY DatabaseName
+        "#;
+
+        // Sprint 20: Note - this is called at startup BEFORE editor init,
+        // so OutputSuppressor may not be strictly necessary, but we keep it
+        // for consistency and safety.
+        let query_result = with_stdout_suppressed(|| client.execute(sql));
+
+        match query_result {
+            Ok(result) => {
+                let mut databases = Vec::with_capacity(result.row_count);
+
+                for row in &result.rows {
+                    let db_name = row.first().map(|v| v.display()).unwrap_or_default();
+
+                    // Skip NULL values
+                    if db_name != "[NULL]" && !db_name.is_empty() {
+                        databases.push(db_name);
+                    }
+                }
+
+                log::info!("Loaded {} database names into metadata cache", databases.len());
+
+                self.databases = Some(databases);
+                self.databases_loaded_at = Some(Instant::now());
+                self.loading_databases = false;
+                true
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to load database names: {}", e);
+                log::warn!("{}", error_msg);
+                self.last_error = Some(error_msg);
+                self.loading_databases = false;
                 false
             }
         }
@@ -537,10 +628,17 @@ impl MetadataCache {
             .collect()
     }
 
-    /// Get distinct database names from cached tables
+    /// Get distinct database names
     ///
-    /// Sprint 8 Bug Fix: Returns database names for Teradata's database.table model
+    /// Sprint 20: Prefers cached database list (from load_databases) over
+    /// extracting from tables cache. This allows fast startup loading.
     pub fn get_databases(&self) -> Vec<String> {
+        // Sprint 20: First check dedicated database cache (loaded at startup)
+        if let Some(databases) = &self.databases {
+            return databases.clone();
+        }
+
+        // Fall back to extracting from tables cache if databases weren't loaded separately
         let Some(tables) = &self.tables else {
             return vec![];
         };
@@ -558,7 +656,7 @@ impl MetadataCache {
 
     /// Find databases matching a prefix (case-insensitive)
     ///
-    /// Sprint 8 Bug Fix: For showing database names after FROM
+    /// Sprint 20: Uses cached database list for fast completion without DB queries.
     pub fn find_databases_by_prefix(&self, prefix: &str) -> Vec<String> {
         let databases = self.get_databases();
         let prefix_upper = prefix.to_uppercase();
@@ -738,5 +836,105 @@ mod tests {
         assert_eq!(escape_sql_string("test"), "test");
         assert_eq!(escape_sql_string("test's"), "test''s");
         assert_eq!(escape_sql_string("it's a 'test'"), "it''s a ''test''");
+    }
+
+    // Sprint 20: Tests for database caching
+
+    #[test]
+    fn test_metadata_cache_has_databases() {
+        let mut cache = MetadataCache::new("testdb");
+        assert!(!cache.has_databases());
+
+        cache.databases = Some(vec!["db1".to_string(), "db2".to_string()]);
+        assert!(cache.has_databases());
+    }
+
+    #[test]
+    fn test_metadata_cache_get_cached_databases() {
+        let mut cache = MetadataCache::new("testdb");
+        assert!(cache.get_cached_databases().is_none());
+
+        cache.databases = Some(vec!["db1".to_string(), "db2".to_string()]);
+        let dbs = cache.get_cached_databases().unwrap();
+        assert_eq!(dbs.len(), 2);
+        assert_eq!(dbs[0], "db1");
+        assert_eq!(dbs[1], "db2");
+    }
+
+    #[test]
+    fn test_get_databases_prefers_cached() {
+        let mut cache = MetadataCache::new("testdb");
+
+        // Set up both database cache and table cache with different data
+        cache.databases = Some(vec!["cached_db1".to_string(), "cached_db2".to_string()]);
+        cache.tables = Some(vec![
+            TableInfo::new("table_db.employees", "employees", "table_db", "T"),
+        ]);
+
+        // Should return from database cache, not extracted from tables
+        let dbs = cache.get_databases();
+        assert_eq!(dbs.len(), 2);
+        assert!(dbs.contains(&"cached_db1".to_string()));
+        assert!(dbs.contains(&"cached_db2".to_string()));
+        assert!(!dbs.contains(&"table_db".to_string()));
+    }
+
+    #[test]
+    fn test_get_databases_falls_back_to_tables() {
+        let mut cache = MetadataCache::new("testdb");
+
+        // No database cache, but has table cache
+        cache.databases = None;
+        cache.tables = Some(vec![
+            TableInfo::new("db1.employees", "employees", "db1", "T"),
+            TableInfo::new("db2.customers", "customers", "db2", "T"),
+            TableInfo::new("db1.orders", "orders", "db1", "T"),
+        ]);
+
+        // Should extract unique databases from tables
+        let dbs = cache.get_databases();
+        assert_eq!(dbs.len(), 2);
+        assert!(dbs.contains(&"db1".to_string()));
+        assert!(dbs.contains(&"db2".to_string()));
+    }
+
+    #[test]
+    fn test_find_databases_by_prefix_with_cache() {
+        let mut cache = MetadataCache::new("testdb");
+        cache.databases = Some(vec![
+            "production".to_string(),
+            "prod_archive".to_string(),
+            "development".to_string(),
+            "staging".to_string(),
+        ]);
+
+        let results = cache.find_databases_by_prefix("prod");
+        assert_eq!(results.len(), 2);
+        assert!(results.contains(&"production".to_string()));
+        assert!(results.contains(&"prod_archive".to_string()));
+
+        let results = cache.find_databases_by_prefix("PROD"); // Case-insensitive
+        assert_eq!(results.len(), 2);
+
+        let results = cache.find_databases_by_prefix("dev");
+        assert_eq!(results.len(), 1);
+        assert!(results.contains(&"development".to_string()));
+
+        let results = cache.find_databases_by_prefix("xyz");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_metadata_cache_clear_clears_databases() {
+        let mut cache = MetadataCache::new("testdb");
+        cache.databases = Some(vec!["db1".to_string()]);
+        cache.tables = Some(vec![]);
+        cache.databases_loaded_at = Some(Instant::now());
+
+        cache.clear();
+
+        assert!(!cache.has_databases());
+        assert!(!cache.has_tables());
+        assert!(cache.databases_loaded_at.is_none());
     }
 }

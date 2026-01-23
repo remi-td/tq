@@ -165,6 +165,32 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 - **Key Difference**: Tests what USER SEES, not what code returns
 - **Acceptance**: User's exact bug reports must be proven fixed with visual evidence
 
+### Sprint 20: CRITICAL BUG FIXES - HYBRID TESTING (Sprint 18/19 Failed)
+
+**Sprint 20 Context:** Sprint 18 and 19 both failed to fix two critical bugs. Sprint 20 implements hybrid testing strategy.
+
+**Sprint 20 Test Cases (2 total - hybrid: automated + manual):**
+
+#### Logo Fix - 9-Line ASCII Art (P0 - CRITICAL)
+- **TC-LOGO-003**: Logo Display Verification - 9-Line ASCII Art (Hybrid: Interactive automated + manual visual)
+
+#### Tab Completion Fix - No Pager Output (P0 - CRITICAL)
+- **TC-TAB-COMPLETION-003**: Tab Completion Without Pager Output (Hybrid: Interactive automated + manual visual)
+
+**Sprint 20 Test Strategy:**
+- **Test Count**: 2 hybrid test cases + 8-10 automated tests + 2 screenshots
+- **Type**: Maintenance Sprint (CRISIS - FINAL ATTEMPT)
+- **Why Hybrid**: Prevent Sprint 18 false positives AND Sprint 19 execution blockers
+- **Database Required**: Yes (for tab completion tests)
+- **Automated Component**: PTY tests with negative assertions (NO pager text) for regression detection
+- **Manual Component**: Human visual validation with screenshot evidence for correctness
+- **Unit Tests**: OutputSuppressor mechanism, logo data structures
+- **Interactive Tests**: Tab completion, logo rendering with expectrl
+- **Screenshot Evidence**: MANDATORY for both tests
+- **Focus**: Test what users SEE (manual) AND prevent regressions (automated)
+- **Key Innovation**: BOTH automated and manual must pass for APPROVED verdict
+- **Acceptance**: User confirms bugs fixed + automated tests pass (100%)
+
 ### Security
 - **TC022**: Security - No Password Exposure
 - **TC-SECURITY-001**: Password File Permission Enforcement - 0644 Rejected (Sprint 17)

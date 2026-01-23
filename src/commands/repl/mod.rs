@@ -28,8 +28,8 @@ use metadata_completer::{CompletionState, MetadataCompleter};
 use nu_ansi_term::Color;
 use reedline::{
     default_emacs_keybindings, default_vi_insert_keybindings, default_vi_normal_keybindings,
-    EditMode, Emacs, FileBackedHistory, KeyCode, KeyModifiers, Keybindings, ListMenu, MenuBuilder,
-    Reedline, ReedlineEvent, ReedlineMenu, Signal, Vi,
+    ColumnarMenu, EditMode, Emacs, FileBackedHistory, KeyCode, KeyModifiers, Keybindings,
+    MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal, Vi,
 };
 use std::io::Write;
 use std::path::PathBuf;
@@ -46,6 +46,8 @@ pub use state::ReplState;
 /// Execute the REPL command
 ///
 /// Sprint 7: Updated to support metadata completion and /logon.
+/// Sprint 20: Pre-loads database names BEFORE editor initialization to avoid
+/// TTY conflicts during tab completion.
 /// The client is now owned by a shared state that can be updated on reconnection.
 pub fn execute<W: Write>(
     client: DatabaseClient,
@@ -64,6 +66,28 @@ pub fn execute<W: Write>(
         ReplState::new(cs.client().config().clone())
     };
 
+    // Pre-load ALL metadata BEFORE editor initialization for faster tab completion.
+    // This ensures tab completion is instant without needing database roundtrips.
+    {
+        let mut cs = completion_state.lock().unwrap();
+        log::info!("Pre-loading metadata for tab completion...");
+
+        // Load database names first
+        if cs.ensure_databases_loaded() {
+            log::info!("Database names loaded successfully");
+        } else {
+            log::warn!("Failed to pre-load database names; tab completion may be limited");
+        }
+
+        // Also pre-load tables in current database
+        // This prevents queries during tab completion after "SELECT * FROM "
+        if cs.ensure_tables_loaded() {
+            log::info!("Table metadata loaded successfully");
+        } else {
+            log::warn!("Failed to pre-load table metadata; tab completion may be limited");
+        }
+    }
+
     // Show startup banner
     {
         let cs = completion_state.lock().unwrap();
@@ -71,6 +95,7 @@ pub fn execute<W: Write>(
     }
 
     // Initialize reedline editor with persistent history and editor mode
+    // Note: Databases are already cached, so tab completion won't trigger queries
     let mut editor = create_editor(args, writer, Arc::clone(&completion_state))?;
 
     // Create prompt
@@ -138,10 +163,14 @@ fn create_editor(
     editor = editor.with_completer(Box::new(completer));
 
     // Create a completion menu that shows suggestions
-    // Sprint 9 Bug 1 Fix: Use ListMenu with larger page size to show more completions
-    let completion_menu = ListMenu::default()
+    // Sprint 20 Fix: Use ColumnarMenu instead of ListMenu.
+    // ListMenu displays a pager banner "Page 1: records 0 - 0 total: 0" which appears
+    // even when there are no completions, causing unwanted output during tab completion.
+    // ColumnarMenu does not have this banner and provides a cleaner completion experience.
+    let completion_menu = ColumnarMenu::default()
         .with_name("completion_menu")
-        .with_page_size(25); // Show up to 25 completions at once (previously ~9 with ColumnarMenu)
+        .with_columns(2) // Show completions in 2 columns for better readability
+        .with_column_padding(4); // Add padding between columns
     editor = editor.with_menu(ReedlineMenu::EngineCompleter(Box::new(completion_menu)));
 
     // Configure editor mode with keybindings that include Tab completion
@@ -225,7 +254,7 @@ mod dirs {
 
 /// Print the startup banner with connection information
 ///
-/// Sprint 19: Fixed logo display - lowercase "tq" ASCII art with 't' in Teradata orange
+/// Sprint 20: Fixed logo display - 9-line lowercase "tq" ASCII art with 't' in Teradata orange
 /// and 'q' in white/default color. Information messages displayed to the RIGHT of the logo.
 fn print_banner<W: Write>(
     completion_state: &CompletionState,
@@ -252,25 +281,46 @@ fn print_banner<W: Write>(
     };
     info_lines.push(format!("Editor mode: {}", editor_mode_str));
 
-    // LOWERCASE "tq" using block characters
-    // Sprint 20: Block-based lowercase letters for maximum clarity
-    // 't' is in Teradata orange, 'q' is in default color
+    // LOWERCASE "tq" ASCII art logo - 9 lines
+    // Sprint 20: User's exact ASCII art specification from branding-guidelines.md
+    // 't' portion (left side) is in Teradata orange, 'q' portion (right side) is default color
     //
-    // Logo design (lowercase):
-    //   ▄      ▄▄
-    //  █▀█    █  █
-    //   █     ▀▀█
+    // Full logo:
+    //  __
+    // /\ \__
+    // \ \ ,_\    __
+    //  \ \ \/  /'__`\
+    //   \ \ \_/\ \L\ \
+    //    \ \__\ \___, \
+    //     \/__/\/___/\ \
+    //               \ \_\
+    //                \/_/
     //
+    // The 't' portion (lines 1-7 left side) is in orange
+    // The 'q' portion (lines 3-9 right side) is in default color
+
     let logo_t = [
-        "  ▄    ",
-        " █▀█   ",
-        "  █    ",
+        " __",
+        "/\\ \\__",
+        "\\ \\ ,_\\",
+        " \\ \\ \\/",
+        "  \\ \\ \\_",
+        "   \\ \\__",
+        "    \\/__",
+        "        ",
+        "        ",
     ];
 
     let logo_q = [
-        "  ▄▄   ",
-        " █  █  ",
-        "  ▀▀█  ",
+        "",
+        "",
+        "    __",
+        "  /'__`\\",
+        "/\\ \\L\\ \\",
+        "\\ \\___, \\",
+        "/\\/___/\\ \\",
+        "      \\ \\_\\",
+        "       \\/_/",
     ];
 
     writeln!(writer)?;
@@ -283,7 +333,16 @@ fn print_banner<W: Write>(
         // Get info line if available (offset by 0 to align with first logo line)
         let info = info_lines.get(i).map(|s| s.as_str()).unwrap_or("");
 
-        writeln!(writer, "{}{}   {}", t_colored, q_part, info)?;
+        // Calculate spacing between logo and info (align info at consistent column)
+        let logo_width = t_part.len() + q_part.len();
+        let target_width = 18; // Ensure consistent alignment
+        let padding = if logo_width < target_width {
+            " ".repeat(target_width - logo_width)
+        } else {
+            "   ".to_string()
+        };
+
+        writeln!(writer, "{}{}{}   {}", t_colored, q_part, padding, info)?;
     }
 
     writeln!(writer)?;
