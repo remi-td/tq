@@ -36,7 +36,7 @@ Review the last 3 sprint reviews. Look for stuck issues, accumulating debt, or f
 **If Feature Sprint:**
 > **Read:** `process/phase1-planning.md`
 
-Create `docs/builder/sprints/sprint-N-planning.md` with objectives and acceptance criteria.
+Create `docs/sprints/sprint-N-planning.md` with objectives and acceptance criteria.
 Use `references/template.md` as template.
 
 **If Maintenance Sprint (Crisis Detected):**

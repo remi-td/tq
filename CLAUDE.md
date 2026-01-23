@@ -63,9 +63,9 @@ The sprint-coordinator skill (`.claude/skills/sprint-coordinator/SKILL.md`) defi
 - Launch when: Designing features, refining UX, updating specifications
 
 **rust-teradata-architect** (Opus)
-- Owns: `rust-cli-design-general.md`, `rust-architecture.md`, implementation
-- Creates: Production code, unit tests, architecture docs
-- Launch when: Implementing features, refactoring code, making architectural decisions
+- Owns: `docs/design/` (technical design documents), production code, unit tests
+- Creates: Design documentation, production code, unit tests, architectural patterns
+- Launch when: Implementing features, refactoring code, making architectural decisions, updating design docs
 
 **quality-validator** (Sonnet)
 - Owns: `testing-guidelines.md`, test cases, test execution
@@ -95,67 +95,157 @@ These documents provide shared context for all agents and track sprint progress.
 
 See the sprint-coordinator skill for complete details on Phase 6: Framework Optimization, which implements continuous improvement through sprint retrospective analysis and optional token metrics.
 
-### Master specification documents
+### Documentation Organization
 
-The project is governed by authoritative specification documents located in `docs/builder/`:
+The project documentation is organized into five clear categories:
 
-#### Main Specifications
+#### 1. Pure Specifications (`docs/specifications/`)
 
-1. **`specifications.md`** - Main specifications dashboard
-   - High-level feature status dashboard with visual indicators (✅ 🚧 📋 🔲)
-   - Sprint roadmap showing delivered, current, and planned work
-   - Quick navigation to detailed specifications
-   - Owned by the `cli-ux-designer` agent
-   - Shows WHAT is implemented and WHAT is planned
+**Purpose:** Timeless feature requirements - WHAT the tool should do
 
-2. **`detailed-specifications/*.md`** - Detailed technical specifications
-   - Comprehensive specifications organized by domain
-   - Each file is self-contained and covers a specific area:
-     - `user-personas.md` - Target users and use cases
-     - `cli-interface.md` - Command structure, flags, help text
-     - `repl-mode.md` - Interactive mode specifications
-     - `batch-mode.md` - Non-interactive execution
-     - `configuration.md` - Config files and credentials
-     - `output-formats.md` - Table, JSON, CSV formatting
-     - `error-handling.md` - Error messages and exit codes
-     - `security.md` - Security requirements
-     - `performance.md` - Performance considerations
-   - Owned by the `cli-ux-designer` agent
-   - Defines WHAT the tool should do and HOW users interact with it
+**Contents:**
+- `vision.md` - Project vision, goals, and principles
+- `user-personas.md` - Target users and use cases
+- `cli-interface.md` - Command-line interface specification
+- `repl.md` - Interactive REPL mode specification
+- `batch-mode.md` - Batch mode execution
+- `configuration.md` - Configuration files and profiles
+- `output-formats.md` - Output format specifications
+- `error-handling.md` - Error messages and exit codes
+- `security.md` - Security requirements
+- `performance.md` - Performance targets
+- `branding-guidelines.md` - Visual identity and branding
 
-#### Architecture and Testing
+**Owner:** `cli-ux-designer` agent
 
-3. **`rust-cli-design-general.md`** - General Rust CLI design guidelines
-   - General Rust CLI design principles and best practices
-   - Owned by the `rust-teradata-architect` agent
-   - Provides patterns and principles for CLI tool development
+**Key Principle:** These files contain ONLY pure requirements with NO implementation status, sprint references, or dates. They are the single source of truth for feature behavior.
 
-4. **`rust-architecture.md`** - Rust architecture for tq
-   - Architecture document specific to the tq tool
-   - Owned by the `rust-teradata-architect` agent
-   - Defines HOW the tool is implemented internally
+#### 2. Technical Design (`docs/design/`)
 
-5. **`testing-guidelines.md`** - Testing methodology and best practices
-   - Testing approach, patterns, and execution techniques
-   - Owned by the `quality-validator` agent
-   - Defines HOW to design and execute quality validation tests
-   - Provides templates, checklists, and lessons learned
+**Purpose:** Technical architecture and implementation approach - HOW features are implemented
 
-### Document authority and precedence
+**Contents:**
+- `README.md` - Organization and usage guide for design docs
+- `vision.md` - High-level technical architecture, design principles, component integration
+- `cli-interface.md` - Command parsing, argument handling implementation
+- `repl.md` - REPL loop, state management, interactive features
+- `batch-mode.md` - Batch execution, file processing (when created)
+- `connection-management.md` - Connection lifecycle, credential resolution, Teradata integration
+- `configuration.md` - Config loading, profile management (when created)
+- `output-formats.md` - Formatters architecture, rendering pipeline (when created)
+- `error-handling.md` - Error types, propagation patterns (when created)
+- `security.md` - Security implementation details (when created)
+- `performance.md` - Optimization techniques, profiling (when created)
 
-**IMPORTANT**: The content of these specification documents is authoritative and overrides any other information, best practices, or general knowledge when working on this project.
+**Owner:** `rust-teradata-architect` agent
 
-When designing, coding, or testing:
-1. **Always consult** the relevant specification documents first
-2. **Follow** the specifications exactly as written
-3. **Propose updates** to the specifications when you identify gaps or improvements
-4. **Never deviate** from the specifications without explicit approval
+**Key Principle:** Design documents explain implementation approach with code references, architectural patterns, and design decisions. They mirror the structure of specifications but address technical "how" instead of user-facing "what". NO sprint references, status updates, or dates.
 
-### Updating specifications
+**Relationship to Specifications:** Each specification in `docs/specifications/` may have a corresponding design document in `docs/design/` that explains the technical implementation.
 
-- Any significant change to project specifications or guidelines MUST be reflected in these documents
-- Changes to these documents MUST be carefully evaluated and approved by the project subject matter expert (the user)
-- When proposing changes, clearly explain the rationale and impact
+#### 3. Roadmap & Status (`docs/roadmap/`)
+
+**Purpose:** Implementation tracking and planning - WHEN features are/will be implemented
+
+**Contents:**
+- `status.md` - Current implementation status dashboard (✅ 🚧 📋)
+- `backlog.md` - Prioritized feature backlog
+- `roadmap.md` - High-level strategic direction
+
+**Owner:** `sprint-coordinator`
+
+**Updated:** After each sprint (status.md), during planning (backlog.md), quarterly (roadmap.md)
+
+#### 4. Sprint History (`docs/sprints/`)
+
+**Purpose:** Historical planning and retrospectives - Sprint context and lessons learned
+
+**Contents:**
+- `sprint-N-planning.md` - Sprint objectives and scope
+- `sprint-N-review.md` - Retrospective with metrics and lessons
+
+**Owner:** `sprint-coordinator`
+
+**Note:** For reference only, not used during active development
+
+#### 5. Testing Documentation (`docs/testing/`)
+
+**Purpose:** Testing methodology and validation approach - HOW we validate implementations
+
+**Contents:**
+- `README.md` - Testing documentation organization and quick reference
+- `philosophy.md` - Core testing principles and quality philosophy
+- `approach.md` - Testing strategy, test types, design patterns
+- `execution.md` - Running tests, best practices, debugging
+- `tools.md` - Testing infrastructure, tools, and utilities
+
+**Owner:** `quality-validator` agent
+
+**Key Principle:** Testing documents explain HOW to validate features, independent of sprint execution. Test methodology is timeless, test results are per-sprint (in `tests/results/`).
+
+### Document Authority and Usage
+
+**IMPORTANT**: Documentation has different purposes and authority levels:
+
+#### When Implementing Features
+1. **Read specifications first**: `docs/specifications/` defines WHAT to build
+2. **Read design docs**: `docs/design/` explains HOW to build it
+3. **Check architecture**: `docs/design/vision.md` for high-level architecture
+4. **Follow patterns**: Design docs for specific component patterns
+5. **Design tests**: `docs/testing/` for test methodology and validation approach
+
+#### When Planning Sprints
+1. **Check status**: `docs/roadmap/status.md` for what's implemented
+2. **Review backlog**: `docs/roadmap/backlog.md` for prioritized features
+3. **Read specifications**: `docs/specifications/` for feature requirements
+4. **Review design**: `docs/design/` for technical approach
+5. **Create plan**: `docs/sprints/sprint-N-planning.md` for this sprint's scope
+
+#### When Fixing Bugs
+1. **Read specifications**: `docs/specifications/` for expected behavior
+2. **Check design**: `docs/design/` for implementation approach
+3. **Compare code**: Verify code matches design
+4. **Never update status**: Bug fixes don't change specification requirements
+
+#### When Refactoring
+1. **Understand current design**: Read relevant docs in `docs/design/`
+2. **Propose new approach**: Document design changes
+3. **Update design docs**: Keep design docs synchronized with code
+4. **Update specifications if needed**: Only if user-facing behavior changes
+
+### Updating Documentation
+
+**Specifications (`docs/specifications/`):**
+- Updated by: `cli-ux-designer` agent
+- When: Requirements change (NOT when implementation completes)
+- Content: ONLY timeless requirements (no status, no sprint refs)
+- Approval: Required from user for significant changes
+
+**Design (`docs/design/`):**
+- Updated by: `rust-teradata-architect` agent
+- When: Architecture changes, new patterns added, or implementation approach changes
+- Content: Technical design, architectural patterns, code references (no status, no sprint refs, no dates)
+- Approval: Technical review during sprint
+- Important: Keep synchronized with code - update design docs when refactoring
+
+**Testing (`docs/testing/`):**
+- Updated by: `quality-validator` agent
+- When: Testing methodology evolves, new testing approaches discovered
+- Content: Testing philosophy, approach, execution guidelines, tools (no status, no sprint refs, no dates)
+- Approval: Technical review during sprint
+- Important: Keep methodology timeless - sprint-specific test strategies go in `tests/strategy/`
+
+**Roadmap (`docs/roadmap/`):**
+- Updated by: `sprint-coordinator`
+- When: After sprint completion (status.md), during planning (backlog.md)
+- Content: Implementation status and planning info
+- Approval: Autonomous updates during sprint workflow
+
+**Sprint History (`docs/sprints/`):**
+- Updated by: `sprint-coordinator`
+- When: At sprint start (planning.md) and sprint completion (review.md)
+- Content: Sprint objectives, scope, retrospectives, lessons learned
+- Approval: Autonomous creation during sprint workflow
 
 ### Environment configuration
 The project uses a `.env` file to store development and test configuration that should not be committed to git.

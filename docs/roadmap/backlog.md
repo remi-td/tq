@@ -1,0 +1,209 @@
+# Feature Backlog
+
+**Last Updated:** 2026-01-23
+**Next Sprint:** Sprint 20
+
+---
+
+## Overview
+
+This document contains the prioritized backlog of features to be implemented in future sprints. Features are organized by priority level and include dependencies where applicable.
+
+---
+
+## P0 - Critical (Must Have)
+
+No P0 features currently in backlog. All critical features have been implemented.
+
+---
+
+## P1 - High Priority (Should Have)
+
+### Batch Mode Enhancements
+
+**Output to File**
+- Direct output redirection: `tq query "..." --output results.csv`
+- Avoids shell redirection for better error handling
+- Spec: [Batch Mode - Output to File](../specifications/batch-mode.md#output-to-file)
+
+**Transaction Control**
+- `--atomic` flag for transaction wrapping
+- Automatic rollback on error
+- Spec: [Batch Mode - Transactions](../specifications/batch-mode.md#transactions)
+
+### Configuration Management
+
+**Project Config File**
+- `.tq.toml` in project directory
+- Project-specific connection profiles
+- Team-shared configuration
+- Spec: [Configuration - Project Config](../specifications/configuration.md#project-config)
+
+**Profile Editing Commands**
+- `tq profile add <name>` - Add new profile interactively
+- `tq profile edit <name>` - Edit existing profile
+- `tq profile delete <name>` - Remove profile
+- Spec: [Configuration - Profile Management](../specifications/configuration.md#profile-management)
+
+### REPL Enhancements
+
+**Metacommand Completion**
+- Tab completion for metacommands (`/des<TAB>` → `/describe`)
+- Show available options after slash
+- Spec: [REPL Mode - Metacommand Completion](../specifications/repl.md#metacommand-completion)
+
+**Additional Schema Commands**
+- `/list databases` - List all databases
+- `/list tables [pattern]` - List tables with optional pattern
+- `/list views` - List views in current database
+- `/show indexes <table>` - Show table indexes
+- Spec: [REPL Mode - Schema Inspection](../specifications/repl.md#schema-inspection)
+
+---
+
+## P2 - Medium Priority (Nice to Have)
+
+### Performance Optimizations
+
+**Streaming Large Results**
+- Stream query results without loading all into memory
+- Support datasets >1GB
+- Progress indicators for long-running queries
+- Spec: [Performance - Streaming](../specifications/performance.md#streaming)
+
+**Query Result Caching**
+- Cache recent query results for re-export
+- Configurable cache size and TTL
+- `/cache clear` to manually clear cache
+- Spec: [Performance - Caching](../specifications/performance.md#caching)
+
+### Batch Mode Enhancements
+
+**Variable Substitution**
+- `${VAR}` syntax for variable substitution in SQL
+- Command-line variable passing: `--var name=value`
+- Environment variable expansion
+- Spec: [Batch Mode - Variables](../specifications/batch-mode.md#variables)
+
+**Script Preprocessing**
+- Include files: `-- @include common.sql`
+- Conditional execution: `-- @if ENVIRONMENT=prod`
+- Macro expansion for DRY scripts
+- Spec: [Batch Mode - Preprocessing](../specifications/batch-mode.md#preprocessing)
+
+### Security Enhancements
+
+**Keyring Integration**
+- Store credentials in system keyring
+- OS-native credential storage (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+- `tq keyring add <profile>` command
+- Spec: [Security - Keyring](../specifications/security.md#keyring)
+
+**Config Validation Command**
+- `tq config validate` - Check config file syntax
+- Validate profile connectivity
+- Security audit (check file permissions)
+- Spec: [Configuration - Validation](../specifications/configuration.md#validation)
+
+### REPL Enhancements
+
+**Data Sampling Commands**
+- `/sample <table> [n]` - Show random sample of rows
+- `/peek <table>` - Show first 5 rows with column info
+- Quick data exploration without writing SQL
+- Spec: [REPL Mode - Data Sampling](../specifications/repl.md#data-sampling)
+
+**Query Editing**
+- `/edit` - Open last query in $EDITOR
+- `/repeat` - Re-execute last query
+- External editor integration
+- Spec: [REPL Mode - Query Editing](../specifications/repl.md#query-editing)
+
+**Search in Pager**
+- `/pattern` - Search forward in paged results
+- `n` - Next match
+- `N` - Previous match
+- Spec: [REPL Mode - Pager Search](../specifications/repl.md#pager-search)
+
+---
+
+## P3 - Low Priority (Future)
+
+### Advanced REPL Features
+
+**Transaction Indicators**
+- `tq(tx)>` prompt when in transaction
+- Visual indication of uncommitted changes
+- Automatic rollback warning on exit
+- Spec: [REPL Mode - Transactions](../specifications/repl.md#transactions)
+
+**Autocorrect Suggestions**
+- Detect common typos in SQL keywords
+- "Did you mean: SELECT?" suggestions
+- Optional auto-fix with confirmation
+- Spec: [REPL Mode - Autocorrect](../specifications/repl.md#autocorrect)
+
+**Query Cancellation**
+- Ctrl-C to cancel running query
+- Double Ctrl-C to force quit
+- Progress feedback during long queries
+- Spec: [REPL Mode - Query Cancellation](../specifications/repl.md#query-cancellation)
+
+### Output Format Extensions
+
+**Additional Export Formats**
+- Parquet format for big data tools
+- HTML tables for reports
+- Markdown tables for documentation
+- Spec: [Output Formats - Additional Formats](../specifications/output-formats.md#additional-formats)
+
+**Format Customization**
+- Custom delimiters for CSV
+- JSON array vs. newline-delimited JSON
+- Custom NULL representation
+- Spec: [Output Formats - Customization](../specifications/output-formats.md#customization)
+
+---
+
+## Dependencies
+
+Some features depend on others being implemented first:
+
+- **Project Config** depends on **User Config** (✅ Complete)
+- **Keyring Integration** depends on **Config Validation** (for secure storage)
+- **Variable Substitution** may benefit from **Preprocessing** (can share parser)
+- **Transaction Indicators** depends on **Transaction Control** implementation
+
+---
+
+## Future Considerations
+
+Features under consideration but not yet committed to backlog:
+
+- **Query Performance Analysis**: EXPLAIN plan integration
+- **SQL Formatting**: Auto-format SQL queries
+- **Multi-Connection REPL**: Switch between multiple connections
+- **Query Templates**: Saved queries with parameter placeholders
+- **Diff Mode**: Compare query results across databases
+- **Collaborative Features**: Share queries via gists/URLs
+
+These will be evaluated based on user feedback and demand.
+
+---
+
+## Backlog Management
+
+This backlog is reviewed during **Phase 0 (Reality Check)** of each sprint. The sprint coordinator:
+
+1. Reviews recent sprint retrospectives
+2. Identifies highest-priority features from backlog
+3. Considers bug fixes and technical debt
+4. Decides: Feature Sprint or Maintenance Sprint
+
+---
+
+## Related Documents
+
+- **[Status Dashboard](status.md)** - Current implementation status
+- **[Roadmap](roadmap.md)** - High-level product direction
+- **[Specifications](../specifications/)** - Detailed feature specifications

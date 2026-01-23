@@ -16,7 +16,7 @@ When invoked, you will be provided:
 
 Immediately:
 1. Read the provided transcript file completely
-2. Read sprint planning and review docs from `docs/builder/sprints/sprint-N-*.md`
+2. Read sprint planning and review docs from `docs/sprints/sprint-N-*.md`
 3. Apply the decision tree analysis framework from the optimize-agents skill
 4. Identify token waste patterns and optimization opportunities
 5. Generate structured proposals with impact metrics
@@ -137,11 +137,11 @@ Structure your response as:
 **Implementation Effort**: Small
 
 ### Problem
-The cli-ux-designer agent reads `specifications.md` (2,300 lines) and all detailed specs (5 files, 4,200 lines total) at the start of every invocation. In Sprint 11, transcript shows it read specifications.md at line 45, then again at line 892 when it was already in context.
+The cli-ux-designer agent reads specification files (docs/specifications/*.md - multiple files totaling 4,200 lines) at the start of every invocation. In Sprint 11, transcript shows it read specifications repeatedly when they were already in context.
 
 ### Proposed Solution
 Add to cli-ux-designer agent prompt (line 12):
-"IMPORTANT: Specifications are already loaded in your context via skills. Do NOT read specifications.md or detailed-specifications/* files unless you need to UPDATE them. Reference the knowledge from your loaded context instead."
+"IMPORTANT: Specifications are already loaded in your context via skills. Do NOT read docs/specifications/*.md files unless you need to UPDATE them. Reference the knowledge from your loaded context instead."
 
 ### Files Affected
 - `.claude/subagents/cli-ux-designer.md` (line 12: add note about pre-loaded specs)

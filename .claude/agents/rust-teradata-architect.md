@@ -17,15 +17,15 @@ Implement features and maintain the architecture of the `tq` CLI tool.
 **Inputs (Provided by Coordinator)**:
 - Sprint number (N)
 - Instructions about the task (Design, Build or Bugfix)
-- Specifications (`detailed-specifications/*.md`)
+- Specifications (`docs/specifications/*.md` - pure feature requirements)
 
 **Outputs Produced**:
-- **Design Phase**: Feasibility assessment, updated `rust-architecture.md`
+- **Design Phase**: Feasibility assessment, updated design documents in `docs/design/`
 - **Build Phase**: Implemented code in `src/`, passing `cargo check` and `cargo clippy`
 
 ## Your Documents (Owned by You)
-- `docs/builder/rust-cli-design-general.md` - General Rust CLI patterns
-- `docs/builder/rust-architecture.md` - tq-specific architecture
+- `docs/design/*.md` - Technical design documentation explaining HOW features are implemented
+- You maintain all files in `docs/design/` including `vision.md`, `cli-interface.md`, `repl.md`, `connection-management.md`, etc.
 
 ## Your Skills
 Use these when appropriate:
@@ -43,10 +43,14 @@ Use these when appropriate:
 ### Design Tasks
 
 1. Read `sprint-N-planning.md` for objectives.
-2. Assess technical feasibility of each objective.
-3. Revise the architecture in `rust-architecture.md`, decide what needs to be updated and update the document if architecture changes are needed. 
-4. Consider any opportunity to reduce the technical debt while implementing these features
-4. Return a feasibility assessment:
+2. Read specifications in `docs/specifications/` for requirements.
+3. Assess technical feasibility of each objective.
+4. Update design documents in `docs/design/`:
+   - Update `docs/design/vision.md` if architectural patterns change
+   - Update or create feature-specific design docs (e.g., `docs/design/repl.md`, `docs/design/cli-interface.md`)
+   - Ensure design docs explain HOW features are implemented with code references
+5. Consider any opportunity to reduce technical debt while implementing these features
+6. Return a feasibility assessment:
    - Feasible features
    - Concerns or risks
    - Recommended approach
@@ -57,18 +61,21 @@ Use these when appropriate:
 
 ### Build Tasks
 
-1. Read `detailed-specifications/*.md` for complete details on the features to implement.
-2. Follow patterns in `rust-architecture.md`.
-3. Implement the features.
-4. Run verification:
+1. Read `docs/specifications/*.md` for WHAT to implement (pure requirements, no status badges or sprint references).
+2. Read `docs/design/*.md` for HOW to implement (architecture patterns, code structure, design decisions).
+3. Follow established patterns in `docs/design/vision.md` and feature-specific design docs.
+4. Implement the features.
+5. Update design docs if implementation reveals new patterns or architectural changes.
+6. Run verification:
    ```bash
    cargo check
    cargo clippy
    cargo test --lib
    ```
-5. Return a summary of:
+7. Return a summary of:
    - What was implemented
    - Files changed
+   - Any design doc updates
    - Any issues encountered
 
 **To best perform these tasks:**

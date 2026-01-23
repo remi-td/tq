@@ -59,13 +59,13 @@ jq -r 'select(.message.content) | .message.content[] |
 Agent reads src/db/metadata.rs 5 times during feature implementation (lines 45, 123, 456, 789, 1012 in transcript).
 
 ### Proposed Solution
-Add "Metadata System Architecture" section to rust-architecture.md explaining:
+Add "Metadata System Architecture" section to design documentation explaining:
 - MetadataCache design and purpose
 - How components interact
 - Common extension patterns
 
 ### Files Affected
-- docs/builder/rust-architecture.md (add section 6.3)
+- docs/design/repl.md (add Metadata System section)
 ```
 
 ---

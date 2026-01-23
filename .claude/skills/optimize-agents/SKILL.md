@@ -12,7 +12,7 @@ context: fork
 
 Deep analysis of sprint metrics to identify where time/tokens are wasted and generate concrete optimization actions.
 
-**Input:** Historical sprint metrics files (`docs/builder/sprints/sprint-N-metrics.md`)
+**Input:** Historical sprint metrics files (`docs/sprints/sprint-N-metrics.md`)
 **Output:** Specific file edits to improve agents, docs, tools, and workflows
 **Model:** Opus (requires complex analysis and decision-making)
 
@@ -64,7 +64,7 @@ Ranks optimizations by expected token reduction and implementation effort.
 
 ```bash
 # Find all sprint metrics files
-ls -t docs/builder/sprints/sprint-*-metrics.md | head -6
+ls -t docs/sprints/sprint-*-metrics.md | head -6
 ```
 
 Read the most recent 3-6 sprint metrics files to establish patterns.
@@ -87,7 +87,7 @@ For each pattern in the waste patterns catalog, check if it appears in multiple 
 
 ```bash
 # Extract token usage per agent across sprints
-for metrics in docs/builder/sprints/sprint-{6,7,8}-metrics.md; do
+for metrics in docs/sprints/sprint-{6,7,8}-metrics.md; do
     echo "=== $(basename $metrics) ==="
     grep -A 20 "## Sprint Summary" "$metrics" | grep "Total Tokens"
 done
@@ -102,7 +102,7 @@ done
 
 ```bash
 # Check sprint reviews for quality issues
-for review in docs/builder/sprints/sprint-{6,7,8}-review.md; do
+for review in docs/sprints/sprint-{6,7,8}-review.md; do
     echo "=== $(basename $review) ==="
     grep -i "issue\|bug\|failure\|rework\|manual test" "$review" | head -5
 done
@@ -117,7 +117,7 @@ done
 
 ```bash
 # Extract cache rates from metrics
-grep -h "Cache Hit Rate" docs/builder/sprints/sprint-*-metrics.md | sort
+grep -h "Cache Hit Rate" docs/sprints/sprint-*-metrics.md | sort
 ```
 
 **Questions to answer:**
@@ -196,15 +196,15 @@ For each identified optimization, create a detailed action plan:
 Agent doesn't understand metadata module structure upfront. Explores file multiple times during implementation.
 
 ### Solution
-Add "Metadata Module Overview" section to rust-architecture.md explaining:
+Add "Metadata Module Overview" section to design documentation explaining:
 - MetadataCache purpose and design
 - How sql_context uses metadata
 - Common patterns for extending metadata features
 
 ### Implementation
 
-**File:** `docs/builder/rust-architecture.md`
-**Action:** Add new section after "6.2 REPL Module Organization"
+**File:** `docs/design/repl.md`
+**Action:** Add new section explaining metadata system architecture
 
 **Content to add:**
 ```markdown
@@ -263,7 +263,7 @@ Rank all identified optimizations by:
 
 ### Step 7: Create Implementation Plan
 
-Generate a concrete action list, save it in `docs/builder/sprints/sprint-N-planning.md` (where N is the sprint number), for example:
+Generate a concrete action list, save it in `docs/sprints/sprint-N-planning.md` (where N is the sprint number), for example:
 
 ```markdown
 # Framework Optimization Plan
@@ -282,9 +282,9 @@ Generate a concrete action list, save it in `docs/builder/sprints/sprint-N-plann
 **Effort:** 15 minutes
 **Owner:** Main agent (update sprint-coordinator before next sprint)
 
-### Action 2: Add Module Overviews to Rust Architecture
-**Files:** `docs/builder/rust-architecture.md`
-**Change:** Add sections 6.3 (Metadata), 6.4 (Completion), 6.5 (Connection Management)
+### Action 2: Add Module Overviews to Design Documentation
+**Files:** `docs/design/repl.md`, `docs/design/connection-management.md`
+**Change:** Add detailed sections for Metadata System, Tab Completion Architecture, Connection Lifecycle
 **Expected impact:** 10-15K token reduction (fewer redundant reads)
 **Effort:** 2-3 hours
 **Owner:** Main agent or rust-teradata-architect

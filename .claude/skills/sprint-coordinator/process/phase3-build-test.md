@@ -5,10 +5,10 @@
 
 ## Warmup (for Sub-Agents)
 This phase follows Design (Phase 2). At this point:
-- Specifications in `detailed-specifications/*.md` are finalized.
-- Architecture in `rust-architecture.md` is updated and approved.
+- Specifications in `docs/specifications/*.md` are finalized.
+- Design documents in `docs/design/*.md` are updated and approved.
 - For each feature, you will task the following agents to run in parallel:
-   - the `rust-teradata-architect`  agent to implement the feature
+   - the `rust-teradata-architect` agent to implement the feature
    - the `quality-validator` agent to implement the test case
 
 ## Process
@@ -18,13 +18,13 @@ This phase follows Design (Phase 2). At this point:
 Launch BOTH agents in a **single message with multiple Task calls**:
 
 1. **`rust-teradata-architect`**:
-   - Instruction: "Implement the features defined in  `docs/builder/sprints/sprint-N-planning.md` as per requirements in `detailed-specifications/*.md` for Sprint N using the design outlined in `detailed-design/*.md`. Follow patterns in `rust-architecture.md`. Compile and run the tool to validate that your feature is implemented. Return a summary of what was implemented."
+   - Instruction: "Implement the features defined in `docs/sprints/sprint-N-planning.md` as per requirements in `docs/specifications/*.md` for Sprint N using the design outlined in `docs/design/*.md`. Follow patterns in `docs/design/vision.md`. Compile and run the tool to validate that your feature is implemented. Return a summary of what was implemented."
 
 2. **`quality-validator`**:
-   - Instruction: "Design and implement tests for the features in Sprint N as per per requirements in `docs/builder/sprints/sprint-N-planning.md`. Use the specifications in `detailed-specifications/*.md`. Document your strategy in `tests/strategy/` based on `tests/strategy/test-strategy-template.md`. Add test cases in `tests/cases` and use `tests/README.md`
+   - Instruction: "Design and implement tests for the features in Sprint N as per requirements in `docs/sprints/sprint-N-planning.md`. Use the specifications in `docs/specifications/*.md`. Document your strategy in `tests/strategy/` based on `tests/strategy/test-strategy-template.md`. Add test cases in `tests/cases` and use `tests/README.md`
 
 2. **`cli-ux-designer.md`**:
-   - Instruction: "Update the documentation for the features in Sprint N as per `docs/builder/sprints/sprint-N-planning.md`. Use the specifications in `detailed-specifications/*.md`. The documentation should be placed in `docs/user`. Make sure that the documentation is accurate, intuitive and easy to navigate.
+   - Instruction: "Update the documentation for the features in Sprint N as per `docs/sprints/sprint-N-planning.md`. Use the specifications in `docs/specifications/*.md`. The documentation should be placed in `docs/user`. Make sure that the documentation is accurate, intuitive and easy to navigate.
 
 ### Step 2: Collect Results
 
@@ -64,6 +64,14 @@ Untill all test cases are passed, run a tet round (I denotates the round number,
 - **100% execution + 100% pass rate?** → Proceed to Phase 4 (Ship)
 - **Failures?** → Loop: Re-launch Architect to fix, then Validator to re-test
 - **Not executed?** → BLOCKED: Fix environment (database, credentials) and re-run
+
+### Step 4: Synthesize
+
+Review all sub-agents outputs:
+- **Gaps?** Identify failed tests or unclear outcomes. Ensure that documentation was updated.
+- **Scope?** Ensure all features in scope were delivered, tested and documented. If some were not or only delivered, move them to the backlog in `specifications.md` and update `sprint-N-planning.md` with a special note on these features.
+- **Ready?** Proceed to Phase 3.
+- **Status Update** Update the `sprint-N-planning.md` document to mark this phase as complete
 
 ## Output
 - Implemented code in `src/`.

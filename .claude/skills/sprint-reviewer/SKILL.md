@@ -30,11 +30,11 @@ Before starting:
 
 1. **Invoke collect-metrics skill:**
    ```
-   Use Skill tool with skill: "collect-metrics" to output the metrics in a file named `docs/builder/sprints/sprint-N-metrics.md`
+   Use Skill tool with skill: "collect-metrics" to output the metrics in a file named `docs/sprints/sprint-N-metrics.md`
    ```
 
 2. **Read generated metrics:**
-   - File: `docs/builder/sprints/sprint-N-metrics.md`
+   - File: `docs/sprints/sprint-N-metrics.md`
    - Contains actual token usage from sub-agent transcripts
    - Includes cache hit rates and cost estimates
 
@@ -44,7 +44,7 @@ Before starting:
    - Provide honest statement about missing data
 
 4. **Collect other metrics:**
-   - Features delivered: From `docs/builder/sprints/sprint-N-planning.md`
+   - Features delivered: From `docs/sprints/sprint-N-planning.md`
    - Test counts: From `tests/results/sprint-N/REPORT.md`
    - Feature status: Cross-check planning vs. test report
 
@@ -59,7 +59,7 @@ See [Agent Prompts](references/agent-prompts.md) for prompt templates.
 
 ### Step 4: Create Review Document
 
-Create ONE file: `docs/builder/sprints/sprint-N-review.md`
+Create ONE file: `docs/sprints/sprint-N-review.md`
 
 Use template `references/template.md` for document structure.
 

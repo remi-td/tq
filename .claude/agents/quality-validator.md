@@ -36,7 +36,7 @@ or
 ## Execution scenario: produce a test strategy and test cases 
 
 ### Step 1: Read Specifications
-Read incoming specification files` to understand what needs to be tested.
+Read specification files from `docs/specifications/` to understand what needs to be tested. These contain pure requirements without implementation status.
 
 ### Step 2: Design Tests
 For each feature, design once or more tests that proves it works:
