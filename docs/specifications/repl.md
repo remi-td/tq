@@ -280,6 +280,106 @@ tq> SELECT COUNT(*) FROM employees WHERE dept = 'IT';
 
 **CRITICAL REQUIREMENT:** Tab completion MUST NOT produce any pager output or database query result formatting. When pressing TAB, the user should see ONLY completion suggestions, never "Page 1: records 0 - 0 total: 0" or similar pager output.
 
+### Metacommand Completion
+
+#### TC-006: Metacommand Tab Completion
+
+**Requirement:** Metacommands SHALL be discoverable and completable via TAB key, following standard shell completion behavior.
+
+**Specific Requirements:**
+
+1. **TC-006.1** - Typing `/` followed by TAB SHALL display all available metacommands in a completion menu
+2. **TC-006.2** - Typing partial metacommand (e.g., `/des`) followed by TAB SHALL complete to matching metacommands
+3. **TC-006.3** - If multiple metacommands match the prefix, TAB SHALL display filtered completion menu
+4. **TC-006.4** - If single unambiguous match exists, TAB SHALL auto-complete immediately
+5. **TC-006.5** - Metacommand completion SHALL work on any line (including multi-line SQL input) when line starts with `/`
+6. **TC-006.6** - Completion menu SHALL display metacommand descriptions alongside command names
+7. **TC-006.7** - Case-insensitive matching SHALL be supported (e.g., `/DES<TAB>` matches `/describe`)
+8. **TC-006.8** - Metacommand completion SHALL use same navigation as other completions (UP/DOWN arrows, ENTER to accept, ESC to cancel)
+
+**Completable Metacommands:**
+- `/describe` - Describe table structure
+- `/list` - Schema inspection (databases, tables, views)
+- `/logon` - Connect/switch database
+- `/disconnect` - Disconnect current connection
+- `/reconnect` - Reconnect to database
+- `/ping` - Test connection
+- `/sample` - Show random sample
+- `/peek` - Show first rows and column info
+- `/export` - Export results
+- `/session` - Show session info
+- `/timing` - Enable/disable query timing
+- `/set` - Set configuration
+- `/pager` - Enable/disable result paging
+- `/colors` - Enable/disable syntax highlighting
+- `/help` - Show help
+- `/clear` - Clear screen
+- `/history` - Show command history
+- `/edit` - Edit last query
+- `/repeat` - Re-execute last query
+- `/quit` - Exit REPL
+
+**Example Behavior:**
+
+**Show all metacommands:**
+```sql
+tq> /<TAB>
+
+Available metacommands:
+    /clear       Clear screen
+    /colors      Enable/disable syntax highlighting
+    /describe    Describe table structure
+    /disconnect  Disconnect current connection
+    /edit        Edit last query in $EDITOR
+    /export      Export results
+    /help        Show help
+    /history     Show command history
+    /list        Schema inspection (databases, tables, views)
+    /logon       Connect/switch database
+    /pager       Enable/disable result paging
+    /peek        Show first rows and column info
+    /ping        Test connection
+    /quit        Exit REPL
+    /reconnect   Reconnect to database
+    /repeat      Re-execute last query
+    /sample      Show random sample
+    /session     Show session info
+    /set         Set configuration
+    /timing      Enable/disable query timing
+```
+
+**Partial completion - single match:**
+```sql
+tq> /des<TAB>
+tq> /describe _
+```
+
+**Partial completion - multiple matches:**
+```sql
+tq> /l<TAB>
+
+Matching metacommands:
+    /list        Schema inspection (databases, tables, views)
+    /logon       Connect/switch database
+```
+
+**In multi-line mode:**
+```sql
+tq> SELECT *
+    FROM employees
+    WHERE dept = 'IT';
+tq(multi)> /des<TAB>
+tq(multi)> /describe _
+```
+
+**Acceptance Test:**
+- Type `/<TAB>` and verify all metacommands are shown with descriptions
+- Type `/des<TAB>` and verify auto-completion to `/describe`
+- Type `/l<TAB>` and verify filtered menu shows `/list` and `/logon`
+- Type `/HELP<TAB>` (uppercase) and verify completion to `/help`
+
+---
+
 ### Core Requirements
 
 #### TC-001: Complete Database Metadata Coverage
@@ -514,6 +614,83 @@ Tables in 'demo_user':
 
 ---
 
+### Loading Indicator for Metadata Fetching
+
+#### TC-007: Loading Indicator During Slow Metadata Queries
+
+**Requirement:** Users SHALL receive visual feedback during slow metadata fetch operations (>500ms) to indicate the system is working and has not frozen.
+
+**Specific Requirements:**
+
+1. **TC-007.1** - If metadata query takes longer than 500ms, a loading indicator SHALL be displayed
+2. **TC-007.2** - Loading indicator message format SHALL be: `"Loading tables from <database>..."` (for table fetching)
+3. **TC-007.3** - Loading indicator SHALL show animated spinner character to indicate active processing
+4. **TC-007.4** - Loading indicator SHALL clear automatically when completion menu appears
+5. **TC-007.5** - For cached metadata (instant response <50ms), NO loading indicator SHALL appear
+6. **TC-007.6** - If metadata query fails, loading indicator SHALL be replaced with error message
+7. **TC-007.7** - Loading indicator SHALL not block other terminal input/output
+8. **TC-007.8** - Ctrl-C during loading SHALL cancel the metadata fetch and return to prompt
+
+**Indicator Messages by Context:**
+
+| Context | Message Format |
+|---------|----------------|
+| Fetching tables for database | `Loading tables from <database>...` |
+| Fetching columns for table | `Loading columns from <table>...` |
+| Fetching databases | `Loading databases...` |
+
+**Spinner Animation:**
+- Character sequence: `⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏` (Braille spinner)
+- Animation speed: 10 frames per second (100ms per frame)
+- Cycles continuously until metadata fetch completes
+
+**Example Behavior:**
+
+**Fast metadata (cached, <50ms) - No indicator:**
+```sql
+tq> SELECT * FROM production.<TAB>
+[Instant, no loading message]
+Tables in 'production':
+    customers    employees    orders    products
+```
+
+**Slow metadata (uncached, >500ms) - With indicator:**
+```sql
+tq> SELECT * FROM remote_database.<TAB>
+Loading tables from remote_database... ⠋
+[After 2.3 seconds:]
+Tables in 'remote_database':
+    table1    table2    table3    table4
+```
+
+**User cancellation:**
+```sql
+tq> SELECT * FROM slow_database.<TAB>
+Loading tables from slow_database... ⠹
+^C
+Metadata fetch cancelled
+
+tq> _
+[Returns to prompt without completion]
+```
+
+**Error during fetch:**
+```sql
+tq> SELECT * FROM forbidden_db.<TAB>
+Loading tables from forbidden_db... ⠴
+Error: Access denied to database 'forbidden_db'
+Cannot fetch table metadata (insufficient privileges)
+```
+
+**Acceptance Test:**
+- Trigger table completion on uncached database with >500ms query time and verify loading indicator appears
+- Verify indicator shows spinner animation
+- Verify indicator clears when completion menu appears
+- Trigger table completion on cached database and verify NO indicator appears (<50ms)
+- Press Ctrl-C during loading and verify cancellation returns to prompt
+
+---
+
 ### Metadata Caching Strategy
 
 **Database names:**
@@ -526,11 +703,13 @@ Tables in 'demo_user':
 2. Query: Fetch all tables for specific database from Teradata system catalog
 3. Cache lifetime: Entire REPL session
 4. Behavior: If not cached, fetch on first `database.<TAB>` press
+5. Loading indicator: Display if fetch takes >500ms (see TC-007)
 
 **Column names:**
 1. Cached on-demand when table is first referenced
 2. Query: Fetch all columns for specific table from Teradata system catalog
 3. Cache lifetime: Entire REPL session
+4. Loading indicator: Display if fetch takes >500ms (see TC-007)
 
 ### Completion Menu Behavior Summary
 
@@ -960,6 +1139,259 @@ Suggestions:
 | `/list views` | `\dv` | List views | `/list views` |
 | `/list schemas` | `\dn` | List schemas | `/list schemas` |
 | `/show indexes <table>` | `\di` | Show table indexes | `/show indexes employees` |
+
+**`/list databases` Metacommand**
+
+**Requirement:** List all databases accessible on the Teradata system.
+
+**Syntax:**
+```
+/list databases
+\l                  -- Short alias
+```
+
+**Output Format:**
+```
+tq> /list databases
+
+Databases:
+┌─────────────────────┬──────────────┬─────────────┐
+│ Database            │ Owner        │ Type        │
+├─────────────────────┼──────────────┼─────────────┤
+│ dbc                 │ DBC          │ System      │
+│ production          │ dba_user     │ User        │
+│ staging             │ dba_user     │ User        │
+│ development         │ dev_user     │ User        │
+│ analytics           │ analytics    │ User        │
+└─────────────────────┴──────────────┴─────────────┘
+
+5 databases found
+```
+
+**Behavior Requirements:**
+
+1. **Database Discovery:** Query Teradata system catalog (DBC.DatabasesV or equivalent) to retrieve all databases
+2. **Display Columns:**
+   - Database name
+   - Owner
+   - Type (System/User)
+3. **Sorting:** Alphabetical by database name, with system databases (dbc, etc.) listed first
+4. **Empty Result:** If no databases found (unlikely), display "No databases found"
+5. **Error Handling:** If query fails due to permissions, display error message with explanation
+
+**Error Cases:**
+
+**Permission denied:**
+```
+tq> /list databases
+
+Error: Unable to list databases
+Reason: Insufficient privileges to query system catalog
+```
+
+**Connection lost:**
+```
+tq> /list databases
+
+Error: Cannot list databases - connection lost
+Use /reconnect to establish new connection
+```
+
+**Acceptance Test:**
+- Execute `/list databases` and verify all accessible databases are shown
+- Verify system database `dbc` appears in results
+- Verify results are sorted (system databases first, then alphabetical)
+
+---
+
+**`/list tables [pattern]` Metacommand**
+
+**Requirement:** List tables in the current database, with optional pattern filtering.
+
+**Syntax:**
+```
+/list tables                    -- List all tables in current database
+/list tables <pattern>          -- List tables matching glob pattern
+\dt                             -- Short alias (all tables)
+\dt <pattern>                   -- Short alias with pattern
+```
+
+**Pattern Format:**
+- Standard SQL LIKE patterns: `%` (any characters), `_` (single character)
+- Case-insensitive matching
+- Examples: `emp%`, `%_temp`, `sales_2024_%`
+
+**Output Format:**
+
+**Without pattern (all tables):**
+```
+tq> /list tables
+
+Tables in 'production':
+┌─────────────────────┬──────────┬──────────────┬───────────────┐
+│ Table               │ Type     │ Rows (Est.)  │ Size          │
+├─────────────────────┼──────────┼──────────────┼───────────────┤
+│ customers           │ Table    │ 1,234,567    │ 45.2 MB       │
+│ employees           │ Table    │ 42,573       │ 2.1 MB        │
+│ orders              │ Table    │ 9,876,543    │ 320.5 MB      │
+│ products            │ Table    │ 15,432       │ 890 KB        │
+└─────────────────────┴──────────┴──────────────┴───────────────┘
+
+4 tables found in database 'production'
+```
+
+**With pattern:**
+```
+tq> /list tables emp%
+
+Tables in 'production' matching 'emp%':
+┌─────────────────────┬──────────┬──────────────┬───────────────┐
+│ Table               │ Type     │ Rows (Est.)  │ Size          │
+├─────────────────────┼──────────┼──────────────┼───────────────┤
+│ employees           │ Table    │ 42,573       │ 2.1 MB        │
+│ emp_archive         │ Table    │ 8,123        │ 512 KB        │
+└─────────────────────┴──────────┴──────────────┴───────────────┘
+
+2 tables found matching 'emp%'
+```
+
+**Qualified pattern (with database name):**
+```
+tq> /list tables staging.test_%
+
+Tables in 'staging' matching 'test_%':
+┌─────────────────────┬──────────┬──────────────┬───────────────┐
+│ Table               │ Type     │ Rows (Est.)  │ Size          │
+├─────────────────────┼──────────┼──────────────┼───────────────┤
+│ test_customers      │ Table    │ 100          │ 8 KB          │
+│ test_orders         │ Table    │ 250          │ 12 KB         │
+└─────────────────────┴──────────┴──────────────┴───────────────┘
+
+2 tables found in 'staging' matching 'test_%'
+```
+
+**Behavior Requirements:**
+
+1. **Current Database Context:** Without qualified name, list tables in current database only
+2. **Qualified Pattern:** Support `database.pattern` format to list tables in different database
+3. **Display Columns:**
+   - Table name
+   - Type (Table, always "Table" for this command)
+   - Estimated row count
+   - Approximate size
+4. **Sorting:** Alphabetical by table name
+5. **Empty Result:** If no tables found, display "No tables found in database 'X'" or "No tables matching 'pattern'"
+6. **Data Source:** Query Teradata system catalog (DBC.TablesV) WHERE TableKind = 'T'
+
+**Error Cases:**
+
+**No current database:**
+```
+tq> /list tables
+
+Error: No current database selected
+Use /logon to connect to a database
+```
+
+**Pattern matches no tables:**
+```
+tq> /list tables xyz%
+
+No tables found in database 'production' matching 'xyz%'
+```
+
+**Invalid pattern:**
+```
+tq> /list tables [invalid
+
+Error: Invalid pattern syntax
+Use SQL LIKE patterns: % (any characters), _ (single character)
+```
+
+**Permission denied:**
+```
+tq> /list tables restricted_db.%
+
+Error: Unable to list tables in database 'restricted_db'
+Reason: Insufficient privileges
+```
+
+**Acceptance Test:**
+- Execute `/list tables` and verify all tables in current database are shown
+- Execute `/list tables emp%` and verify only matching tables shown
+- Execute `/list tables staging.test_%` and verify tables from different database
+- Execute `/list tables nonexistent%` and verify "No tables found" message
+
+---
+
+**`/list views` Metacommand**
+
+**Requirement:** List views in the current database.
+
+**Syntax:**
+```
+/list views
+\dv                             -- Short alias
+```
+
+**Output Format:**
+```
+tq> /list views
+
+Views in 'production':
+┌─────────────────────────┬──────────────┬─────────────────────────┐
+│ View                    │ Owner        │ Definition (truncated)  │
+├─────────────────────────┼──────────────┼─────────────────────────┤
+│ active_employees        │ dba_user     │ SELECT * FROM employe...│
+│ sales_summary           │ analytics    │ SELECT dept, SUM(sal... │
+│ customer_orders_view    │ dba_user     │ SELECT c.*, o.* FROM ... │
+└─────────────────────────┴──────────────┴─────────────────────────┘
+
+3 views found in database 'production'
+```
+
+**Behavior Requirements:**
+
+1. **Current Database Context:** List views in current database only
+2. **Display Columns:**
+   - View name
+   - Owner
+   - View definition (first 50 characters, truncated with `...`)
+3. **Sorting:** Alphabetical by view name
+4. **Empty Result:** If no views found, display "No views found in database 'X'"
+5. **Data Source:** Query Teradata system catalog (DBC.TablesV) WHERE TableKind = 'V'
+
+**Error Cases:**
+
+**No current database:**
+```
+tq> /list views
+
+Error: No current database selected
+Use /logon to connect to a database
+```
+
+**No views exist:**
+```
+tq> /list views
+
+No views found in database 'development'
+```
+
+**Permission denied:**
+```
+tq> /list views
+
+Error: Unable to list views in database 'production'
+Reason: Insufficient privileges to query system catalog
+```
+
+**Acceptance Test:**
+- Execute `/list views` in database with views and verify all shown
+- Execute `/list views` in database without views and verify "No views found" message
+- Verify view definitions are truncated to reasonable length
+
+---
 
 **`/describe` Metacommand**
 

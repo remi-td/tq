@@ -334,6 +334,37 @@ Add catalog browsing by querying DBC views:
 - `DBC.ColumnsV`: Describe columns
 - `DBC.IndicesV`: Show indexes
 
+### Tab Completion Extensibility
+
+The REPL tab completion system uses a context-aware architecture:
+
+1. **Context Analysis** (`sql_context.rs`): Parse input to determine completion context
+2. **Completion Dispatch** (`metadata_completer.rs`): Route to appropriate completer
+3. **Suggestion Generation**: Build suggestions with values, descriptions, spans
+
+To add new completion contexts:
+1. Extend `CompletionContext` enum in `sql_context.rs`
+2. Add detection logic in `analyze_context()`
+3. Add handler in `MetadataCompleter::complete()`
+4. Define suggestion format and span calculation
+
+Example pattern for metacommand completion:
+```rust
+// Detect metacommand context
+if line.starts_with('/') || line.starts_with('\\') {
+    return complete_metacommands(&line[1..]);
+}
+
+// Filter and build suggestions
+fn complete_metacommands(prefix: &str) -> Vec<Suggestion> {
+    METACOMMAND_REGISTRY
+        .iter()
+        .filter(|cmd| cmd.name.starts_with(prefix))
+        .map(|cmd| Suggestion { value: cmd.name, description: cmd.help, .. })
+        .collect()
+}
+```
+
 ### Authentication Methods
 
 Support additional logon mechanisms:

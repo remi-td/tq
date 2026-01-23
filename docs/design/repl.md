@@ -948,6 +948,541 @@ if databases.len() == 1 && prefix_matches_database_exactly {
 
 ---
 
+## Metacommand Tab Completion
+
+This section documents the technical design for metacommand tab completion, enabling users to type `/des<TAB>` and see `/describe` in the completion menu.
+
+### Architecture
+
+Metacommand completion integrates with the existing `MetadataCompleter` by detecting when the input starts with `/` or `\` and providing metacommand suggestions instead of SQL completions.
+
+```
+Tab Completion Decision Flow:
+
+User presses TAB
+        |
+        v
+Check if line starts with '/' or '\'
+        |
+    +---+---+
+    |       |
+    v       v
+  YES       NO
+    |       |
+    v       v
+Metacommand   SQL Context
+Completion    Completion
+    |       (existing)
+    v
+Filter metacommands by prefix
+    |
+    v
+Return suggestions with descriptions
+```
+
+### Implementation Location
+
+**Primary file**: `src/commands/repl/metadata_completer.rs`
+
+**Extension points**:
+1. Add metacommand detection in `complete()` method (around line 489)
+2. Add `complete_metacommands()` helper method
+3. Define metacommand registry with names, aliases, and descriptions
+
+### Metacommand Registry
+
+```rust
+// src/commands/repl/metadata_completer.rs
+
+/// Metacommand definition for completion
+struct MetacommandDef {
+    name: &'static str,
+    aliases: &'static [&'static str],
+    description: &'static str,
+}
+
+/// Registry of all available metacommands
+const METACOMMANDS: &[MetacommandDef] = &[
+    MetacommandDef { name: "help", aliases: &["?"], description: "Show help message" },
+    MetacommandDef { name: "quit", aliases: &["q", "exit"], description: "Exit the REPL" },
+    MetacommandDef { name: "session", aliases: &[], description: "Show session information" },
+    MetacommandDef { name: "ping", aliases: &[], description: "Test database connection" },
+    MetacommandDef { name: "describe", aliases: &["d"], description: "Describe table structure" },
+    MetacommandDef { name: "export", aliases: &[], description: "Export query results" },
+    MetacommandDef { name: "pager", aliases: &[], description: "Toggle result paging" },
+    MetacommandDef { name: "colors", aliases: &[], description: "Toggle syntax highlighting" },
+    MetacommandDef { name: "logon", aliases: &[], description: "Switch database connection" },
+    // Sprint 22 additions:
+    MetacommandDef { name: "list databases", aliases: &["l"], description: "List all databases" },
+    MetacommandDef { name: "list tables", aliases: &["dt"], description: "List tables in database" },
+    MetacommandDef { name: "list views", aliases: &["dv"], description: "List views in database" },
+];
+```
+
+### Completion Logic
+
+```rust
+/// Complete metacommands
+fn complete_metacommands(&self, prefix: &str) -> Vec<Suggestion> {
+    let prefix_lower = prefix.to_lowercase();
+
+    METACOMMANDS
+        .iter()
+        .filter(|cmd| {
+            cmd.name.starts_with(&prefix_lower) ||
+            cmd.aliases.iter().any(|a| a.starts_with(&prefix_lower))
+        })
+        .map(|cmd| Suggestion {
+            value: format!("/{}", cmd.name),
+            description: Some(cmd.description.to_string()),
+            style: None,
+            extra: None,
+            span: reedline::Span { start: 0, end: 0 }, // Set by caller
+            append_whitespace: cmd.name.contains(' '), // Space for commands with args
+        })
+        .collect()
+}
+```
+
+### Multi-word Metacommand Handling
+
+Commands like `/list tables` require special handling:
+
+1. First TAB after `/list` shows subcommands: `databases`, `tables`, `views`
+2. Subcommand completion uses same registry pattern
+3. Space-separated parts treated as single command
+
+```rust
+/// Check if completing a multi-word metacommand
+fn complete_metacommand_subcommand(&self, prefix: &str) -> Vec<Suggestion> {
+    let parts: Vec<&str> = prefix.split_whitespace().collect();
+
+    match parts.as_slice() {
+        ["list"] | ["list", ""] => {
+            // Show subcommands: databases, tables, views
+            vec![
+                Suggestion { value: "/list databases".into(), description: Some("List all databases".into()), .. },
+                Suggestion { value: "/list tables".into(), description: Some("List tables".into()), .. },
+                Suggestion { value: "/list views".into(), description: Some("List views".into()), .. },
+            ]
+        }
+        ["list", partial] => {
+            // Filter subcommands by partial match
+            let subcommands = ["databases", "tables", "views"];
+            subcommands.iter()
+                .filter(|s| s.starts_with(&partial.to_lowercase()))
+                .map(|s| Suggestion { value: format!("/list {}", s), .. })
+                .collect()
+        }
+        _ => Vec::new()
+    }
+}
+```
+
+---
+
+## Schema Inspection Commands
+
+This section documents the technical design for `/list databases`, `/list tables [pattern]`, and `/list views` commands.
+
+### Architecture
+
+Schema commands query Teradata system catalog views and format results for display. They integrate with the existing metacommand handler in `src/commands/repl/metacommands.rs`.
+
+```
+Schema Command Flow:
+
+User types "/list tables emp%"
+        |
+        v
+Parse metacommand (handle_metacommand_with_state)
+        |
+        v
+Match "list" command with args ["tables", "emp%"]
+        |
+        v
+Call execute_list_tables(client, pattern, writer)
+        |
+        v
+Build SQL query for DBC.TablesV
+        |
+        v
+Execute query via DatabaseClient
+        |
+        v
+Format results as columnar output
+        |
+        v
+Display to user
+```
+
+### Implementation Location
+
+**Primary file**: `src/commands/repl/metacommands.rs`
+
+**New functions**:
+- `execute_list_databases()`
+- `execute_list_tables(pattern: Option<&str>)`
+- `execute_list_views()`
+
+### `/list databases` Implementation
+
+```rust
+/// Execute /list databases
+///
+/// Queries DBC.DatabasesV and displays all accessible databases.
+fn execute_list_databases<W: Write>(
+    client: &DatabaseClient,
+    writer: &mut W,
+) -> Result<()> {
+    let sql = r#"
+        SELECT TRIM(DatabaseName) AS database_name,
+               OwnerName,
+               CommentString
+        FROM DBC.DatabasesV
+        WHERE DatabaseName NOT IN ('All', 'Console', 'Crashdumps', ...)
+        ORDER BY DatabaseName
+    "#;
+
+    match client.execute(sql) {
+        Ok(result) => {
+            writeln!(writer)?;
+            writeln!(writer, "Databases ({} total):", result.row_count)?;
+            writeln!(writer)?;
+
+            for row in &result.rows {
+                let name = row.first().map(|v| v.display()).unwrap_or_default();
+                let owner = row.get(1).map(|v| v.display()).unwrap_or_default();
+                writeln!(writer, "  {:<30} (owner: {})", name, owner)?;
+            }
+            writeln!(writer)?;
+        }
+        Err(e) => {
+            writeln!(writer, "Error listing databases: {}", e)?;
+        }
+    }
+    Ok(())
+}
+```
+
+### `/list tables [pattern]` Implementation
+
+```rust
+/// Execute /list tables [pattern]
+///
+/// Lists tables in current database, with optional glob pattern filtering.
+/// Pattern supports:
+/// - `*` matches any characters
+/// - `?` matches single character
+/// - `dbc.*` matches database prefix
+fn execute_list_tables<W: Write>(
+    client: &DatabaseClient,
+    pattern: Option<&str>,
+    current_database: &str,
+    writer: &mut W,
+) -> Result<()> {
+    // Determine database context and table filter
+    let (database, table_pattern) = parse_table_pattern(pattern, current_database);
+
+    // Convert glob to SQL LIKE pattern
+    let like_pattern = glob_to_sql_like(&table_pattern);
+
+    let sql = format!(r#"
+        SELECT TRIM(TableName) AS table_name,
+               TableKind,
+               CommentString
+        FROM DBC.TablesV
+        WHERE UPPER(DatabaseName) = UPPER('{}')
+          AND TableKind IN ('T', 'V', 'O')
+          AND TableName LIKE '{}'
+        ORDER BY TableName
+    "#, escape_sql_string(&database), like_pattern);
+
+    match client.execute(&sql) {
+        Ok(result) => {
+            writeln!(writer)?;
+            writeln!(writer, "Tables in '{}' ({} found):", database, result.row_count)?;
+            writeln!(writer)?;
+
+            for row in &result.rows {
+                let name = row.first().map(|v| v.display()).unwrap_or_default();
+                let kind = row.get(1).map(|v| format_table_kind(&v.display())).unwrap_or_default();
+                writeln!(writer, "  {:<40} ({})", name, kind)?;
+            }
+            writeln!(writer)?;
+        }
+        Err(e) => {
+            writeln!(writer, "Error listing tables: {}", e)?;
+        }
+    }
+    Ok(())
+}
+
+/// Parse table pattern to extract database and table filter
+fn parse_table_pattern(pattern: Option<&str>, current_db: &str) -> (String, String) {
+    match pattern {
+        Some(p) if p.contains('.') => {
+            let parts: Vec<&str> = p.splitn(2, '.').collect();
+            (parts[0].to_string(), parts.get(1).unwrap_or(&"*").to_string())
+        }
+        Some(p) => (current_db.to_string(), p.to_string()),
+        None => (current_db.to_string(), "*".to_string()),
+    }
+}
+
+/// Convert glob pattern to SQL LIKE pattern
+fn glob_to_sql_like(pattern: &str) -> String {
+    pattern
+        .replace('*', "%")
+        .replace('?', "_")
+}
+```
+
+### `/list views` Implementation
+
+```rust
+/// Execute /list views
+///
+/// Lists views in current database (TableKind = 'V').
+fn execute_list_views<W: Write>(
+    client: &DatabaseClient,
+    current_database: &str,
+    writer: &mut W,
+) -> Result<()> {
+    let sql = format!(r#"
+        SELECT TRIM(TableName) AS view_name,
+               CommentString
+        FROM DBC.TablesV
+        WHERE UPPER(DatabaseName) = UPPER('{}')
+          AND TableKind = 'V'
+        ORDER BY TableName
+    "#, escape_sql_string(current_database));
+
+    match client.execute(&sql) {
+        Ok(result) => {
+            writeln!(writer)?;
+            writeln!(writer, "Views in '{}' ({} found):", current_database, result.row_count)?;
+            writeln!(writer)?;
+
+            for row in &result.rows {
+                let name = row.first().map(|v| v.display()).unwrap_or_default();
+                writeln!(writer, "  {}", name)?;
+            }
+            writeln!(writer)?;
+        }
+        Err(e) => {
+            writeln!(writer, "Error listing views: {}", e)?;
+        }
+    }
+    Ok(())
+}
+```
+
+### Metacommand Handler Integration
+
+Update `handle_metacommand_with_state()` to handle the new commands:
+
+```rust
+// In handle_metacommand_with_state()
+match command.as_str() {
+    // ... existing commands ...
+
+    "list" => {
+        if args.is_empty() {
+            writeln!(writer, "Usage: /list databases | tables [pattern] | views")?;
+        } else {
+            match args[0].to_lowercase().as_str() {
+                "databases" | "database" => {
+                    execute_list_databases(completion_state.client(), writer)?;
+                }
+                "tables" | "table" => {
+                    let pattern = args.get(1).map(|s| *s);
+                    let current_db = &state.connection_info().database;
+                    execute_list_tables(completion_state.client(), pattern, current_db, writer)?;
+                }
+                "views" | "view" => {
+                    let current_db = &state.connection_info().database;
+                    execute_list_views(completion_state.client(), current_db, writer)?;
+                }
+                _ => {
+                    writeln!(writer, "Unknown list target: {}", args[0])?;
+                    writeln!(writer, "Usage: /list databases | tables [pattern] | views")?;
+                }
+            }
+        }
+    }
+
+    // Aliases
+    "l" => { /* delegate to list databases */ }
+    "dt" => { /* delegate to list tables */ }
+    "dv" => { /* delegate to list views */ }
+}
+```
+
+---
+
+## Loading Indicator for Slow Metadata Fetches
+
+This section documents the technical design for displaying a loading indicator when metadata queries take longer than 500ms.
+
+### Architecture
+
+The loading indicator uses a background thread to display progress while the main thread executes the metadata query. This provides user feedback during slow network operations.
+
+```
+Loading Indicator Flow:
+
+User types "database." + TAB
+        |
+        v
+Check if database tables cached
+        |
+    +---+---+
+    |       |
+    v       v
+  YES       NO
+    |       |
+    v       v
+Return     Start loading indicator thread
+cached     |
+           v
+           Display "Loading tables from <database>..."
+           |
+           v
+           Execute metadata query
+           |
+           v
+           Stop indicator, clear line
+           |
+           v
+           Show completions
+```
+
+### Implementation Location
+
+**Primary file**: `src/db/metadata.rs` (loading logic)
+**Secondary file**: `src/commands/repl/metadata_completer.rs` (UI feedback)
+
+### Design Approach
+
+Two approaches were considered:
+
+1. **Background thread with channel** (Chosen)
+   - Spawn thread to display spinner
+   - Main thread executes query
+   - Signal thread when complete
+   - Pros: Non-blocking, responsive
+   - Cons: Thread overhead, complexity
+
+2. **Timeout-based display**
+   - Start timer before query
+   - If timer exceeds threshold, print message
+   - Pros: Simple
+   - Cons: Message may appear mid-query, flicker
+
+### Implementation
+
+```rust
+// src/db/metadata.rs
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
+
+/// Threshold for showing loading indicator
+const LOADING_INDICATOR_THRESHOLD: Duration = Duration::from_millis(500);
+
+/// Execute a query with loading indicator for slow operations
+fn execute_with_loading_indicator<T, F>(
+    message: &str,
+    threshold: Duration,
+    operation: F,
+) -> T
+where
+    F: FnOnce() -> T,
+{
+    let start = Instant::now();
+    let indicator_shown = Arc::new(AtomicBool::new(false));
+    let stop_signal = Arc::new(AtomicBool::new(false));
+
+    // Clone for thread
+    let indicator_shown_clone = Arc::clone(&indicator_shown);
+    let stop_signal_clone = Arc::clone(&stop_signal);
+    let message = message.to_string();
+
+    // Spawn indicator thread
+    let handle = thread::spawn(move || {
+        thread::sleep(threshold);
+
+        if !stop_signal_clone.load(Ordering::Relaxed) {
+            eprint!("\r{}", message);
+            let _ = std::io::Write::flush(&mut std::io::stderr());
+            indicator_shown_clone.store(true, Ordering::Relaxed);
+        }
+    });
+
+    // Execute operation
+    let result = operation();
+
+    // Stop indicator
+    stop_signal.store(true, Ordering::Relaxed);
+    let _ = handle.join();
+
+    // Clear indicator line if shown
+    if indicator_shown.load(Ordering::Relaxed) {
+        eprint!("\r{}\r", " ".repeat(message.len()));
+        let _ = std::io::Write::flush(&mut std::io::stderr());
+    }
+
+    result
+}
+```
+
+### Integration with On-Demand Loading
+
+```rust
+// src/db/metadata.rs
+
+impl MetadataCache {
+    pub fn load_tables_for_database(&mut self, client: &DatabaseClient, database: &str) -> bool {
+        let db_upper = database.to_uppercase();
+
+        if self.tables_by_database.contains_key(&db_upper) {
+            return true;
+        }
+
+        let message = format!("Loading tables from {}...", database);
+
+        execute_with_loading_indicator(
+            &message,
+            LOADING_INDICATOR_THRESHOLD,
+            || {
+                // Existing query logic...
+                let sql = format!(r#"
+                    SELECT TRIM(TableName), TableKind
+                    FROM DBC.TablesV
+                    WHERE UPPER(DatabaseName) = UPPER('{}')
+                    AND TableKind IN ('T', 'V', 'O')
+                    ORDER BY TableName
+                "#, escape_sql_string(database));
+
+                // Execute and cache...
+            }
+        )
+    }
+}
+```
+
+### Considerations
+
+1. **Thread safety**: Uses atomics for cross-thread communication
+2. **Terminal handling**: Writes to stderr to avoid interfering with completion output
+3. **Cleanup**: Clears indicator line on completion
+4. **reedline compatibility**: Must not interfere with terminal raw mode
+
+---
+
 ## Future Enhancements
 
 - Multi-line editing with visual indicators

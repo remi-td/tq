@@ -1,6 +1,7 @@
 //! Metadata-aware SQL completer for reedline
 //!
 //! Provides context-sensitive tab completion that includes:
+//! - Metacommands (when line starts with '/' or '\')
 //! - SQL keywords (always available)
 //! - Table names (after FROM, JOIN, UPDATE, INSERT INTO)
 //! - Column names (after SELECT, WHERE, ORDER BY with table context)
@@ -13,6 +14,7 @@
 //! - Surfaces errors as user-visible feedback (not silent failures)
 //!
 //! Sprint 7 implementation, Sprint 8 bug fixes.
+//! Sprint 22: Added metacommand tab completion.
 
 use super::sql_context::{analyze_context, CompletionContext};
 use crate::db::{ColumnInfo, DatabaseClient, MetadataCache};
@@ -189,6 +191,207 @@ impl CompletionState {
     pub fn accumulated_buffer(&self) -> &str {
         &self.accumulated_buffer
     }
+
+    /// Get the current database name
+    ///
+    /// Sprint 22: Needed by /list commands to show tables/views in current database.
+    pub fn current_database(&self) -> &str {
+        self.client.config().database.as_str()
+    }
+}
+
+// =============================================================================
+// Sprint 22: Metacommand Tab Completion
+// =============================================================================
+
+/// Metacommand definition for tab completion
+///
+/// Each metacommand has a name, optional aliases, and a description shown in
+/// the completion menu.
+struct MetacommandDef {
+    /// Primary command name (without the leading /)
+    name: &'static str,
+    /// Optional short aliases
+    aliases: &'static [&'static str],
+    /// Description shown in completion menu
+    description: &'static str,
+}
+
+/// Registry of all available metacommands for tab completion
+///
+/// This list should match the metacommands handled in `metacommands.rs`.
+/// Sprint 22: Added /list commands for schema inspection.
+const METACOMMANDS: &[MetacommandDef] = &[
+    MetacommandDef {
+        name: "help",
+        aliases: &["?"],
+        description: "Show help message",
+    },
+    MetacommandDef {
+        name: "quit",
+        aliases: &["q", "exit"],
+        description: "Exit the REPL",
+    },
+    MetacommandDef {
+        name: "session",
+        aliases: &[],
+        description: "Show session information",
+    },
+    MetacommandDef {
+        name: "ping",
+        aliases: &[],
+        description: "Test database connection",
+    },
+    MetacommandDef {
+        name: "describe",
+        aliases: &["d"],
+        description: "Describe table structure",
+    },
+    MetacommandDef {
+        name: "export",
+        aliases: &[],
+        description: "Export query results",
+    },
+    MetacommandDef {
+        name: "pager",
+        aliases: &[],
+        description: "Toggle result paging (on/off)",
+    },
+    MetacommandDef {
+        name: "colors",
+        aliases: &[],
+        description: "Toggle syntax highlighting (on/off)",
+    },
+    MetacommandDef {
+        name: "logon",
+        aliases: &[],
+        description: "Switch database connection",
+    },
+    // Sprint 22: Schema inspection commands
+    MetacommandDef {
+        name: "list databases",
+        aliases: &["l"],
+        description: "List all accessible databases",
+    },
+    MetacommandDef {
+        name: "list tables",
+        aliases: &["dt"],
+        description: "List tables [pattern]",
+    },
+    MetacommandDef {
+        name: "list views",
+        aliases: &["dv"],
+        description: "List views in current database",
+    },
+];
+
+/// Complete metacommands based on user input prefix
+///
+/// Returns a list of suggestions for metacommands that match the given prefix.
+/// The prefix should NOT include the leading '/' or '\'.
+///
+/// # Arguments
+/// * `prefix` - The text after '/' that the user has typed (may be empty)
+/// * `line_start` - Position where the metacommand starts (for span calculation)
+/// * `cursor_pos` - Current cursor position
+fn complete_metacommands(prefix: &str, line_start: usize, cursor_pos: usize) -> Vec<Suggestion> {
+    let prefix_lower = prefix.to_lowercase();
+    let prefix_parts: Vec<&str> = prefix_lower.split_whitespace().collect();
+
+    let mut suggestions = Vec::new();
+
+    // Check if we're completing a subcommand (e.g., "/list tab" -> "/list tables")
+    if !prefix_parts.is_empty() && prefix_parts[0] == "list" {
+        return complete_list_subcommands(&prefix_parts, line_start, cursor_pos);
+    }
+
+    // Filter metacommands by prefix
+    for cmd in METACOMMANDS {
+        let matches = cmd.name.to_lowercase().starts_with(&prefix_lower)
+            || cmd
+                .aliases
+                .iter()
+                .any(|a| a.to_lowercase().starts_with(&prefix_lower));
+
+        if matches {
+            // For multi-word commands, show the full command
+            let display_name = cmd.name;
+
+            suggestions.push(Suggestion {
+                value: format!("/{}", display_name),
+                description: Some(cmd.description.to_string()),
+                style: None,
+                extra: None,
+                span: reedline::Span {
+                    start: line_start,
+                    end: cursor_pos,
+                },
+                // Add space after single-word commands, not after multi-word (user may add args)
+                append_whitespace: !cmd.name.contains(' '),
+            });
+        }
+    }
+
+    // Sort alphabetically
+    suggestions.sort_by(|a, b| a.value.cmp(&b.value));
+
+    suggestions
+}
+
+/// Complete /list subcommands (databases, tables, views)
+fn complete_list_subcommands(
+    parts: &[&str],
+    line_start: usize,
+    cursor_pos: usize,
+) -> Vec<Suggestion> {
+    let subcommands = [
+        ("databases", "List all accessible databases"),
+        ("tables", "List tables [pattern]"),
+        ("views", "List views in current database"),
+    ];
+
+    // Get the partial subcommand (if any)
+    let partial = if parts.len() > 1 { parts[1] } else { "" };
+
+    let mut suggestions = Vec::new();
+
+    for (name, description) in subcommands {
+        if partial.is_empty() || name.starts_with(partial) {
+            suggestions.push(Suggestion {
+                value: format!("/list {}", name),
+                description: Some(description.to_string()),
+                style: None,
+                extra: None,
+                span: reedline::Span {
+                    start: line_start,
+                    end: cursor_pos,
+                },
+                append_whitespace: true,
+            });
+        }
+    }
+
+    suggestions
+}
+
+/// Check if the input line is a metacommand (starts with / or \)
+fn is_metacommand_input(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with('/') || trimmed.starts_with('\\')
+}
+
+/// Extract metacommand prefix from input line
+///
+/// Returns the prefix after '/' or '\' and the position where the metacommand starts.
+fn extract_metacommand_prefix(line: &str) -> Option<(&str, usize)> {
+    let trimmed_start = line.len() - line.trim_start().len();
+    let trimmed = line.trim_start();
+
+    // Check for '/' or '\' prefix
+    trimmed
+        .strip_prefix('/')
+        .or_else(|| trimmed.strip_prefix('\\'))
+        .map(|stripped| (stripped, trimmed_start))
 }
 
 /// Metadata-aware SQL completer
@@ -487,6 +690,20 @@ impl MetadataCompleter {
 
 impl Completer for MetadataCompleter {
     fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
+        // Sprint 22: Check for metacommand completion FIRST
+        // If the line starts with '/' or '\', provide metacommand completions
+        if is_metacommand_input(line) {
+            if let Some((prefix, cmd_start)) = extract_metacommand_prefix(line) {
+                log::debug!(
+                    "Metacommand completion: prefix='{}', start={}, pos={}",
+                    prefix,
+                    cmd_start,
+                    pos
+                );
+                return complete_metacommands(prefix, cmd_start, pos);
+            }
+        }
+
         // Sprint 18: Simplified completion - ONLY metadata (databases, tables, columns)
         // NO keyword completion.
 
@@ -733,5 +950,139 @@ mod tests {
         let completer = MetadataCompleter::keywords_only();
         let suggestions = completer.complete_schema_tables("", "orders");
         assert!(suggestions.is_empty());
+    }
+
+    // Sprint 22: Tests for metacommand tab completion
+
+    #[test]
+    fn test_is_metacommand_input_slash() {
+        assert!(is_metacommand_input("/help"));
+        assert!(is_metacommand_input("/"));
+        assert!(is_metacommand_input("  /quit"));
+    }
+
+    #[test]
+    fn test_is_metacommand_input_backslash() {
+        assert!(is_metacommand_input("\\help"));
+        assert!(is_metacommand_input("\\"));
+        assert!(is_metacommand_input("  \\quit"));
+    }
+
+    #[test]
+    fn test_is_metacommand_input_not_metacommand() {
+        assert!(!is_metacommand_input("SELECT * FROM"));
+        assert!(!is_metacommand_input(""));
+        assert!(!is_metacommand_input("help"));
+    }
+
+    #[test]
+    fn test_extract_metacommand_prefix() {
+        let (prefix, start) = extract_metacommand_prefix("/help").unwrap();
+        assert_eq!(prefix, "help");
+        assert_eq!(start, 0);
+
+        let (prefix, start) = extract_metacommand_prefix("/").unwrap();
+        assert_eq!(prefix, "");
+        assert_eq!(start, 0);
+
+        let (prefix, start) = extract_metacommand_prefix("  /quit").unwrap();
+        assert_eq!(prefix, "quit");
+        assert_eq!(start, 2);
+    }
+
+    #[test]
+    fn test_extract_metacommand_prefix_backslash() {
+        let (prefix, start) = extract_metacommand_prefix("\\help").unwrap();
+        assert_eq!(prefix, "help");
+        assert_eq!(start, 0);
+    }
+
+    #[test]
+    fn test_complete_metacommands_empty_prefix() {
+        let suggestions = complete_metacommands("", 0, 1);
+        assert!(!suggestions.is_empty());
+        // Should include common commands
+        let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
+        assert!(values.contains(&"/help"));
+        assert!(values.contains(&"/quit"));
+        assert!(values.contains(&"/session"));
+    }
+
+    #[test]
+    fn test_complete_metacommands_partial_match() {
+        let suggestions = complete_metacommands("he", 0, 3);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].value, "/help");
+    }
+
+    #[test]
+    fn test_complete_metacommands_quit_and_aliases() {
+        let suggestions = complete_metacommands("q", 0, 2);
+        // Should match 'quit' (both name and alias)
+        let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
+        assert!(values.contains(&"/quit"));
+    }
+
+    #[test]
+    fn test_complete_metacommands_case_insensitive() {
+        let suggestions = complete_metacommands("HELP", 0, 5);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].value, "/help");
+    }
+
+    #[test]
+    fn test_complete_metacommands_list_subcommands() {
+        // Just "/list" should show all list subcommands
+        let suggestions = complete_metacommands("list", 0, 5);
+        // Should find /list databases, /list tables, /list views
+        let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
+        assert!(values.contains(&"/list databases"));
+        assert!(values.contains(&"/list tables"));
+        assert!(values.contains(&"/list views"));
+    }
+
+    #[test]
+    fn test_complete_metacommands_list_partial_subcommand() {
+        // "/list tab" should complete to "/list tables"
+        let suggestions = complete_metacommands("list tab", 0, 9);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].value, "/list tables");
+    }
+
+    #[test]
+    fn test_complete_metacommands_no_match() {
+        let suggestions = complete_metacommands("xyz", 0, 4);
+        assert!(suggestions.is_empty());
+    }
+
+    #[test]
+    fn test_metacommand_completion_descriptions() {
+        let suggestions = complete_metacommands("help", 0, 5);
+        assert_eq!(suggestions.len(), 1);
+        assert!(suggestions[0].description.is_some());
+        assert!(suggestions[0]
+            .description
+            .as_ref()
+            .unwrap()
+            .contains("help"));
+    }
+
+    #[test]
+    fn test_metacommand_completion_via_completer() {
+        // Test that the Completer trait implementation routes metacommands correctly
+        let mut completer = MetadataCompleter::keywords_only();
+
+        let suggestions = completer.complete("/he", 3);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].value, "/help");
+    }
+
+    #[test]
+    fn test_metacommand_completion_backslash_via_completer() {
+        let mut completer = MetadataCompleter::keywords_only();
+
+        let suggestions = completer.complete("\\q", 2);
+        let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
+        assert!(values.contains(&"/quit"));
     }
 }

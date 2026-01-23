@@ -44,6 +44,8 @@ docs/builder/incoming/*.jpeg
 
 # Claude agent working files
 .claude/
+!.claude/settings.json
+!.claude/skills/
 CLAUDE.md
 .claude/transcripts/
 agent-output/

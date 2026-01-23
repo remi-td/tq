@@ -9,6 +9,11 @@
 //!
 //! Sprint 7 additions:
 //! - /logon <connection_string> - Switch to a different database connection
+//!
+//! Sprint 22 additions:
+//! - /list databases - List all accessible databases
+//! - /list tables [pattern] - List tables with optional glob pattern
+//! - /list views - List views in current database
 
 use super::metadata_completer::CompletionState;
 use super::state::ReplState;
@@ -317,6 +322,46 @@ pub fn handle_metacommand_with_state<W: Write>(
             }
         }
 
+        // Sprint 22: List command for schema inspection
+        "list" | "l" => {
+            if args.is_empty() {
+                writeln!(writer)?;
+                writeln!(writer, "Usage: /list <subcommand> [options]")?;
+                writeln!(writer)?;
+                writeln!(writer, "Subcommands:")?;
+                writeln!(
+                    writer,
+                    "  databases           List all accessible databases"
+                )?;
+                writeln!(
+                    writer,
+                    "  tables [pattern]    List tables (optional glob pattern)"
+                )?;
+                writeln!(writer, "  views               List views in current database")?;
+                writeln!(writer)?;
+                writeln!(writer, "Examples:")?;
+                writeln!(writer, "  /list databases")?;
+                writeln!(writer, "  /list tables")?;
+                writeln!(writer, "  /list tables order*")?;
+                writeln!(writer, "  /list views")?;
+                writeln!(writer)?;
+                writeln!(writer, "Aliases: /l (short for /list)")?;
+                writeln!(writer)?;
+            } else {
+                execute_list(completion_state, &args, writer)?;
+            }
+        }
+
+        // Sprint 22: Direct aliases for list subcommands
+        "dt" => {
+            // /dt is alias for /list tables
+            execute_list(completion_state, &["tables"], writer)?;
+        }
+        "dv" => {
+            // /dv is alias for /list views
+            execute_list(completion_state, &["views"], writer)?;
+        }
+
         // Unknown command
         _ => {
             writeln!(writer, "Unknown command: /{}", command)?;
@@ -327,7 +372,7 @@ pub fn handle_metacommand_with_state<W: Write>(
     Ok(true)
 }
 
-/// Print help text (extended version with /logon)
+/// Print help text (extended version with /logon and /list)
 fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer)?;
     writeln!(writer, "tq REPL Commands:")?;
@@ -356,20 +401,33 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
         "  /logon <conn_str>      Switch to a different connection"
     )?;
     writeln!(writer)?;
+    writeln!(writer, "Schema Inspection:")?;
+    writeln!(
+        writer,
+        "  /list databases        List all accessible databases"
+    )?;
+    writeln!(
+        writer,
+        "  /list tables [pattern] List tables (optional glob pattern)"
+    )?;
+    writeln!(writer, "  /list views            List views in current database")?;
+    writeln!(writer, "  /dt                    Shortcut for /list tables")?;
+    writeln!(writer, "  /dv                    Shortcut for /list views")?;
+    writeln!(writer)?;
     writeln!(writer, "SQL Execution:")?;
     writeln!(writer, "  Enter SQL statements ending with semicolon (;)")?;
     writeln!(writer, "  Multi-line statements are supported")?;
     writeln!(writer)?;
     writeln!(writer, "Tab Completion:")?;
+    writeln!(writer, "  Tab after /            Complete metacommands")?;
     writeln!(writer, "  Tab after FROM/JOIN    Complete table names")?;
     writeln!(writer, "  Tab after SELECT/WHERE Complete column names")?;
-    writeln!(writer, "  Tab on partial word    Complete SQL keywords")?;
     writeln!(writer)?;
     writeln!(writer, "Keyboard Shortcuts:")?;
     writeln!(writer, "  Up/Down        Navigate command history")?;
     writeln!(
         writer,
-        "  Tab            Auto-complete (keywords, tables, columns)"
+        "  Tab            Auto-complete (commands, tables, columns)"
     )?;
     writeln!(writer, "  Ctrl-C         Cancel current input")?;
     writeln!(writer, "  Ctrl-D         Exit REPL (when input is empty)")?;
@@ -471,6 +529,358 @@ fn execute_logon<W: Write>(
 
     writeln!(writer)?;
     Ok(())
+}
+
+/// Execute the /list metacommand (Sprint 22)
+///
+/// Provides schema inspection commands:
+/// - /list databases - List all accessible databases
+/// - /list tables [pattern] - List tables with optional glob pattern
+/// - /list views - List views in current database
+fn execute_list<W: Write>(
+    completion_state: &mut CompletionState,
+    args: &[&str],
+    writer: &mut W,
+) -> Result<()> {
+    if args.is_empty() {
+        writeln!(writer, "Error: Missing subcommand.")?;
+        writeln!(writer, "Usage: /list <databases|tables|views>")?;
+        return Ok(());
+    }
+
+    let subcommand = args[0].to_lowercase();
+    let pattern = args.get(1).copied();
+
+    match subcommand.as_str() {
+        "databases" | "db" | "dbs" => {
+            execute_list_databases(completion_state, writer)?;
+        }
+        "tables" | "table" | "t" => {
+            execute_list_tables(completion_state, pattern, writer)?;
+        }
+        "views" | "view" | "v" => {
+            execute_list_views(completion_state, writer)?;
+        }
+        _ => {
+            writeln!(writer)?;
+            writeln!(writer, "Unknown list subcommand: {}", subcommand)?;
+            writeln!(writer, "Available: databases, tables, views")?;
+            writeln!(writer)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Execute /list databases
+///
+/// Lists all accessible databases from DBC.DatabasesV.
+fn execute_list_databases<W: Write>(
+    completion_state: &mut CompletionState,
+    writer: &mut W,
+) -> Result<()> {
+    writeln!(writer)?;
+
+    // First try to use cached databases (loaded at startup)
+    if completion_state.ensure_databases_loaded() {
+        let cache = completion_state.cache();
+        if let Some(databases) = cache.get_cached_databases() {
+            writeln!(writer, "Databases ({}):", databases.len())?;
+            writeln!(writer, "{}", "-".repeat(40))?;
+
+            // Display in columns for better readability
+            let col_width = 25;
+            let cols = 3;
+
+            for chunk in databases.chunks(cols) {
+                let line: Vec<String> = chunk
+                    .iter()
+                    .map(|db| format!("{:<width$}", db, width = col_width))
+                    .collect();
+                writeln!(writer, "{}", line.join(""))?;
+            }
+
+            writeln!(writer)?;
+            writeln!(writer, "{} database(s)", databases.len())?;
+            writeln!(writer)?;
+            return Ok(());
+        }
+    }
+
+    // Fallback: query directly
+    let client = completion_state.client();
+    let sql = r#"
+        SELECT TRIM(DatabaseName) AS database_name
+        FROM DBC.DatabasesV
+        WHERE DatabaseName NOT IN ('All', 'Console', 'Crashdumps',
+                                   'dbcmngr', 'Default', 'External_AP',
+                                   'EXTUSER', 'LockLogShredder', 'PUBLIC',
+                                   'SQLJ', 'Sys_Calendar', 'SysAdmin',
+                                   'SYSBAR', 'SYSJDBC', 'SYSLIB', 'SYSSPATIAL',
+                                   'SystemFe', 'SYSUDTLIB', 'TD_SERVER_DB',
+                                   'TD_SYSFNLIB', 'TD_SYSGPL', 'TD_SYSXML',
+                                   'TDMaps', 'TDPUSER', 'TDQCD', 'TDStats',
+                                   'tdwm', 'VIEWPOINT')
+        ORDER BY DatabaseName
+    "#;
+
+    match client.execute(sql) {
+        Ok(result) => {
+            writeln!(writer, "Databases ({}):", result.row_count)?;
+            writeln!(writer, "{}", "-".repeat(40))?;
+
+            let col_width = 25;
+            let cols = 3;
+            let databases: Vec<String> = result
+                .rows
+                .iter()
+                .filter_map(|row| {
+                    row.first().map(|v| {
+                        let s = v.display();
+                        if s == "[NULL]" {
+                            None
+                        } else {
+                            Some(s)
+                        }
+                    })
+                })
+                .flatten()
+                .collect();
+
+            for chunk in databases.chunks(cols) {
+                let line: Vec<String> = chunk
+                    .iter()
+                    .map(|db| format!("{:<width$}", db, width = col_width))
+                    .collect();
+                writeln!(writer, "{}", line.join(""))?;
+            }
+
+            writeln!(writer)?;
+            writeln!(writer, "{} database(s)", databases.len())?;
+        }
+        Err(e) => {
+            writeln!(writer, "Error listing databases: {}", e)?;
+            writeln!(writer)?;
+            writeln!(writer, "You may not have permission to query DBC.DatabasesV")?;
+        }
+    }
+
+    writeln!(writer)?;
+    Ok(())
+}
+
+/// Execute /list tables [pattern]
+///
+/// Lists tables in the current database, optionally filtered by a glob pattern.
+fn execute_list_tables<W: Write>(
+    completion_state: &mut CompletionState,
+    pattern: Option<&str>,
+    writer: &mut W,
+) -> Result<()> {
+    writeln!(writer)?;
+
+    let current_db = completion_state.current_database().to_string();
+
+    // Ensure tables are loaded for current database
+    if !completion_state.ensure_tables_loaded() {
+        writeln!(writer, "Warning: Could not load table metadata from cache")?;
+    }
+
+    // Query tables from DBC.TablesV
+    let client = completion_state.client();
+    let sql = format!(
+        r#"
+        SELECT TRIM(TableName) AS table_name,
+               TableKind
+        FROM DBC.TablesV
+        WHERE DatabaseName = '{}'
+          AND TableKind IN ('T', 'O')
+        ORDER BY TableName
+        "#,
+        escape_sql_string(&current_db)
+    );
+
+    match client.execute(&sql) {
+        Ok(result) => {
+            // Apply pattern filter if provided
+            let tables: Vec<(String, &str)> = result
+                .rows
+                .iter()
+                .filter_map(|row| {
+                    let name = row.first().map(|v| v.display())?;
+                    let kind = row.get(1).map(|v| v.display()).unwrap_or_default();
+                    if name == "[NULL]" {
+                        return None;
+                    }
+
+                    // Apply glob pattern if provided
+                    if let Some(pat) = pattern {
+                        if !matches_glob(&name, pat) {
+                            return None;
+                        }
+                    }
+
+                    let kind_str = match kind.as_str() {
+                        "T" => "TABLE",
+                        "O" => "OBJECT",
+                        _ => "TABLE",
+                    };
+                    Some((name, kind_str))
+                })
+                .collect();
+
+            let pattern_str = pattern.map(|p| format!(" matching '{}'", p)).unwrap_or_default();
+            writeln!(
+                writer,
+                "Tables in {}{}:",
+                current_db,
+                pattern_str
+            )?;
+            writeln!(writer, "{:<40} {:<10}", "Name", "Type")?;
+            writeln!(writer, "{}", "-".repeat(50))?;
+
+            for (name, kind) in &tables {
+                writeln!(writer, "{:<40} {:<10}", name, kind)?;
+            }
+
+            writeln!(writer)?;
+            writeln!(writer, "{} table(s)", tables.len())?;
+        }
+        Err(e) => {
+            writeln!(writer, "Error listing tables: {}", e)?;
+            writeln!(writer)?;
+            writeln!(
+                writer,
+                "Verify you have SELECT permission on DBC.TablesV"
+            )?;
+        }
+    }
+
+    writeln!(writer)?;
+    Ok(())
+}
+
+/// Execute /list views
+///
+/// Lists views in the current database.
+fn execute_list_views<W: Write>(
+    completion_state: &mut CompletionState,
+    writer: &mut W,
+) -> Result<()> {
+    writeln!(writer)?;
+
+    let current_db = completion_state.current_database().to_string();
+    let client = completion_state.client();
+
+    let sql = format!(
+        r#"
+        SELECT TRIM(TableName) AS view_name
+        FROM DBC.TablesV
+        WHERE DatabaseName = '{}'
+          AND TableKind = 'V'
+        ORDER BY TableName
+        "#,
+        escape_sql_string(&current_db)
+    );
+
+    match client.execute(&sql) {
+        Ok(result) => {
+            let views: Vec<String> = result
+                .rows
+                .iter()
+                .filter_map(|row| {
+                    let name = row.first().map(|v| v.display())?;
+                    if name == "[NULL]" {
+                        None
+                    } else {
+                        Some(name)
+                    }
+                })
+                .collect();
+
+            writeln!(writer, "Views in {}:", current_db)?;
+            writeln!(writer, "{}", "-".repeat(40))?;
+
+            if views.is_empty() {
+                writeln!(writer, "(no views found)")?;
+            } else {
+                for view in &views {
+                    writeln!(writer, "  {}", view)?;
+                }
+            }
+
+            writeln!(writer)?;
+            writeln!(writer, "{} view(s)", views.len())?;
+        }
+        Err(e) => {
+            writeln!(writer, "Error listing views: {}", e)?;
+            writeln!(writer)?;
+            writeln!(
+                writer,
+                "Verify you have SELECT permission on DBC.TablesV"
+            )?;
+        }
+    }
+
+    writeln!(writer)?;
+    Ok(())
+}
+
+/// Simple glob pattern matching
+///
+/// Supports:
+/// - `*` matches any sequence of characters
+/// - `?` matches any single character
+/// - Case-insensitive matching
+fn matches_glob(text: &str, pattern: &str) -> bool {
+    let text_lower = text.to_lowercase();
+    let pattern_lower = pattern.to_lowercase();
+
+    // Convert glob pattern to regex-like matching
+    let mut pattern_chars = pattern_lower.chars().peekable();
+    let mut text_chars = text_lower.chars().peekable();
+
+    fn match_recursive(
+        pattern: &mut std::iter::Peekable<std::str::Chars>,
+        text: &mut std::iter::Peekable<std::str::Chars>,
+    ) -> bool {
+        loop {
+            match (pattern.peek().copied(), text.peek().copied()) {
+                (None, None) => return true,
+                (None, Some(_)) => return false,
+                (Some('*'), _) => {
+                    pattern.next();
+                    // Try matching rest of pattern at each position
+                    if pattern.peek().is_none() {
+                        return true; // Trailing * matches everything
+                    }
+                    // Try matching at current position and all subsequent positions
+                    let mut text_clone = text.clone();
+                    loop {
+                        let mut pattern_clone = pattern.clone();
+                        let mut text_try = text_clone.clone();
+                        if match_recursive(&mut pattern_clone, &mut text_try) {
+                            return true;
+                        }
+                        if text_clone.next().is_none() {
+                            return false;
+                        }
+                    }
+                }
+                (Some('?'), Some(_)) => {
+                    pattern.next();
+                    text.next();
+                }
+                (Some(p), Some(t)) if p == t => {
+                    pattern.next();
+                    text.next();
+                }
+                _ => return false,
+            }
+        }
+    }
+
+    match_recursive(&mut pattern_chars, &mut text_chars)
 }
 
 /// Print help text
@@ -1567,5 +1977,86 @@ mod tests {
         let json = format_as_json(&result).unwrap();
         assert!(json.contains("\"id\""));
         assert!(json.contains("42"));
+    }
+
+    // Sprint 22: Tests for glob pattern matching
+
+    #[test]
+    fn test_matches_glob_exact() {
+        assert!(matches_glob("orders", "orders"));
+        assert!(!matches_glob("orders", "customers"));
+    }
+
+    #[test]
+    fn test_matches_glob_case_insensitive() {
+        assert!(matches_glob("ORDERS", "orders"));
+        assert!(matches_glob("orders", "ORDERS"));
+        assert!(matches_glob("Orders", "orders"));
+    }
+
+    #[test]
+    fn test_matches_glob_star_prefix() {
+        assert!(matches_glob("order_items", "*items"));
+        assert!(matches_glob("line_items", "*items"));
+        assert!(!matches_glob("items_archive", "*items"));
+    }
+
+    #[test]
+    fn test_matches_glob_star_suffix() {
+        assert!(matches_glob("order_items", "order*"));
+        assert!(matches_glob("orders", "order*"));
+        assert!(!matches_glob("new_orders", "order*"));
+    }
+
+    #[test]
+    fn test_matches_glob_star_middle() {
+        assert!(matches_glob("order_items", "order*items"));
+        assert!(matches_glob("order_line_items", "order*items"));
+        assert!(!matches_glob("orders_archive", "order*items"));
+    }
+
+    #[test]
+    fn test_matches_glob_star_only() {
+        assert!(matches_glob("anything", "*"));
+        assert!(matches_glob("", "*"));
+    }
+
+    #[test]
+    fn test_matches_glob_question_mark() {
+        assert!(matches_glob("order1", "order?"));
+        assert!(matches_glob("orders", "order?"));
+        assert!(!matches_glob("orders123", "order?"));
+    }
+
+    #[test]
+    fn test_matches_glob_complex() {
+        assert!(matches_glob("order_items_2024", "order*items*"));
+        assert!(matches_glob("customer_orders", "*order*"));
+        assert!(matches_glob("t1", "t?"));
+    }
+
+    #[test]
+    fn test_help_extended_includes_list_commands() {
+        let mut output = Vec::new();
+        print_help_extended(&mut output).unwrap();
+        let output_str = String::from_utf8(output).unwrap();
+
+        // Verify Sprint 22 /list commands are documented
+        assert!(output_str.contains("/list databases"));
+        assert!(output_str.contains("/list tables"));
+        assert!(output_str.contains("/list views"));
+        assert!(output_str.contains("/dt"));
+        assert!(output_str.contains("/dv"));
+    }
+
+    #[test]
+    fn test_help_extended_includes_metacommand_tab_completion() {
+        let mut output = Vec::new();
+        print_help_extended(&mut output).unwrap();
+        let output_str = String::from_utf8(output).unwrap();
+
+        // Verify tab completion for metacommands is documented
+        assert!(output_str.contains("Tab after /"));
+        assert!(output_str.contains("metacommands"));
     }
 }

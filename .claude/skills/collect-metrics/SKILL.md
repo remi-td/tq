@@ -13,28 +13,48 @@ Simple, fast extraction of token usage data from subagent transcripts. Adds fact
 **What this does:** Data collection only
 **What this does NOT do:** Analysis, interpretation, or recommendations
 
+## Setup (One-time)
+
+The project uses a SessionStart hook to automatically capture the current session ID. This is configured in `.claude/settings.json` and requires no manual intervention.
+
 ## Workflow
 
-### Step 1: Find Current Session ID
+### Option 1: Use Current Session (Recommended)
 
 ```bash
-# Get current session (you should already know this from context)
-SESSION_ID="<current-session-id>"
+# Extract metrics for current session (captured by hook)
+./.claude/skills/collect-metrics/scripts/extract-sprint-metrics.sh <sprint-number>
 
-# Or find most recent session
-SESSION_ID=$(ls -t ~/.claude/projects/-Users-remi-turpaud-Code-genAI-tq/ | grep -E '^[0-9a-f-]+$' | head -1)
-
-echo "Using session: $SESSION_ID"
+# Example: Extract metrics for sprint 22
+./.claude/skills/collect-metrics/scripts/extract-sprint-metrics.sh 22
 ```
 
-### Step 2: Run Metrics Extraction
+The session ID is automatically read from `.claude/current-session-id.txt` (populated by the SessionStart hook).
+
+### Option 2: Use Specific Session
 
 ```bash
-# Extract metrics
-./skills/collect-metrics/scripts/extract-sprint-metrics.sh "$SESSION_ID" <output-file.md>
+# Extract metrics for a specific past session
+./.claude/skills/collect-metrics/scripts/extract-sprint-metrics.sh <session-id> <sprint-number>
+
+# Example: Extract metrics for sprint 18 from a specific session
+./.claude/skills/collect-metrics/scripts/extract-sprint-metrics.sh f599ef4e-6741-40b9-8b70-54c6e6d7272e 18
 ```
 
-This creates a markdown file at the location specified.
+### Finding Past Session IDs
+
+```bash
+# List recent sessions for this project
+ls -t ~/.claude/projects/$(pwd | sed 's|/|-|g; s|\.|-|g')/*.jsonl | head -5
+```
+
+## Output
+
+Creates `docs/sprints/sprint-<N>-metrics.md` with:
+- Token usage by agent (input, output, cache creation, cache reads)
+- Overall cache hit rates
+- Total token counts
+- Estimated costs
 
 ## Important Notes
 

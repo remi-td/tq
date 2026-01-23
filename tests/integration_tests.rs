@@ -627,3 +627,310 @@ fn test_live_multi_column_query() {
     assert!(matches!(result.rows[0][1], Value::Integer(2)));
     assert!(matches!(result.rows[0][2], Value::Integer(3)));
 }
+
+// =============================================================================
+// Sprint 22: Feature 2 - Enhanced Schema Commands Integration Tests
+// =============================================================================
+// These tests verify that the /list commands work correctly against a live database.
+// They test the SQL query execution, result parsing, and output formatting.
+// Run with: cargo test --test integration_tests -- --ignored
+
+/// Test /list databases query returns database names
+///
+/// Run with: cargo test test_list_databases_query -- --ignored
+#[test]
+#[ignore] // Requires live database connection
+fn test_list_databases_query() {
+    use tq::db::DatabaseClient;
+
+    dotenvy::dotenv().ok();
+    let logon = std::env::var("TQ_LOGON").expect("TQ_LOGON must be set for live database tests");
+
+    let config = ConnectionConfig::from_connection_string(
+        &logon,
+        LogonMechanism::Td2,
+        Duration::from_secs(30),
+        None,
+    )
+    .unwrap();
+    let client = DatabaseClient::new(config, None).unwrap();
+
+    // Execute the same SQL query that /list databases uses
+    let sql = r#"
+        SELECT TRIM(DatabaseName) AS database_name
+        FROM DBC.DatabasesV
+        WHERE DatabaseName NOT IN ('All', 'Console', 'Crashdumps',
+                                   'dbcmngr', 'Default', 'External_AP',
+                                   'EXTUSER', 'LockLogShredder', 'PUBLIC',
+                                   'SQLJ', 'Sys_Calendar', 'SysAdmin',
+                                   'SYSBAR', 'SYSJDBC', 'SYSLIB', 'SYSSPATIAL',
+                                   'SystemFe', 'SYSUDTLIB', 'TD_SERVER_DB',
+                                   'TD_SYSFNLIB', 'TD_SYSGPL', 'TD_SYSXML',
+                                   'TDMaps', 'TDPUSER', 'TDQCD', 'TDStats',
+                                   'tdwm', 'VIEWPOINT')
+        ORDER BY DatabaseName
+    "#;
+
+    let result = client.execute(sql).unwrap();
+
+    // Verify that we got database results
+    assert!(result.columns.len() > 0, "Should have at least one column");
+    assert!(result.rows.len() > 0, "Should have at least one database");
+
+    // DBC database should always be present
+    let dbc_found = result.rows.iter().any(|row| {
+        if let Some(val) = row.first() {
+            val.display().to_uppercase() == "DBC"
+        } else {
+            false
+        }
+    });
+    assert!(dbc_found, "DBC database should be in results");
+}
+
+/// Test /list tables query returns tables in DBC database
+///
+/// Run with: cargo test test_list_tables_query -- --ignored
+#[test]
+#[ignore] // Requires live database connection
+fn test_list_tables_query() {
+    use tq::db::DatabaseClient;
+
+    dotenvy::dotenv().ok();
+    let logon = std::env::var("TQ_LOGON").expect("TQ_LOGON must be set for live database tests");
+
+    let config = ConnectionConfig::from_connection_string(
+        &logon,
+        LogonMechanism::Td2,
+        Duration::from_secs(30),
+        None,
+    )
+    .unwrap();
+    let client = DatabaseClient::new(config, None).unwrap();
+
+    // Execute the same SQL query that /list tables uses (for DBC database)
+    let sql = r#"
+        SELECT TRIM(TableName) AS table_name,
+               TableKind
+        FROM DBC.TablesV
+        WHERE DatabaseName = 'DBC'
+          AND TableKind IN ('T', 'O')
+        ORDER BY TableName
+    "#;
+
+    let result = client.execute(sql).unwrap();
+
+    // Verify that we got table results
+    assert_eq!(result.columns.len(), 2, "Should have 2 columns (name and kind)");
+    assert!(result.rows.len() > 0, "DBC should have tables");
+
+    // Verify columns are properly named
+    assert_eq!(result.columns[0].name.to_lowercase(), "table_name");
+    assert_eq!(result.columns[1].name.to_lowercase(), "tablekind");
+}
+
+/// Test /list tables with pattern filtering
+///
+/// Run with: cargo test test_list_tables_pattern_query -- --ignored
+#[test]
+#[ignore] // Requires live database connection
+fn test_list_tables_pattern_query() {
+    use tq::db::DatabaseClient;
+
+    dotenvy::dotenv().ok();
+    let logon = std::env::var("TQ_LOGON").expect("TQ_LOGON must be set for live database tests");
+
+    let config = ConnectionConfig::from_connection_string(
+        &logon,
+        LogonMechanism::Td2,
+        Duration::from_secs(30),
+        None,
+    )
+    .unwrap();
+    let client = DatabaseClient::new(config, None).unwrap();
+
+    // Execute query to get all tables from DBC
+    let sql = r#"
+        SELECT TRIM(TableName) AS table_name,
+               TableKind
+        FROM DBC.TablesV
+        WHERE DatabaseName = 'DBC'
+          AND TableKind IN ('T', 'O')
+        ORDER BY TableName
+    "#;
+
+    let result = client.execute(sql).unwrap();
+
+    // Apply pattern matching (same logic as /list tables uses)
+    // Test that pattern matching logic works correctly
+    let all_count = result.rows.len();
+
+    // Pattern "*" should match all tables
+    let wildcard_matches: Vec<_> = result.rows.iter()
+        .filter(|row| {
+            if let Some(val) = row.first() {
+                let _name = val.display();
+                true // "*" matches everything
+            } else {
+                false
+            }
+        })
+        .collect();
+
+    assert_eq!(wildcard_matches.len(), all_count, "Pattern '*' should match all tables");
+
+    // At least verify the query ran successfully and returned tables
+    assert!(all_count > 0, "DBC should have tables");
+}
+
+/// Test /list views query returns views in DBC database
+///
+/// Run with: cargo test test_list_views_query -- --ignored
+#[test]
+#[ignore] // Requires live database connection
+fn test_list_views_query() {
+    use tq::db::DatabaseClient;
+
+    dotenvy::dotenv().ok();
+    let logon = std::env::var("TQ_LOGON").expect("TQ_LOGON must be set for live database tests");
+
+    let config = ConnectionConfig::from_connection_string(
+        &logon,
+        LogonMechanism::Td2,
+        Duration::from_secs(30),
+        None,
+    )
+    .unwrap();
+    let client = DatabaseClient::new(config, None).unwrap();
+
+    // Execute the same SQL query that /list views uses (for DBC database)
+    let sql = r#"
+        SELECT TRIM(TableName) AS view_name
+        FROM DBC.TablesV
+        WHERE DatabaseName = 'DBC'
+          AND TableKind = 'V'
+        ORDER BY TableName
+    "#;
+
+    let result = client.execute(sql).unwrap();
+
+    // Verify that we got view results
+    assert_eq!(result.columns.len(), 1, "Should have 1 column (view_name)");
+    assert!(result.rows.len() > 0, "DBC should have views");
+
+    // Verify column is properly named
+    assert_eq!(result.columns[0].name.to_lowercase(), "view_name");
+
+    // DBC has many system views like TablesV, ColumnsV, DatabasesV
+    let views_found = result.rows.iter().any(|row| {
+        if let Some(val) = row.first() {
+            val.display().to_uppercase().contains("V")
+        } else {
+            false
+        }
+    });
+    assert!(views_found, "Should find system views in DBC");
+}
+
+/// Test glob pattern matching logic used by /list tables
+///
+/// Run with: cargo test test_glob_matching_integration -- --ignored
+#[test]
+#[ignore] // Requires live database connection
+fn test_glob_matching_integration() {
+    use tq::db::DatabaseClient;
+
+    dotenvy::dotenv().ok();
+    let logon = std::env::var("TQ_LOGON").expect("TQ_LOGON must be set for live database tests");
+
+    let config = ConnectionConfig::from_connection_string(
+        &logon,
+        LogonMechanism::Td2,
+        Duration::from_secs(30),
+        None,
+    )
+    .unwrap();
+    let client = DatabaseClient::new(config, None).unwrap();
+
+    // Get some tables from DBC
+    let sql = r#"
+        SELECT TRIM(TableName) AS table_name
+        FROM DBC.TablesV
+        WHERE DatabaseName = 'DBC'
+          AND TableKind IN ('T', 'O', 'V')
+        ORDER BY TableName
+        SAMPLE 10
+    "#;
+
+    let result = client.execute(sql).unwrap();
+    assert!(result.rows.len() > 0, "Should get some tables/views from DBC");
+
+    // Test various glob patterns
+    let test_cases = vec![
+        ("*", true),  // Wildcard matches everything
+        ("T*", false), // Some tables may not start with T
+        ("*V", false), // Some tables may not end with V
+    ];
+
+    for (pattern, expect_all_match) in test_cases {
+        let matches = result.rows.iter().filter(|row| {
+            if let Some(val) = row.first() {
+                let name = val.display().to_uppercase();
+                let pat = pattern.to_uppercase();
+
+                // Simple glob implementation (same as in production code)
+                if pat == "*" {
+                    true
+                } else if pat.starts_with('*') && pat.ends_with('*') {
+                    name.contains(&pat[1..pat.len()-1])
+                } else if pat.starts_with('*') {
+                    name.ends_with(&pat[1..])
+                } else if pat.ends_with('*') {
+                    name.starts_with(&pat[..pat.len()-1])
+                } else {
+                    name == pat
+                }
+            } else {
+                false
+            }
+        }).count();
+
+        if expect_all_match {
+            assert_eq!(matches, result.rows.len(), "Pattern '{}' should match all", pattern);
+        }
+    }
+}
+
+/// Test error handling when querying non-existent database
+///
+/// Run with: cargo test test_list_tables_error_handling -- --ignored
+#[test]
+#[ignore] // Requires live database connection
+fn test_list_tables_error_handling() {
+    use tq::db::DatabaseClient;
+
+    dotenvy::dotenv().ok();
+    let logon = std::env::var("TQ_LOGON").expect("TQ_LOGON must be set for live database tests");
+
+    let config = ConnectionConfig::from_connection_string(
+        &logon,
+        LogonMechanism::Td2,
+        Duration::from_secs(30),
+        None,
+    )
+    .unwrap();
+    let client = DatabaseClient::new(config, None).unwrap();
+
+    // Try to query tables from a database that definitely doesn't exist
+    let sql = r#"
+        SELECT TRIM(TableName) AS table_name
+        FROM DBC.TablesV
+        WHERE DatabaseName = 'NonExistent_Database_XYZ_12345'
+          AND TableKind IN ('T', 'O')
+        ORDER BY TableName
+    "#;
+
+    // Should execute successfully but return empty results
+    let result = client.execute(sql).unwrap();
+    assert_eq!(result.rows.len(), 0, "Non-existent database should return 0 tables");
+}

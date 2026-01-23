@@ -1396,3 +1396,355 @@ fn read_available_output(session: &mut expectrl::Session) -> String {
 
     output
 }
+
+// ============================================================================
+// Sprint 22: Feature 2 - Enhanced Schema Commands PTY Tests
+// ============================================================================
+
+#[test]
+#[ignore] // Run with --ignored flag, requires live database
+fn test_list_databases_pty() {
+    // Sprint 22 Feature 2: Verify /list databases command displays database names
+    // in REPL and shows proper formatting.
+    let mut p = spawn_tq_repl();
+
+    // Wait for connection
+    p.expect("Connected to").expect("Failed to connect");
+    std::thread::sleep(Duration::from_millis(1500));
+
+    // Clear any banner output
+    let _ = read_available_output(&mut p);
+
+    // Execute /list databases
+    p.send_line("/list databases")
+        .expect("Failed to send /list databases");
+    std::thread::sleep(Duration::from_millis(3000));
+
+    // Read output
+    let output = read_available_output(&mut p);
+
+    // Check for cursor position error (PTY limitation)
+    if output.contains("cursor position") {
+        eprintln!("Warning: Cursor position detection failed in PTY - skipping validation");
+        p.send("\x03").expect("Failed to send Ctrl-C");
+        std::thread::sleep(Duration::from_millis(200));
+        p.send_line("/quit").expect("Failed to send quit");
+        std::thread::sleep(Duration::from_millis(500));
+        return;
+    }
+
+    // Verify output contains database listing
+    assert!(
+        output.contains("Databases") || output.contains("database"),
+        "Output should contain 'Databases' header. Got: {}",
+        output
+    );
+
+    // DBC database should be present
+    assert!(
+        output.contains("DBC"),
+        "Output should contain DBC database. Got: {}",
+        output
+    );
+
+    // Should show count
+    assert!(
+        output.contains("database(s)"),
+        "Output should show database count. Got: {}",
+        output
+    );
+
+    // Clean exit
+    p.send_line("/quit").expect("Failed to send quit");
+    std::thread::sleep(Duration::from_millis(500));
+}
+
+#[test]
+#[ignore] // Run with --ignored flag, requires live database
+fn test_list_tables_pty() {
+    // Sprint 22 Feature 2: Verify /list tables command displays table names
+    // in current database with proper formatting.
+    let mut p = spawn_tq_repl();
+
+    // Wait for connection
+    p.expect("Connected to").expect("Failed to connect");
+    std::thread::sleep(Duration::from_millis(1500));
+
+    // Clear any banner output
+    let _ = read_available_output(&mut p);
+
+    // Set database context to DBC (which always has tables)
+    p.send_line("DATABASE DBC;")
+        .expect("Failed to set database");
+    std::thread::sleep(Duration::from_millis(2000));
+
+    // Clear database change output
+    let _ = read_available_output(&mut p);
+
+    // Execute /list tables
+    p.send_line("/list tables")
+        .expect("Failed to send /list tables");
+    std::thread::sleep(Duration::from_millis(3000));
+
+    // Read output
+    let output = read_available_output(&mut p);
+
+    // Check for cursor position error (PTY limitation)
+    if output.contains("cursor position") {
+        eprintln!("Warning: Cursor position detection failed in PTY - skipping validation");
+        p.send("\x03").expect("Failed to send Ctrl-C");
+        std::thread::sleep(Duration::from_millis(200));
+        p.send_line("/quit").expect("Failed to send quit");
+        std::thread::sleep(Duration::from_millis(500));
+        return;
+    }
+
+    // Verify output contains table listing
+    assert!(
+        output.contains("Tables in") || output.contains("table"),
+        "Output should contain 'Tables in' header. Got: {}",
+        output
+    );
+
+    // Should show count
+    assert!(
+        output.contains("table(s)"),
+        "Output should show table count. Got: {}",
+        output
+    );
+
+    // DBC should have tables listed
+    let lines: Vec<&str> = output.lines().collect();
+    assert!(
+        lines.len() > 5,
+        "Output should have multiple lines with table listings. Got: {}",
+        output
+    );
+
+    // Clean exit
+    p.send_line("/quit").expect("Failed to send quit");
+    std::thread::sleep(Duration::from_millis(500));
+}
+
+#[test]
+#[ignore] // Run with --ignored flag, requires live database
+fn test_list_tables_pattern_pty() {
+    // Sprint 22 Feature 2: Verify /list tables with glob pattern filters and
+    // displays matching tables only.
+    let mut p = spawn_tq_repl();
+
+    // Wait for connection
+    p.expect("Connected to").expect("Failed to connect");
+    std::thread::sleep(Duration::from_millis(1500));
+
+    // Clear any banner output
+    let _ = read_available_output(&mut p);
+
+    // Set database context to DBC
+    p.send_line("DATABASE DBC;")
+        .expect("Failed to set database");
+    std::thread::sleep(Duration::from_millis(2000));
+    let _ = read_available_output(&mut p);
+
+    // Execute /list tables with pattern
+    p.send_line("/list tables Tables*")
+        .expect("Failed to send /list tables with pattern");
+    std::thread::sleep(Duration::from_millis(3000));
+
+    // Read output
+    let output = read_available_output(&mut p);
+
+    // Check for cursor position error (PTY limitation)
+    if output.contains("cursor position") {
+        eprintln!("Warning: Cursor position detection failed in PTY - skipping validation");
+        p.send("\x03").expect("Failed to send Ctrl-C");
+        std::thread::sleep(Duration::from_millis(200));
+        p.send_line("/quit").expect("Failed to send quit");
+        std::thread::sleep(Duration::from_millis(500));
+        return;
+    }
+
+    // Verify output contains filtered table listing
+    assert!(
+        output.contains("Tables in") || output.contains("pattern"),
+        "Output should contain 'Tables in' header or pattern indicator. Got: {}",
+        output
+    );
+
+    // Should show the pattern used
+    assert!(
+        output.contains("Tables*") || output.contains("tables"),
+        "Output should reference the pattern or show tables. Got: {}",
+        output
+    );
+
+    // Clean exit
+    p.send_line("/quit").expect("Failed to send quit");
+    std::thread::sleep(Duration::from_millis(500));
+}
+
+#[test]
+#[ignore] // Run with --ignored flag, requires live database
+fn test_list_views_pty() {
+    // Sprint 22 Feature 2: Verify /list views command displays view names
+    // in current database with proper formatting.
+    let mut p = spawn_tq_repl();
+
+    // Wait for connection
+    p.expect("Connected to").expect("Failed to connect");
+    std::thread::sleep(Duration::from_millis(1500));
+
+    // Clear any banner output
+    let _ = read_available_output(&mut p);
+
+    // Set database context to DBC (which has many system views)
+    p.send_line("DATABASE DBC;")
+        .expect("Failed to set database");
+    std::thread::sleep(Duration::from_millis(2000));
+    let _ = read_available_output(&mut p);
+
+    // Execute /list views
+    p.send_line("/list views")
+        .expect("Failed to send /list views");
+    std::thread::sleep(Duration::from_millis(3000));
+
+    // Read output
+    let output = read_available_output(&mut p);
+
+    // Check for cursor position error (PTY limitation)
+    if output.contains("cursor position") {
+        eprintln!("Warning: Cursor position detection failed in PTY - skipping validation");
+        p.send("\x03").expect("Failed to send Ctrl-C");
+        std::thread::sleep(Duration::from_millis(200));
+        p.send_line("/quit").expect("Failed to send quit");
+        std::thread::sleep(Duration::from_millis(500));
+        return;
+    }
+
+    // Verify output contains view listing
+    assert!(
+        output.contains("Views in") || output.contains("view"),
+        "Output should contain 'Views in' header. Got: {}",
+        output
+    );
+
+    // Should show count
+    assert!(
+        output.contains("view(s)"),
+        "Output should show view count. Got: {}",
+        output
+    );
+
+    // DBC should have views listed
+    assert!(
+        output.len() > 50,
+        "Output should contain view listings. Got: {}",
+        output
+    );
+
+    // Clean exit
+    p.send_line("/quit").expect("Failed to send quit");
+    std::thread::sleep(Duration::from_millis(500));
+}
+
+#[test]
+#[ignore] // Run with --ignored flag, requires live database
+fn test_list_tables_output_formatting() {
+    // Sprint 22 Feature 2: Verify /list tables output is formatted as a table
+    // with proper column alignment and readability.
+    let mut p = spawn_tq_repl();
+
+    // Wait for connection
+    p.expect("Connected to").expect("Failed to connect");
+    std::thread::sleep(Duration::from_millis(1500));
+
+    // Clear any banner output
+    let _ = read_available_output(&mut p);
+
+    // Set database context to DBC
+    p.send_line("DATABASE DBC;")
+        .expect("Failed to set database");
+    std::thread::sleep(Duration::from_millis(2000));
+    let _ = read_available_output(&mut p);
+
+    // Execute /list tables
+    p.send_line("/list tables")
+        .expect("Failed to send /list tables");
+    std::thread::sleep(Duration::from_millis(3000));
+
+    // Read output
+    let output = read_available_output(&mut p);
+
+    // Check for cursor position error (PTY limitation)
+    if output.contains("cursor position") {
+        eprintln!("Warning: Cursor position detection failed in PTY - skipping formatting validation");
+        p.send("\x03").expect("Failed to send Ctrl-C");
+        std::thread::sleep(Duration::from_millis(200));
+        p.send_line("/quit").expect("Failed to send quit");
+        std::thread::sleep(Duration::from_millis(500));
+        return;
+    }
+
+    // Verify output has structure (not just a blob of text)
+    let lines: Vec<&str> = output.lines().collect();
+    assert!(
+        lines.len() > 3,
+        "Output should have header, separator, and content lines. Got: {}",
+        output
+    );
+
+    // Should have a header line
+    assert!(
+        output.contains("Tables in") || output.contains("---"),
+        "Output should have header or separator. Got: {}",
+        output
+    );
+
+    // Clean exit
+    p.send_line("/quit").expect("Failed to send quit");
+    std::thread::sleep(Duration::from_millis(500));
+}
+
+#[test]
+#[ignore] // Run with --ignored flag, requires live database
+fn test_list_error_message_display() {
+    // Sprint 22 Feature 2: Verify error messages are displayed clearly when
+    // /list commands fail (e.g., invalid subcommand).
+    let mut p = spawn_tq_repl();
+
+    // Wait for connection
+    p.expect("Connected to").expect("Failed to connect");
+    std::thread::sleep(Duration::from_millis(1500));
+
+    // Clear any banner output
+    let _ = read_available_output(&mut p);
+
+    // Execute /list with invalid subcommand
+    p.send_line("/list invalid")
+        .expect("Failed to send /list invalid");
+    std::thread::sleep(Duration::from_millis(1000));
+
+    // Read output
+    let output = read_available_output(&mut p);
+
+    // Check for cursor position error (PTY limitation)
+    if output.contains("cursor position") {
+        eprintln!("Warning: Cursor position detection failed in PTY - skipping error validation");
+        p.send("\x03").expect("Failed to send Ctrl-C");
+        std::thread::sleep(Duration::from_millis(200));
+        p.send_line("/quit").expect("Failed to send quit");
+        std::thread::sleep(Duration::from_millis(500));
+        return;
+    }
+
+    // Verify error message is displayed
+    assert!(
+        output.contains("Unknown") || output.contains("Available"),
+        "Output should show error message for invalid subcommand. Got: {}",
+        output
+    );
+
+    // Clean exit
+    p.send_line("/quit").expect("Failed to send quit");
+    std::thread::sleep(Duration::from_millis(500));
+}

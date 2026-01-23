@@ -82,7 +82,48 @@ tq query --format json "SELECT * FROM employees" > employees.json
 
 # Export to CSV
 tq query --format csv "SELECT * FROM sales" --output sales.csv
+
+# Start interactive REPL mode
+tq repl
 ```
+
+## Interactive REPL Mode
+
+tq includes a powerful interactive REPL (Read-Eval-Print Loop) for exploring your database:
+
+```bash
+# Start REPL
+export TQ_LOGON="user:pass@host:1025/database"
+tq repl
+```
+
+### Key Features
+
+- **Tab completion** - Discover commands and complete SQL with TAB key
+- **Schema exploration** - Quick commands to list databases, tables, and views
+- **Command history** - Navigate previous commands with arrow keys
+- **Multi-line editing** - Write complex queries across multiple lines
+
+### Quick Examples
+
+```sql
+# Discover available metacommands
+tq> /<TAB>
+
+# List all databases
+tq> /list databases
+
+# List tables with pattern matching
+tq> /list tables emp%
+
+# Describe table structure
+tq> /describe employees
+
+# Run queries with syntax highlighting
+tq> SELECT * FROM employees WHERE department = 'IT';
+```
+
+**Learn more:** See the complete [REPL User Guide](docs/user/repl-guide.md) for detailed examples and tips.
 
 ## Usage
 
