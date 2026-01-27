@@ -1483,10 +1483,289 @@ impl MetadataCache {
 
 ---
 
+## Multi-line Command History
+
+This section documents the technical design for storing and recalling complete multi-line SQL statements as single history entries (Sprint 24).
+
+### Problem Statement
+
+**Current Behavior (Pre-Sprint 24):**
+1. User types multi-line SQL statement across multiple lines
+2. Each line is individually saved to history by reedline
+3. Pressing UP arrow recalls only individual lines, not complete statements
+4. User cannot easily re-execute or edit previous complex queries
+
+**Desired Behavior:**
+1. Multi-line SQL statements (until `;` terminator) stored as single history entry
+2. UP/DOWN arrows recall complete multi-line commands
+3. Cursor navigation works within recalled multi-line commands
+4. Backward compatible with existing `~/.tq_history` files
+
+### Solution Architecture
+
+The solution leverages reedline's `Validator` trait, which controls when input is considered "complete":
+
+```
+Multi-line History Architecture:
+
+User types line     →  reedline receives input
+        |
+        v
+Validator::validate(line) called
+        |
+    +---+---+
+    |       |
+    v       v
+Does line      Does line NOT
+end with ';'?  end with ';'?
+    |              |
+    v              v
+Return         Return
+Complete       Incomplete
+    |              |
+    v              v
+reedline       reedline
+saves ENTIRE   continues
+buffer to      accepting
+history        input
+    |              |
+    v              v
+Returns        Shows
+Signal::       multi-line
+Success        prompt
+(buffer)       (repeats)
+```
+
+**Key Insight**: When `Validator` returns `Incomplete`:
+- reedline does NOT save partial input to history
+- reedline continues accepting input on new lines
+- reedline accumulates all lines into single buffer
+- When `Complete` is returned, the ENTIRE buffer is saved as one history entry
+
+### Implementation Components
+
+#### 1. SqlStatementValidator
+
+New validator that checks for SQL statement completion:
+
+```rust
+// src/commands/repl/validator.rs
+
+use reedline::{ValidationResult, Validator};
+
+/// Validates SQL statement completion for multi-line history support
+///
+/// Returns `Incomplete` until a semicolon terminator is found,
+/// causing reedline to accumulate multi-line input as a single
+/// history entry.
+pub struct SqlStatementValidator;
+
+impl Validator for SqlStatementValidator {
+    fn validate(&self, line: &str) -> ValidationResult {
+        let trimmed = line.trim();
+
+        // Empty input is complete (allows pressing Enter on empty line)
+        if trimmed.is_empty() {
+            return ValidationResult::Complete;
+        }
+
+        // Metacommands are always complete (single line)
+        if trimmed.starts_with('/') || trimmed.starts_with('\\') {
+            return ValidationResult::Complete;
+        }
+
+        // SQL statements complete when ending with semicolon
+        // Note: We use simple terminator detection for performance.
+        // Edge cases (semicolons in strings/comments) are rare in practice
+        // and can be handled by adding a space after the closing quote.
+        if trimmed.ends_with(';') {
+            ValidationResult::Complete
+        } else {
+            ValidationResult::Incomplete
+        }
+    }
+}
+```
+
+#### 2. Editor Configuration Update
+
+Integrate validator into reedline setup:
+
+```rust
+// src/commands/repl/mod.rs (in create_editor function)
+
+use crate::commands::repl::validator::SqlStatementValidator;
+
+fn create_editor(...) -> Result<Reedline> {
+    let mut editor = Reedline::create();
+
+    // Add validator for multi-line history support
+    editor = editor.with_validator(Box::new(SqlStatementValidator));
+
+    // ... rest of editor configuration ...
+}
+```
+
+#### 3. REPL Loop Simplification
+
+With the validator handling multi-line accumulation, the REPL loop simplifies:
+
+```rust
+// Simplified REPL loop (validator handles accumulation)
+match editor.read_line(&current_prompt) {
+    Ok(Signal::Success(buffer)) => {
+        // Buffer contains complete multi-line statement
+        // (including newlines preserved from user input)
+
+        if buffer.trim().is_empty() {
+            continue;
+        }
+
+        if is_metacommand(&buffer) {
+            handle_metacommand(&buffer, state, writer)?;
+        } else {
+            // Execute complete SQL statement
+            execute_sql(&buffer, state, writer)?;
+        }
+    }
+    // ... handle Ctrl-C, Ctrl-D ...
+}
+```
+
+**Note:** The current `ReplState.input_buffer` accumulation logic becomes redundant when using the validator. The `Signal::Success(buffer)` from reedline already contains the complete multi-line input.
+
+### History File Format
+
+reedline's `FileBackedHistory` already supports multi-line entries via newline escaping:
+
+```
+File format (~/.tq_history):
+-----------------------------
+SELECT 1;
+SELECT<\n>  col1,<\n>  col2<\n>FROM table<\n>WHERE x = 1;
+SELECT * FROM users;
+```
+
+**Key Points:**
+- Newlines within entries are escaped as `<\n>`
+- Backward compatible: existing single-line entries work unchanged
+- When loaded, `<\n>` is decoded back to actual newlines
+- History search (Ctrl-R) works with full command text
+
+### Cursor Navigation Within Multi-line Commands
+
+When a multi-line command is recalled from history:
+
+1. reedline displays the complete command with actual newlines
+2. Standard line editing keys work:
+   - Left/Right arrows: Move within current line
+   - Home/End: Jump to line start/end
+   - Ctrl-A/Ctrl-E: Beginning/end of line
+3. Vertical navigation within multi-line buffer:
+   - When at top line, UP recalls previous history entry
+   - When at bottom line, DOWN recalls next history entry
+   - Within multi-line buffer, cursor moves between lines
+
+This is native reedline behavior - no additional implementation needed.
+
+### Edge Cases and Mitigations
+
+| Edge Case | Handling | Rationale |
+|-----------|----------|-----------|
+| Semicolon in string literal | May cause early termination | User can add space after closing quote to continue |
+| Semicolon in comment | May cause early termination | Rare in interactive use; user can adjust |
+| Very long statements | Works correctly | reedline handles arbitrary buffer sizes |
+| Escaped newlines in history | Preserved correctly | reedline's `<\n>` encoding handles this |
+| Existing history file | Backward compatible | Single-line entries have no `<\n>` |
+| Ctrl-C during multi-line | Clears accumulated buffer | reedline handles this automatically |
+
+### Testing Strategy
+
+**Unit Tests:**
+- `test_validator_empty_input_complete` - Empty returns Complete
+- `test_validator_metacommand_complete` - Metacommands return Complete
+- `test_validator_semicolon_complete` - Statements with `;` return Complete
+- `test_validator_no_semicolon_incomplete` - Partial statements return Incomplete
+- `test_validator_semicolon_in_middle` - Only trailing `;` counts
+
+**Integration Tests (with mock):**
+- History saves multi-line statement as single entry
+- History recall returns complete multi-line command
+- Ctrl-C clears accumulated multi-line buffer
+
+**PTY Tests (manual validation primary):**
+- Type multi-line SQL, verify single history entry created
+- Press UP, verify complete statement recalled
+- Edit recalled multi-line statement, verify cursor navigation
+- Verify history file contains escaped newlines
+
+**Manual Validation Required:**
+- Visual appearance of multi-line continuation prompt
+- Cursor movement within recalled multi-line command
+- Keyboard behavior for UP/DOWN at buffer boundaries
+
+### Design Trade-offs
+
+#### Validator-Based vs Manual Accumulation
+**Chosen**: reedline Validator (new in Sprint 24)
+**Previous**: Manual `ReplState.input_buffer` accumulation
+**Rationale**:
+- Validator integrates with reedline's history mechanism
+- Single history entry for complete statement (desired behavior)
+- Simpler REPL loop (reedline handles accumulation)
+- Better multi-line editing experience
+
+#### Simple Semicolon Detection vs SQL Parsing
+**Chosen**: Simple `ends_with(';')` check
+**Alternative**: Full SQL lexer to detect semicolons in context
+**Rationale**:
+- Performance: No parsing overhead per keystroke
+- Simplicity: Easy to understand and maintain
+- Pragmatism: Edge cases rare in interactive use
+- Escape hatch: User can work around by adjusting input
+
+### Code Linkage
+
+| Component | File Path | Key Changes |
+|-----------|-----------|-------------|
+| SQL Validator | `src/commands/repl/validator.rs` (NEW) | `SqlStatementValidator` struct |
+| Editor Setup | `src/commands/repl/mod.rs` | Add `.with_validator()` call |
+| Module Export | `src/commands/repl/mod.rs` | Add `mod validator;` |
+| REPL Loop | `src/commands/repl/mod.rs` | Simplify to use validator buffer |
+| State | `src/commands/repl/state.rs` | `input_buffer` may become redundant |
+
+### Migration Notes
+
+**From Pre-Sprint 24:**
+- Existing `~/.tq_history` files are backward compatible
+- Single-line entries continue to work unchanged
+- New multi-line entries use `<\n>` escaping
+- No migration script needed
+
+**Removed/Deprecated:**
+- `ReplState.input_buffer` accumulation logic (redundant with validator)
+- `ReplState.has_input()` checks in REPL loop (validator handles this)
+- Manual multi-line prompt state (reedline manages this)
+
+### Implementation Status (Sprint 24)
+
+**Status:** IMPLEMENTED
+
+**Files Changed:**
+- `src/commands/repl/validator.rs` (NEW) - SqlStatementValidator implementing reedline::Validator
+- `src/commands/repl/mod.rs` - Added validator module, integrated into create_editor(), simplified repl_loop()
+
+**Key Implementation Details:**
+1. SqlStatementValidator returns `Complete` for empty input, metacommands, and statements ending with `;`
+2. SqlStatementValidator returns `Incomplete` for partial SQL statements
+3. REPL loop simplified - no longer needs manual accumulation, uses validator-provided buffer
+4. Comprehensive unit tests for validator logic (13 tests)
+
+---
+
 ## Future Enhancements
 
-- Multi-line editing with visual indicators
-- Query history search (Ctrl-R)
+- Query history search (Ctrl-R) - already supported by reedline
 - Result export from REPL (\export)
 - Session transcripts (\spool)
 - Variable substitution (\set, \unset)

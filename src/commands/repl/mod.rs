@@ -3,6 +3,7 @@
 //! Provides an interactive SQL shell for Teradata databases.
 //! Features:
 //! - Multi-line SQL input with semicolon termination
+//! - Multi-line command history - complete statements stored as single entries (Sprint 24)
 //! - SQL syntax highlighting with customizable colors
 //! - Persistent command history (saved to ~/.tq_history)
 //! - Vim and Emacs keybinding modes
@@ -20,6 +21,7 @@ mod pager;
 mod prompt;
 mod sql_context;
 mod state;
+mod validator;
 
 use crate::cli::{EditorMode, ReplArgs};
 use crate::db::DatabaseClient;
@@ -42,6 +44,7 @@ pub use pager::{display_with_pager, should_page, PagedOutput, PagerConfig};
 pub use prompt::TqPrompt;
 pub use sql_context::{analyze_context, CompletionContext, TableReference};
 pub use state::ReplState;
+pub use validator::SqlStatementValidator;
 
 /// Execute the REPL command
 ///
@@ -121,6 +124,7 @@ pub fn execute<W: Write>(
 ///
 /// Sprint 7: Now accepts shared completion state for metadata-aware completion.
 /// Sprint 8: Fixed tab completion by adding ColumnarMenu and keybindings.
+/// Sprint 24: Added SqlStatementValidator for multi-line history support.
 fn create_editor(
     args: &ReplArgs,
     writer: &mut impl Write,
@@ -156,6 +160,20 @@ fn create_editor(
         // Exclude metacommands from history
         editor = editor.with_history_exclusion_prefix(Some("/".to_string()));
     }
+
+    // Sprint 24: Add validator for multi-line history support
+    //
+    // The SqlStatementValidator detects when SQL statements are complete (end with ';').
+    // When the validator returns `Incomplete`, reedline:
+    // - Does NOT save partial input to history
+    // - Continues accepting input on new lines
+    // - Accumulates all lines into a single buffer
+    //
+    // When `Complete` is returned, the ENTIRE buffer (including newlines) is saved
+    // as one history entry. This achieves REQ-HIST-001 through REQ-HIST-007:
+    // pressing UP arrow recalls complete multi-line statements, not individual lines.
+    let statement_validator = validator::SqlStatementValidator::new();
+    editor = editor.with_validator(Box::new(statement_validator));
 
     // Configure tab completion with metadata support (Sprint 7)
     // Sprint 8: Fixed by adding ColumnarMenu and proper keybindings
@@ -355,6 +373,12 @@ fn print_banner<W: Write>(
 /// Main REPL loop
 ///
 /// Sprint 7: Updated to use shared completion state for metacommand handling.
+/// Sprint 24: Simplified to leverage SqlStatementValidator for multi-line history.
+///
+/// With the validator in place, reedline handles multi-line accumulation:
+/// - When validator returns `Incomplete`, reedline continues accepting input
+/// - When validator returns `Complete`, reedline returns the full buffer
+/// - Multi-line statements are saved as single history entries (REQ-HIST-001-007)
 fn repl_loop<W: Write>(
     editor: &mut Reedline,
     completion_state: &Arc<Mutex<CompletionState>>,
@@ -366,6 +390,8 @@ fn repl_loop<W: Write>(
 ) -> Result<()> {
     loop {
         // Sprint 9 Bug 2 Fix: Update accumulated buffer in completion state for multi-line context
+        // Note: With Sprint 24 validator, reedline handles accumulation internally.
+        // The state.input_buffer() is mainly used for prompt display now.
         if let Ok(mut state_lock) = completion_state.lock() {
             state_lock.set_accumulated_buffer(state.input_buffer().to_string());
         }
@@ -374,16 +400,24 @@ fn repl_loop<W: Write>(
         let current_prompt = prompt.for_state(state);
 
         match editor.read_line(&current_prompt) {
-            Ok(Signal::Success(line)) => {
-                let trimmed = line.trim();
+            Ok(Signal::Success(buffer)) => {
+                // Sprint 24: With the validator, `buffer` contains the complete input.
+                // For SQL statements, this is the full multi-line statement (including newlines).
+                // For metacommands, this is the single line.
+                let trimmed = buffer.trim();
 
-                // Empty line - just continue
+                // Empty buffer - just continue
                 if trimmed.is_empty() {
+                    // Clear any accumulated state (shouldn't happen with validator, but be safe)
+                    state.clear_input();
                     continue;
                 }
 
                 // Check for metacommand
                 if trimmed.starts_with('/') || trimmed.starts_with('\\') {
+                    // Clear accumulated input state for metacommand
+                    state.clear_input();
+
                     // Lock completion state for metacommand handling
                     let mut cs = completion_state.lock().unwrap();
                     match metacommands::handle_metacommand_with_state(
@@ -401,48 +435,41 @@ fn repl_loop<W: Write>(
                     continue;
                 }
 
-                // Accumulate SQL input
-                state.append_input(&line);
+                // Sprint 24: With validator, `buffer` IS the complete SQL statement.
+                // The validator returns `Complete` only when statement ends with ';'.
+                // We no longer need to manually accumulate or check for semicolon.
+                let sql = buffer;
 
-                // Check if statement is complete (ends with semicolon)
-                if state.input_buffer().trim_end().ends_with(';') {
-                    let sql = state.take_input();
+                // Clear the state's input buffer since we're executing
+                state.clear_input();
 
-                    // Lock completion state to access client
-                    let cs = completion_state.lock().unwrap();
-                    let client = cs.client();
+                // Lock completion state to access client
+                let cs = completion_state.lock().unwrap();
+                let client = cs.client();
 
-                    // Execute the SQL with default limit for SELECT queries (Sprint 6: uses state colors)
-                    match execute_sql_with_state(client, state, &sql, writer, default_limit) {
-                        Ok(row_count) => {
-                            state.record_query(row_count);
-                        }
-                        Err(e) => {
-                            // Print error but don't exit REPL
-                            writeln!(writer, "\nError: {}", e)?;
-                        }
+                // Execute the SQL with default limit for SELECT queries (Sprint 6: uses state colors)
+                match execute_sql_with_state(client, state, &sql, writer, default_limit) {
+                    Ok(row_count) => {
+                        state.record_query(row_count);
                     }
-                    writeln!(writer)?;
+                    Err(e) => {
+                        // Print error but don't exit REPL
+                        writeln!(writer, "\nError: {}", e)?;
+                    }
                 }
+                writeln!(writer)?;
             }
 
             Ok(Signal::CtrlC) => {
-                if state.has_input() {
-                    // Clear current input buffer
-                    state.clear_input();
-                    writeln!(writer, "^C")?;
-                } else {
-                    // Hint to use /quit
-                    writeln!(writer, "\nUse /quit or Ctrl-D to exit.")?;
-                }
+                // Ctrl-C during input - reedline clears the buffer automatically
+                // with validator, but we still show feedback to user
+                writeln!(writer, "^C")?;
+                state.clear_input();
             }
 
             Ok(Signal::CtrlD) => {
-                if !state.has_input() {
-                    // Exit on Ctrl-D with empty buffer
-                    break;
-                }
-                // Ignore Ctrl-D when there's input in buffer
+                // Ctrl-D exits when input is empty (validator returns Complete for empty input)
+                break;
             }
 
             Err(e) => {

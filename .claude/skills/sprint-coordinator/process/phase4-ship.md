@@ -33,6 +33,51 @@
 | **Architecture Compliance** | Implementation follows `docs/design/*.md`? | ✅ MUST |
 | **Zero Technical Debt** | No workarounds introduced? | ✅ MUST |
 
+### Step 1.5: Documentation Accuracy Verification
+
+**PURPOSE:** Prevent documentation/implementation mismatches (Sprint 22 & 23 lesson)
+
+**CRITICAL**: Verify that user-facing documentation matches what was actually delivered.
+
+**Check User Guides** (`docs/user/*.md`):
+- [ ] All code examples use correct syntax (e.g., glob patterns not SQL LIKE)
+- [ ] All feature descriptions match actual implementation
+- [ ] No deferred features documented as implemented
+- [ ] All flag names match actual CLI flags (e.g., no `--force` if not implemented)
+- [ ] Error messages in docs match actual error messages in code
+
+**Check Specifications** (`docs/specifications/*.md`):
+- [ ] Requirements marked as implemented are actually implemented
+- [ ] No requirements documented that were deferred to future sprints
+- [ ] Examples in specifications execute correctly with the tool
+
+**Check CLI Help Text**:
+- [ ] Run `cargo run --release -- --help` and verify all flags documented
+- [ ] Run `cargo run --release -- <subcommand> --help` for each subcommand
+- [ ] Help text matches user guide descriptions
+
+**How to Verify**:
+1. Read `docs/sprints/sprint-N-planning.md` "Scope" section
+2. List all P0 and P1 features with DELIVERED status
+3. For each delivered feature:
+   - Find its documentation in `docs/user/*.md`
+   - Verify description matches implementation
+   - Test examples execute correctly
+4. For each deferred feature:
+   - Verify it's NOT documented in user guides
+   - Verify specifications mark it as future work
+
+**Common Issues to Check** (from Sprint 22 & 23):
+- Pattern syntax mismatch (SQL LIKE `%` vs glob `*`)
+- Flags documented but not implemented (`--force`)
+- Loading indicators described but not built
+- Session types described incorrectly
+- Qualified patterns documented but not supported
+
+**Verdict**:
+- ✅ **PASS**: All documentation matches delivered features
+- ❌ **FAIL**: Documentation mismatches found → Fix docs before commit
+
 ### Step 2: Decision
 
 **CRITICAL CHECKS:**

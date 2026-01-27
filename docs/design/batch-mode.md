@@ -512,6 +512,68 @@ pub enum TqError {
 }
 ```
 
+### Session Mode Transaction Errors (Sprint 24)
+
+Teradata has different session modes that affect transaction control support:
+
+| Session Mode | Transaction Support | Common Usage |
+|--------------|---------------------|--------------|
+| ANSI | Auto-commit by default, explicit BEGIN required | Standard SQL |
+| Teradata | Implicit transactions, COMMIT/ROLLBACK supported | Traditional Teradata |
+| DBC/SQL (ODBC/JDBC) | May restrict transaction control statements | Driver connections |
+
+When transaction control fails due to session mode limitations, tq provides enhanced error messages:
+
+```rust
+// src/error.rs - SessionModeTransactionError variant
+#[error("Transaction control not supported in current session mode")]
+SessionModeTransactionError {
+    /// The attempted operation (e.g., "COMMIT", "BEGIN TRANSACTION")
+    operation: String,
+    /// Original error code if available (e.g., 3706)
+    error_code: Option<u32>,
+    /// Original error message from database
+    original_message: String,
+}
+
+// src/db/client.rs - Detection logic
+fn is_transaction_session_error(error_lower: &str, sql: &str) -> bool {
+    // Detect if SQL is a transaction control statement
+    let is_transaction_sql = sql contains COMMIT/ROLLBACK/BEGIN TRANSACTION/BT/ET
+
+    // Check for session mode restriction patterns
+    error_lower contains "not allowed" OR "not supported" OR "3706" etc
+}
+```
+
+**Error Message Example:**
+```
+Error: Transaction control not supported [Error 3706]
+
+COMMIT is not allowed for DBC/SQL session
+
+Operation attempted: COMMIT
+
+This error typically occurs when the session mode does not support
+explicit transaction control (e.g., DBC/SQL sessions via ODBC/JDBC).
+
+Troubleshooting:
+  - Verify the connection session mode supports transactions
+  - If using --atomic, try without it and manage transactions manually
+  - For ANSI mode databases, transactions are auto-committed by default
+  - Contact your DBA to verify session configuration
+
+Technical details:
+  Teradata has different session modes:
+  - ANSI mode: Auto-commit by default, explicit BEGIN required
+  - Teradata mode: Implicit transactions, COMMIT/ROLLBACK supported
+  - DBC/SQL (ODBC/JDBC): May restrict transaction control statements
+```
+
+**Implementation Files (Sprint 24):**
+- `src/error.rs` - `SessionModeTransactionError` variant and `user_message()` implementation
+- `src/db/client.rs` - `is_transaction_session_error()`, `extract_transaction_operation()`, `extract_error_code()` functions
+
 ### User-Friendly Messages
 
 All errors provide actionable guidance:

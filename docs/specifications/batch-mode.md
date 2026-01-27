@@ -300,23 +300,17 @@ Overwrite? [y/N]: _
 
 **Non-interactive mode (no TTY, scripts, CI):**
 - Abort with error message and exit code 2
-- Error message: "File exists: <path>. Use --force to overwrite."
+- Error message: "File exists: <path>"
 - No prompt displayed
 
-**REQ-OUT-005: Force Overwrite**
-- Flag: `--force` or `-f`
-- Skips overwrite confirmation
-- Works in both interactive and non-interactive modes
-- Silent overwrite (no prompt, no warning)
-
-**REQ-OUT-006: Atomic Write**
+**REQ-OUT-005: Atomic Write**
 - Write to temporary file first: `<output>.tmp.<random>`
 - Rename to final path only on success
 - Prevents partial file creation on query errors
 - Temporary file cleanup on failure or interruption
 - Random suffix prevents temp file collisions
 
-**REQ-OUT-007: Status Messages**
+**REQ-OUT-006: Status Messages**
 
 On success:
 ```bash
@@ -329,7 +323,7 @@ Message format:
 - Message goes to stderr (not stdout)
 - Suppressed by `--quiet` flag
 
-**REQ-OUT-008: Error Handling**
+**REQ-OUT-007: Error Handling**
 
 File write errors:
 ```bash
@@ -348,10 +342,10 @@ Error categories:
 - Permission denied (exit code 1)
 - Disk full (exit code 1)
 - Invalid path (exit code 2)
-- File exists without --force (exit code 2)
+- File exists (exit code 2)
 - Parent directory does not exist (exit code 2)
 
-**REQ-OUT-009: Multi-Statement Handling**
+**REQ-OUT-008: Multi-Statement Handling**
 
 When executing multiple statements:
 - Only the LAST SELECT query result is written to file
@@ -377,11 +371,74 @@ Wrote 2 rows to result.csv
 Statement 4: DROP TABLE - OK
 ```
 
-**REQ-OUT-010: Interaction with --quiet**
+**REQ-OUT-009: Interaction with --quiet**
 - `--quiet` suppresses status messages
 - File is still written
 - Errors still displayed
 - Useful for silent scripting
+
+### Teradata Session Type Compatibility
+
+Teradata supports different session types with varying capabilities. The tool must respect these limitations when executing queries.
+
+**Session Types:**
+
+1. **ANSI Mode Session**
+   - Explicit transaction control required
+   - Supports BEGIN TRANSACTION, COMMIT, ROLLBACK
+   - Best for transactional workloads
+
+2. **Teradata Mode Session**
+   - Auto-commit by default for most statements
+   - Supports BT (Begin Transaction), ET (End Transaction)
+   - Some DDL statements cannot be in transactions
+
+3. **BTEQ Mode Session**
+   - Legacy batch mode with specific transaction semantics
+   - Limited transaction control capabilities
+
+**Transaction Control Requirements:**
+
+**REQ-SESSION-001: Session Mode Detection**
+- Tool should query session mode at connection time
+- Detection query: `SELECT SessionMode FROM DBC.SessionInfoV WHERE SessionNo = SESSION`
+- Cache result for session duration
+- Use appropriate transaction syntax based on mode
+
+**REQ-SESSION-002: Transaction Syntax Adaptation**
+- ANSI mode: Use BEGIN TRANSACTION/COMMIT/ROLLBACK
+- Teradata mode: Use BT/ET/ABORT
+- Fallback: Attempt ANSI first, then Teradata syntax on error
+
+**REQ-SESSION-003: DDL Transaction Limitations**
+
+Some Teradata operations cannot execute within transactions:
+- CREATE TABLE (in some modes)
+- DROP TABLE (in some modes)
+- ALTER TABLE statements
+- Some utility operations
+
+When these statements fail with "not allowed in transaction":
+- Error message: "This statement type cannot be executed within a transaction in current session mode"
+- Guidance: "Remove --atomic flag or execute DDL separately"
+- Error category: Usage error (exit code 2)
+
+**REQ-SESSION-004: Error Messages**
+
+Transaction control errors should explain session limitations:
+
+```bash
+Error: Transaction control not supported
+
+This session type does not support explicit transactions.
+Session mode: BTEQ
+Operation attempted: BEGIN TRANSACTION
+
+Suggestions:
+  - Reconnect in ANSI or Teradata mode for transaction support
+  - Execute statements without --atomic flag
+  - Contact DBA to change default session mode
+```
 
 ### Error Handling
 

@@ -466,6 +466,19 @@ impl DatabaseClient {
         let error_lower = error.to_lowercase();
         let clean_error = strip_go_stack_trace(error);
 
+        // Sprint 24: Detect transaction control errors due to session mode limitations
+        // Error 3706 with specific messages indicates session mode restrictions
+        if is_transaction_session_error(&error_lower, sql) {
+            let operation = extract_transaction_operation(sql);
+            let error_code = extract_error_code(error);
+
+            return TqError::SessionModeTransactionError {
+                operation,
+                error_code,
+                original_message: clean_error,
+            };
+        }
+
         if error_lower.contains("syntax") || error_lower.contains("parse") {
             TqError::SqlSyntaxError {
                 message: clean_error,
@@ -482,6 +495,84 @@ impl DatabaseClient {
             TqError::QueryExecution(clean_error)
         }
     }
+}
+
+/// Check if the error is a transaction control error due to session mode limitations
+///
+/// Sprint 24: REQ-SESSION-004 - Detect session mode transaction errors
+fn is_transaction_session_error(error_lower: &str, sql: &str) -> bool {
+    let sql_lower = sql.to_lowercase();
+
+    // Check if SQL is a transaction control statement
+    let is_transaction_statement = sql_lower.contains("commit")
+        || sql_lower.contains("rollback")
+        || sql_lower.contains("begin transaction")
+        || sql_lower.contains("begin tran")
+        // Teradata-specific shortcuts
+        || sql_lower.trim() == "bt"
+        || sql_lower.trim() == "et";
+
+    if !is_transaction_statement {
+        return false;
+    }
+
+    // Check for common session mode restriction error patterns
+    // Error 3706 is "Syntax error" but often indicates session mode issues for transaction control
+    // Error 3932 is "Transaction is not active" which can happen in wrong session modes
+    let session_mode_patterns = [
+        "not allowed",
+        "not supported",
+        "not valid",
+        "not permitted",
+        "invalid request",
+        "cannot be issued",
+        "3706", // Syntax error - often used for invalid commands in session context
+        "3932", // Transaction not active
+    ];
+
+    session_mode_patterns
+        .iter()
+        .any(|pattern| error_lower.contains(pattern))
+}
+
+/// Extract the transaction operation from SQL for error reporting
+fn extract_transaction_operation(sql: &str) -> String {
+    let sql_upper = sql.to_uppercase().trim().to_string();
+
+    if sql_upper.starts_with("COMMIT") || sql_upper == "ET" {
+        "COMMIT".to_string()
+    } else if sql_upper.starts_with("ROLLBACK") {
+        "ROLLBACK".to_string()
+    } else if sql_upper.starts_with("BEGIN TRANSACTION")
+        || sql_upper.starts_with("BEGIN TRAN")
+        || sql_upper == "BT"
+    {
+        "BEGIN TRANSACTION".to_string()
+    } else {
+        "Transaction control".to_string()
+    }
+}
+
+/// Extract Teradata error code from error message (e.g., "[Error 3706]" -> Some(3706))
+fn extract_error_code(error: &str) -> Option<u32> {
+    // Look for patterns like "[Error 3706]" or "Error 3706"
+    let patterns = ["[Error ", "Error "];
+
+    for pattern in patterns {
+        if let Some(start) = error.find(pattern) {
+            let after_pattern = &error[start + pattern.len()..];
+            // Find the end of the number (first non-digit or ']')
+            let end = after_pattern
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(after_pattern.len());
+            if end > 0 {
+                if let Ok(code) = after_pattern[..end].parse::<u32>() {
+                    return Some(code);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Map Teradata type name string to TeradataType enum
@@ -837,5 +928,107 @@ mod tests {
 
         // Test empty error
         assert_eq!(strip_go_stack_trace(""), "");
+    }
+
+    // Sprint 24: Tests for transaction session error detection
+
+    #[test]
+    fn test_is_transaction_session_error_commit() {
+        // COMMIT with "not allowed" should be detected
+        assert!(is_transaction_session_error(
+            "[error 3706] commit is not allowed for dbc/sql session",
+            "COMMIT"
+        ));
+
+        // COMMIT with "not supported" should be detected
+        assert!(is_transaction_session_error(
+            "commit statement not supported",
+            "COMMIT"
+        ));
+
+        // Regular query error should not be detected as session error
+        assert!(!is_transaction_session_error(
+            "syntax error in select",
+            "SELECT * FROM t"
+        ));
+    }
+
+    #[test]
+    fn test_is_transaction_session_error_rollback() {
+        assert!(is_transaction_session_error(
+            "rollback not permitted in this session mode",
+            "ROLLBACK"
+        ));
+    }
+
+    #[test]
+    fn test_is_transaction_session_error_begin_transaction() {
+        assert!(is_transaction_session_error(
+            "begin transaction cannot be issued",
+            "BEGIN TRANSACTION"
+        ));
+
+        // Teradata shorthand BT
+        assert!(is_transaction_session_error("error 3706: invalid request", "BT"));
+    }
+
+    #[test]
+    fn test_is_transaction_session_error_non_transaction_sql() {
+        // Error with "not allowed" but not a transaction statement
+        assert!(!is_transaction_session_error(
+            "select is not allowed",
+            "SELECT * FROM t"
+        ));
+
+        // Transaction-like keywords in data should not trigger
+        assert!(!is_transaction_session_error(
+            "error",
+            "INSERT INTO t (col) VALUES ('COMMIT')"
+        ));
+    }
+
+    #[test]
+    fn test_extract_transaction_operation() {
+        assert_eq!(extract_transaction_operation("COMMIT"), "COMMIT");
+        assert_eq!(extract_transaction_operation("commit;"), "COMMIT");
+        assert_eq!(extract_transaction_operation("ROLLBACK"), "ROLLBACK");
+        assert_eq!(
+            extract_transaction_operation("BEGIN TRANSACTION"),
+            "BEGIN TRANSACTION"
+        );
+        assert_eq!(
+            extract_transaction_operation("BEGIN TRAN"),
+            "BEGIN TRANSACTION"
+        );
+        assert_eq!(extract_transaction_operation("BT"), "BEGIN TRANSACTION");
+        assert_eq!(extract_transaction_operation("ET"), "COMMIT");
+        assert_eq!(
+            extract_transaction_operation("SELECT 1"),
+            "Transaction control"
+        );
+    }
+
+    #[test]
+    fn test_extract_error_code() {
+        // Standard format
+        assert_eq!(
+            extract_error_code("[Error 3706] Syntax error"),
+            Some(3706)
+        );
+
+        // Without brackets
+        assert_eq!(
+            extract_error_code("Error 3932 Transaction not active"),
+            Some(3932)
+        );
+
+        // No error code
+        assert_eq!(extract_error_code("Some other error message"), None);
+
+        // Multiple occurrences (should return first)
+        assert_eq!(
+            extract_error_code("[Error 1234] followed by Error 5678"),
+            Some(1234)
+        );
     }
 }

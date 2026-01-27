@@ -285,6 +285,75 @@ Use arrow keys to navigate your command history:
 
 Your history persists between sessions in `~/.tq_history`.
 
+#### Multi-line Command History
+
+When you write multi-line SQL statements, tq remembers them as complete commands, not line-by-line. This makes it easy to recall and edit complex queries.
+
+**How it works:**
+
+Each complete SQL statement (ending with `;`) is stored as a single history entry, regardless of how many lines it spans.
+
+**Example interaction:**
+
+```sql
+# Enter a multi-line query
+tq> SELECT
+    employee_id,
+    first_name,
+    last_name
+  FROM employees
+  WHERE department = 'IT';
+
+[Query executes, shows results]
+
+# Press ↑ to recall - the ENTIRE query comes back
+tq> SELECT
+    employee_id,
+    first_name,
+    last_name
+  FROM employees
+  WHERE department = 'IT';_
+```
+
+**Benefits:**
+
+1. **Easy editing** - Recall the full query to make changes
+2. **Natural workflow** - Works like you'd expect from a modern SQL client
+3. **Preserved formatting** - Your line breaks and indentation are maintained
+4. **Navigation within query** - Use ↑/↓ arrows to move between lines in the recalled query
+
+**History navigation example:**
+
+```sql
+# Type three queries (two multi-line, one single-line)
+
+tq> SELECT * FROM employees
+    WHERE department = 'IT';
+[Executes]
+
+tq> SELECT COUNT(*) FROM orders;
+[Executes]
+
+tq> UPDATE employees
+    SET status = 'active'
+    WHERE hire_date > '2024-01-01';
+[Executes]
+
+# Now at empty prompt - press ↑ once
+tq> UPDATE employees
+    SET status = 'active'
+    WHERE hire_date > '2024-01-01';
+
+# Press ↑ again
+tq> SELECT COUNT(*) FROM orders;
+
+# Press ↑ again
+tq> SELECT * FROM employees
+    WHERE department = 'IT';
+```
+
+Each press of ↑ recalls one complete statement, whether it was typed on one line or many.
+
 ## Other Useful Commands
 
 ### Describe Tables
@@ -387,13 +456,14 @@ tq> /quit
 3. **Use patterns** - Filter tables with `/list tables pattern` instead of viewing all tables
 4. **Watch for loading indicators** - They tell you when tq is fetching data
 5. **Use short aliases** - Commands like `\l`, `\dt`, `\d` save typing
+6. **Write readable multi-line queries** - They're stored as single history entries, so formatting makes them easier to recall and edit
 
 ## Keyboard Shortcuts Reference
 
 | Key | Action |
 |-----|--------|
 | TAB | Show completions |
-| ↑/↓ | Navigate history |
+| ↑/↓ | Navigate history (recalls complete multi-line statements) |
 | Ctrl-R | Search history |
 | Ctrl-C | Cancel current operation |
 | Ctrl-D | Exit REPL (on empty line) |

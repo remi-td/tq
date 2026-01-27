@@ -201,28 +201,12 @@ Overwrite? [y/N]: _
 **Non-interactive mode (scripts, CI):**
 ```bash
 $ tq query "SELECT * FROM users" --output users.csv
-Error: File exists: users.csv. Use --force to overwrite.
+Error: File exists: users.csv
 $ echo $?
 2
 ```
 
-### Force Overwrite
-
-Use `--force` (or `-f`) to skip the prompt:
-
-```bash
-# Overwrite without confirmation
-tq query "SELECT * FROM users" --output users.csv --force
-
-# Works in both interactive and non-interactive modes
-tq query "SELECT * FROM users" -o users.csv -f
-```
-
-**When to use `--force`:**
-- Automated scripts
-- CI/CD pipelines
-- When you're certain the file should be replaced
-- Cron jobs
+In non-interactive environments, the operation aborts if the output file exists. Delete the existing file first or use shell redirection (`>`) which always overwrites.
 
 ### Atomic Writes
 
@@ -812,8 +796,7 @@ for table in users orders products; do
   echo "Exporting $table..."
   tq query "SELECT * FROM ${table}" \
     --format json \
-    --output "${table}.json" \
-    --force
+    --output "${table}.json"
 done
 ```
 
@@ -1044,8 +1027,7 @@ for table in users orders products; do
   echo "Backing up $table..."
   tq query "SELECT * FROM ${table}" \
     --format csv \
-    --output "${BACKUP_DIR}/${table}.csv" \
-    --force
+    --output "${BACKUP_DIR}/${table}.csv"
 done
 
 echo "Backup completed: $BACKUP_DIR"
@@ -1094,6 +1076,131 @@ if [ "$row_count" -lt "$THRESHOLD" ]; then
 fi
 
 echo "Table size OK: $row_count rows"
+```
+
+---
+
+## Teradata Session Types and Transaction Support
+
+Teradata supports different session types with varying transaction capabilities. Understanding these modes helps avoid errors when using transactional features.
+
+### Session Modes
+
+**ANSI Mode (Recommended for Transactions)**
+- Explicit transaction control supported
+- Uses standard SQL syntax: BEGIN TRANSACTION, COMMIT, ROLLBACK
+- Statements do not auto-commit by default
+- Best for migration scripts and multi-step operations
+- Set by DBA or connection parameter
+
+**Teradata Mode (Default)**
+- Implicit commit for most statements
+- Uses Teradata-specific syntax: BT (Begin Transaction), ET (End Transaction)
+- Some DDL operations cannot be in transactions
+- Common in legacy systems
+
+**BTEQ Mode**
+- Legacy batch mode with limited transaction control
+- Not recommended for new applications
+
+### How Session Mode Affects --atomic Flag
+
+The `--atomic` flag behavior depends on your session mode:
+
+**ANSI Mode:**
+```bash
+$ tq query --file migration.sql --atomic
+[Uses BEGIN TRANSACTION/COMMIT/ROLLBACK]
+Statement 1: UPDATE - OK
+Statement 2: INSERT - OK
+Transaction committed
+```
+
+**Teradata Mode:**
+```bash
+$ tq query --file migration.sql --atomic
+[Uses BT/ET commands]
+Statement 1: UPDATE - OK
+Statement 2: INSERT - OK
+Transaction committed
+```
+
+The tool detects your session mode automatically and uses appropriate syntax.
+
+### DDL Transaction Limitations
+
+Some Teradata DDL statements cannot execute within transactions:
+
+```bash
+$ cat ddl_script.sql
+CREATE TABLE test (id INT);
+DROP TABLE old_table;
+ALTER TABLE users ADD COLUMN status VARCHAR(20);
+
+$ tq query --file ddl_script.sql --atomic
+Error: This statement type cannot be executed within a transaction
+
+Statement 1: CREATE TABLE - FAILED
+Reason: CREATE TABLE not allowed in transaction (Teradata mode)
+
+Transaction rolled back
+
+Suggestions:
+  - Remove --atomic flag for DDL operations
+  - Execute DDL statements separately
+  - Use ANSI mode for better transaction support (contact DBA)
+```
+
+**Solution:** Don't use `--atomic` for scripts with DDL statements.
+
+```bash
+# Execute DDL without transactions
+$ tq query --file ddl_script.sql
+Statement 1: CREATE TABLE - OK
+Statement 2: DROP TABLE - OK
+Statement 3: ALTER TABLE - OK
+```
+
+### Checking Your Session Mode
+
+To see your current session mode:
+
+```bash
+$ tq query "SELECT SessionMode FROM DBC.SessionInfoV WHERE SessionNo = SESSION"
+```
+
+**Output:**
+```
+┌─────────────┐
+│ SessionMode │
+├─────────────┤
+│ ANSI        │
+└─────────────┘
+```
+
+### Best Practices
+
+1. **Use ANSI mode for transactional workloads** - More reliable transaction support
+2. **Avoid --atomic with DDL scripts** - DDL statements often cannot be in transactions
+3. **Test in development first** - Session mode behavior can vary by environment
+4. **Separate DDL and DML** - Run schema changes separately from data changes
+5. **Contact your DBA** - They can change default session mode if needed
+
+### Error Messages
+
+If you encounter transaction errors, the tool provides guidance:
+
+```bash
+Error: Transaction control not supported
+
+This session type does not support explicit transactions.
+Session mode: BTEQ
+Operation attempted: BEGIN TRANSACTION
+
+Suggestions:
+  - Reconnect in ANSI or Teradata mode for transaction support
+  - Execute statements without --atomic flag
+  - Contact DBA to change default session mode
 ```
 
 ---

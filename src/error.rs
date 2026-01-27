@@ -167,6 +167,22 @@ pub enum TqError {
     #[error("Cannot use --atomic with SQL containing explicit transaction control")]
     AtomicConflict,
 
+    /// Transaction control not supported in current session mode
+    ///
+    /// Sprint 24: REQ-SESSION-004 - Better error messages for session limitations
+    /// Teradata has different session types (ANSI, Teradata, BTEQ/DBC/SQL) with
+    /// varying transaction control support. This error provides guidance when
+    /// transaction operations fail due to session mode limitations.
+    #[error("Transaction control not supported in current session mode")]
+    SessionModeTransactionError {
+        /// The attempted operation (e.g., "COMMIT", "BEGIN TRANSACTION")
+        operation: String,
+        /// Original error code if available (e.g., 3706)
+        error_code: Option<u32>,
+        /// Original error message from database
+        original_message: String,
+    },
+
     // ========================================================================
     // Internal Errors
     // ========================================================================
@@ -333,6 +349,35 @@ impl TqError {
                     .to_string()
             }
 
+            TqError::SessionModeTransactionError {
+                operation,
+                error_code,
+                original_message,
+            } => {
+                let error_code_str = error_code
+                    .map(|c| format!(" [Error {}]", c))
+                    .unwrap_or_default();
+
+                format!(
+                    "Error: Transaction control not supported{}\n\n\
+                     {}\n\n\
+                     Operation attempted: {}\n\n\
+                     This error typically occurs when the session mode does not support\n\
+                     explicit transaction control (e.g., DBC/SQL sessions via ODBC/JDBC).\n\n\
+                     Troubleshooting:\n  \
+                     - Verify the connection session mode supports transactions\n  \
+                     - If using --atomic, try without it and manage transactions manually\n  \
+                     - For ANSI mode databases, transactions are auto-committed by default\n  \
+                     - Contact your DBA to verify session configuration\n\n\
+                     Technical details:\n  \
+                     Teradata has different session modes:\n  \
+                     - ANSI mode: Auto-commit by default, explicit BEGIN required\n  \
+                     - Teradata mode: Implicit transactions, COMMIT/ROLLBACK supported\n  \
+                     - DBC/SQL (ODBC/JDBC): May restrict transaction control statements",
+                    error_code_str, original_message, operation
+                )
+            }
+
             // Default: use the Display implementation
             _ => format!("Error: {}", self),
         }
@@ -394,5 +439,58 @@ mod tests {
         let msg = err.user_message();
         assert!(msg.contains("--password-file"));
         assert!(msg.contains("TQ_PASSWORD"));
+    }
+
+    #[test]
+    fn test_user_message_session_mode_transaction_error() {
+        let err = TqError::SessionModeTransactionError {
+            operation: "COMMIT".to_string(),
+            error_code: Some(3706),
+            original_message: "COMMIT is not allowed for DBC/SQL session".to_string(),
+        };
+        let msg = err.user_message();
+
+        // Should contain the operation
+        assert!(msg.contains("COMMIT"));
+
+        // Should contain the error code
+        assert!(msg.contains("3706"));
+
+        // Should contain the original message
+        assert!(msg.contains("DBC/SQL session"));
+
+        // Should contain troubleshooting guidance
+        assert!(msg.contains("Troubleshooting"));
+        assert!(msg.contains("session mode"));
+    }
+
+    #[test]
+    fn test_user_message_session_mode_transaction_error_no_code() {
+        let err = TqError::SessionModeTransactionError {
+            operation: "BEGIN TRANSACTION".to_string(),
+            error_code: None,
+            original_message: "Transaction control not supported".to_string(),
+        };
+        let msg = err.user_message();
+
+        // Should contain the operation
+        assert!(msg.contains("BEGIN TRANSACTION"));
+
+        // Should not contain error code format since None
+        assert!(!msg.contains("[Error "));
+
+        // Should still contain troubleshooting
+        assert!(msg.contains("Troubleshooting"));
+    }
+
+    #[test]
+    fn test_session_mode_error_exit_code() {
+        let err = TqError::SessionModeTransactionError {
+            operation: "COMMIT".to_string(),
+            error_code: Some(3706),
+            original_message: "test".to_string(),
+        };
+        // Runtime errors should return exit code 1
+        assert_eq!(err.exit_code(), 1);
     }
 }

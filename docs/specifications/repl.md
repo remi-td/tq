@@ -133,8 +133,12 @@ Exclude commands containing sensitive patterns:
 - Non-consecutive duplicates: Store each occurrence
 
 **Multi-line Commands**:
-- Multi-line SQL stored as single history entry
-- Recalled as complete multi-line block on ↑ arrow
+- Multi-line SQL statements are grouped until semicolon terminator (`;`)
+- Each complete statement (which may span multiple lines) is stored as single history entry
+- Pressing ↑ arrow recalls complete multi-line statement, not individual lines
+- Recalled multi-line statements preserve original line breaks and formatting
+- Within a recalled multi-line statement, cursor navigation allows line-by-line editing
+- History file stores multi-line statements with embedded newlines preserved
 
 **History Exclusions**:
 - Empty lines
@@ -147,6 +151,99 @@ Exclude commands containing sensitive patterns:
 - Configurable via `TQ_HISTORY_SIZE` environment variable
 - Minimum: 100 entries
 - Maximum: 1,000,000 entries
+
+**Multi-line History Navigation Requirements**:
+
+**REQ-HIST-001: Statement Grouping**
+- SQL input continues across lines until semicolon terminator (`;`) is encountered
+- The complete multi-line statement is treated as single logical entry
+- Statement boundaries defined by `;` character (not by line breaks)
+
+**REQ-HIST-002: History Storage**
+- Multi-line statements stored as single entry with embedded newlines preserved
+- File format: newlines within statement stored as literal `\n` or actual newlines (implementation choice)
+- Backward compatibility: existing history files continue to work
+
+**REQ-HIST-003: History Recall**
+- Pressing ↑ arrow recalls previous complete statement
+- If statement spans multiple lines, entire statement appears in input buffer
+- Original line breaks and indentation preserved
+- Cursor positioned at end of recalled statement
+
+**REQ-HIST-004: Navigation Within Recalled Statement**
+- After recalling multi-line statement, ↑/↓ arrows move cursor between lines within statement
+- Ctrl-P/Ctrl-N also navigate within multi-line statement (Emacs mode)
+- j/k keys navigate within statement in Vi normal mode
+- Left/right arrows work normally for character navigation
+
+**REQ-HIST-005: Editing Recalled Statement**
+- User can edit any line within recalled multi-line statement
+- Changes apply to complete statement
+- Executing modified statement adds it as new history entry
+
+**REQ-HIST-006: Line-by-Line Input vs Recall Behavior**
+
+During initial input (typing new query):
+```sql
+tq> SELECT employee_id,     [press Enter - continues to next line]
+    first_name,             [press Enter - continues to next line]
+    last_name               [press Enter - continues to next line]
+  FROM employees            [press Enter - continues to next line]
+  WHERE salary > 50000;     [press Enter - executes complete statement]
+```
+
+During recall (pressing ↑):
+```sql
+tq> [press ↑ arrow]
+tq> SELECT employee_id,
+    first_name,
+    last_name
+  FROM employees
+  WHERE salary > 50000;     [cursor here - complete statement recalled]
+```
+
+**REQ-HIST-007: History Traversal**
+- First ↑: recalls most recent statement (may be multi-line)
+- Second ↑: recalls second-most recent statement (may be multi-line)
+- ↓ after ↑: moves forward through history
+- History navigation treats each complete statement (single or multi-line) as one entry
+
+**Example Interaction:**
+
+User enters three multi-line queries:
+
+```sql
+# Query 1 (multi-line)
+tq> SELECT * FROM employees
+    WHERE department = 'IT';
+[Executes]
+
+# Query 2 (single-line)
+tq> SELECT COUNT(*) FROM orders;
+[Executes]
+
+# Query 3 (multi-line)
+tq> UPDATE employees
+    SET status = 'active'
+    WHERE hire_date > '2024-01-01';
+[Executes]
+
+# Now at empty prompt
+tq> [press ↑ once]
+# Shows complete Query 3:
+tq> UPDATE employees
+    SET status = 'active'
+    WHERE hire_date > '2024-01-01';
+
+tq> [press ↑ again]
+# Shows complete Query 2:
+tq> SELECT COUNT(*) FROM orders;
+
+tq> [press ↑ again]
+# Shows complete Query 1:
+tq> SELECT * FROM employees
+    WHERE department = 'IT';
+```
 
 ### Line Editing
 
