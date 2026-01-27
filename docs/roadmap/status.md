@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-01-27
-**Current Version:** 1.11.1
-**Latest Sprint:** Sprint 25 Complete (Documentation & Issue Template Fixes)
+**Current Version:** 1.12.0
+**Latest Sprint:** Sprint 26 Complete (System Monitoring - /sessions Command)
 
 ---
 
@@ -116,6 +116,15 @@ All core features are complete and tested.
 - SqlStatementValidator: Leverages reedline Validator trait for multi-line input handling
 - Process improvements: Sprint 22 & 23 lessons applied to prevent documentation errors
 
+**Sprint 26 Enhancements (v1.12.0):**
+- `/sessions` command: List active Teradata sessions with performance metrics
+- Session monitoring: Display SessionNo, UserName, LogonTime, PEstate, AMPState
+- Performance metrics: AMPCPUSec, AMPIO, ReqSpool with thousand separators
+- Skew calculation: CPU and I/O distribution across AMPs for bottleneck detection
+- Batch mode integration: `tq sessions` standalone command
+- Tab completion: `/sessions` and `/s` alias in completion menu
+- Multi-format support: Table, CSV, and JSON output for session data
+
 ---
 
 ## Batch Mode
@@ -167,14 +176,25 @@ All core features are complete and tested.
 
 ---
 
+## System Monitoring
+
+| Feature | Status | Spec Reference | Since |
+|---------|--------|----------------|-------|
+| `/sessions` command (REPL) | ✅ | [REPL Mode](../specifications/repl.md#session-monitoring) | v1.12.0 (Sprint 26) |
+| `tq sessions` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#sessions-command) | v1.12.0 (Sprint 26) |
+| Session performance metrics | ✅ | [REPL Mode](../specifications/repl.md#session-monitoring) | v1.12.0 (Sprint 26) |
+| CPU/IO skew calculation | ✅ | [REPL Mode](../specifications/repl.md#session-monitoring) | v1.12.0 (Sprint 26) |
+
+---
+
 ## Summary Statistics
 
-- **Total Features**: 61
-- **Implemented**: 56 (92%)
+- **Total Features**: 62
+- **Implemented**: 57 (92%)
 - **Planned**: 5 (8%)
-- **Test Pass Rate**: 100% (357/357 tests: 291 unit, 39 integration, 26 PTY, 1 process)
+- **Test Pass Rate**: 100% (357/357 tests: 320 unit, 8 integration, 25 interactive, 4 doc)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 24 - REPL History Enhancement & Process Improvements (Multi-line history, Doc verification)
+- **Latest Sprint**: Sprint 26 - System Monitoring (Sessions command with performance metrics)
 
 ---
 
