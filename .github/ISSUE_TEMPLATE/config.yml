@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📚 Documentation
+    url: https://github.com/yourusername/tq/blob/master/README.md
+    about: Check the documentation for usage guides and examples
+  - name: 💬 General Question or Discussion
+    url: https://github.com/yourusername/tq/discussions
+    about: Ask questions or discuss ideas in GitHub Discussions

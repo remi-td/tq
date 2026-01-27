@@ -1,6 +1,8 @@
 # Incoming Feedback and Issues
 
-This directory is a temporary location for user feedback, bug reports, and feature requests until GitHub Issues integration is implemented.
+**⚠️ DEPRECATED:** This directory is no longer used. Please use [GitHub Issues](https://github.com/yourusername/tq/issues) for all bug reports and feature requests.
+
+This directory was a temporary location for user feedback, bug reports, and feature requests. It has been replaced by GitHub Issues integration.
 
 ## Purpose
 
