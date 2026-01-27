@@ -38,6 +38,7 @@ Review the last 3 sprint reviews. Look for stuck issues, accumulating debt, or f
 
 Create `docs/sprints/sprint-N-planning.md` with objectives and acceptance criteria.
 Use `.claude/skills/sprint-coordinator/references/sprint-planning-template.md` as template.
+**Integrate with GitHub Issues:** Use `/github-issues` skill to fetch sprint-ready issues and update selected issues.
 
 **If Maintenance Sprint (Crisis Detected):**
 > **Read:** `.claude/skills/sprint-coordinator/process/phase1-maintainance-planning.md`
@@ -74,7 +75,9 @@ Validate against `definitions/done.md`:
 - No new TODOs?
 - Docs synchronized?
 
-If all pass: `git commit`, `git push`. Then proceed to Phase 5.
+If all pass: `git commit`, `git push`.
+**Update GitHub Issues:** Use `/github-issues` skill to close/update issues addressed in sprint.
+Then proceed to Phase 5.
 
 ### Phase 5: Retrospective
 > **Read:** `process/phase5-review.md`

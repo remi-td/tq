@@ -18,6 +18,7 @@ Use the following skills when working with code in this repository:
 ### Sprint Management Skills
 - **sprint-coordinator**: Coordinates sprint phases and manages the sprint-driven development workflow (use when starting a new sprint)
 - **sprint-reviewer**: Coordinates comprehensive sprint retrospectives with specialized agents, producing consolidated review documents
+- **github-issues**: Manages GitHub issues for sprint intake, triage, and lifecycle management (use when triaging new issues, selecting issues for sprints, or updating issue status)
 - **collect-metrics**: Collects token usage metrics from sprint subagent transcripts for framework optimization
 - **optimize-agents**: Analyzes historical sprint metrics to identify framework optimization opportunities
 
@@ -94,6 +95,49 @@ Each sprint produces two key documents:
 These documents provide shared context for all agents and track sprint progress.
 
 See the sprint-coordinator skill for complete details on Phase 6: Framework Optimization, which implements continuous improvement through sprint retrospective analysis and optional token metrics.
+
+#### GitHub Issues Integration
+
+The project uses GitHub Issues for feature requests, bug reports, and user feedback. This replaces the legacy `incoming/` folder approach.
+
+**IMPORTANT: Use the `/github-issues` skill for all GitHub issue management tasks.**
+
+**Issue Lifecycle:**
+
+1. **Intake**: Users create issues using templates (`.github/ISSUE_TEMPLATE/`)
+2. **Triage**: `/github-issues` skill analyzes new issues and applies labels:
+   - `sprint-ready` - Accepted and ready for sprint inclusion
+   - `needs-info` - Requires clarification from issue author
+   - `wont-fix` - Rejected as out of scope
+   - `duplicate` - Duplicate of existing issue
+3. **Planning** (Phase 1): Sprint coordinator fetches `sprint-ready` issues, includes selected ones in sprint plan
+4. **Tracking**: Issues are commented with sprint inclusion notice in Phase 1
+5. **Closure** (Phase 4): Issues are updated/closed with implementation details after successful commit and push
+
+**Issue Labels:**
+
+Workflow:
+- `sprint-ready` - Triaged and ready for sprint inclusion
+- `needs-info` - Requires user clarification
+- `wont-fix` - Rejected as out of scope
+- `duplicate` - Duplicate of existing issue
+
+Type:
+- `bug` - Something isn't working correctly
+- `enhancement` - New feature or improvement request
+- `documentation` - Documentation updates
+
+Priority:
+- `priority-high` - High priority, blocking or critical
+- `priority-medium` - Medium priority, important but not blocking
+- `priority-low` - Low priority, nice to have
+
+**Sprint Integration Points:**
+
+- **Phase 1 (Planning)**: Use `/github-issues` to fetch sprint-ready issues, select for sprint, comment on selected issues
+- **Phase 4 (Ship)**: Use `/github-issues` to close completed issues with implementation details, or comment on partial implementations
+
+**Autonomous Operation**: The github-issues skill operates autonomously. It makes triage decisions based on project scope and specifications without requiring user approval.
 
 ### Documentation Organization
 

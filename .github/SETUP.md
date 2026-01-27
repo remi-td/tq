@@ -186,36 +186,6 @@ gh issue list --state open --json number,updatedAt \
   | xargs -I {} gh issue close {} --comment "Closing due to inactivity. Please reopen if still relevant."
 ```
 
-## Migrating from `incoming/` Folder
-
-If you have pending items in the legacy `incoming/` folder:
-
-1. **Create GitHub issues for each item:**
-   ```bash
-   # For bugs
-   gh issue create \
-     --title "Bug: [description]" \
-     --body "$(cat incoming/bug-file.md)" \
-     --label "bug"
-
-   # For features
-   gh issue create \
-     --title "[description]" \
-     --body "$(cat incoming/feature-file.md)" \
-     --label "enhancement"
-   ```
-
-2. **Triage the newly created issues:**
-   ```bash
-   /github-issues
-   ```
-
-3. **Archive the incoming folder:**
-   ```bash
-   mkdir -p archive/incoming-legacy
-   mv incoming/*.md archive/incoming-legacy/
-   ```
-
 ## Troubleshooting
 
 ### `gh` command not found

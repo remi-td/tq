@@ -141,9 +141,9 @@ Play nice with pipes, redirects, and other command-line tools.
 
 ## Feedback
 
-We're building tq in the open with continuous user feedback. Have ideas or found issues? 
+We're building tq in the open with continuous user feedback. Have ideas or found issues?
 
-Add feature requests or bug reports to `docs/builder/incoming/` following the templates in the README.
+Submit feature requests or bug reports as [GitHub Issues](https://github.com/remi-td/tq/issues/new/choose). Use the provided templates to help us understand your needs.
 
 ---
 

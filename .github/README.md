@@ -43,7 +43,6 @@ Professional issue templates that guide users to provide complete, actionable in
   - Label creation instructions
   - Issue template verification
   - Workflow integration for sprint coordinators
-  - Migration guide from legacy `incoming/` folder
   - Troubleshooting section
 
 ## Quick Start

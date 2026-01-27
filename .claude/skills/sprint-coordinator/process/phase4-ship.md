@@ -52,6 +52,62 @@ git commit -m "Complete Sprint N: [Summary of features]
 git push origin main
 ```
 
+### Step 3.5: Update GitHub Issues
+
+**CRITICAL**: After successful push, use `/github-issues` skill to update completed issues.
+
+For each GitHub issue addressed in this sprint:
+
+**If fully implemented:**
+```bash
+gh issue close <number> --comment "$(cat <<'EOF'
+## Implementation Complete ✅
+
+**Implemented in Sprint N**
+
+**Changes:**
+- [Summary of implementation]
+
+**Commits:**
+- <commit-hash>: <commit-message>
+
+**Documentation:**
+- Updated: `docs/specifications/<file>.md`
+- Design: `docs/design/<file>.md`
+- Tests: `tests/cases/TC-XXX.md`
+
+**Test Results:** ✅ All tests passing
+
+**Sprint Review:** See docs/sprints/sprint-N-review.md for full details.
+
+Thank you for the feature request!
+EOF
+)"
+```
+
+**If partially implemented or needs follow-up:**
+```bash
+gh issue comment <number> --body "$(cat <<'EOF'
+## Progress Update - Sprint N
+
+**Completed:**
+- [What was implemented]
+
+**Remaining:**
+- [What's still pending]
+
+**Status:** Keeping issue open for remaining work
+
+**Sprint Review:** See docs/sprints/sprint-N-review.md
+EOF
+)"
+```
+
+**Verification:**
+- All issues mentioned in sprint-N-planning.md are updated
+- Closed issues have complete implementation details
+- Open issues have progress comments
+
 ### Step 4: Update Roadmap (Required)
 
 **CRITICAL**: These updates are MANDATORY. Roadmap tracking depends on this step.
@@ -88,7 +144,7 @@ After:
    - If it was blocking other features, update dependencies
 3. **Reprioritize if needed**:
    - Move items between P0/P1/P2 based on what's now possible
-   - Add any new feature requests from `incoming/`
+   - GitHub issues with `sprint-ready` label are potential backlog items
 
 **Verification**:
 - No feature should appear in BOTH status.md (as ✅) AND backlog.md

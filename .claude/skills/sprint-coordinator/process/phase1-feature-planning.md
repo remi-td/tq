@@ -40,17 +40,20 @@ Read relevant context to inform sprint planning:
    - What P1 (high priority) features should be next?
    - Any dependencies that are now unblocked?
 
-3. **Review `incoming/`**:
-   - Any new bug reports to address?
-   - Any new feature requests to consider?
-   - Any user feedback to incorporate?
+3. **Review GitHub Issues**:
+   - Use `/github-issues` skill to fetch sprint-ready issues
+   - Focus on issues labeled `sprint-ready`
+   - Review by priority: `priority-high` first, then `priority-medium`
+   - Check mix of bugs vs enhancements vs documentation
 
 4. **Scan `docs/specifications/*.md`**:
    - Understand full requirements for selected features
    - Check for any specification updates needed
+   - Verify issues align with specifications
 
 5. **Update backlog if needed**:
-   - Add new items from `incoming/` to `docs/roadmap/backlog.md`
+   - Add newly accepted GitHub issues to `docs/roadmap/backlog.md`
+   - Include GitHub issue numbers (e.g., "CSV Export (#42)")
    - Reprioritize based on recent learnings
    - Mark urgent bugs as P0
 
@@ -77,16 +80,36 @@ Append to the sprint planning document `docs/sprints/sprint-N-planning.md`:
 
 ## Scope
 ### In Scope
-- [Feature/Fix 1]
-- [Feature/Fix 2]
+- [Feature/Fix 1] (#IssueNumber if applicable)
+- [Feature/Fix 2] (#IssueNumber if applicable)
 
 ### Out of Scope
 - [Explicitly excluded items]
+
+## GitHub Issues
+### Selected for Sprint
+- #XX: [Issue title] (priority-high, bug)
+- #YY: [Issue title] (priority-medium, enhancement)
+
+### Deferred
+- #ZZ: [Issue title] - [Reason for deferral]
 
 ## Dependencies
 - [External dependencies or blockers]
 ```
 
+### Step 4: Update Selected GitHub Issues
+
+After planning document is complete, use `/github-issues` skill to comment on selected issues:
+
+For each issue included in the sprint:
+```bash
+gh issue comment <number> --body "Included in Sprint N. See planning document: docs/sprints/sprint-N-planning.md"
+```
+
+This creates traceability between GitHub issues and sprint execution.
+
 ## Output
-- `docs/sprints/sprint-N-planning.md` updated.
+- `docs/sprints/sprint-N-planning.md` updated with objectives, scope, and GitHub issue references
+- Selected GitHub issues commented with sprint inclusion notice
 - **Immediately proceed to Phase 2 (Design)** - No approval needed. Execute autonomously.
