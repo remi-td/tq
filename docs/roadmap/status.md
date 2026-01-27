@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-01-27
-**Current Version:** 1.11.0
-**Latest Sprint:** Sprint 24 Complete (REPL History Enhancement & Process Improvements)
+**Current Version:** 1.11.1
+**Latest Sprint:** Sprint 25 Complete (Documentation & Issue Template Fixes)
 
 ---
 
