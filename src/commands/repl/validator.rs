@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn test_validator_default() {
-        let validator = SqlStatementValidator::default();
+        let validator = SqlStatementValidator;
         assert!(matches!(
             validator.validate("SELECT 1;"),
             ValidationResult::Complete

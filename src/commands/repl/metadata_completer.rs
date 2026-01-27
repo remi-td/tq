@@ -283,6 +283,12 @@ const METACOMMANDS: &[MetacommandDef] = &[
         aliases: &["dv"],
         description: "List views in current database",
     },
+    // Sprint 26: Sessions command
+    MetacommandDef {
+        name: "sessions",
+        aliases: &["s"],
+        description: "List active sessions with performance metrics",
+    },
 ];
 
 /// Complete metacommands based on user input prefix
@@ -1084,5 +1090,22 @@ mod tests {
         let suggestions = completer.complete("\\q", 2);
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
         assert!(values.contains(&"/quit"));
+    }
+
+    #[test]
+    fn test_complete_metacommands_sessions() {
+        // Test /sessions command tab completion (Sprint 26)
+        let suggestions = complete_metacommands("sess", 0, 5);
+        let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
+        assert!(values.contains(&"/sessions"));
+    }
+
+    #[test]
+    fn test_complete_metacommands_sessions_alias() {
+        // Test that /s prefix shows /sessions among completions
+        let suggestions = complete_metacommands("s", 0, 2);
+        let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
+        // /s should match /sessions (which has alias /s), /session, and /sample
+        assert!(values.contains(&"/sessions"));
     }
 }

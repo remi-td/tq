@@ -203,6 +203,14 @@ pub enum Command {
     /// Display all connection profiles defined in the configuration file.
     /// Shows profile names and partial connection info (no passwords).
     Profiles,
+
+    /// List active database sessions with performance metrics
+    ///
+    /// Displays active Teradata sessions including user, state, and
+    /// performance metrics (CPU, IO, skew percentages).
+    ///
+    /// Requires SELECT privilege on DBC.MonitorSession.
+    Sessions(SessionsArgs),
 }
 
 /// Arguments for the help command
@@ -308,6 +316,30 @@ pub struct QueryArgs {
     /// control (BEGIN TRANSACTION, COMMIT, ROLLBACK).
     #[arg(long)]
     pub atomic: bool,
+}
+
+/// Arguments for the sessions command (Sprint 26)
+#[derive(Parser, Debug)]
+pub struct SessionsArgs {
+    /// Output format
+    ///
+    /// table: Human-readable ASCII table (default)
+    /// json: JSON array of session objects
+    /// csv: Comma-separated values
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    ///
+    /// If the file exists, it will be overwritten.
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
 }
 
 /// Arguments for the REPL command

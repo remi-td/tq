@@ -95,6 +95,19 @@ fn run(cli: Cli) -> Result<()> {
             // Sprint 7: Pass ownership of client to REPL for /logon support
             commands::repl(client, &args, &mut stdout, use_color, verbose)?;
         }
+        // Sprint 26: Sessions command for system monitoring
+        Command::Sessions(args) => {
+            if args.output.is_some() {
+                // Write to file
+                let file = std::fs::File::create(args.output.as_ref().unwrap())?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::sessions(&client, &args, &mut writer, use_color)?;
+            } else {
+                // Write to stdout
+                let mut stdout = io::stdout();
+                commands::sessions(&client, &args, &mut stdout, use_color)?;
+            }
+        }
         // Help and Profiles already handled above
         Command::Help(_) | Command::Profiles => unreachable!(),
     }

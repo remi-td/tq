@@ -1763,6 +1763,501 @@ This is native reedline behavior - no additional implementation needed.
 
 ---
 
+## Sessions Command (Sprint 26)
+
+This section documents the technical design for the `/sessions` metacommand, which displays active Teradata sessions with performance metrics.
+
+### Overview
+
+The `/sessions` command queries the Teradata `MonitorSession` table function to display real-time session activity. This is valuable for DBAs and developers who need visibility into system utilization, running queries, and performance issues like CPU/IO skew.
+
+### Architecture
+
+```
+Sessions Command Flow:
+
+User types "/sessions" or "tq --sessions"
+        |
+        v
+Parse command (REPL or batch mode)
+        |
+        v
+Build MonitorSession SQL query
+        |
+        v
+Execute via DatabaseClient.execute()
+        |
+        v
+Format results (calculate skew %, format timestamps)
+        |
+        v
+Display using standard table formatter
+```
+
+### Implementation Location
+
+**Primary file**: `src/commands/repl/metacommands.rs`
+
+**New function**: `execute_sessions()`
+
+**Related changes**:
+- `src/cli.rs` - Add `Sessions` command variant
+- `src/main.rs` - Handle `--sessions` flag in batch mode
+- `src/commands/mod.rs` - Add `sessions()` function
+- `src/commands/repl/metadata_completer.rs` - Add `/sessions` to metacommand completion
+
+### SQL Query Design
+
+The query uses Teradata's `MonitorSession` table function:
+
+```sql
+SELECT
+    SessionNo,
+    UserName,
+    LogonTime,
+    PEState,
+    AMPState,
+    AMPCPUSec,
+    AMPIO,
+    ReqSpool,
+    AvgAmpCPUSec,
+    HotAmp1CPU,
+    AvgAmpIOCnt,
+    HotAmp1IO
+FROM TABLE (MonitorSession(-1, '*', 0)) AS t1
+ORDER BY SessionNo
+```
+
+**Query Parameters:**
+- `-1`: Query all sessions (not just current user's sessions)
+- `'*'`: All users (wildcard)
+- `0`: Include all session types
+
+**Design Decision:** The skew calculation is performed in Rust rather than SQL to:
+1. Keep the SQL query simple and portable
+2. Handle NULL values explicitly in the display layer
+3. Allow flexible formatting of skew percentages
+
+### Skew Calculation Algorithm
+
+Skew measures how unevenly work is distributed across AMPs (parallel processing units).
+
+**CPU Skew Formula:**
+```rust
+cpu_skew = if hot_amp1_cpu > 0.0 {
+    Some(100.0 * (1.0 - (avg_amp_cpu_sec / hot_amp1_cpu)))
+} else {
+    None  // Display as [NULL] for idle sessions
+}
+```
+
+**IO Skew Formula:**
+```rust
+io_skew = if hot_amp1_io > 0.0 {
+    Some(100.0 * (1.0 - (avg_amp_io_cnt / hot_amp1_io)))
+} else {
+    None  // Display as [NULL] for idle sessions
+}
+```
+
+**Interpretation:**
+- `0%` = Perfect balance (all AMPs doing equal work)
+- Higher `%` = More skewed (one AMP doing disproportionate work)
+- `NULL` = Session is idle (no AMP activity to measure)
+
+### LogonTime Formatting
+
+The `LogonTime` column from Teradata is a TIMESTAMP. Format as specified:
+
+```rust
+fn format_logon_time(ts: &str) -> String {
+    // Input: "2026-01-27 15:33:26.00" (Teradata TIMESTAMP)
+    // Output: "2026/01/27 15:33:26.00" (User-friendly format)
+    ts.replace('-', "/")
+}
+```
+
+### Implementation Details
+
+#### Metacommand Handler Integration
+
+```rust
+// In handle_metacommand_with_state()
+match command.as_str() {
+    // ... existing commands ...
+
+    // Sprint 26: Sessions command
+    "sessions" | "s" => {
+        execute_sessions(completion_state.client(), writer)?;
+    }
+
+    // ... rest of commands ...
+}
+```
+
+#### Execute Sessions Function
+
+```rust
+/// Execute /sessions metacommand
+///
+/// Lists active Teradata sessions with performance metrics including
+/// CPU/IO skew percentages.
+///
+/// Uses MonitorSession(-1, '*', 0) table function which requires
+/// SELECT privilege on DBC.MonitorSession.
+fn execute_sessions<W: Write>(
+    client: &DatabaseClient,
+    writer: &mut W,
+) -> Result<()> {
+    writeln!(writer)?;
+
+    let sql = r#"
+        SELECT
+            SessionNo,
+            UserName,
+            LogonTime,
+            PEState,
+            AMPState,
+            AMPCPUSec,
+            AMPIO,
+            ReqSpool,
+            AvgAmpCPUSec,
+            HotAmp1CPU,
+            AvgAmpIOCnt,
+            HotAmp1IO
+        FROM TABLE (MonitorSession(-1, '*', 0)) AS t1
+        ORDER BY SessionNo
+    "#;
+
+    match client.execute(sql) {
+        Ok(result) => {
+            // Process rows and calculate skew
+            let sessions: Vec<SessionInfo> = result.rows.iter()
+                .filter_map(|row| SessionInfo::from_row(row))
+                .collect();
+
+            // Display results using table formatter
+            display_sessions(&sessions, writer)?;
+
+            writeln!(writer)?;
+            writeln!(writer, "{} active session(s)", sessions.len())?;
+        }
+        Err(e) => {
+            // Handle privilege errors gracefully
+            if e.to_string().contains("privilege") ||
+               e.to_string().contains("access") {
+                writeln!(writer, "Error: Insufficient privileges to query sessions.")?;
+                writeln!(writer)?;
+                writeln!(writer, "Required: SELECT privilege on DBC.MonitorSession")?;
+                writeln!(writer, "Contact your DBA to grant access.")?;
+            } else {
+                writeln!(writer, "Error listing sessions: {}", e)?;
+            }
+        }
+    }
+
+    writeln!(writer)?;
+    Ok(())
+}
+```
+
+#### SessionInfo Struct
+
+```rust
+/// Session information extracted from MonitorSession result
+struct SessionInfo {
+    session_no: i64,
+    user_name: String,
+    logon_time: String,
+    pe_state: String,
+    amp_state: String,
+    amp_cpu_sec: f64,
+    amp_io: i64,
+    req_spool: i64,
+    cpu_skew: Option<f64>,  // None for idle sessions
+    io_skew: Option<f64>,   // None for idle sessions
+}
+
+impl SessionInfo {
+    fn from_row(row: &[Value]) -> Option<Self> {
+        // Extract values with proper null handling
+        let session_no = row.get(0)?.as_integer()?;
+        let user_name = row.get(1)?.as_string()?.trim().to_string();
+        let logon_time = format_logon_time(row.get(2)?.as_timestamp()?);
+        let pe_state = row.get(3)?.as_string()?.trim().to_string();
+        let amp_state = row.get(4)?.as_string()?.trim().to_string();
+        let amp_cpu_sec = row.get(5)?.as_decimal().unwrap_or(0.0);
+        let amp_io = row.get(6)?.as_integer().unwrap_or(0);
+        let req_spool = row.get(7)?.as_integer().unwrap_or(0);
+
+        // Calculate skew percentages
+        let avg_amp_cpu = row.get(8)?.as_decimal().unwrap_or(0.0);
+        let hot_amp1_cpu = row.get(9)?.as_decimal().unwrap_or(0.0);
+        let avg_amp_io = row.get(10)?.as_decimal().unwrap_or(0.0);
+        let hot_amp1_io = row.get(11)?.as_decimal().unwrap_or(0.0);
+
+        let cpu_skew = calculate_skew(avg_amp_cpu, hot_amp1_cpu);
+        let io_skew = calculate_skew(avg_amp_io, hot_amp1_io);
+
+        Some(Self {
+            session_no,
+            user_name,
+            logon_time,
+            pe_state,
+            amp_state,
+            amp_cpu_sec,
+            amp_io,
+            req_spool,
+            cpu_skew,
+            io_skew,
+        })
+    }
+}
+
+fn calculate_skew(avg: f64, hot: f64) -> Option<f64> {
+    if hot > 0.0 {
+        Some(100.0 * (1.0 - (avg / hot)))
+    } else {
+        None
+    }
+}
+```
+
+### Batch Mode Integration
+
+The `--sessions` flag provides the same functionality in batch mode.
+
+#### CLI Definition (src/cli.rs)
+
+```rust
+/// Available commands for tq
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    // ... existing commands ...
+
+    /// List active database sessions with performance metrics
+    ///
+    /// Displays active Teradata sessions including user, state, and
+    /// performance metrics (CPU, IO, skew percentages).
+    Sessions(SessionsArgs),
+}
+
+/// Arguments for the sessions command
+#[derive(Parser, Debug)]
+pub struct SessionsArgs {
+    /// Output format
+    #[arg(short, long, default_value = "table", value_name = "FORMAT")]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+```
+
+#### Main Handler (src/main.rs)
+
+```rust
+Command::Sessions(args) => {
+    let mut stdout = io::stdout();
+    commands::sessions(&client, &args, &mut stdout, use_color)?;
+}
+```
+
+### Tab Completion Integration
+
+Add `/sessions` to the metacommand completion registry:
+
+```rust
+// In metadata_completer.rs, METACOMMANDS array
+MetacommandDef {
+    name: "sessions",
+    aliases: &["s"],
+    description: "List active sessions with performance metrics"
+},
+```
+
+### Error Handling
+
+#### Privilege Error
+
+```
+tq> /sessions
+
+Error: Insufficient privileges to query sessions.
+
+Required: SELECT privilege on DBC.MonitorSession
+Contact your DBA to grant access.
+```
+
+**Detection:** Check error message for "privilege", "access", or error code 3523.
+
+#### Connection Error
+
+```
+tq> /sessions
+
+Error listing sessions: Connection lost to host:port
+Use /reconnect to establish new connection
+```
+
+#### Empty Result Set
+
+```
+tq> /sessions
+
+Sessions:
+(no active sessions found)
+
+0 active session(s)
+```
+
+Note: This is rare since the current session would normally appear.
+
+### Teradata Compatibility
+
+**Required Teradata Version:** 14.10+
+
+The `MonitorSession` table function was introduced in Teradata 14.10. Earlier versions do not support this syntax.
+
+**Version Detection:** If the query fails with a syntax error mentioning "MonitorSession", display:
+
+```
+Error: MonitorSession function not available.
+
+This feature requires Teradata 14.10 or later.
+Your system may be running an earlier version.
+```
+
+### Performance Considerations
+
+- **Query Speed:** MonitorSession(-1) queries all sessions - typically <1 second
+- **Result Size:** Usually small (tens to hundreds of sessions)
+- **System Impact:** Minimal - reads from session control structures
+- **No Caching:** Results are always live (no caching)
+
+### Output Format
+
+**Table Format (default):**
+```
+Sessions:
+┌───────────┬──────────┬────────────────────────┬────────────┬──────────┬───────────┬───────┬─────────────┬────────────────┬──────────────┐
+│ SessionNo │ UserName │ LogonTime              │ PEState    │ AMPState │ AMPCPUSec │ AMPIO │ ReqSpool    │ Amp CPU Skew % │ Amp IO Skew %│
+├───────────┼──────────┼────────────────────────┼────────────┼──────────┼───────────┼───────┼─────────────┼────────────────┼──────────────┤
+│      1076 │ DBC      │ 2026/01/27 15:33:26.00 │ IDLE       │ IDLE     │         0 │     6 │           0 │         [NULL] │       [NULL] │
+│      1077 │ DBC      │ 2026/01/27 15:33:27.00 │ IDLE       │ IDLE     │     0.376 │  6782 │           0 │         [NULL] │       [NULL] │
+│      1078 │ DBC      │ 2026/01/27 15:33:28.00 │ DISPATCHING│ ACTIVE   │   366.736 │ 75335 │ 26753187840 │           2.87 │         3.78 │
+└───────────┴──────────┴────────────────────────┴────────────┴──────────┴───────────┴───────┴─────────────┴────────────────┴──────────────┘
+
+3 active session(s)
+```
+
+**JSON Format:**
+```json
+[
+  {
+    "SessionNo": 1076,
+    "UserName": "DBC",
+    "LogonTime": "2026/01/27 15:33:26.00",
+    "PEState": "IDLE",
+    "AMPState": "IDLE",
+    "AMPCPUSec": 0,
+    "AMPIO": 6,
+    "ReqSpool": 0,
+    "AmpCPUSkew": null,
+    "AmpIOSkew": null
+  }
+]
+```
+
+**CSV Format:**
+```csv
+SessionNo,UserName,LogonTime,PEState,AMPState,AMPCPUSec,AMPIO,ReqSpool,Amp CPU Skew %,Amp IO Skew %
+1076,DBC,2026/01/27 15:33:26.00,IDLE,IDLE,0,6,0,,
+1077,DBC,2026/01/27 15:33:27.00,IDLE,IDLE,0.376,6782,0,,
+1078,DBC,2026/01/27 15:33:28.00,DISPATCHING,ACTIVE,366.736,75335,26753187840,2.87,3.78
+```
+
+### Code Linkage
+
+| Component | File Path | Key Changes |
+|-----------|-----------|-------------|
+| Metacommand handler | `src/commands/repl/metacommands.rs` | Add `execute_sessions()` function |
+| Help text | `src/commands/repl/metacommands.rs` | Update `print_help_extended()` |
+| Metacommand completion | `src/commands/repl/metadata_completer.rs` | Add `/sessions` to registry |
+| Batch mode CLI | `src/cli.rs` | Add `Sessions` command variant |
+| Batch mode handler | `src/main.rs` | Handle `Command::Sessions` |
+| Sessions command | `src/commands/sessions.rs` (NEW) | Batch mode implementation |
+| Commands export | `src/commands/mod.rs` | Export `sessions()` function |
+
+### Design Trade-offs
+
+#### SQL Calculation vs Rust Calculation for Skew
+**Chosen:** Calculate skew in Rust
+**Alternative:** Use Teradata's DECIMAL casting and NULLIFZERO in SQL
+**Rationale:**
+- Simpler SQL query (easier to debug and maintain)
+- Explicit NULL handling in display layer
+- Flexible formatting without SQL FORMAT clauses
+- Better testability (unit tests for skew calculation)
+
+#### Separate SessionsArgs vs Reusing QueryArgs
+**Chosen:** Separate `SessionsArgs` struct
+**Alternative:** Reuse `QueryArgs` with pre-defined SQL
+**Rationale:**
+- Cleaner CLI interface (no SQL argument needed)
+- `--sessions` is a standalone action, not a query
+- Simpler user experience for DBAs
+
+#### Monolithic Function vs Trait-based Design
+**Chosen:** Simple `execute_sessions()` function
+**Alternative:** Create `MetaCommand` trait with `execute()` method
+**Rationale:**
+- Follows existing metacommand pattern in codebase
+- Lower implementation complexity
+- Can refactor to trait-based if more commands added
+
+### Testing Strategy
+
+**Unit Tests:**
+- `test_calculate_skew_active_session` - Non-zero hot values
+- `test_calculate_skew_idle_session` - Zero hot values return None
+- `test_format_logon_time` - Date format conversion
+- `test_session_info_from_row` - Row parsing with various values
+- `test_session_info_from_row_with_nulls` - NULL handling
+
+**Integration Tests:**
+- `test_sessions_command_execution` - With mock database
+- `test_sessions_privilege_error` - Error handling
+- `test_sessions_empty_result` - No sessions case
+
+**PTY Tests:**
+- `/sessions` command execution in REPL
+- Tab completion includes `/sessions`
+- Help text displays correctly
+
+**Manual Validation:**
+- Visual verification of output format
+- Skew calculation accuracy against known values
+- Error message clarity for privilege issues
+
+### Implementation Checklist
+
+1. [ ] Add `execute_sessions()` to `metacommands.rs`
+2. [ ] Add `/sessions` and `/s` to metacommand match in `handle_metacommand_with_state()`
+3. [ ] Update `print_help_extended()` with `/sessions` description
+4. [ ] Add `/sessions` to metacommand completion registry
+5. [ ] Add `Sessions` variant to `Command` enum in `cli.rs`
+6. [ ] Add `SessionsArgs` struct to `cli.rs`
+7. [ ] Create `src/commands/sessions.rs` for batch mode
+8. [ ] Update `src/commands/mod.rs` to export sessions
+9. [ ] Handle `Command::Sessions` in `main.rs`
+10. [ ] Add unit tests for skew calculation
+11. [ ] Add unit tests for SessionInfo parsing
+12. [ ] Verify output format matches specification
+
+---
+
 ## Future Enhancements
 
 - Query history search (Ctrl-R) - already supported by reedline
@@ -1774,3 +2269,4 @@ This is native reedline behavior - no additional implementation needed.
 - DDL-triggered cache invalidation
 - Fuzzy matching for completion (like pgcli)
 - Second TAB accepts selection (requires reedline enhancement)
+- Session filtering for `/sessions` (by user, state, etc.)

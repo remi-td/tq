@@ -14,6 +14,9 @@
 //! - /list databases - List all accessible databases
 //! - /list tables [pattern] - List tables with optional glob pattern
 //! - /list views - List views in current database
+//!
+//! Sprint 26 additions:
+//! - /sessions - List active database sessions with performance metrics
 
 use super::metadata_completer::CompletionState;
 use super::state::ReplState;
@@ -362,6 +365,11 @@ pub fn handle_metacommand_with_state<W: Write>(
             execute_list(completion_state, &["views"], writer)?;
         }
 
+        // Sprint 26: Sessions command
+        "sessions" | "s" => {
+            crate::commands::sessions::execute_for_repl(completion_state.client(), writer)?;
+        }
+
         // Unknown command
         _ => {
             writeln!(writer, "Unknown command: /{}", command)?;
@@ -413,6 +421,12 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "  /list views            List views in current database")?;
     writeln!(writer, "  /dt                    Shortcut for /list tables")?;
     writeln!(writer, "  /dv                    Shortcut for /list views")?;
+    writeln!(writer)?;
+    writeln!(writer, "System Monitoring:")?;
+    writeln!(
+        writer,
+        "  /sessions, /s          List active sessions with performance metrics"
+    )?;
     writeln!(writer)?;
     writeln!(writer, "SQL Execution:")?;
     writeln!(writer, "  Enter SQL statements ending with semicolon (;)")?;
@@ -2058,5 +2072,18 @@ mod tests {
         // Verify tab completion for metacommands is documented
         assert!(output_str.contains("Tab after /"));
         assert!(output_str.contains("metacommands"));
+    }
+
+    #[test]
+    fn test_help_extended_includes_sessions_command() {
+        let mut output = Vec::new();
+        print_help_extended(&mut output).unwrap();
+        let output_str = String::from_utf8(output).unwrap();
+
+        // Verify Sprint 26 /sessions command is documented
+        assert!(output_str.contains("/sessions"));
+        assert!(output_str.contains("/s"));
+        assert!(output_str.contains("System Monitoring"));
+        assert!(output_str.contains("active sessions"));
     }
 }

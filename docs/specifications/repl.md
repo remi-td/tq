@@ -405,6 +405,7 @@ tq> SELECT COUNT(*) FROM employees WHERE dept = 'IT';
 - `/peek` - Show first rows and column info
 - `/export` - Export results
 - `/session` - Show session info
+- `/sessions` - List active Teradata sessions
 - `/timing` - Enable/disable query timing
 - `/set` - Set configuration
 - `/pager` - Enable/disable result paging
@@ -441,6 +442,7 @@ Available metacommands:
     /repeat      Re-execute last query
     /sample      Show random sample
     /session     Show session info
+    /sessions    List active Teradata sessions with performance metrics
     /set         Set configuration
     /timing      Enable/disable query timing
 ```
@@ -1237,6 +1239,12 @@ Suggestions:
 | `/list schemas` | `\dn` | List schemas | `/list schemas` |
 | `/show indexes <table>` | `\di` | Show table indexes | `/show indexes employees` |
 
+### Session Monitoring Commands
+
+| Command | Alias | Description | Example |
+|---------|-------|-------------|---------|
+| `/sessions` | `/s` | List active Teradata sessions with performance metrics | `/sessions` |
+
 **`/list databases` Metacommand**
 
 **Requirement:** List all databases accessible on the Teradata system.
@@ -1487,6 +1495,305 @@ Reason: Insufficient privileges to query system catalog
 - Execute `/list views` in database with views and verify all shown
 - Execute `/list views` in database without views and verify "No views found" message
 - Verify view definitions are truncated to reasonable length
+
+---
+
+**`/sessions` Metacommand**
+
+**Requirement:** List all active sessions on the Teradata system with key performance metrics.
+
+**Syntax:**
+```
+/sessions
+/s                  -- Short alias
+```
+
+**Output Format:**
+```
+tq> /sessions
+
+Active Sessions on <hostname>:
+┌───────────┬──────────┬────────────────────────┬─────────────┬──────────┬───────────┬───────┬─────────────┬────────────────┬──────────────┐
+│ SessionNo │ UserName │ LogonTime              │ PEstate     │ AMPState │ AMPCPUSec │ AMPIO │ ReqSpool    │ Amp CPU Skew % │ Amp IO Skew %│
+├───────────┼──────────┼────────────────────────┼─────────────┼──────────┼───────────┼───────┼─────────────┼────────────────┼──────────────┤
+│      1076 │ DBC      │ 2026/01/27 15:33:26.00 │ IDLE        │ IDLE     │         0 │     6 │           0 │           [--] │         [--] │
+│      1077 │ DBC      │ 2026/01/27 15:33:27.00 │ IDLE        │ IDLE     │     0.376 │  6782 │           0 │           [--] │         [--] │
+│      1078 │ DBC      │ 2026/01/27 15:33:28.00 │ DISPATCHING │ ACTIVE   │   366.736 │ 75335 │ 26753187840 │           2.87 │         3.78 │
+│      1079 │ alice    │ 2026/01/27 16:15:42.00 │ ACTIVE      │ ACTIVE   │    15.234 │  3421 │   123456789 │           0.15 │         0.23 │
+└───────────┴──────────┴────────────────────────┴─────────────┴──────────┴───────────┴───────┴─────────────┴────────────────┴──────────────┘
+
+4 sessions found (Query time: 0.234s)
+```
+
+**Column Descriptions:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| SessionNo | INTEGER | Session identifier (unique per connection) |
+| UserName | VARCHAR | User account logged into this session |
+| LogonTime | TIMESTAMP | When session was established (YYYY/MM/DD HH:MM:SS.ss format) |
+| PEstate | VARCHAR | Parsing Engine state: IDLE, DISPATCHING, ACTIVE |
+| AMPState | VARCHAR | Access Module Processor state: IDLE, ACTIVE |
+| AMPCPUSec | DECIMAL | Total AMP CPU seconds consumed by this session |
+| AMPIO | INTEGER | Total AMP I/O count for this session |
+| ReqSpool | BIGINT | Requested spool space in bytes |
+| Amp CPU Skew % | DECIMAL(4,2) | CPU distribution skew across AMPs (0% = perfect balance, higher = unbalanced) |
+| Amp IO Skew % | DECIMAL(4,2) | I/O distribution skew across AMPs (0% = perfect balance, higher = unbalanced) |
+
+**Behavior Requirements:**
+
+**REQ-SESS-001: Command Availability and Aliases**
+
+The `/sessions` command SHALL be available as a metacommand in REPL mode with the following characteristics:
+
+1. **REQ-SESS-001.1** - Primary command: `/sessions`
+2. **REQ-SESS-001.2** - Short alias: `/s`
+3. **REQ-SESS-001.3** - Both forms SHALL execute identically
+4. **REQ-SESS-001.4** - Command SHALL execute immediately (no arguments required)
+5. **REQ-SESS-001.5** - Command SHALL be case-insensitive (`/Sessions`, `/SESSIONS`, `/s` all valid)
+
+**REQ-SESS-002: Data Source and Query Execution**
+
+The command SHALL retrieve session information from Teradata system catalog using the MonitorSession table function:
+
+1. **REQ-SESS-002.1** - Data source: `MonitorSession(-1,'*',0)` table function
+2. **REQ-SESS-002.2** - Query scope: All sessions system-wide (parameter -1)
+3. **REQ-SESS-002.3** - SQL query template:
+   ```sql
+   SELECT
+       SessionNo,
+       UserName,
+       LogonTime,
+       PEState,
+       AMPState,
+       AMPCPUSec,
+       AMPIO,
+       ReqSpool,
+       (100 * (1 - (AvgAmpCPUSec / NULLIFZERO(HotAmp1CPU))))(DECIMAL(4,2)) AS "Amp CPU Skew %",
+       (100 * (1 - (AvgAmpIOCnt / NULLIFZERO(HotAmp1IO))))(DECIMAL(4,2)) AS "Amp IO Skew %"
+   FROM TABLE (MonitorSession(-1,'*',0)) AS t1;
+   ```
+4. **REQ-SESS-002.4** - Column ordering SHALL match the query above (SessionNo first, skew percentages last)
+5. **REQ-SESS-002.5** - Query execution SHALL respect current connection timeout settings
+6. **REQ-SESS-002.6** - Query execution time SHALL be displayed in summary footer
+
+**REQ-SESS-003: Output Formatting and Display**
+
+The command SHALL format output as a table with the following requirements:
+
+1. **REQ-SESS-003.1** - Default output format: Table (box-drawing characters)
+2. **REQ-SESS-003.2** - Column headers SHALL match column names exactly (including spaces in "Amp CPU Skew %")
+3. **REQ-SESS-003.3** - LogonTime format: `YYYY/MM/DD HH:MM:SS.ss` (Teradata default timestamp format)
+4. **REQ-SESS-003.4** - Numeric columns SHALL be right-aligned
+5. **REQ-SESS-003.5** - Text columns SHALL be left-aligned
+6. **REQ-SESS-003.6** - Column widths SHALL auto-adjust to content (minimum width: header width)
+7. **REQ-SESS-003.7** - Table SHALL include top border, header row, header separator, data rows, and bottom border
+8. **REQ-SESS-003.8** - Summary footer format: `N sessions found (Query time: X.XXXs)`
+
+**REQ-SESS-004: NULL and Special Value Handling**
+
+The command SHALL handle NULL and edge-case values appropriately:
+
+1. **REQ-SESS-004.1** - NULL skew percentages (for IDLE sessions): Display as `[--]` (not `[NULL]` or blank)
+2. **REQ-SESS-004.2** - Skew percentage format: `X.XX` (two decimal places, no leading zeros)
+   - Examples: `0.15`, `12.34`, `99.99`
+3. **REQ-SESS-004.3** - Skew percentage range: 0.00 to 100.00 (validated, warn if out of range)
+4. **REQ-SESS-004.4** - Large spool values: Display with thousand separators (e.g., `26,753,187,840`)
+5. **REQ-SESS-004.5** - Zero CPU/IO: Display as `0` (not blank)
+6. **REQ-SESS-004.6** - Very small CPU values (<1 second): Display with full precision (e.g., `0.376`)
+
+**REQ-SESS-005: Error Handling and Edge Cases**
+
+The command SHALL handle errors and edge cases gracefully:
+
+**Insufficient Privileges:**
+```
+tq> /sessions
+
+Error: Unable to list sessions
+Reason: SELECT permission denied on DBC.MonitorSession
+
+This command requires SELECT access to the MonitorSession table function.
+Contact your DBA to request access or use the GRANT statement:
+  GRANT SELECT ON DBC.MonitorSession TO <your_username>;
+```
+
+**No Active Sessions (besides current):**
+```
+tq> /sessions
+
+Active Sessions on localhost:
+┌───────────┬──────────┬────────────────────────┬─────────┬──────────┬───────────┬───────┬──────────┬────────────────┬──────────────┐
+│ SessionNo │ UserName │ LogonTime              │ PEstate │ AMPState │ AMPCPUSec │ AMPIO │ ReqSpool │ Amp CPU Skew % │ Amp IO Skew %│
+├───────────┼──────────┼────────────────────────┼─────────┼──────────┼───────────┼───────┼──────────┼────────────────┼──────────────┤
+│      1076 │ dbc      │ 2026/01/27 15:33:26.00 │ ACTIVE  │ ACTIVE   │     0.123 │    45 │        0 │           [--] │         [--] │
+└───────────┴──────────┴────────────────────────┴─────────┴──────────┴───────────┴───────��──────────┴────────────────┴──────────────┘
+
+1 session found (Query time: 0.012s)
+```
+
+**Connection Lost:**
+```
+tq> /sessions
+
+Error: Cannot list sessions - connection lost
+Use /reconnect to establish new connection
+```
+
+**Query Timeout:**
+```
+tq> /sessions
+
+Error: Query timeout after 30s
+The MonitorSession query may be slow on heavily loaded systems.
+Try increasing timeout: /set timeout 60s
+```
+
+**MonitorSession Function Not Available (Old Teradata Version):**
+```
+tq> /sessions
+
+Error: MonitorSession table function not found
+This feature requires Teradata 14.10 or later.
+Current database version: 13.10
+
+Alternative: Use DBC.SessionTbl view (limited metrics)
+```
+
+**Specific Requirements:**
+
+1. **REQ-SESS-005.1** - Privilege errors SHALL include helpful explanation and GRANT statement example
+2. **REQ-SESS-005.2** - Empty result set SHALL still display table with headers
+3. **REQ-SESS-005.3** - Connection errors SHALL suggest `/reconnect` metacommand
+4. **REQ-SESS-005.4** - Timeout errors SHALL suggest timeout adjustment
+5. **REQ-SESS-005.5** - Version compatibility errors SHALL suggest alternative approaches
+6. **REQ-SESS-005.6** - All errors SHALL return to REPL prompt (non-fatal)
+
+**REQ-SESS-006: Tab Completion and Help Integration**
+
+The command SHALL be discoverable through standard REPL features:
+
+1. **REQ-SESS-006.1** - Tab completion: Typing `/s<TAB>` SHALL suggest `/sessions` and `/sample`
+2. **REQ-SESS-006.2** - Tab completion: Typing `/sess<TAB>` SHALL auto-complete to `/sessions`
+3. **REQ-SESS-006.3** - Help text: `/help` SHALL list `/sessions` command with description
+4. **REQ-SESS-006.4** - Help text description: "List active Teradata sessions with performance metrics"
+5. **REQ-SESS-006.5** - Detailed help: `/help sessions` SHALL display extended help including column descriptions
+6. **REQ-SESS-006.6** - Command SHALL appear in metacommand list when typing `/<TAB>`
+
+**REQ-SESS-007: Output Format Compatibility**
+
+The command SHALL work with all output format modes:
+
+1. **REQ-SESS-007.1** - Table format (default): Box-drawing table as shown above
+2. **REQ-SESS-007.2** - CSV format: Standard CSV with headers, NULL skew as empty string
+   ```csv
+   SessionNo,UserName,LogonTime,PEstate,AMPState,AMPCPUSec,AMPIO,ReqSpool,Amp CPU Skew %,Amp IO Skew %
+   1076,DBC,2026/01/27 15:33:26.00,IDLE,IDLE,0,6,0,,
+   1078,DBC,2026/01/27 15:33:28.00,ACTIVE,ACTIVE,366.736,75335,26753187840,2.87,3.78
+   ```
+3. **REQ-SESS-007.3** - JSON format: Array of objects, NULL skew as `null`
+   ```json
+   [
+     {
+       "SessionNo": 1076,
+       "UserName": "DBC",
+       "LogonTime": "2026/01/27 15:33:26.00",
+       "PEstate": "IDLE",
+       "AMPState": "IDLE",
+       "AMPCPUSec": 0.0,
+       "AMPIO": 6,
+       "ReqSpool": 0,
+       "Amp CPU Skew %": null,
+       "Amp IO Skew %": null
+     },
+     {
+       "SessionNo": 1078,
+       "UserName": "DBC",
+       "LogonTime": "2026/01/27 15:33:28.00",
+       "PEstate": "ACTIVE",
+       "AMPState": "ACTIVE",
+       "AMPCPUSec": 366.736,
+       "AMPIO": 75335,
+       "ReqSpool": 26753187840,
+       "Amp CPU Skew %": 2.87,
+       "Amp IO Skew %": 3.78
+     }
+   ]
+   ```
+4. **REQ-SESS-007.4** - Format selection: Command SHALL respect current output format setting (`/set format <fmt>`)
+5. **REQ-SESS-007.5** - Format override: NOT supported (use `/set format` before running command)
+
+**REQ-SESS-008: Performance and Resource Considerations**
+
+The command SHALL execute efficiently and provide feedback:
+
+1. **REQ-SESS-008.1** - Target execution time: <1 second for systems with <1000 sessions
+2. **REQ-SESS-008.2** - Loading indicator: Display "Loading session information..." if query takes >500ms
+3. **REQ-SESS-008.3** - Result caching: NOT cached (each execution is fresh query for real-time monitoring)
+4. **REQ-SESS-008.4** - Query cancellation: Ctrl-C SHALL cancel query and return to prompt
+5. **REQ-SESS-008.5** - Resource impact: Query SHALL use read-only system views (no locks, no modifications)
+
+**Example Interaction:**
+
+**Basic usage:**
+```sql
+tq> /sessions
+[Query executes, displays table with 15 sessions]
+
+tq> /s
+[Same output, using short alias]
+```
+
+**With active queries:**
+```sql
+tq> /sessions
+
+Active Sessions on prod-td01.company.com:
+┌───────────┬──────────┬────────────────────────┬─────────────┬──────────┬───────────┬────────┬──────────────┬────────────────┬──────────────┐
+│ SessionNo │ UserName │ LogonTime              │ PEstate     │ AMPState │ AMPCPUSec │ AMPIO  │ ReqSpool     │ Amp CPU Skew % │ Amp IO Skew %│
+├───────────┼──────────┼────────────────────────┼─────────────┼──────────┼───────────┼────────┼──────────────┼────────────────┼──────────────┤
+│      1023 │ etl_user │ 2026/01/27 08:15:00.00 │ ACTIVE      │ ACTIVE   │   4523.45 │ 892341 │ 512000000000 │          25.43 │        32.19 │
+│      1024 │ analyst1 │ 2026/01/27 09:30:15.00 │ DISPATCHING │ ACTIVE   │    123.67 │  45231 │   8500000000 │           1.23 │         2.45 │
+│      1025 │ dbc      │ 2026/01/27 14:22:33.00 │ IDLE        │ IDLE     │      0.05 │     12 │            0 │           [--] │         [--] │
+└───────────┴──────────┴────────────────────────┴─────────────┴──────────┴───────────┼────────┼──────────────┼────────────────┼──────────────┤
+
+3 sessions found (Query time: 0.156s)
+```
+
+**Tab completion:**
+```sql
+tq> /s<TAB>
+Matching metacommands:
+    /sample      Show random sample
+    /sessions    List active Teradata sessions with performance metrics
+
+tq> /sess<TAB>
+tq> /sessions_
+[Auto-completed]
+```
+
+**With different output format:**
+```sql
+tq> /set format csv
+Output format set to: csv
+
+tq> /sessions
+SessionNo,UserName,LogonTime,PEstate,AMPState,AMPCPUSec,AMPIO,ReqSpool,Amp CPU Skew %,Amp IO Skew %
+1076,DBC,2026/01/27 15:33:26.00,IDLE,IDLE,0,6,0,,
+1078,DBC,2026/01/27 15:33:28.00,ACTIVE,ACTIVE,366.736,75335,26753187840,2.87,3.78
+```
+
+**Acceptance Test:**
+- Execute `/sessions` and verify all active sessions are displayed with correct columns
+- Execute `/s` (alias) and verify identical behavior
+- Verify skew percentages show `[--]` for IDLE sessions
+- Verify skew percentages show decimal values (X.XX format) for ACTIVE sessions
+- Trigger privilege error by revoking access and verify helpful error message
+- Execute on system with single session and verify table still displays
+- Execute with `/set format csv` and verify CSV output
+- Execute with `/set format json` and verify JSON output
+- Type `/s<TAB>` and verify tab completion suggestions include `/sessions`
+- Execute `/help` and verify `/sessions` appears in command list
 
 ---
 

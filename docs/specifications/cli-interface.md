@@ -38,6 +38,7 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 - `ping` - Test database connectivity
 - `query` - Execute SQL queries
 - `repl` - Start interactive mode
+- `sessions` - List active Teradata sessions
 - `profiles` - List connection profiles
 
 ## Global Options
@@ -264,6 +265,224 @@ tq repl --no-history
 
 ---
 
+### sessions - List Active Sessions
+
+**Purpose**: List all active Teradata sessions with performance metrics
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] sessions [OPTIONS]
+tq [GLOBAL_OPTIONS] --sessions [OPTIONS]
+```
+
+**Options**:
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv` |
+| `--output` | `-o` | path | stdout | Write output to file |
+
+**Examples**:
+```bash
+# Basic session list with table output
+tq sessions
+
+# Alternative standalone flag form
+tq --sessions
+
+# JSON output for scripting
+tq sessions --format json
+
+# CSV export to file
+tq sessions --format csv --output sessions.csv
+tq sessions -f csv -o sessions.csv
+
+# Pipe to processing tool
+tq sessions --format json | jq '.[] | select(.PEstate == "ACTIVE")'
+
+# Using connection profile
+tq --profile prod sessions
+```
+
+**Output (Table Format)**:
+```
+Active Sessions on prod-td01.company.com:
+┌───────────┬──────────┬────────────────────────┬─────────────┬──────────┬───────────┬───────┬─────────────┬────────────────┬──────────────┐
+│ SessionNo │ UserName │ LogonTime              │ PEstate     │ AMPState │ AMPCPUSec │ AMPIO │ ReqSpool    │ Amp CPU Skew % │ Amp IO Skew %│
+├───────────┼──────────┼────────────────────────┼─────────────┼──────────┼───────────┼───────┼─────────────┼────────────────┼──────────────┤
+│      1076 │ DBC      │ 2026/01/27 15:33:26.00 │ IDLE        │ IDLE     │         0 │     6 │           0 │           [--] │         [--] │
+│      1077 │ DBC      │ 2026/01/27 15:33:27.00 │ IDLE        │ IDLE     │     0.376 │  6782 │           0 │           [--] │         [--] │
+│      1078 │ DBC      │ 2026/01/27 15:33:28.00 │ DISPATCHING │ ACTIVE   │   366.736 │ 75335 │ 26753187840 │           2.87 │         3.78 │
+└───────────┴──────────┴────────────────────────┴─────────────┴──────────┴───────────┴───────┴─────────────┴────────────────┴──────────────┘
+
+3 sessions found (Query time: 0.234s)
+```
+
+**Output (CSV Format)**:
+```csv
+SessionNo,UserName,LogonTime,PEstate,AMPState,AMPCPUSec,AMPIO,ReqSpool,Amp CPU Skew %,Amp IO Skew %
+1076,DBC,2026/01/27 15:33:26.00,IDLE,IDLE,0,6,0,,
+1077,DBC,2026/01/27 15:33:27.00,IDLE,IDLE,0.376,6782,0,,
+1078,DBC,2026/01/27 15:33:28.00,DISPATCHING,ACTIVE,366.736,75335,26753187840,2.87,3.78
+```
+
+**Output (JSON Format)**:
+```json
+[
+  {
+    "SessionNo": 1076,
+    "UserName": "DBC",
+    "LogonTime": "2026/01/27 15:33:26.00",
+    "PEstate": "IDLE",
+    "AMPState": "IDLE",
+    "AMPCPUSec": 0.0,
+    "AMPIO": 6,
+    "ReqSpool": 0,
+    "Amp CPU Skew %": null,
+    "Amp IO Skew %": null
+  },
+  {
+    "SessionNo": 1077,
+    "UserName": "DBC",
+    "LogonTime": "2026/01/27 15:33:27.00",
+    "PEstate": "IDLE",
+    "AMPState": "IDLE",
+    "AMPCPUSec": 0.376,
+    "AMPIO": 6782,
+    "ReqSpool": 0,
+    "Amp CPU Skew %": null,
+    "Amp IO Skew %": null
+  },
+  {
+    "SessionNo": 1078,
+    "UserName": "DBC",
+    "LogonTime": "2026/01/27 15:33:28.00",
+    "PEstate": "DISPATCHING",
+    "AMPState": "ACTIVE",
+    "AMPCPUSec": 366.736,
+    "AMPIO": 75335,
+    "ReqSpool": 26753187840,
+    "Amp CPU Skew %": 2.87,
+    "Amp IO Skew %": 3.78
+  }
+]
+```
+
+**Behavior Requirements**:
+
+1. **Standalone Operation**: Does NOT require a SQL file argument (unlike `query` command)
+2. **Data Source**: Queries Teradata `MonitorSession(-1,'*',0)` table function
+3. **Column Display**: 10 columns in this order:
+   - SessionNo (session identifier)
+   - UserName (logged-in user)
+   - LogonTime (session start timestamp: YYYY/MM/DD HH:MM:SS.ss format)
+   - PEstate (Parsing Engine state: IDLE/DISPATCHING/ACTIVE)
+   - AMPState (AMP state: IDLE/ACTIVE)
+   - AMPCPUSec (total AMP CPU seconds consumed)
+   - AMPIO (total AMP I/O count)
+   - ReqSpool (requested spool space in bytes)
+   - Amp CPU Skew % (CPU distribution across AMPs, 0% = perfect balance)
+   - Amp IO Skew % (I/O distribution across AMPs, 0% = perfect balance)
+4. **NULL Handling**:
+   - Table format: Display `[--]` for NULL skew percentages (IDLE sessions)
+   - CSV format: Empty string for NULL skew percentages
+   - JSON format: `null` for NULL skew percentages
+5. **Format Compatibility**: Works with `--format table`, `--format csv`, `--format json`
+6. **Output Destination**: Respects `--output` flag for file output, otherwise stdout
+7. **Summary Footer**: Includes row count and query execution time (table format only)
+
+**Error Handling**:
+
+**Insufficient Privileges**:
+```
+Error: Unable to list sessions
+Reason: SELECT permission denied on DBC.MonitorSession
+
+This command requires SELECT access to the MonitorSession table function.
+Contact your DBA to request access or use the GRANT statement:
+  GRANT SELECT ON DBC.MonitorSession TO <your_username>;
+
+Exit code: 1
+```
+
+**Connection Failed**:
+```
+Error: Failed to connect to prod-td01.company.com:1025
+Reason: Connection refused
+
+Troubleshooting:
+  - Check that the hostname and port are correct
+  - Verify the database is running
+  - Check firewall settings
+
+Exit code: 1
+```
+
+**MonitorSession Not Available**:
+```
+Error: MonitorSession table function not found
+This feature requires Teradata 14.10 or later.
+Current database version: 13.10
+
+Alternative: Use DBC.SessionTbl view (limited metrics)
+
+Exit code: 1
+```
+
+**Exit Codes**:
+- `0`: Sessions listed successfully
+- `1`: Query error (privilege denied, connection failed, function not available)
+- `2`: Usage error (invalid format, invalid output path)
+
+**Integration with Scripting**:
+
+The `sessions` command is designed for both interactive use and automation:
+
+```bash
+# Monitor active queries in cron job
+tq --sessions --format json | \
+  jq '.[] | select(.PEstate == "ACTIVE" and .AMPCPUSec > 100)' | \
+  mail -s "Long-running queries alert" dba@company.com
+
+# Export session snapshot for analysis
+tq sessions --format csv --output "/var/log/td-sessions/$(date +%Y%m%d_%H%M%S).csv"
+
+# Check for high skew sessions
+tq --sessions -f json | \
+  jq '.[] | select(.["Amp CPU Skew %"] > 20) | .SessionNo'
+
+# Count active sessions by user
+tq --sessions -f csv | \
+  tail -n +2 | \
+  cut -d, -f2 | \
+  sort | uniq -c
+```
+
+**Command Form Equivalence**:
+
+Both forms are functionally identical:
+```bash
+# Subcommand form (recommended for clarity)
+tq sessions
+
+# Flag form (compact)
+tq --sessions
+```
+
+The flag form (`--sessions`) provides compatibility with single-purpose invocations, while the subcommand form (`sessions`) follows the standard CLI pattern and allows for potential future options.
+
+**Acceptance Test**:
+- Execute `tq sessions` and verify table output with all 10 columns
+- Execute `tq --sessions` and verify identical behavior to `tq sessions`
+- Execute `tq sessions --format csv` and verify CSV output with headers
+- Execute `tq sessions --format json` and verify valid JSON array output
+- Execute `tq sessions --output sessions.txt` and verify file creation
+- Trigger privilege error and verify helpful error message with GRANT example
+- Execute on system with no sessions besides current and verify 1 row displayed
+- Verify NULL skew percentages appear as `[--]` in table format, empty in CSV, `null` in JSON
+- Verify exit code 0 on success, 1 on privilege/connection errors
+
+---
+
 ### profiles - List Connection Profiles
 
 **Purpose**: Display all available connection profiles from the configuration file
@@ -444,6 +663,7 @@ Commands:
   ping      Test database connectivity
   query     Execute a SQL query
   repl      Start interactive mode
+  sessions  List active Teradata sessions with performance metrics
   profiles  List available connection profiles
   help      Print help information or help for a topic
 
@@ -487,6 +707,12 @@ Examples:
 
   # Export to JSON
   tq query --format json "SELECT * FROM data" > data.json
+
+  # List active sessions (DBA monitoring)
+  tq sessions
+
+  # Export session metrics to CSV
+  tq sessions --format csv --output sessions.csv
 
   # Secure password handling
   echo "password" > ~/.tq_pass && chmod 0600 ~/.tq_pass
