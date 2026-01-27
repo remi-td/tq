@@ -2,8 +2,8 @@
 name: Feature Request
 about: Suggest a new feature or enhancement for tq
 title: "[FEATURE] "
-labels: ["enhancement"]
-assignees: []
+labels: enhancement
+assignees: ''
 ---
 
 ## Feature Description

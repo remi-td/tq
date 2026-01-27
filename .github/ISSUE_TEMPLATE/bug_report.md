@@ -2,8 +2,8 @@
 name: Bug Report
 about: Report a bug or unexpected behavior in tq
 title: "[BUG] "
-labels: ["bug"]
-assignees: []
+labels: bug
+assignees: ''
 ---
 
 ## Bug Description
