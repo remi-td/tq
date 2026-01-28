@@ -3,8 +3,7 @@
 > A lightweight, Rust-powered command-line client for Teradata databases with
 > interactive REPL and modern output formatting.
 
-<!-- TODO: Add screenshot once available -->
-<!-- ![tq in action](docs/images/tq-screenshot.png) -->
+![tq in action](docs/media/tq.gif)
 
 ## What is tq?
 
