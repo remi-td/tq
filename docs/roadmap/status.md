@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-01-28
 **Current Version:** 1.12.1
-**Latest Sprint:** Sprint 27 Complete (Bug Fix + Documentation)
+**Latest Sprint:** Sprint 28 Complete (Pager UX + Startup Cleanup)
 
 ---
 
@@ -131,6 +131,12 @@ All core features are complete and tested.
 - README restructure: User-focused TLDR format with AI development story and quick start guide
 - User documentation: Added `/sessions` command documentation to REPL guide (Sprint 26 gap addressed)
 - Regression tests: Added tests to prevent session filtering bugs in future
+
+**Sprint 28 Enhancements (v1.12.1):**
+- Pager UX improvements: Enhanced column position indicators for better discoverability (feature existed since v1.3.0)
+- Help system: Added comprehensive pager documentation to `/help` command
+- Build cleanup: Removed build.rs success warning for cleaner development experience
+- Status bar improvements: Better navigation hints in pager mode
 
 ---
 
