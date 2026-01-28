@@ -2356,6 +2356,394 @@ fn test_session_info_from_row_non_string_state() {
 
 ---
 
+## Sprint 28: Interactive Horizontal Paging Enhancement
+
+This section documents the technical design for Sprint 28 interactive horizontal paging and startup warnings fix.
+
+### Background
+
+**GitHub Issue #7:** Users cannot effectively explore wide result sets. While the pager has basic horizontal navigation (Left/Right arrow keys), it lacks:
+1. Visual indicators showing hidden columns on both sides (`(+N cols)`)
+2. Clear status bar showing column navigation capabilities
+3. Discoverability - users don't realize horizontal scrolling is available
+
+**GitHub Issue #11:** Cargo build warnings pollute REPL startup with messages like:
+```
+warning: tq@1.12.0: Successfully copied teradatasql.dylib to ...
+```
+
+### Feature #7: Interactive Horizontal Paging
+
+#### Current Pager State Analysis
+
+The existing pager at `src/commands/repl/pager.rs` provides:
+
+**What Works:**
+- Left/Right arrow key navigation (lines 528-535)
+- `h`/`l` vim-style navigation (same lines)
+- `H`/`L` jump to first/last column (lines 538-545)
+- Status bar shows `Columns X-Y of Z` (lines 473-478)
+- `visible_column_count()` calculates fitting columns (lines 322-336)
+- `col_offset` tracks current horizontal position
+
+**What's Missing (per specification):**
+- `(+N cols)` indicators on left/right borders when columns hidden
+- Clear visual cue that more columns exist beyond current view
+- Enhanced status bar with explicit horizontal navigation hints
+
+#### Solution Architecture
+
+##### 1. Column Indicator Design
+
+**Implementation in `render_header()` and `render_row()`:**
+
+Add indicator columns on borders when columns are hidden:
+
+```rust
+/// Calculate hidden column counts
+fn hidden_columns_left(&self) -> usize {
+    self.col_offset
+}
+
+fn hidden_columns_right(&self) -> usize {
+    let visible = self.visible_column_count();
+    let end_col = (self.col_offset + visible).min(self.data.columns.len());
+    self.data.columns.len().saturating_sub(end_col)
+}
+```
+
+**Left Indicator (when `col_offset > 0`):**
+- Display format: `(+N cols)` as first pseudo-column
+- Width: Fixed 10 characters (fits `(+999 cols)`)
+- Alignment: Right-aligned
+- Color: Dim/gray to distinguish from data
+
+**Right Indicator (when more columns hidden):**
+- Display format: `(+N cols)` as last pseudo-column
+- Width: Fixed 10 characters
+- Alignment: Left-aligned
+- Color: Dim/gray to distinguish from data
+
+**Visual Example:**
+```
+╭────────────┬─────────────────────────┬──────────────┬────────────╮
+│   (+2 cols)│ Column3                 │ Column4      │   (+15 cols)│
+├────────────┼─────────────────────────┼──────────────┼────────────┤
+│         ...│ Value3                  │ Value4       │ ...        │
+╰────────────┴─────────────────────────┴──────────────┴────────────╯
+```
+
+##### 2. Render Method Updates
+
+**File:** `src/commands/repl/pager.rs`
+
+**Update `render_border()`:**
+```rust
+fn render_border(&self, stdout: &mut impl Write, position: &str) -> io::Result<()> {
+    let (left, middle, right, line) = match position {
+        "top" => ('╭', '┬', '╮', '─'),
+        "middle" => ('├', '┼', '┤', '─'),
+        "bottom" => ('╰', '┴', '╯', '─'),
+        _ => ('├', '┼', '┤', '─'),
+    };
+
+    let hidden_left = self.hidden_columns_left();
+    let hidden_right = self.hidden_columns_right();
+    let visible_cols = self.visible_column_count();
+    let end_col = (self.col_offset + visible_cols).min(self.data.columns.len());
+
+    let mut border = String::new();
+    border.push(left);
+
+    // Left indicator column (if columns hidden on left)
+    if hidden_left > 0 {
+        border.push_str(&line.to_string().repeat(INDICATOR_WIDTH));
+        border.push(middle);
+    }
+
+    // Data columns
+    for (i, col) in self.data.columns[self.col_offset..end_col]
+        .iter()
+        .enumerate()
+    {
+        border.push_str(&line.to_string().repeat(col.display_width + 2));
+        let is_last_data_col = i == end_col - self.col_offset - 1;
+        if !is_last_data_col || hidden_right > 0 {
+            border.push(middle);
+        }
+    }
+
+    // Right indicator column (if columns hidden on right)
+    if hidden_right > 0 {
+        border.push_str(&line.to_string().repeat(INDICATOR_WIDTH));
+    }
+
+    border.push(right);
+    writeln!(stdout, "{}", border)
+}
+```
+
+**Update `render_header()`:**
+```rust
+fn render_header(
+    &self,
+    stdout: &mut impl Write,
+    start_col: usize,
+    end_col: usize,
+) -> io::Result<()> {
+    let hidden_left = self.hidden_columns_left();
+    let hidden_right = self.hidden_columns_right();
+
+    let mut row_str = String::from("│");
+
+    // Left indicator
+    if hidden_left > 0 {
+        let indicator = format!("(+{} cols)", hidden_left);
+        let padded = format!(" {:>width$} ", indicator, width = INDICATOR_WIDTH - 2);
+        // Use dim color
+        execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+        write!(stdout, "{}", padded)?;
+        execute!(stdout, ResetColor)?;
+        write!(stdout, "│")?;
+    }
+
+    // Data column headers
+    for col in &self.data.columns[start_col..end_col] {
+        let padded = format!(" {:^width$} ", col.header, width = col.display_width);
+        row_str.push_str(&padded);
+        row_str.push('│');
+    }
+
+    // Right indicator
+    if hidden_right > 0 {
+        let indicator = format!("(+{} cols)", hidden_right);
+        let padded = format!(" {:<width$} ", indicator, width = INDICATOR_WIDTH - 2);
+        // Use dim color
+        execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+        write!(stdout, "{}", padded)?;
+        execute!(stdout, ResetColor)?;
+        write!(stdout, "│")?;
+    }
+
+    // Header text (cyan)
+    execute!(stdout, SetForegroundColor(Color::Cyan))?;
+    write!(stdout, "{}", row_str)?;
+    execute!(stdout, ResetColor)?;
+    writeln!(stdout)
+}
+```
+
+**Update `render_row()`:**
+Similar pattern - add `(+N cols)` / `...` indicator cells on left/right.
+
+##### 3. Status Bar Enhancement
+
+**Current (line 488):**
+```rust
+let nav_hints = "j/k:scroll  Space/b:page  Left/Right:columns  g/G:first/last  q:exit";
+```
+
+**Updated:**
+```rust
+let nav_hints = "Arrows/hjkl: scroll | Space/b: page | g/G: jump | q: exit";
+```
+
+**Rationale:**
+- "Arrows" is more intuitive than "Left/Right"
+- Combined format is more concise
+- Clearer that both horizontal and vertical scrolling work
+
+##### 4. Help Text Integration
+
+**File:** `src/commands/repl/metacommands.rs`
+**Function:** `print_help_extended()`
+
+Add new section:
+```rust
+writeln!(writer)?;
+writeln!(writer, "Result Paging (when viewing large results):")?;
+writeln!(writer, "  Up/Down, j/k       Scroll rows")?;
+writeln!(writer, "  Left/Right, h/l    Scroll columns (wide tables)")?;
+writeln!(writer, "  Space, Page Down   Next page")?;
+writeln!(writer, "  b, Page Up         Previous page")?;
+writeln!(writer, "  g, Home            Jump to first row")?;
+writeln!(writer, "  G, End             Jump to last row")?;
+writeln!(writer, "  H                  Jump to first column")?;
+writeln!(writer, "  L                  Jump to last column")?;
+writeln!(writer, "  q, Esc             Exit pager (return to prompt)")?;
+```
+
+##### 5. Constants and Configuration
+
+```rust
+/// Width of the column indicator pseudo-column (fits "(+999 cols)")
+const INDICATOR_WIDTH: usize = 12;
+```
+
+#### Code Linkage for Feature #7
+
+| Component | File Path | Function | Changes |
+|-----------|-----------|----------|---------|
+| Indicator calculation | `pager.rs` | NEW: `hidden_columns_left()`, `hidden_columns_right()` | Add methods |
+| Border rendering | `pager.rs` | `render_border()` | Add indicator columns to borders |
+| Header rendering | `pager.rs` | `render_header()` | Add indicator cells |
+| Row rendering | `pager.rs` | `render_row()` | Add indicator cells |
+| Column width calc | `pager.rs` | `visible_column_count()` | Account for indicator width |
+| Status bar | `pager.rs` | `render_status_bar()` | Update nav hints text |
+| Help text | `metacommands.rs` | `print_help_extended()` | Add pager section |
+
+### Feature #11: Clean REPL Startup
+
+#### Problem Analysis
+
+**Source of Warning:**
+The warning originates from `build.rs` (lines 50-59):
+```rust
+println!(
+    "cargo:warning=Successfully copied {} to {}",
+    lib_name,
+    lib_dest.display()
+);
+```
+
+Also a fallback warning (lines 81-85):
+```rust
+println!("cargo:warning=Could not find teradatasql library in cargo cache");
+```
+
+**Cargo Output:**
+The "Finished" and "Running" messages are standard cargo output, not from build.rs.
+
+#### Solution Design
+
+**Option 1: Remove informational warning from build.rs (RECOMMENDED)**
+
+Change the success message from `cargo:warning=` to a silent operation. The warning was informational, not an actual warning about a problem.
+
+**File:** `build.rs`
+
+**Before:**
+```rust
+println!(
+    "cargo:warning=Successfully copied {} to {}",
+    lib_name,
+    lib_dest.display()
+);
+```
+
+**After:**
+```rust
+// Success message is informational - use rerun-if-changed for cargo visibility
+// instead of warning which pollutes user output
+eprintln!("build.rs: Copied {} to {}", lib_name, lib_dest.display());
+```
+
+Or simply remove the println entirely - silent success.
+
+**Keep the failure warning** - that's a legitimate warning users need to see:
+```rust
+println!("cargo:warning=Could not find teradatasql library in cargo cache");
+```
+
+**Option 2: Suppress via cargo flag (NOT RECOMMENDED)**
+
+Users could use `cargo run --quiet` but this also hides genuine errors.
+
+**Option 3: Documentation workaround (FALLBACK)**
+
+Document that developers should use release builds or add cargo config.
+
+#### Recommended Approach
+
+1. **Remove success warning** from build.rs - silent success is appropriate
+2. **Keep failure warning** - users need to know if library wasn't found
+3. **Test** that release builds show no warnings
+4. **Document** that dev builds may show cargo's "Finished/Running" output (this is standard cargo behavior)
+
+#### Code Changes for Feature #11
+
+**File:** `build.rs`
+
+```rust
+// Line 55-59: Remove or convert to silent
+// BEFORE:
+println!(
+    "cargo:warning=Successfully copied {} to {}",
+    lib_name,
+    lib_dest.display()
+);
+
+// AFTER (Option A - silent):
+// Just remove the println
+
+// AFTER (Option B - debug only):
+#[cfg(debug_assertions)]
+eprintln!("build.rs: Copied {} to {}", lib_name, lib_dest.display());
+```
+
+### Complexity Assessment
+
+| Feature | Complexity | Estimate | Risk |
+|---------|------------|----------|------|
+| #7 Horizontal Paging Indicators | Medium | 4-6 hours | Low |
+| #7 Status Bar Update | Low | 0.5 hours | Low |
+| #7 Help Text Integration | Low | 0.5 hours | Low |
+| #11 Startup Warnings | Low | 0.5 hours | Low |
+| Testing (both features) | Medium | 2-3 hours | Low |
+| **Total** | **Medium** | **8-10 hours** | **Low** |
+
+### Testing Strategy
+
+#### Feature #7 Tests
+
+**Unit Tests (pager.rs):**
+- `test_hidden_columns_left_none` - No hidden columns when offset is 0
+- `test_hidden_columns_left_some` - Correct count when offset > 0
+- `test_hidden_columns_right_none` - No hidden columns when all visible
+- `test_hidden_columns_right_some` - Correct count when columns overflow
+- `test_indicator_width_constant` - Verify fits expected patterns
+
+**Integration Tests:**
+- Execute query with >20 columns, verify `(+N cols)` appears
+- Navigate left/right, verify indicator counts update
+- Verify status bar shows updated text
+
+**Manual Validation:**
+- Wide table rendering appearance
+- Indicator visibility and readability
+- Navigation responsiveness
+
+#### Feature #11 Tests
+
+**Manual Validation:**
+- `cargo build` - verify no warnings on success
+- `cargo run -- repl` - verify clean startup (dev mode still shows Finished/Running)
+- `cargo build --release && ./target/release/tq repl` - verify completely clean
+
+### Implementation Checklist
+
+#### Feature #7: Interactive Horizontal Paging
+- [ ] Add `INDICATOR_WIDTH` constant
+- [ ] Add `hidden_columns_left()` method
+- [ ] Add `hidden_columns_right()` method
+- [ ] Update `visible_column_count()` to account for indicator width
+- [ ] Update `render_border()` for indicator columns
+- [ ] Update `render_header()` for indicator cells
+- [ ] Update `render_row()` for indicator cells
+- [ ] Update `render_status_bar()` nav hints
+- [ ] Add pager section to `/help` output
+- [ ] Add unit tests for indicator calculations
+- [ ] Manual testing with wide result sets
+
+#### Feature #11: Clean Startup
+- [ ] Remove success warning from `build.rs`
+- [ ] Verify failure warning still works
+- [ ] Test `cargo build` output
+- [ ] Test `cargo run -- repl` output
+- [ ] Test release build startup
+
+---
+
 ## Future Enhancements
 
 - Query history search (Ctrl-R) - already supported by reedline

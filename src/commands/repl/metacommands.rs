@@ -447,6 +447,36 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "  Ctrl-D         Exit REPL (when input is empty)")?;
     writeln!(writer, "  Ctrl-R         Search command history")?;
     writeln!(writer)?;
+    writeln!(writer, "Result Paging:")?;
+    writeln!(
+        writer,
+        "  When result sets are large, an interactive pager activates automatically."
+    )?;
+    writeln!(
+        writer,
+        "  j/k or Up/Down   Scroll rows up/down"
+    )?;
+    writeln!(
+        writer,
+        "  Space/b          Page down/up"
+    )?;
+    writeln!(
+        writer,
+        "  Left/Right       Scroll columns (for wide tables)"
+    )?;
+    writeln!(
+        writer,
+        "  g/G              Jump to first/last row"
+    )?;
+    writeln!(
+        writer,
+        "  q or Esc         Exit pager, return to prompt"
+    )?;
+    writeln!(
+        writer,
+        "  Column indicators (+N cols) show when columns are hidden."
+    )?;
+    writeln!(writer)?;
 
     Ok(())
 }
@@ -2085,5 +2115,21 @@ mod tests {
         assert!(output_str.contains("/s"));
         assert!(output_str.contains("System Monitoring"));
         assert!(output_str.contains("active sessions"));
+    }
+
+    #[test]
+    fn test_help_extended_includes_result_paging_section() {
+        let mut output = Vec::new();
+        print_help_extended(&mut output).unwrap();
+        let output_str = String::from_utf8(output).unwrap();
+
+        // Verify Sprint 28 Result Paging section is documented
+        assert!(output_str.contains("Result Paging"));
+        assert!(output_str.contains("j/k"));
+        assert!(output_str.contains("Space/b"));
+        assert!(output_str.contains("Left/Right"));
+        assert!(output_str.contains("g/G"));
+        assert!(output_str.contains("q or Esc"));
+        assert!(output_str.contains("Column indicators"));
     }
 }

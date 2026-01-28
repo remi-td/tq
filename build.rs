@@ -52,11 +52,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     lib_name, e
                                 );
                             } else {
-                                println!(
-                                    "cargo:warning=Successfully copied {} to {}",
-                                    lib_name,
-                                    lib_dest.display()
-                                );
+                                // Successfully copied - no warning needed for success case
+                                // Sprint 28: Removed success warning to provide clean REPL startup
 
                                 // Write the library directory to a file that can be included at compile time
                                 let lib_dir_file =

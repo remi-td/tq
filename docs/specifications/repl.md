@@ -1105,11 +1105,57 @@ tq> _
 
 #### Complete Status Bar Design
 
+**REQ-PAGER-001: Status Bar Layout**
+
+The pager SHALL display a two-line status bar at the bottom of the terminal with the following requirements:
+
+1. **REQ-PAGER-001.1** - Position: Bottom two lines of terminal viewport
+2. **REQ-PAGER-001.2** - Visual separation: Top and bottom borders using box-drawing characters
+3. **REQ-PAGER-001.3** - Line 1 content: Position indicators and navigation summary
+4. **REQ-PAGER-001.4** - Line 2 content: Additional navigation keys and exit instructions
+5. **REQ-PAGER-001.5** - Status bar SHALL remain visible at all times during paging
+
+**REQ-PAGER-002: Status Bar Content Requirements**
+
+The status bar SHALL display the following information:
+
+1. **REQ-PAGER-002.1** - Column position: `Columns X-Y of Z` format (when horizontal scrolling available)
+2. **REQ-PAGER-002.2** - Row position: `Rows X-Y of Z (P%)` format with percentage indicator
+3. **REQ-PAGER-002.3** - Navigation hints: Key bindings for common operations
+4. **REQ-PAGER-002.4** - Exit instructions: Clear indication of how to exit pager
+
+**REQ-PAGER-003: Navigation Hints Clarity**
+
+The status bar navigation hints SHALL be clear and discoverable:
+
+1. **REQ-PAGER-003.1** - Horizontal navigation: `←→: columns` or `← →: scroll columns` when applicable
+2. **REQ-PAGER-003.2** - Vertical navigation: `↑↓ Space b: rows` or similar concise format
+3. **REQ-PAGER-003.3** - Jump commands: `g/G: first/last` for quick navigation
+4. **REQ-PAGER-003.4** - Exit commands: `q/Esc: exit pager` prominently displayed
+5. **REQ-PAGER-003.5** - Hints SHALL be concise (fit within terminal width)
+6. **REQ-PAGER-003.6** - Hints SHALL prioritize most commonly used keys
+
+**REQ-PAGER-004: Dynamic Status Bar Adaptation**
+
+The status bar SHALL adapt to result set characteristics:
+
+1. **REQ-PAGER-004.1** - Single column width result: Omit horizontal navigation hints
+2. **REQ-PAGER-004.2** - Wide result sets: Display horizontal navigation prominently
+3. **REQ-PAGER-004.3** - Short result sets (fits in viewport): Indicate all rows visible
+4. **REQ-PAGER-004.4** - Terminal width changes: Reflow status bar content dynamically
+
 **Layout (Two-Line Status Bar at Bottom):**
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
-│ Columns 1-5 of 23 | Rows 1-20 of 1,234 (2%) | Navigation: ←→ ↑↓ Space b  │
+│ Columns 1-5 of 23 | Rows 1-20 of 1,234 (2%) | ← →: columns | ↑↓ Space: rows│
 │ g/G: first/last | q/Esc: exit pager                                        │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Alternative Compact Layout (Single-Line for Narrow Terminals):**
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│ Cols 1-5/23 | Rows 1-20/1234 (2%) | ←→↑↓: navigate | Space: page | q: exit │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1734,6 +1780,27 @@ The command SHALL execute efficiently and provide feedback:
 3. **REQ-SESS-008.3** - Result caching: NOT cached (each execution is fresh query for real-time monitoring)
 4. **REQ-SESS-008.4** - Query cancellation: Ctrl-C SHALL cancel query and return to prompt
 5. **REQ-SESS-008.5** - Resource impact: Query SHALL use read-only system views (no locks, no modifications)
+
+**REQ-SESS-009: Skew Percentage Interpretation Guidelines**
+
+The command output SHALL include documentation-referenced guidance for interpreting skew percentages:
+
+1. **REQ-SESS-009.1** - Skew metrics indicate workload distribution imbalance across AMPs
+2. **REQ-SESS-009.2** - Interpretation guidelines SHALL be documented in user guide
+3. **REQ-SESS-009.3** - Interpretation ranges:
+   - **0-5%**: Excellent distribution (well-balanced query)
+   - **5-15%**: Good distribution (acceptable for most workloads)
+   - **15-25%**: Moderate skew (consider optimization if persistent)
+   - **>25%**: High skew (investigate join conditions, PI/NUPI distribution, statistics)
+4. **REQ-SESS-009.4** - NULL skew (`[--]`) indicates IDLE session with no active AMP work
+5. **REQ-SESS-009.5** - Actionable guidance for DBAs:
+   - High CPU skew: Review join conditions, collect statistics, check PI distribution
+   - High I/O skew: Investigate data distribution, check for hot spots, review access patterns
+   - Persistent skew: Candidate for table redesign or partitioning strategy
+6. **REQ-SESS-009.6** - Context matters:
+   - Batch ETL jobs: Occasional high skew acceptable during specific operations
+   - Interactive queries: Persistent high skew degrades user experience
+   - Small result sets: Skew less impactful than on large scans
 
 **Example Interaction:**
 

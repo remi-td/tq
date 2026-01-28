@@ -36,6 +36,9 @@ const MIN_COLUMN_WIDTH: usize = 8;
 /// Maximum column width (including padding)
 const MAX_COLUMN_WIDTH: usize = 40;
 
+/// Width of the column position indicator cells (e.g., "(+3 cols)")
+const INDICATOR_WIDTH: usize = 10;
+
 /// Configuration for the pager
 #[derive(Debug, Clone)]
 pub struct PagerConfig {
@@ -319,13 +322,23 @@ impl Pager {
     }
 
     /// Calculate how many columns can fit in the terminal width
+    /// Sprint 28: Accounts for indicator cells when columns are hidden
     fn visible_column_count(&self) -> usize {
-        let mut total_width = 3; // Left border + padding
+        let hidden_left = self.hidden_columns_left();
+        let hidden_right_possible = self.data.columns.len().saturating_sub(self.col_offset + 1) > 0;
+
+        // Reserve space for indicator cells if columns are hidden
+        let left_indicator_width = if hidden_left > 0 { INDICATOR_WIDTH + 3 } else { 0 };
+        let right_indicator_width = if hidden_right_possible { INDICATOR_WIDTH + 3 } else { 0 };
+
+        let mut total_width = 3 + left_indicator_width; // Left border + left indicator
         let mut count = 0;
 
         for col in self.data.columns.iter().skip(self.col_offset) {
             let col_width = col.display_width + 3; // Cell + separator
-            if total_width + col_width > self.term_width && count > 0 {
+            // Account for right indicator when checking if column fits
+            let available_width = self.term_width.saturating_sub(right_indicator_width);
+            if total_width + col_width > available_width && count > 0 {
                 break;
             }
             total_width += col_width;
@@ -333,6 +346,20 @@ impl Pager {
         }
 
         count.max(1) // Always show at least 1 column
+    }
+
+    /// Calculate number of columns hidden to the left
+    /// Sprint 28: For column position indicators
+    fn hidden_columns_left(&self) -> usize {
+        self.col_offset
+    }
+
+    /// Calculate number of columns hidden to the right
+    /// Sprint 28: For column position indicators
+    fn hidden_columns_right(&self) -> usize {
+        let visible = self.visible_column_count();
+        let end_col = (self.col_offset + visible).min(self.data.columns.len());
+        self.data.columns.len().saturating_sub(end_col)
     }
 
     /// Render the current view
@@ -370,6 +397,7 @@ impl Pager {
     }
 
     /// Render a table border
+    /// Sprint 28: Updated to include indicator cell borders when columns are hidden
     fn render_border(&self, stdout: &mut impl Write, position: &str) -> io::Result<()> {
         let (left, middle, right, line) = match position {
             "top" => ('╭', '┬', '╮', '─'),
@@ -380,10 +408,19 @@ impl Pager {
 
         let visible_cols = self.visible_column_count();
         let end_col = (self.col_offset + visible_cols).min(self.data.columns.len());
+        let hidden_left = self.hidden_columns_left();
+        let hidden_right = self.hidden_columns_right();
 
         let mut border = String::new();
         border.push(left);
 
+        // Left indicator cell border (if columns hidden to left)
+        if hidden_left > 0 {
+            border.push_str(&line.to_string().repeat(INDICATOR_WIDTH + 2));
+            border.push(middle);
+        }
+
+        // Data column borders
         for (i, col) in self.data.columns[self.col_offset..end_col]
             .iter()
             .enumerate()
@@ -393,36 +430,73 @@ impl Pager {
                 border.push(middle);
             }
         }
+
+        // Right indicator cell border (if columns hidden to right)
+        if hidden_right > 0 {
+            border.push(middle);
+            border.push_str(&line.to_string().repeat(INDICATOR_WIDTH + 2));
+        }
+
         border.push(right);
 
         writeln!(stdout, "{}", border)
     }
 
     /// Render the header row
+    /// Sprint 28: Updated to include column position indicator cells
     fn render_header(
         &self,
         stdout: &mut impl Write,
         start_col: usize,
         end_col: usize,
     ) -> io::Result<()> {
+        let hidden_left = self.hidden_columns_left();
+        let hidden_right = self.hidden_columns_right();
+
         let mut row_str = String::from("│");
 
-        for col in &self.data.columns[start_col..end_col] {
-            let padded = format!(" {:^width$} ", col.header, width = col.display_width);
-            row_str.push_str(&padded);
+        // Left indicator cell (if columns hidden to left)
+        if hidden_left > 0 {
+            let indicator = format!("(+{} cols)", hidden_left);
+            let padded = format!(" {:^width$} ", indicator, width = INDICATOR_WIDTH);
+            // Write indicator with dim color
+            execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+            write!(stdout, "{}", padded)?;
+            execute!(stdout, ResetColor)?;
+            row_str.clear();
             row_str.push('│');
         }
 
-        // Use bold/cyan for header
-        execute!(stdout, SetForegroundColor(Color::Cyan))?;
-        write!(stdout, "{}", row_str)?;
-        execute!(stdout, ResetColor)?;
+        // Data column headers
+        for col in &self.data.columns[start_col..end_col] {
+            let padded = format!(" {:^width$} ", col.header, width = col.display_width);
+            // Use bold/cyan for header
+            execute!(stdout, SetForegroundColor(Color::Cyan))?;
+            write!(stdout, "{}", row_str)?;
+            write!(stdout, "{}", padded)?;
+            execute!(stdout, ResetColor)?;
+            row_str.clear();
+            row_str.push('│');
+        }
+
+        // Right indicator cell (if columns hidden to right)
+        if hidden_right > 0 {
+            let indicator = format!("(+{} cols)", hidden_right);
+            let padded = format!(" {:^width$} ", indicator, width = INDICATOR_WIDTH);
+            write!(stdout, "│")?;
+            execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+            write!(stdout, "{}", padded)?;
+            execute!(stdout, ResetColor)?;
+        }
+
+        write!(stdout, "│")?;
         writeln!(stdout)
     }
 
     /// Render a data row
     ///
     /// Sprint 8 Bug Fix: Write leading border, simplified logic
+    /// Sprint 28: Updated to include column position indicator cells
     fn render_row(
         &self,
         stdout: &mut impl Write,
@@ -430,8 +504,21 @@ impl Pager {
         start_col: usize,
         end_col: usize,
     ) -> io::Result<()> {
+        let hidden_left = self.hidden_columns_left();
+        let hidden_right = self.hidden_columns_right();
+
         // Sprint 8 Fix: Write leading border FIRST
         write!(stdout, "│")?;
+
+        // Left indicator cell (if columns hidden to left)
+        if hidden_left > 0 {
+            // Show left arrow indicator in data rows
+            let indicator = "    <--   ";
+            execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+            write!(stdout, " {} ", indicator)?;
+            execute!(stdout, ResetColor)?;
+            write!(stdout, "│")?;
+        }
 
         for col in &self.data.columns[start_col..end_col] {
             let value = col.values.get(row_idx).map(|s| s.as_str()).unwrap_or("");
@@ -453,14 +540,27 @@ impl Pager {
             write!(stdout, "│")?;
         }
 
+        // Right indicator cell (if columns hidden to right)
+        if hidden_right > 0 {
+            // Show right arrow indicator in data rows
+            let indicator = "   -->    ";
+            execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
+            write!(stdout, " {} ", indicator)?;
+            execute!(stdout, ResetColor)?;
+            write!(stdout, "│")?;
+        }
+
         writeln!(stdout)
     }
 
     /// Render the status bar
+    /// Sprint 28: Updated with clearer navigation hints and column indicators
     fn render_status_bar(&self, stdout: &mut impl Write) -> io::Result<()> {
         let visible_cols = self.visible_column_count();
         let end_col = (self.col_offset + visible_cols).min(self.data.columns.len());
         let end_row = (self.row_offset + self.page_size).min(self.data.row_count);
+        let hidden_left = self.hidden_columns_left();
+        let hidden_right = self.hidden_columns_right();
 
         // Calculate progress percentage
         let progress = if self.data.row_count == 0 {
@@ -469,7 +569,7 @@ impl Pager {
             (end_row * 100) / self.data.row_count
         };
 
-        // Build status line
+        // Build status line with column and row positions
         let col_status = format!(
             "Columns {}-{} of {}",
             self.col_offset + 1,
@@ -485,7 +585,20 @@ impl Pager {
             progress
         );
 
-        let nav_hints = "j/k:scroll  Space/b:page  Left/Right:columns  g/G:first/last  q:exit";
+        // Build navigation hints based on what navigation is possible
+        let mut nav_parts = Vec::new();
+
+        // Horizontal navigation (only show if columns are hidden)
+        if hidden_left > 0 || hidden_right > 0 {
+            nav_parts.push("<- ->: scroll cols");
+        }
+
+        // Vertical navigation
+        nav_parts.push("j/k Space/b: rows");
+        nav_parts.push("g/G: first/last");
+        nav_parts.push("q/Esc: exit");
+
+        let nav_hints = nav_parts.join(" | ");
 
         writeln!(stdout)?;
         execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
@@ -784,5 +897,38 @@ mod tests {
         let content = "Line 1\nLine 2\nLine 3";
         let config = PagerConfig::default();
         assert!(!should_page(content, &config));
+    }
+
+    // Sprint 28: Tests for column indicator calculations
+    #[test]
+    fn test_indicator_width_constant() {
+        // Verify INDICATOR_WIDTH can hold typical indicators like "(+99 cols)"
+        assert!(INDICATOR_WIDTH >= 10);
+    }
+
+    #[test]
+    fn test_hidden_columns_at_start() {
+        // When col_offset is 0, no columns are hidden to the left
+        let content = r#"╭──────┬──────┬──────╮
+│ col1 │ col2 │ col3 │
+├──────┼──────┼──────┤
+│ a    │ b    │ c    │
+╰──────┴──────┴──────╯"#;
+        let config = PagerConfig::default();
+        let pager = Pager::new(content.to_string(), 1, &config);
+        assert_eq!(pager.hidden_columns_left(), 0);
+    }
+
+    #[test]
+    fn test_table_data_parse_columns() {
+        let content = r#"╭──────┬──────┬──────╮
+│ col1 │ col2 │ col3 │
+├──────┼──────┼──────┤
+│ a    │ b    │ c    │
+│ d    │ e    │ f    │
+╰──────┴──────┴──────╯"#;
+        let data = TableData::parse_from_content(content).unwrap();
+        assert_eq!(data.columns.len(), 3);
+        assert_eq!(data.row_count, 2);
     }
 }
