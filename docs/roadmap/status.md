@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
-**Last Updated:** 2026-01-27
-**Current Version:** 1.12.0
-**Latest Sprint:** Sprint 26 Complete (System Monitoring - /sessions Command)
+**Last Updated:** 2026-01-28
+**Current Version:** 1.12.1
+**Latest Sprint:** Sprint 27 Complete (Bug Fix + Documentation)
 
 ---
 
@@ -125,6 +125,13 @@ All core features are complete and tested.
 - Tab completion: `/sessions` and `/s` alias in completion menu
 - Multi-format support: Table, CSV, and JSON output for session data
 
+**Sprint 27 Bug Fixes & Documentation (v1.12.1):**
+- `/sessions` bug fix: Correctly display ALL sessions regardless of PEstate/AMPState value types (fixes issue #10)
+- LICENSE file: Comprehensive licensing with MIT + third-party attributions (teradatarustapi, Go SDK)
+- README restructure: User-focused TLDR format with AI development story and quick start guide
+- User documentation: Added `/sessions` command documentation to REPL guide (Sprint 26 gap addressed)
+- Regression tests: Added tests to prevent session filtering bugs in future
+
 ---
 
 ## Batch Mode
@@ -192,9 +199,9 @@ All core features are complete and tested.
 - **Total Features**: 62
 - **Implemented**: 57 (92%)
 - **Planned**: 5 (8%)
-- **Test Pass Rate**: 100% (357/357 tests: 320 unit, 8 integration, 25 interactive, 4 doc)
+- **Test Pass Rate**: 100% (386/386 tests: 322 unit, 39 integration, 25 interactive)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 26 - System Monitoring (Sessions command with performance metrics)
+- **Latest Sprint**: Sprint 27 - Bug Fix + Documentation (Sessions bug fix, LICENSE, README)
 
 ---
 
