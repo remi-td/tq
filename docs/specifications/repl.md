@@ -1576,6 +1576,8 @@ The command SHALL retrieve session information from Teradata system catalog usin
 4. **REQ-SESS-002.4** - Column ordering SHALL match the query above (SessionNo first, skew percentages last)
 5. **REQ-SESS-002.5** - Query execution SHALL respect current connection timeout settings
 6. **REQ-SESS-002.6** - Query execution time SHALL be displayed in summary footer
+7. **REQ-SESS-002.7** - ALL sessions returned by the query SHALL be displayed in the output (no filtering by PEState, AMPState, or any other criteria)
+8. **REQ-SESS-002.8** - Sessions in ALL state combinations SHALL be included: IDLE/IDLE, IDLE/ACTIVE, DISPATCHING/IDLE, DISPATCHING/ACTIVE, ACTIVE/IDLE, ACTIVE/ACTIVE
 
 **REQ-SESS-003: Output Formatting and Display**
 

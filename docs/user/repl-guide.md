@@ -45,6 +45,7 @@ Available metacommands:
     /quit        Exit REPL
     /reconnect   Reconnect to database
     /session     Show session info
+    /sessions    List all database sessions
     /timing      Enable/disable query timing
 ```
 
@@ -419,6 +420,63 @@ Session Information:
   Character Set: UTF8
   Queries Executed: 42
 ```
+
+### List All Database Sessions
+
+Monitor all active sessions on the Teradata system:
+
+```sql
+tq> /sessions
+
+Sessions:
+┌───────────┬──────────┬────────────────────────┬─────────────┬──────────┬───────────┬───────┬─────────────┬────────────────┬──────────────┐
+│ SessionNo │ UserName │ LogonTime              │ PEstate     │ AMPState │ AMPCPUSec │ AMPIO │ ReqSpool    │ Amp CPU Skew % │ Amp IO Skew %│
+├───────────┼──────────┼────────────────────────┼─────────────┼──────────┼───────────┼───────┼─────────────┼────────────────┼──────────────┤
+│      1230 │ DBC      │ 2026/01/27 19:31:24.00 │ IDLE        │ IDLE     │     0.000 │     6 │           0 │           [--] │         [--] │
+│      1231 │ DBC      │ 2026/01/27 19:31:24.00 │ IDLE        │ IDLE     │     0.020 │   224 │           0 │           [--] │         [--] │
+│      1232 │ DBC      │ 2026/01/27 19:31:25.00 │ DISPATCHING │ ACTIVE   │     9.564 │  5084 │  1168793600 │           4.05 │          .86 │
+└───────────┴──────────┴────────────────────────┴─────────────┴──────────┴───────────┴───────┴─────────────┴────────────────┴──────────────┘
+
+3 active session(s) (Query time: 0.749s)
+```
+
+**Short alias:** `/s`
+
+```sql
+tq> /s
+```
+
+**What you see:**
+
+The `/sessions` command displays ALL active sessions on the Teradata system, regardless of their state. You'll see sessions in various states:
+
+- **IDLE/IDLE** - Session connected but not running queries
+- **DISPATCHING/ACTIVE** - Session actively executing a query
+- **ACTIVE/ACTIVE** - Session processing query results
+- **IDLE/ACTIVE** - Session with active AMP operations but idle PE
+
+**Column meanings:**
+
+- **SessionNo** - Unique session identifier
+- **UserName** - Database user running the session
+- **LogonTime** - When the session connected
+- **PEstate** - Parser Engine state (IDLE, DISPATCHING, ACTIVE)
+- **AMPState** - AMP state (IDLE, ACTIVE)
+- **AMPCPUSec** - Total CPU seconds consumed by AMPs
+- **AMPIO** - Total I/O operations by AMPs
+- **ReqSpool** - Spool space used by this session (bytes)
+- **Amp CPU Skew %** - CPU usage imbalance across AMPs (shows `[--]` for IDLE sessions)
+- **Amp IO Skew %** - I/O imbalance across AMPs (shows `[--]` for IDLE sessions)
+
+**Use cases:**
+
+- Monitor active queries and their resource consumption
+- Identify sessions using excessive spool space
+- Check for workload imbalances (high skew percentages)
+- Find long-running sessions
+- Verify your own session is connected
+
+**Note:** This command requires SELECT permission on `DBC.MonitorSession`. If you see a permission error, contact your DBA.
 
 ### Clear Screen
 

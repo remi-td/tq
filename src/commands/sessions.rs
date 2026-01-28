@@ -91,13 +91,13 @@ impl SessionInfo {
         let pe_state = match &row[3] {
             Value::String(s) => s.trim().to_string(),
             Value::Null => "[NULL]".to_string(),
-            _ => return None,
+            other => other.display(),
         };
 
         let amp_state = match &row[4] {
             Value::String(s) => s.trim().to_string(),
             Value::Null => "[NULL]".to_string(),
-            _ => return None,
+            other => other.display(),
         };
 
         let amp_cpu_sec = extract_decimal(&row[5]).unwrap_or(0.0);
@@ -702,5 +702,62 @@ mod tests {
     fn test_extract_decimal_from_null() {
         let value = Value::Null;
         assert_eq!(extract_decimal(&value), None);
+    }
+
+    #[test]
+    fn test_session_info_from_row_with_non_string_state() {
+        // Test that sessions with non-String pe_state/amp_state are NOT dropped
+        // This is a regression test for Sprint 27 bug fix (issue #10)
+        // Some Teradata versions may return Integer codes instead of String values
+        let row = vec![
+            Value::Integer(1079),
+            Value::String("DBC".to_string()),
+            Value::Timestamp("2026-01-27 15:33:29.00".to_string()),
+            Value::Integer(1),  // Non-string PE state (was causing row to be dropped)
+            Value::Integer(0),  // Non-string AMP state (was causing row to be dropped)
+            Value::Decimal(0.0),
+            Value::Integer(0),
+            Value::Integer(0),
+            Value::Decimal(0.0),
+            Value::Decimal(0.0),
+            Value::Decimal(0.0),
+            Value::Decimal(0.0),
+        ];
+
+        let session = SessionInfo::from_row(&row);
+        // Before fix: session would be None (row silently dropped)
+        // After fix: session is Some with pe_state="1", amp_state="0"
+        assert!(session.is_some(), "Session with non-String state values should NOT be dropped");
+
+        let session = session.unwrap();
+        assert_eq!(session.session_no, 1079);
+        assert_eq!(session.pe_state, "1"); // Integer displayed as string
+        assert_eq!(session.amp_state, "0"); // Integer displayed as string
+    }
+
+    #[test]
+    fn test_session_info_from_row_with_boolean_state() {
+        // Test that Boolean state values are also handled gracefully
+        let row = vec![
+            Value::Integer(1080),
+            Value::String("DBC".to_string()),
+            Value::Timestamp("2026-01-27 15:33:30.00".to_string()),
+            Value::Boolean(true),   // Boolean PE state
+            Value::Boolean(false),  // Boolean AMP state
+            Value::Decimal(0.0),
+            Value::Integer(0),
+            Value::Integer(0),
+            Value::Decimal(0.0),
+            Value::Decimal(0.0),
+            Value::Decimal(0.0),
+            Value::Decimal(0.0),
+        ];
+
+        let session = SessionInfo::from_row(&row);
+        assert!(session.is_some(), "Session with Boolean state values should NOT be dropped");
+
+        let session = session.unwrap();
+        assert_eq!(session.pe_state, "true");
+        assert_eq!(session.amp_state, "false");
     }
 }

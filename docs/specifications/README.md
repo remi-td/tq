@@ -74,10 +74,27 @@ The following specifications have been fully extracted and cleaned:
    - Interactive mode specifications
    - Multi-line SQL handling
    - Tab completion (keywords, tables, columns)
-   - Metacommands (/describe, /ping, /logon, /export, etc.)
+   - Metacommands (/describe, /ping, /logon, /export, /sessions, etc.)
    - Result paging with column windowing
    - History management
    - Line editing (Emacs/Vi modes)
+
+10. **licensing.md** - Licensing and attribution requirements
+    - MIT license for tq source code
+    - Third-party dependency attribution (Teradata, Go)
+    - LICENSE file structure and organization
+    - User-facing license messaging
+    - Trademark notices and disclaimers
+    - Compliance validation
+
+11. **documentation.md** - Project documentation requirements
+    - README.md structure and content
+    - TLDR summary with screenshot
+    - AI development story section
+    - Installation and usage examples
+    - Features and documentation links
+    - Contribution guidelines
+    - License and trademark sections
 
 ## Extraction Process
 
@@ -151,7 +168,7 @@ Implementation tracking documents in `docs/builder/` track progress toward these
 
 ## Next Steps
 
-This extraction initiative is now complete. All 9 core specification documents have been successfully extracted and cleaned.
+This extraction initiative is ongoing. Core specification documents are maintained and expanded as features are added.
 
 ### Future Enhancements
 
@@ -181,5 +198,5 @@ When updating these specifications:
 
 ---
 
-**Last Updated:** 2026-01-23
-**Status:** Complete (All 9 core specifications extracted)
+**Last Updated:** 2026-01-27
+**Status:** Active maintenance (11 specification documents)

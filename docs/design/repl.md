@@ -2217,6 +2217,103 @@ SessionNo,UserName,LogonTime,PEState,AMPState,AMPCPUSec,AMPIO,ReqSpool,Amp CPU S
 - Lower implementation complexity
 - Can refactor to trait-based if more commands added
 
+### Sprint 27 Bug Fix: Missing Sessions (#10)
+
+#### Problem Description
+
+The `/sessions` command was incorrectly showing 2 sessions when 3 actually existed. Active sessions with `DISPATCHING/ACTIVE` states were being silently dropped from the output.
+
+**User Evidence:**
+- SQL query `SELECT ... FROM TABLE (MonitorSession(-1,'*',0))` returned 3 rows
+- `/sessions` command only displayed 2 rows
+- Missing session had `PEState = 'DISPATCHING'` and `AMPState = 'ACTIVE'`
+
+#### Root Cause Analysis
+
+The bug was in `SessionInfo::from_row()` in `src/commands/sessions.rs`. The function used strict type matching for `PEState` and `AMPState` columns that returned `None` (silently dropping the row) when the value type was unexpected:
+
+```rust
+// BUGGY CODE (Sprint 26):
+let pe_state = match &row[3] {
+    Value::String(s) => s.trim().to_string(),
+    Value::Null => "[NULL]".to_string(),
+    _ => return None,  // BUG: Silently drops entire row!
+};
+
+let amp_state = match &row[4] {
+    Value::String(s) => s.trim().to_string(),
+    Value::Null => "[NULL]".to_string(),
+    _ => return None,  // BUG: Silently drops entire row!
+};
+```
+
+**Why this caused the bug:**
+1. The Teradata driver may return state values as different `Value` types depending on the column metadata or data characteristics
+2. IDLE states were being returned as `Value::String` and worked correctly
+3. Some active states (like `DISPATCHING`) were being returned as a different type
+4. When the match arm hit the `_` wildcard, `return None` caused `filter_map()` to skip that session entirely
+
+**The silent failure pattern:**
+```rust
+let sessions: Vec<SessionInfo> = result.rows.iter()
+    .filter_map(|row| SessionInfo::from_row(row))  // Silently drops None
+    .collect();
+```
+
+#### Solution Design
+
+**Principle:** Never silently drop rows due to unexpected value types. Instead, convert any value type to a displayable string using the `Value::display()` method.
+
+**Fixed Code:**
+```rust
+// FIXED CODE (Sprint 27):
+let pe_state = match &row[3] {
+    Value::String(s) => s.trim().to_string(),
+    Value::Null => "[NULL]".to_string(),
+    other => other.display(),  // Convert any type to string
+};
+
+let amp_state = match &row[4] {
+    Value::String(s) => s.trim().to_string(),
+    Value::Null => "[NULL]".to_string(),
+    other => other.display(),  // Convert any type to string
+};
+```
+
+**Design Rationale:**
+1. **Defensive Programming:** Never assume database driver returns specific types
+2. **Graceful Degradation:** Display something meaningful rather than dropping data
+3. **Consistency:** The `Value::display()` method already handles all value types correctly
+4. **User Visibility:** Users see all sessions, even if some field formatting is unexpected
+
+#### Regression Prevention
+
+**Unit Test Added:**
+```rust
+#[test]
+fn test_session_info_from_row_non_string_state() {
+    // Test that non-String state values don't cause row to be dropped
+    let row = vec![
+        Value::Integer(1232),
+        Value::String("DBC".to_string()),
+        Value::Timestamp("2026-01-27 19:31:25.00".to_string()),
+        Value::Integer(5),  // PEState as unexpected type
+        Value::Boolean(true),  // AMPState as unexpected type
+        // ... rest of row
+    ];
+
+    let session = SessionInfo::from_row(&row);
+    assert!(session.is_some(), "Row should not be dropped for non-string state");
+}
+```
+
+#### Lessons Learned
+
+1. **Pattern Matching Pitfall:** Using `_ => return None` in match arms can silently drop data
+2. **Test Coverage Gap:** Unit tests only tested with expected value types
+3. **Database Driver Variability:** Teradata driver type mapping may vary by database version, client configuration, or data characteristics
+4. **Defensive Parsing:** When parsing database rows, prefer converting to display format over rejecting data
+
 ### Testing Strategy
 
 **Unit Tests:**
@@ -2225,6 +2322,7 @@ SessionNo,UserName,LogonTime,PEState,AMPState,AMPCPUSec,AMPIO,ReqSpool,Amp CPU S
 - `test_format_logon_time` - Date format conversion
 - `test_session_info_from_row` - Row parsing with various values
 - `test_session_info_from_row_with_nulls` - NULL handling
+- `test_session_info_from_row_non_string_state` - Non-string state handling (Sprint 27)
 
 **Integration Tests:**
 - `test_sessions_command_execution` - With mock database

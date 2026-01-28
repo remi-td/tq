@@ -1,526 +1,310 @@
-# tq - Teradata Query
+# tq - Teradata Query CLI
 
-A fast, lightweight command-line client for Teradata databases written in Rust.
+> A lightweight, Rust-powered command-line client for Teradata databases with
+> interactive REPL and modern output formatting.
 
-## Features
+<!-- TODO: Add screenshot once available -->
+<!-- ![tq in action](docs/images/tq-screenshot.png) -->
 
-- **One-shot execution model**: connect, execute, close - designed for scripts and CLI usage
-- **Multiple authentication mechanisms**: TD2, LDAP, Kerberos, TDNEGO
-- **Multiple output formats**: table (human-readable), JSON (scripting), CSV (data export)
-- **Secure credential handling**: password files, environment variables, never in shell history
-- **Configuration hierarchy**: CLI args, environment, project config, user config, defaults
-- **Type preservation**: proper handling of numbers, booleans, dates, and NULL values
-- **Streaming support**: efficient handling of large result sets
+## What is tq?
 
-## License & Prerequisites
+tq is a fast, user-friendly terminal client for Teradata databases. It provides
+a powerful REPL (Read-Eval-Print Loop) with tab completion, command history,
+and beautiful table output. Perfect for DBAs, analysts, and developers who work
+with Teradata from the command line.
 
-**tq source code** is licensed under the MIT License (see [LICENSE](LICENSE)).
+**Why tq?** Modern CLI experience, instant startup, no Java dependencies.
 
-**Important**: This tool depends on the **Teradata GoSQL Driver**, which is proprietary
-software owned by Teradata Corporation with separate license terms. When you build this
-project, Cargo automatically fetches the driver from Teradata's official GitHub repository
-([teradatarustapi](https://github.com/Teradata/teradatarustapi)).
+## Quick Start
 
-### Requirements to Use tq
+```bash
+# Install (requires Rust toolchain from https://rustup.rs)
+git clone https://github.com/your-org/tq.git
+cd tq && cargo install --path .
 
-1. **Authorized Teradata Access**: You must have a valid, authorized license to use the
-   Teradata Analytics Platform. This tool is a client that requires legitimate database
-   access credentials.
+# Set connection
+export TQ_LOGON="user:pass@host:1025/database"
 
-2. **Teradata Driver License**: By building and using this software, you agree to comply
-   with Teradata Corporation's license terms for the GoSQL driver. See the
-   [NOTICE](NOTICE) file for details.
+# Test connectivity
+tq ping
 
-3. **Rust Toolchain**: Rust 1.70 or later (for building from source)
+# Start interactive REPL
+tq repl
 
-This is similar to other database clients - the client tool itself is open source, but
-you need legitimate access to the database system. See [NOTICE](NOTICE) for complete
-licensing information.
+# Or run a one-shot query
+tq query "SELECT * FROM dbc.dbcinfo"
+```
+
+---
+
+## Built Exclusively by AI Agents
+
+Here is something different: `tq` is developed entirely by AI agents using Claude
+Code. No human has written a line of production code. Instead, specialized AI
+agents collaborate through a sprint-driven workflow:
+
+- **cli-ux-designer**: Designs the user experience and interface specifications
+- **rust-teradata-architect**: Implements features and maintains code quality
+- **quality-validator**: Writes and executes test suites
+- **tq-project-manager**: Coordinates releases and manages technical debt
+
+**How to contribute?** Humans are welcome to submit GitHub issues with feature
+requests or bug reports. The AI agents triage, prioritize, and implement them
+autonomously in sprint cycles. Think of it as a collaborative experiment in
+AI-driven software development.
+
+Current development status and roadmap: [docs/roadmap/status.md](docs/roadmap/status.md)
+
+*Note: While the agents handle implementation, humans oversee the project
+direction and validate releases. This is an experiment in AI capabilities, not
+a replacement for human developers.*
+
+---
 
 ## Installation
 
 ### Prerequisites
 
-- **Rust 1.70+**: Install from [rustup.rs](https://rustup.rs/)
-- **Teradata Access**: Valid credentials for a Teradata database
-- **Teradata Driver**: Automatically fetched by Cargo from Teradata's public repository
+tq is written in Rust. Install the Rust toolchain if you have not already:
+https://rustup.rs
 
-### From source
+**Supported platforms:** Linux, macOS, Windows
+
+**Required:** Rust 1.70 or later
+
+### Install from Source
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/your-org/tq.git
 cd tq
 cargo install --path .
 ```
 
-### Development
+### Verify Installation
 
 ```bash
-cargo build          # Development build
-cargo build --release # Optimized release build
-cargo test           # Run all tests
+tq --version
+# tq 1.12.0
 ```
 
-## Quick Start
+**License Notice:** By installing tq, you accept the license terms for bundled
+dependencies (Teradata drivers, Go runtime). See [LICENSE](LICENSE) for details.
 
-```bash
-# Option 1: Set connection details using environment file (recommended for development)
-cp .env.example .env
-# Edit .env and set TQ_LOGON=myuser:mypassword@myteradata:1025/mydatabase
-
-# Option 2: Set connection details in your shell
-export TQ_LOGON="myuser:mypassword@myteradata:1025/mydatabase"
-
-# Test connectivity
-tq ping
-
-# Run a query
-tq query "SELECT * FROM dbc.dbcinfo"
-
-# Export to JSON
-tq query --format json "SELECT * FROM employees" > employees.json
-
-# Export to CSV
-tq query --format csv "SELECT * FROM sales" --output sales.csv
-
-# Start interactive REPL mode
-tq repl
-```
-
-## Interactive REPL Mode
-
-tq includes a powerful interactive REPL (Read-Eval-Print Loop) for exploring your database:
-
-```bash
-# Start REPL
-export TQ_LOGON="user:pass@host:1025/database"
-tq repl
-```
-
-### Key Features
-
-- **Tab completion** - Discover commands and complete SQL with TAB key
-- **Schema exploration** - Quick commands to list databases, tables, and views
-- **Command history** - Navigate previous commands with arrow keys
-- **Multi-line editing** - Write complex queries across multiple lines
-
-### Quick Examples
-
-```sql
-# Discover available metacommands
-tq> /<TAB>
-
-# List all databases
-tq> /list databases
-
-# List tables with pattern matching
-tq> /list tables emp%
-
-# Describe table structure
-tq> /describe employees
-
-# Run queries with syntax highlighting
-tq> SELECT * FROM employees WHERE department = 'IT';
-```
-
-**Learn more:** See the complete [REPL User Guide](docs/user/repl-guide.md) for detailed examples and tips.
+---
 
 ## Usage
 
-```
-tq is a fast, lightweight command-line client for Teradata databases.
+### Interactive REPL Mode
 
-Usage: tq [OPTIONS] <COMMAND>
-
-Commands:
-  ping   Test database connectivity
-  query  Execute a SQL query
-  help   Print this message or the help of the given subcommand(s)
-
-Global Options:
-  -l, --logon <LOGON>        Connection string: user:password@host:port/database
-      --password-file <FILE> Read password from file (recommended for security)
-      --logmech <MECH>       Authentication mechanism [default: TD2]
-  -t, --timeout <DURATION>   Connection timeout [default: 30s]
-  -v, --verbose...           Verbose output (repeat for more: -v, -vv, -vvv)
-  -q, --quiet                Suppress non-essential output
-      --color <WHEN>         Color output control [default: auto]
-  -h, --help                 Print help
-  -V, --version              Print version
-```
-
-### Query Command
+Start an interactive session:
 
 ```bash
-tq query [OPTIONS] [QUERY]
-
-Arguments:
-  [QUERY]  SQL query to execute (or use --file or stdin)
-
-Options:
-  -f, --format <FORMAT>   Output format: table, json, csv [default: table]
-  -o, --output <FILE>     Write output to file instead of stdout
-      --file <FILE>       Read SQL from file
-      --no-header         Omit column headers in output
-      --timing            Show query execution time
-  -n, --limit <N>         Limit number of rows returned
+export TQ_LOGON="myuser:mypass@tdhost:1025/mydb"
+tq repl
 ```
 
-### Ping Command
+Inside the REPL:
+
+```sql
+tq> SELECT employee_id, first_name, last_name
+    FROM employees
+    WHERE department = 'Engineering'
+    LIMIT 5;
+
++--------------+------------+-----------+
+| employee_id  | first_name | last_name |
++--------------+------------+-----------+
+| 1001         | Alice      | Anderson  |
+| 1002         | Bob        | Brown     |
+| 1003         | Charlie    | Chen      |
+| 1004         | Diana      | Davis     |
+| 1005         | Eve        | Evans     |
++--------------+------------+-----------+
+
+5 rows (0.123s)
+```
+
+### REPL Metacommands
+
+```sql
+tq> /list databases          # List all databases
+tq> /list tables emp%        # List tables matching pattern
+tq> /describe employees      # Show table structure
+tq> /sessions                # Monitor active database sessions
+tq> /export csv result.csv   # Export last result to CSV
+```
+
+### One-Shot Queries
+
+Execute a single query:
 
 ```bash
-tq ping [OPTIONS]
-
-Options:
-  -c, --count <N>         Number of ping attempts [default: 1]
-  -i, --interval <DURATION> Interval between pings [default: 1s]
+tq query "SELECT COUNT(*) FROM orders WHERE date = CURRENT_DATE"
 ```
 
-## Configuration
+### Export to Different Formats
 
-Configuration follows this precedence (highest to lowest):
+```bash
+# CSV export
+tq query "SELECT * FROM sales_summary" --format csv > report.csv
 
-1. Command-line arguments
-2. Environment variables
-3. Project config file (`.tq.toml` in current directory)
-4. User config file (`~/.config/tq/config.toml`)
-5. System config file (`/etc/tq/config.toml`)
-6. Built-in defaults
+# JSON export
+tq query "SELECT * FROM products" --format json > products.json
+```
 
-### Environment Variables
+### Batch Mode (Multiple Statements)
 
-| Variable | Description |
-|----------|-------------|
-| `TQ_LOGON` | Connection string: `user:password@host:port/database` |
-| `TQ_LOGMECH` | Authentication mechanism (TD2, LDAP, KRB5, TDNEGO) |
-| `TQ_TIMEOUT` | Connection timeout (e.g., `30s`, `5m`) |
-| `TQ_FORMAT` | Default output format (table, json, csv) |
-| `TQ_COLOR` | Color output (auto, always, never) |
+```bash
+# Execute multiple statements from a file
+tq query --file setup.sql
 
-### Environment File (.env)
+# Or from stdin
+tq query <<'EOF'
+SELECT CURRENT_DATE;
+SELECT CURRENT_TIME;
+SELECT DATABASE;
+EOF
+```
 
-For convenience, you can store environment variables in a `.env` file in your project directory. This is especially useful for development and testing.
-
-1. Copy the example file:
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Edit `.env` with your connection details:
-   ```bash
-   # .env file
-   TQ_LOGON=myuser:mypassword@myteradata:1025/mydatabase
-   ```
-
-3. Run tq commands without specifying connection details:
-   ```bash
-   tq ping
-   tq query "SELECT 1"
-   ```
-
-**Security notes:**
-- The `.env` file is automatically excluded from git (listed in `.gitignore`)
-- Use `.env.example` as a template to share configuration structure without secrets
-- Ensure `.env` has appropriate permissions: `chmod 0600 .env`
-
-### Configuration File
+### Using Configuration
 
 Create `~/.config/tq/config.toml`:
 
 ```toml
 [connection]
-host = "myteradata.company.com"
+host = "prod-td.company.com"
 port = 1025
-user = "myuser"
-database = "mydatabase"
+database = "sales_db"
+user = "analyst"
 
 [output]
 format = "table"
 color = "auto"
 ```
 
-## Examples
+Or use environment variables:
 
-### Basic Queries
+| Variable | Description |
+|----------|-------------|
+| `TQ_LOGON` | Connection string: `user:password@host:port/database` |
+| `TQ_LOGMECH` | Authentication mechanism (TD2, LDAP, KRB5, TDNEGO) |
+| `TQ_FORMAT` | Default output format (table, json, csv) |
 
-```bash
-# Set logon string once
-export TQ_LOGON="user:password@host:1025/database"
+---
 
-# Simple SELECT
-tq query "SELECT * FROM dbc.dbcinfo"
+## Features
 
-# With WHERE clause
-tq query "SELECT * FROM employees WHERE department = 'IT'"
-
-# Query from file
-tq query --file report.sql
-
-# Query from stdin
-echo "SELECT COUNT(*) FROM orders" | tq query
-```
-
-### Batch Mode (Multiple Statements)
-
-Execute multiple SQL statements from files or stdin. Statements are separated by semicolons and executed sequentially.
-
-```bash
-# Execute multiple statements from a file
-cat > setup.sql << 'EOF'
--- Create temporary table
-CREATE VOLATILE TABLE temp_data (
-    id INTEGER,
-    value VARCHAR(100)
-) ON COMMIT PRESERVE ROWS;
-
--- Insert test data
-INSERT INTO temp_data VALUES (1, 'test1');
-INSERT INTO temp_data VALUES (2, 'test2');
-
--- Query the data
-SELECT * FROM temp_data;
-
--- Cleanup
-DROP TABLE temp_data;
-EOF
-tq query --file setup.sql
-
-# Execute multiple statements from stdin using heredoc
-tq query <<'EOF'
-SELECT CURRENT_DATE;
-SELECT CURRENT_TIME;
-SELECT DATABASE;
-EOF
-
-# Batch mode with progress output (to stderr)
-# Statement 1: SELECT... 1 rows returned
-# Statement 2: SELECT... 1 rows returned
-# Statement 3: SELECT... 1 rows returned
-
-# Pipe multiple statements
-echo "SELECT 1; SELECT 2; SELECT 3;" | tq query
-```
-
-**Batch Mode Features:**
-- Automatic statement parsing (semicolon-separated)
-- Progress messages for each statement (to stderr)
-- Results output (to stdout)
-- Fail-fast error handling with statement context
-- Line number tracking for error messages
-
-**Error Handling in Batch Mode:**
-
-If a statement fails, tq stops execution and shows:
-- Which statement failed (number and line)
-- The SQL that caused the error
-- Which statements completed successfully
-- Which statements were not executed
-
-```bash
-# Example error output:
-# Statement 1: SELECT... 1 rows returned
-# Statement 2: INSERT... FAILED
-# Error at statement 2 (line 5): SQL syntax error...
-# Statement: INSERT INTO nonexistent VALUES (1)
-# Statements executed: 1-1
-# Statements remaining: 3-3
-```
+### Interactive REPL
+- Multi-line SQL editing
+- Tab completion for tables, columns, and SQL keywords
+- Command history with search (Ctrl-R)
+- Emacs and Vi editing modes
+- Metacommands: `/describe`, `/list`, `/export`, `/sessions`, and more
 
 ### Output Formats
+- Beautiful ASCII table output with box-drawing characters
+- CSV export for data analysis tools
+- JSON output for programmatic processing
+- Automatic column truncation for wide results
+
+### Performance
+- Instant startup (no JVM warmup)
+- Efficient memory usage
+- Fast result rendering
+- Streaming support for large result sets
+
+### Security
+- Secure credential handling via password files
+- Environment variable support
+- Never stores passwords in shell history
+- Warns on insecure file permissions
+
+### Authentication
+- TD2 (username/password)
+- LDAP
+- Kerberos (KRB5)
+- TDNEGO (Teradata negotiation)
+
+---
+
+## Documentation
+
+- **[REPL User Guide](docs/user/repl-guide.md)** - Interactive mode documentation
+- **[Feature Specifications](docs/specifications/)** - Detailed feature specs
+- **[Roadmap](docs/roadmap/status.md)** - Current implementation status
+- **[Architecture](docs/design/)** - Technical design documents
+
+**Need help?** Open a [GitHub issue](https://github.com/your-org/tq/issues).
+
+---
+
+## Development and Contribution
+
+This project uses an AI-driven development workflow. Instead of traditional pull
+requests, we accept contributions through GitHub Issues.
+
+### How to Contribute
+
+1. **Submit a GitHub Issue** using our templates:
+   - Bug reports
+   - Feature requests
+   - Documentation improvements
+
+2. **AI agents triage and implement** your issue autonomously in sprint cycles
+
+3. **Track progress** via issue comments and roadmap updates
+
+### Issue Labels
+
+- `sprint-ready` - Accepted and queued for implementation
+- `needs-info` - Requires clarification from issue author
+- `bug` - Bug report
+- `enhancement` - Feature request
+- `documentation` - Documentation improvement
+
+### Local Development
+
+While agents handle implementation, you can explore the codebase:
 
 ```bash
-# Human-readable table (default)
-tq query "SELECT TOP 5 * FROM products"
-
-# JSON for scripting
-tq query --format json "SELECT product_id, name, price FROM products" | jq '.'
-
-# CSV for data export
-tq query --format csv "SELECT * FROM sales_2024" > sales_2024.csv
-
-# With timing information
-tq query --timing "SELECT COUNT(*) FROM large_table"
-```
-
-### Secure Password Handling
-
-```bash
-# Method 1: Password file (recommended)
-echo "mypassword" > ~/.tq_password
-chmod 0600 ~/.tq_password
-tq -l "user@host:1025/db" --password-file ~/.tq_password query "SELECT 1"
-
-# Method 2: Connection string without password + password file
-export TQ_LOGON="user@host:1025/db"
-tq --password-file ~/.tq_password query "SELECT 1"
-```
-
-### Different Authentication Methods
-
-```bash
-# TD2 (default - username/password)
-tq --logmech TD2 query "SELECT SESSION"
-
-# LDAP authentication
-tq --logmech LDAP query "SELECT SESSION"
-
-# Kerberos authentication
-tq --logmech KRB5 query "SELECT SESSION"
-
-# Teradata negotiation
-tq --logmech TDNEGO query "SELECT SESSION"
-```
-
-### Scripting Examples
-
-```bash
-# Get user count as JSON
-count=$(tq query --format json "SELECT COUNT(*) AS cnt FROM users" | jq -r '.[0].cnt')
-echo "User count: $count"
-
-# Export all tables to CSV
-for table in customers orders products; do
-  tq query --format csv "SELECT * FROM $table" > "${table}.csv"
-done
-
-# Conditional query based on result
-if tq query "SELECT 1 FROM table WHERE condition" | grep -q .; then
-  echo "Condition met"
-fi
-```
-
-## Output Format Details
-
-### Table Format (default for interactive use)
-
-```
-+---------+----------+---------+
-| user_id | username | active  |
-+---------+----------+---------+
-|       1 | alice    | true    |
-|       2 | bob      | false   |
-+---------+----------+---------+
-2 row(s) in set (0.045s)
-```
-
-### JSON Format (for scripting)
-
-```json
-[
-  {"user_id": 1, "username": "alice", "active": true},
-  {"user_id": 2, "username": "bob", "active": false}
-]
-```
-
-Type preservation:
-- Numbers are JSON numbers (not strings)
-- Booleans are JSON booleans
-- NULL values are JSON null
-- Dates and timestamps are ISO 8601 strings
-
-### CSV Format (RFC 4180 compliant)
-
-```csv
-user_id,username,active
-1,alice,true
-2,bob,false
-```
-
-Features:
-- Proper quoting of fields containing commas, quotes, or newlines
-- NULL values become empty fields
-- Unix line endings for compatibility
-
-## Security Best Practices
-
-1. **Never use passwords in command-line arguments** - they appear in process lists and shell history
-2. **Use `--password-file` or environment variables** for password handling
-3. **Protect credential files** with `chmod 0600`
-4. **Use project/user config files** in secure locations
-5. **tq warns** if password files have insecure permissions
-
-## Exit Codes
-
-| Code | Description |
-|------|-------------|
-| 0 | Success |
-| 1 | Runtime error (connection failed, query error, etc.) |
-| 2 | Usage error (invalid arguments, missing required options) |
-
-## Building from Source
-
-```bash
-# Clone repository
-git clone <repository-url>
+git clone https://github.com/your-org/tq.git
 cd tq
-
-# Development build
-# Note: First build will fetch the Teradata driver from GitHub
 cargo build
-
-# Optimized release build
-cargo build --release
-
-# Run tests (101+ tests)
 cargo test
-
-# Run with debug logging
-RUST_LOG=debug cargo run -- ping
-
-# Install to ~/.cargo/bin
-cargo install --path .
+cargo clippy
 ```
 
-**Note**: The first build will take longer as Cargo fetches dependencies, including
-the Teradata GoSQL driver from Teradata's public GitHub repository. By building this
-software, you acknowledge that you have read and agree to comply with the Teradata
-driver license terms (see [NOTICE](NOTICE)).
+**Note:** Direct code contributions (pull requests) are reviewed on a case-by-case
+basis. For most contributions, submitting an issue is the preferred approach.
 
-## Architecture
-
-tq follows a library-first design:
-
-```
-src/
-  lib.rs        # Public library API
-  main.rs       # CLI entry point
-  cli.rs        # Command-line interface (Clap)
-  config.rs     # Configuration management (Figment)
-  error.rs      # Error types (thiserror)
-  db/           # Database connectivity
-    connection.rs   # Connection management
-    client.rs       # Query execution
-    types.rs        # Type conversions
-  format/       # Output formatters
-    table.rs    # Table format (comfy-table)
-    json.rs     # JSON format (serde_json)
-    csv.rs      # CSV format (csv crate)
-  commands/     # Command implementations
-    ping.rs     # Ping command
-    query.rs    # Query command
-```
-
-## Contributing
-
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with tests
-4. Run `cargo fmt` and `cargo clippy`
-5. Submit a pull request
+---
 
 ## License
 
-The tq source code is licensed under the MIT License - see the [LICENSE](LICENSE) file
-for details.
+The `tq` tool source code is licensed under the **MIT License**.
 
-**Important**: This software depends on the Teradata GoSQL Driver, which is proprietary
-software with separate license terms. See the [NOTICE](NOTICE) file for complete
-licensing information about dependencies.
+**Important:** This tool depends on third-party software with separate licenses:
+- Teradata GoSQL Driver (Teradata proprietary license)
+- Go runtime (BSD-style Go license)
+
+By installing and using tq, you accept all dependency license terms.
+
+See [LICENSE](LICENSE) for complete license text and attributions.
+
+---
+
+## Trademarks
+
+Teradata is a registered trademark of Teradata Corporation.
+
+This project is **not affiliated with, endorsed by, or sponsored by Teradata
+Corporation**. The name "Teradata" is used solely to indicate compatibility
+with Teradata database systems.
+
+---
 
 ## Links
 
 - [Teradata Rust API](https://github.com/Teradata/teradatarustapi)
-- [Report Issues](issues)
-- [Documentation](docs)
+- [Report Issues](https://github.com/your-org/tq/issues)
+- [Project Roadmap](docs/roadmap/status.md)

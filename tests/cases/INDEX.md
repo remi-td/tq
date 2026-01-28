@@ -232,6 +232,43 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 - **Documentation**: Test only delivered features, no deferred features documented
 - **Acceptance**: 100% test pass rate for P0 features, zero regressions
 
+### Sprint 27: Bug Fix and Documentation (Bug Fix + LICENSE + README)
+
+**Sprint 27 Context:** Critical bug fix for /sessions command + legal compliance + user-facing documentation improvements.
+
+**Sprint 27 Test Cases (15 total: 11 automated + 3 manual + 1 regression):**
+
+#### Feature 1: Bug Fix - /sessions Command (#10) - 4 tests
+- **TC-SESS-BUG-001**: Bug Fix - All Sessions Displayed (Row Count Match)
+- **TC-SESS-BUG-002**: Bug Fix - Session State Coverage (All States Displayed)
+- **TC-SESS-BUG-003**: Bug Fix - Regression Test (Sprint 26 Tests Still Pass)
+- **TC-SESS-BUG-004-MANUAL**: Bug Fix - Manual Verification with User Scenario
+
+#### Feature 2: LICENSE File Validation (#8) - 5 tests
+- **TC-LICENSE-001**: LICENSE File Existence and Completeness
+- **TC-LICENSE-002**: LICENSE Attribution Validation (MIT + BSD + Go)
+- **TC-LICENSE-003**: NOTICE or THIRD-PARTY-LICENSES File Check
+- **TC-LICENSE-004**: README Licensing Section
+- **TC-LICENSE-MANUAL**: Legal Compliance Manual Review (BLOCKING)
+
+#### Feature 3: README Validation (#9) - 6 tests
+- **TC-README-001**: README Structure and TLDR Section
+- **TC-README-002**: README AI Development Story
+- **TC-README-003**: README Screenshot Validation
+- **TC-README-004**: README Installation Instructions
+- **TC-README-005**: README Documentation Links
+- **TC-README-006**: README GitHub Configuration Section Moved
+- **TC-README-MANUAL**: README Tone and Quality Manual Review (BLOCKING)
+
+**Sprint 27 Test Strategy:**
+- **Test Count**: 15 test cases (11 automated + 3 manual + 1 regression suite)
+- **Type**: Bug Fix + Documentation Sprint
+- **Database Required**: Yes (bug fix tests only)
+- **Test Types**: Integration tests (row count, state coverage, file validation) + Manual reviews (2 BLOCKING)
+- **Critical Focus**: Bug fix must not regress Sprint 26 functionality
+- **Manual Reviews**: LICENSE legal review and README quality review are BLOCKING for release
+- **Acceptance**: 100% bug fix validation + legal compliance + professional README
+
 ### Security
 - **TC022**: Security - No Password Exposure
 - **TC-SECURITY-001**: Password File Permission Enforcement - 0644 Rejected (Sprint 17)
