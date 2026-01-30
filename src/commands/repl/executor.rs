@@ -8,7 +8,8 @@
 //! - Result paging for large result sets (Sprint 8 integration)
 //! - Automatic row limiting for SELECT queries
 
-// Sprint 11: Pager disabled - imports removed
+// Sprint 29: Pager re-enabled with horizontal scrolling support
+use super::pager::{display_with_pager, PagerConfig};
 use super::state::ReplState;
 use crate::cli::OutputFormat;
 use crate::db::DatabaseClient;
@@ -165,19 +166,48 @@ pub fn execute_sql_with_state<W: Write>(
         .with_header(true)
         .with_color(use_color);
 
-    // Sprint 11: Pager COMPLETELY DISABLED per user directive
-    // User feedback: "going into panning mode, when I asked to drop it from now"
-    // User wants simple column truncation, not paging
-    // Table formatter now handles terminal width and truncation
+    // Sprint 29: Pager re-enabled with horizontal scrolling support
+    // Check if pager is enabled in state (controlled by /pager on|off metacommand)
+    let pager_enabled = state.is_pager_enabled();
 
-    // Format and write output directly - no paging
-    write_output_with_timing(
-        &result_clone,
-        writer,
-        OutputFormat::Table,
-        &format_options,
-        true, // Always show timing in REPL
-    )?;
+    if pager_enabled {
+        // Format output for pager
+        let mut output_buffer = Vec::new();
+        write_output_with_timing(
+            &result_clone,
+            &mut output_buffer,
+            OutputFormat::Table,
+            &format_options,
+            true, // Always show timing in REPL
+        )?;
+        let output_str = String::from_utf8_lossy(&output_buffer).to_string();
+
+        // Try to use pager - if it's not needed (small result), it returns false
+        let pager_config = PagerConfig::default();
+        match display_with_pager(&output_str, row_count, &pager_config) {
+            Ok(true) => {
+                // Pager was used, output already displayed
+            }
+            Ok(false) => {
+                // Pager not needed, write directly to output
+                writer.write_all(&output_buffer)?;
+            }
+            Err(e) => {
+                // Pager failed, fall back to direct output
+                log::warn!("Pager failed, falling back to direct output: {}", e);
+                writer.write_all(&output_buffer)?;
+            }
+        }
+    } else {
+        // Pager disabled - format and write output directly
+        write_output_with_timing(
+            &result_clone,
+            writer,
+            OutputFormat::Table,
+            &format_options,
+            true, // Always show timing in REPL
+        )?;
+    }
 
     // Show limit message if we applied the default limit
     if limited {

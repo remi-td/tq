@@ -596,6 +596,7 @@ impl Pager {
         // Vertical navigation
         nav_parts.push("j/k Space/b: rows");
         nav_parts.push("g/G: first/last");
+        nav_parts.push("?: help");
         nav_parts.push("q/Esc: exit");
 
         let nav_hints = nav_parts.join(" | ");
@@ -609,10 +610,11 @@ impl Pager {
     }
 
     /// Handle navigation input
-    fn handle_key(&mut self, key: KeyEvent) -> bool {
+    /// Returns Ok(true) to continue paging, Ok(false) to exit pager
+    fn handle_key(&mut self, key: KeyEvent) -> io::Result<bool> {
         match key.code {
             // Exit pager
-            KeyCode::Char('q') | KeyCode::Esc => return false,
+            KeyCode::Char('q') | KeyCode::Esc => return Ok(false),
 
             // Vertical navigation
             KeyCode::Char('j') | KeyCode::Down => {
@@ -657,9 +659,72 @@ impl Pager {
                 self.col_offset = self.data.columns.len().saturating_sub(visible);
             }
 
+            // Help display
+            KeyCode::Char('?') => {
+                self.show_help()?;
+            }
+
             _ => {}
         }
-        true // Continue paging
+        Ok(true) // Continue paging
+    }
+
+    /// Display help overlay showing all navigation keys
+    /// REQ-PAGER-HORIZ-011: Help text documents horizontal navigation keys
+    fn show_help(&mut self) -> io::Result<()> {
+        let mut stdout = io::stdout();
+
+        // Clear screen and show help
+        execute!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
+
+        let help_text = r#"
+Navigation Keys
+===============
+
+Vertical (Row) Navigation:
+  ↑ or k      Scroll up one row
+  ↓ or j      Scroll down one row
+  Space       Page down (next page)
+  b           Page up (previous page)
+  g / Home    Jump to first row
+  G / End     Jump to last row
+
+Horizontal (Column) Navigation:
+  ← or h      Scroll left one column
+  → or l      Scroll right one column
+  H           Jump to first column
+  L           Jump to last column
+
+Column Indicators:
+  (+N cols)   Shows N hidden columns in that direction
+  <--         Arrow pointing left indicates more columns to the left
+  -->         Arrow pointing right indicates more columns to the right
+
+Note: Column position is preserved when scrolling vertically.
+
+Exit:
+  q / Esc     Exit pager and return to REPL prompt
+
+Press any key to return to results..."#;
+
+        execute!(stdout, SetForegroundColor(Color::Cyan))?;
+        writeln!(stdout, "{}", help_text)?;
+        execute!(stdout, ResetColor)?;
+        stdout.flush()?;
+
+        // Wait for any key press
+        loop {
+            if event::poll(std::time::Duration::from_millis(100))? {
+                if let Event::Key(_) = event::read()? {
+                    break;
+                }
+            }
+        }
+
+        // Re-render the table
+        self.render()?;
+
+        Ok(())
     }
 
     /// Run the pager event loop
@@ -676,7 +741,7 @@ impl Pager {
         loop {
             if event::poll(std::time::Duration::from_millis(100))? {
                 if let Event::Key(key) = event::read()? {
-                    if !self.handle_key(key) {
+                    if !self.handle_key(key)? {
                         break; // Exit pager
                     }
                     self.render()?;
@@ -903,7 +968,15 @@ mod tests {
     #[test]
     fn test_indicator_width_constant() {
         // Verify INDICATOR_WIDTH can hold typical indicators like "(+99 cols)"
-        assert!(INDICATOR_WIDTH >= 10);
+        // The indicator format "(+99 cols)" is 10 chars, so INDICATOR_WIDTH must be >= 10
+        let sample_indicator = "(+99 cols)";
+        assert!(
+            INDICATOR_WIDTH >= sample_indicator.len(),
+            "INDICATOR_WIDTH {} must be >= {} to hold indicators like '{}'",
+            INDICATOR_WIDTH,
+            sample_indicator.len(),
+            sample_indicator
+        );
     }
 
     #[test]
@@ -930,5 +1003,71 @@ mod tests {
         let data = TableData::parse_from_content(content).unwrap();
         assert_eq!(data.columns.len(), 3);
         assert_eq!(data.row_count, 2);
+    }
+
+    // Sprint 29: Tests for horizontal navigation features
+    #[test]
+    fn test_pager_initial_column_offset() {
+        // New pager should start at column offset 0
+        let content = r#"╭──────┬──────┬──────╮
+│ col1 │ col2 │ col3 │
+├──────┼──────┼──────┤
+│ a    │ b    │ c    │
+╰──────┴──────┴──────╯"#;
+        let config = PagerConfig::default();
+        let pager = Pager::new(content.to_string(), 1, &config);
+        assert_eq!(pager.col_offset, 0);
+    }
+
+    #[test]
+    fn test_pager_visible_column_count_minimum_one() {
+        // Should always show at least one column
+        let content = r#"╭──────┬──────┬──────╮
+│ col1 │ col2 │ col3 │
+├──────┼──────┼──────┤
+│ a    │ b    │ c    │
+╰──────┴──────┴──────╯"#;
+        let config = PagerConfig::default();
+        let pager = Pager::new(content.to_string(), 1, &config);
+        assert!(pager.visible_column_count() >= 1);
+    }
+
+    #[test]
+    fn test_pager_hidden_columns_right_calculation() {
+        // With 3 columns and starting at offset 0, hidden right depends on terminal width
+        let content = r#"╭──────┬──────┬──────╮
+│ col1 │ col2 │ col3 │
+├──────┼──────┼──────┤
+│ a    │ b    │ c    │
+╰──────┴──────┴──────╯"#;
+        let config = PagerConfig::default();
+        let pager = Pager::new(content.to_string(), 1, &config);
+        // hidden_columns_right = total_cols - (col_offset + visible_cols)
+        let expected_hidden = pager
+            .data
+            .columns
+            .len()
+            .saturating_sub(pager.col_offset + pager.visible_column_count());
+        assert_eq!(pager.hidden_columns_right(), expected_hidden);
+    }
+
+    #[test]
+    fn test_status_bar_includes_help_hint() {
+        // Verify the status bar nav_parts include help key
+        // This is a code structure test - the status bar should mention '?'
+        // We test this by verifying the constant behavior in the code
+        let mut buffer = Vec::new();
+        let content = r#"╭──────┬──────╮
+│ col1 │ col2 │
+├──────┼──────┤
+│ a    │ b    │
+╰──────┴──────╯"#;
+        let config = PagerConfig::default();
+        let pager = Pager::new(content.to_string(), 1, &config);
+        // render_status_bar writes to buffer - we just verify no panic
+        let _ = pager.render_status_bar(&mut buffer);
+        let output = String::from_utf8_lossy(&buffer);
+        // Status bar should mention help key
+        assert!(output.contains("?") || output.contains("help"));
     }
 }

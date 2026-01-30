@@ -515,19 +515,316 @@ tq> /quit
 4. **Watch for loading indicators** - They tell you when tq is fetching data
 5. **Use short aliases** - Commands like `\l`, `\dt`, `\d` save typing
 6. **Write readable multi-line queries** - They're stored as single history entries, so formatting makes them easier to recall and edit
+7. **Master jump keys in the pager** - Press **L** to see the last columns or **H** to return to the start. Much faster than repeated arrow presses
+8. **Lock your column view** - When you find interesting columns, your horizontal position stays fixed while you scroll through rows
+9. **Check column indicators** - The `(+N cols) →` and `(+N cols) ←` indicators tell you exactly how many columns are hidden
+10. **Press ? in the pager** - If you forget navigation keys, the help screen is always one keypress away
+11. **Disable paging when needed** - Use `/pager off` if you prefer to see all columns at once (even if truncated)
 
 ## Keyboard Shortcuts Reference
+
+### General Editing
 
 | Key | Action |
 |-----|--------|
 | TAB | Show completions |
-| ↑/↓ | Navigate history (recalls complete multi-line statements) |
+| ↑/↓ | Navigate command history (recalls complete multi-line statements) |
 | Ctrl-R | Search history |
 | Ctrl-C | Cancel current operation |
 | Ctrl-D | Exit REPL (on empty line) |
 | Ctrl-L | Clear screen |
 | Ctrl-A | Move to start of line |
 | Ctrl-E | Move to end of line |
+
+### Result Pager Navigation
+
+When viewing query results, these additional keys are available:
+
+**Vertical (Row) Navigation:**
+
+| Key | Action |
+|-----|--------|
+| j, ↓ | Scroll down one row |
+| k, ↑ | Scroll up one row |
+| Space, Page Down | Scroll down one page |
+| b, Page Up | Scroll up one page |
+| g, Home | Jump to first row |
+| G, End | Jump to last row |
+
+**Horizontal (Column) Navigation:**
+
+| Key | Action |
+|-----|--------|
+| l, → | Scroll right one column |
+| h, ← | Scroll left one column |
+| L (uppercase) | Jump to last column |
+| H (uppercase) | Jump to first column |
+
+**Pager Control:**
+
+| Key | Action |
+|-----|--------|
+| ? | Show navigation help |
+| q, Esc | Exit pager, return to REPL |
+
+## Navigating Wide Result Sets
+
+When query results contain many columns that exceed your terminal width, tq automatically enables horizontal paging. This lets you explore all columns by scrolling left and right through the data.
+
+### How Horizontal Paging Works
+
+If your result set is wider than the terminal, tq displays as many columns as fit and shows indicators for hidden columns:
+
+```sql
+tq> SELECT * FROM dbc.tables WHERE databasename='dbc';
+
+╭──────────┬───────────┬─────────┬───────┬────────────┬────────────┬─────────────┬────────────╮
+│ Database │ TableName │ Version │ Kind  │ Protection │ Journal    │ CreatorName │ (+16 cols) →│
+├──────────┼───────────┼─────────┼───────┼────────────┼────────────┼─────────────┼────────────┤
+│ dbc      │ tables    │       1 │ T     │ F          │ N          │ DBC         │ ...        │
+│ dbc      │ columns   │       1 │ T     │ F          │ N          │ DBC         │ ...        │
+│ dbc      │ indexes   │       1 │ T     │ F          │ N          │ DBC         │ ...        │
+╰──────────┴───────────┴─────────┴───────┴────────────┴────────────┴─────────────┴────────────╯
+
+Columns 1-7 of 23 | Rows 1-20 of 156 (13%)
+
+Press → or l to see more columns
+Press ? for navigation help
+Press q or Esc to exit pager
+```
+
+The `(+16 cols) →` indicator tells you there are 16 more columns hidden to the right. The status bar shows you're viewing columns 1-7 out of 23 total.
+
+### Horizontal Navigation Keys
+
+**Arrow Keys:**
+- **→** (Right Arrow): Scroll one column to the right
+- **←** (Left Arrow): Scroll one column to the left
+
+**Vim-Style Keys:**
+- **l**: Scroll right (same as →)
+- **h**: Scroll left (same as ←)
+- **L** (uppercase): Jump to the last column instantly
+- **H** (uppercase): Jump to the first column instantly
+
+### Navigation Example
+
+Start with the leftmost columns:
+
+```sql
+╭──────────┬───────────┬─────────┬───────┬────────────╮
+│ Database │ TableName │ Version │ Kind  │ Protection │
+├──────────┼───────────┼─────────┼───────┼────────────┤
+│ dbc      │ tables    │       1 │ T     │ F          │
+╰──────────┴───────────┴─────────┴───────┴────────────╯
+
+Columns 1-5 of 23 | (+18 cols) →
+```
+
+Press **→** or **l** to scroll right:
+
+```sql
+╭───────────┬─────────┬───────┬────────────┬────────────╮
+│ TableName │ Version │ Kind  │ Protection │ Journal    │
+├───────────┼─────────┼───────┼────────────┼────────────┤
+│ tables    │       1 │ T     │ F          │ N          │
+╰───────────┴─────────┴───────┴────────────┴────────────╯
+
+(+1 cols) ← | Columns 2-6 of 23 | (+17 cols) →
+```
+
+Notice the `(+1 cols) ←` indicator now appears on the left, showing one column is hidden to the left. You can press **←** or **h** to scroll back.
+
+Press **L** (uppercase) to jump to the last columns:
+
+```sql
+╭───────────────┬──────────────┬────────────────┬────────────┬─────────────╮
+│ RequestText   │ RequestSize  │ CommentString  │ CreateTime │ LastAlterTime│
+├───────────────┼──────────────┼────────────────┼────────────┼─────────────┤
+│ CREATE TABLE..│ 512          │ System table   │ 2024-01-01 │ 2024-01-01  │
+╰───────────────┴──────────────┴────────────────┴────────────┴─────────────╯
+
+(+18 cols) ← | Columns 19-23 of 23
+```
+
+Press **H** (uppercase) to jump back to the beginning:
+
+```sql
+╭──────────┬───────────┬─────────┬───────┬────────────╮
+│ Database │ TableName │ Version │ Kind  │ Protection │
+├──────────┼───────────┼─────────┼───────┼────────────┤
+│ dbc      │ tables    │       1 │ T     │ F          │
+╰──────────┴───────────┴─────────┴───────┴────────────╯
+
+Columns 1-5 of 23 | (+18 cols) →
+```
+
+### Column Position is Preserved
+
+When you scroll vertically through rows, your horizontal position stays the same. This lets you focus on specific columns while exploring different rows.
+
+**Example:**
+
+Scroll right to see salary information:
+
+```sql
+╭────────────┬────────────┬────────────┬──────────╮
+│ Department │ Salary     │ Bonus      │ StartDate│
+├────────────┼────────────┼────────────┼──────────┤
+│ IT         │ 75000      │ 5000       │ 2020-03-15│
+│ Sales      │ 68000      │ 12000      │ 2019-07-01│
+╰────────────┴────────────┴────────────┴──────────╯
+
+(+3 cols) ← | Columns 4-7 of 15 | Rows 1-2 of 500
+```
+
+Press **j** or **↓** to scroll down rows:
+
+```sql
+╭────────────┬────────────┬────────────┬──────────╮
+│ Department │ Salary     │ Bonus      │ StartDate│
+├────────────┼────────────┼────────────┼──────────┤
+│ Sales      │ 68000      │ 12000      │ 2019-07-01│
+│ Engineering│ 82000      │ 7500       │ 2021-01-10│
+╰────────────┴────────────┴────────────┴──────────╯
+
+(+3 cols) ← | Columns 4-7 of 15 | Rows 2-3 of 500
+```
+
+Notice the column range (4-7) stays the same while the row range changed. You can scroll through all 500 rows while staying on these salary columns.
+
+### Understanding Column Indicators
+
+**Right Indicator: `(+N cols) →`**
+- Shows how many columns are hidden to the right
+- Appears in the status bar
+- Disappears when you reach the rightmost column
+
+**Left Indicator: `(+N cols) ←`**
+- Shows how many columns are hidden to the left
+- Appears after you scroll right
+- Disappears when you scroll back to the first column
+
+**Status Bar: `Columns X-Y of Z`**
+- **X**: First visible column number
+- **Y**: Last visible column number
+- **Z**: Total number of columns
+
+### Disabling the Pager
+
+If you prefer to see all columns at once (even if they're truncated), you can disable the pager:
+
+```sql
+tq> /pager off
+Pager disabled
+
+tq> SELECT * FROM wide_table;
+[Result displays all columns, may be truncated to fit terminal width]
+```
+
+Re-enable it with:
+
+```sql
+tq> /pager on
+Pager enabled
+```
+
+### Quick Reference: Navigation Keys
+
+When viewing paged results, these keys control navigation:
+
+**Vertical Navigation (rows):**
+- **j** or **↓**: Scroll down one row
+- **k** or **↑**: Scroll up one row
+- **Space** or **Page Down**: Scroll down one page
+- **b** or **Page Up**: Scroll up one page
+- **g** or **Home**: Jump to first row
+- **G** or **End**: Jump to last row
+
+**Horizontal Navigation (columns):**
+- **l** or **→**: Scroll right one column
+- **h** or **←**: Scroll left one column
+- **L** (uppercase): Jump to last column
+- **H** (uppercase): Jump to first column
+
+**Pager Control:**
+- **?**: Show help (lists all navigation keys)
+- **q** or **Esc**: Exit pager and return to REPL
+
+### Navigation Tips
+
+1. **Use jump keys for efficiency** - Press **L** to quickly see the last columns, or **H** to return to the start
+2. **Column position stays locked** - When scrolling vertically, you stay on the same columns. This is perfect for comparing values across rows
+3. **Check the status bar** - It always shows your current position (both rows and columns)
+4. **Press ? for help** - If you forget the keys, press **?** to see a complete navigation reference
+5. **Disable paging when needed** - Use `/pager off` if you prefer to see the full width output (truncated if necessary)
+
+### Example: Exploring a Wide Analytics Table
+
+Let's say you're analyzing a sales report with 40 columns:
+
+```sql
+tq> SELECT * FROM sales_report WHERE year = 2024;
+
+╭──────────┬────────────┬───────────┬────────────┬─────────────╮
+│ Region   │ SalesPerson│ ProductID │ Units      │ Revenue     │
+├──────────┼────────────┼───────────┼────────────┼─────────────┤
+│ East     │ Alice      │ P-1001    │ 150        │ 45000.00    │
+│ West     │ Bob        │ P-1002    │ 230        │ 68000.00    │
+╰──────────┴────────────┴───────────┴────────────┴─────────────╯
+
+Columns 1-5 of 40 | Rows 1-2 of 5,234 (0%)
+Press → to see more columns | Press ? for help
+```
+
+**Step 1:** Press **L** to jump to the last columns and see year-end totals:
+
+```sql
+╭──────────────┬─────────────┬──────────────┬─────────────╮
+│ Q4_Revenue   │ YTD_Revenue │ Target_Met   │ Commission  │
+├──────────────┼─────────────┼──────────────┼─────────────┤
+│ 12000.00     │ 45000.00    │ Yes          │ 2250.00     │
+│ 18500.00     │ 68000.00    │ Yes          │ 3400.00     │
+╰──────────────┴─────────────┴──────────────┴─────────────╯
+
+(+36 cols) ← | Columns 37-40 of 40 | Rows 1-2 of 5,234 (0%)
+```
+
+**Step 2:** Press **j** repeatedly to scan through rows, still viewing the final columns:
+
+```sql
+(+36 cols) ← | Columns 37-40 of 40 | Rows 15-16 of 5,234 (0%)
+```
+
+**Step 3:** Press **h** a few times to scroll left and see Q3 data:
+
+```sql
+╭──────────────┬─────────────┬──────────────┬─────────────╮
+│ Q3_Revenue   │ Q4_Revenue  │ YTD_Revenue  │ Target_Met  │
+├──────────────┼─────────────┼──────────────┼─────────────┤
+│ 10500.00     │ 11000.00    │ 42500.00     │ Yes         │
+╰──────────────┴─────────────┴──────────────┴─────────────╯
+
+(+32 cols) ← | Columns 33-36 of 40 | Rows 15-16 of 5,234 (0%)
+```
+
+**Step 4:** Press **H** to jump back to the start when you're done:
+
+```sql
+╭──────────┬────────────┬───────────┬────────────┬─────────────╮
+│ Region   │ SalesPerson│ ProductID │ Units      │ Revenue     │
+├──────────┼────────────┼───────────┼────────────┼─────────────┤
+│ East     │ Carol      │ P-1015    │ 195        │ 58500.00    │
+╰──────────┴────────────┴───────────┴────────────┴─────────────╯
+
+Columns 1-5 of 40 | Rows 15-16 of 5,234 (0%)
+```
+
+**Step 5:** Press **q** to exit the pager and return to the REPL prompt:
+
+```sql
+tq> _
+```
 
 ## Next Steps
 

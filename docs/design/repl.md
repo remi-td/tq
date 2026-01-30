@@ -176,7 +176,400 @@ fn should_page(rows: usize) -> bool {
 }
 ```
 
-Uses `minus` crate for interactive paging with vi-like keys.
+Uses `crossterm` crate for terminal control with vi-like navigation keys.
+
+### Horizontal Paging
+
+This section documents the technical design for interactive horizontal paging, enabling users to navigate wide result sets that exceed terminal width.
+
+#### Overview
+
+Horizontal paging extends the existing pager infrastructure to provide column-by-column navigation through wide tables. The design integrates seamlessly with vertical paging, allowing users to navigate both dimensions independently.
+
+**Related Specification**: `docs/specifications/repl.md#large-result-handling--result-paging`
+
+#### Architecture
+
+```
+Horizontal Paging Flow:
+
+Query Result (N columns, M rows)
+        |
+        v
+Table Formatter (comfy-table)
+        |
+        v
+Pager Activation Check
+        |
+    +---+---+
+    |       |
+    v       v
+Pager ON   Pager OFF
+    |       |
+    v       v
+Pager::new()  Direct Output
+    |         (truncated columns)
+    v
+TableData::parse_from_content()
+    |
+    v
+Calculate Visible Columns (visible_column_count)
+    |
+    v
+Interactive Event Loop:
+    +--> Render visible window (col_offset to col_offset+visible)
+    |        |
+    |        v
+    |    Key Event
+    |        |
+    |    +---+---+
+    |    |   |   |
+    |    v   v   v
+    |   <-  ->   q
+    |   |   |    |
+    |   v   v    v
+    |  col--  col++  Exit
+    +---+----+
+```
+
+#### Column Windowing Algorithm
+
+The pager calculates how many columns can fit in the terminal width at any given time, accounting for column position indicators when columns are hidden.
+
+```rust
+// src/commands/repl/pager.rs
+
+/// Calculate how many columns fit in the terminal width
+/// Accounts for indicator cells when columns are hidden
+fn visible_column_count(&self) -> usize {
+    let hidden_left = self.hidden_columns_left();
+    let hidden_right_possible = self.data.columns.len().saturating_sub(self.col_offset + 1) > 0;
+
+    // Reserve space for indicator cells if columns are hidden
+    let left_indicator_width = if hidden_left > 0 { INDICATOR_WIDTH + 3 } else { 0 };
+    let right_indicator_width = if hidden_right_possible { INDICATOR_WIDTH + 3 } else { 0 };
+
+    let mut total_width = 3 + left_indicator_width; // Left border + left indicator
+    let mut count = 0;
+
+    for col in self.data.columns.iter().skip(self.col_offset) {
+        let col_width = col.display_width + 3; // Cell + separator
+        let available_width = self.term_width.saturating_sub(right_indicator_width);
+        if total_width + col_width > available_width && count > 0 {
+            break;
+        }
+        total_width += col_width;
+        count += 1;
+    }
+
+    count.max(1) // Always show at least 1 column
+}
+```
+
+#### Column Offset Calculation
+
+```rust
+/// Calculate number of columns hidden to the left
+fn hidden_columns_left(&self) -> usize {
+    self.col_offset
+}
+
+/// Calculate number of columns hidden to the right
+fn hidden_columns_right(&self) -> usize {
+    let visible = self.visible_column_count();
+    let end_col = (self.col_offset + visible).min(self.data.columns.len());
+    self.data.columns.len().saturating_sub(end_col)
+}
+```
+
+#### Key Bindings
+
+Horizontal navigation is handled in the `handle_key()` method:
+
+```rust
+fn handle_key(&mut self, key: KeyEvent) -> bool {
+    match key.code {
+        // Exit pager
+        KeyCode::Char('q') | KeyCode::Esc => return false,
+
+        // Vertical navigation (existing)
+        KeyCode::Char('j') | KeyCode::Down => { /* scroll down */ }
+        KeyCode::Char('k') | KeyCode::Up => { /* scroll up */ }
+        KeyCode::Char(' ') | KeyCode::PageDown => { /* page down */ }
+        KeyCode::Char('b') | KeyCode::PageUp => { /* page up */ }
+        KeyCode::Char('g') | KeyCode::Home => { /* first row */ }
+        KeyCode::Char('G') | KeyCode::End => { /* last row */ }
+
+        // Horizontal navigation
+        KeyCode::Left | KeyCode::Char('h') => {
+            self.col_offset = self.col_offset.saturating_sub(1);
+        }
+        KeyCode::Right | KeyCode::Char('l') => {
+            if self.col_offset + self.visible_column_count() < self.data.columns.len() {
+                self.col_offset += 1;
+            }
+        }
+
+        // Jump navigation
+        KeyCode::Char('H') => {
+            self.col_offset = 0; // First column
+        }
+        KeyCode::Char('L') => {
+            let visible = self.visible_column_count();
+            self.col_offset = self.data.columns.len().saturating_sub(visible); // Last columns
+        }
+
+        // Help
+        KeyCode::Char('?') => {
+            self.show_help(); // Display navigation help
+        }
+
+        _ => {}
+    }
+    true // Continue paging
+}
+```
+
+#### Column Position Indicators
+
+When columns are hidden, visual indicators show the user how many columns exist off-screen.
+
+```rust
+/// Render column indicators in header and data rows
+fn render_header(&self, stdout: &mut impl Write, start_col: usize, end_col: usize) -> io::Result<()> {
+    let hidden_left = self.hidden_columns_left();
+    let hidden_right = self.hidden_columns_right();
+
+    let mut row_str = String::from("│");
+
+    // Left indicator cell (if columns hidden to left)
+    if hidden_left > 0 {
+        let indicator = format!("(+{} cols)", hidden_left);
+        write_dim(stdout, &format!(" {:^width$} ", indicator, width = INDICATOR_WIDTH))?;
+        row_str = "│".to_string();
+    }
+
+    // Data column headers...
+
+    // Right indicator cell (if columns hidden to right)
+    if hidden_right > 0 {
+        let indicator = format!("(+{} cols)", hidden_right);
+        write!(stdout, "│")?;
+        write_dim(stdout, &format!(" {:^width$} ", indicator, width = INDICATOR_WIDTH))?;
+    }
+
+    write!(stdout, "│")?;
+    writeln!(stdout)
+}
+```
+
+#### Status Bar Design
+
+The status bar shows current position and available navigation:
+
+```rust
+fn render_status_bar(&self, stdout: &mut impl Write) -> io::Result<()> {
+    let visible_cols = self.visible_column_count();
+    let end_col = (self.col_offset + visible_cols).min(self.data.columns.len());
+    let end_row = (self.row_offset + self.page_size).min(self.data.row_count);
+    let hidden_left = self.hidden_columns_left();
+    let hidden_right = self.hidden_columns_right();
+
+    let col_status = format!(
+        "Columns {}-{} of {}",
+        self.col_offset + 1, end_col, self.data.columns.len()
+    );
+
+    let row_status = format!(
+        "Rows {}-{} of {} ({}%)",
+        self.row_offset + 1, end_row, self.total_rows, progress
+    );
+
+    // Navigation hints (only show horizontal hints if columns are hidden)
+    let mut nav_parts = Vec::new();
+    if hidden_left > 0 || hidden_right > 0 {
+        nav_parts.push("h/l <-/->: scroll cols");
+        nav_parts.push("H/L: first/last col");
+    }
+    nav_parts.push("j/k Space/b: rows");
+    nav_parts.push("g/G: first/last");
+    nav_parts.push("?: help");
+    nav_parts.push("q/Esc: exit");
+
+    writeln!(stdout, "{} | {} | {}", col_status, row_status, nav_parts.join(" | "))?;
+    Ok(())
+}
+```
+
+#### Help Display
+
+Pressing `?` displays available navigation keys:
+
+```rust
+fn show_help(&mut self) {
+    // Clear screen and show help overlay
+    let help_text = r#"
+Navigation Keys:
+
+  Horizontal (Column) Navigation:
+    <- or h     Scroll left one column
+    -> or l     Scroll right one column
+    H           Jump to first column
+    L           Jump to last column
+
+  Vertical (Row) Navigation:
+    j or Down   Next row
+    k or Up     Previous row
+    Space       Page down
+    b           Page up
+    g           Jump to first row
+    G           Jump to last row
+
+  Control:
+    ?           Show this help
+    q or Esc    Exit pager
+
+Press any key to return...
+"#;
+    // Display help_text and wait for keypress
+}
+```
+
+#### Integration with Executor
+
+The executor conditionally invokes the pager based on state and output size:
+
+```rust
+// src/commands/repl/executor.rs
+
+pub fn execute_sql_with_state<W: Write>(
+    client: &DatabaseClient,
+    state: &mut ReplState,
+    sql: &str,
+    writer: &mut W,
+    default_limit: usize,
+) -> Result<usize> {
+    // ... execute query ...
+
+    // Format output to buffer first
+    let mut buffer = Vec::new();
+    write_output_with_timing(&result_clone, &mut buffer, OutputFormat::Table, &format_options, true)?;
+    let formatted = String::from_utf8_lossy(&buffer);
+
+    // Check if paging is needed and enabled
+    if state.is_pager_enabled() && should_page(&formatted, &PagerConfig::default()) {
+        // Use interactive pager
+        display_with_pager(&formatted, row_count, &PagerConfig::default())?;
+    } else {
+        // Direct output (no paging)
+        writer.write_all(&buffer)?;
+    }
+
+    Ok(row_count)
+}
+```
+
+#### Terminal Resize Handling
+
+The pager responds to terminal resize events:
+
+```rust
+// In event loop
+if let Event::Resize(w, h) = event::read()? {
+    self.term_width = w as usize;
+    self.term_height = h as usize;
+    self.page_size = self.term_height.saturating_sub(5);
+    // Recalculate visible columns after resize
+    self.render()?;
+}
+```
+
+Note: `col_offset` is preserved during resize - only the visible window size changes.
+
+#### Data Structures
+
+```rust
+/// Pager state for navigation
+pub struct Pager {
+    /// Table data
+    data: TableData,
+    /// Current row offset (first visible row)
+    row_offset: usize,
+    /// Current column offset (first visible column)
+    col_offset: usize,
+    /// Page size (rows per page)
+    page_size: usize,
+    /// Terminal width
+    term_width: usize,
+    /// Terminal height
+    term_height: usize,
+    /// Total row count in result
+    total_rows: usize,
+}
+
+/// Parsed table data for paging
+struct TableData {
+    /// Columns with their data
+    columns: Vec<ColumnData>,
+    /// Total number of rows
+    row_count: usize,
+}
+
+/// A single column with its data
+struct ColumnData {
+    /// Column header name
+    header: String,
+    /// Cell values for each row
+    values: Vec<String>,
+    /// Calculated display width for this column
+    display_width: usize,
+}
+```
+
+#### Design Trade-offs
+
+##### Column Offset vs Character Offset
+
+**Chosen**: Column-level offset (scroll by whole columns)
+**Alternative**: Character-level offset (scroll by characters within cells)
+**Rationale**:
+- Column-level scrolling keeps data aligned and readable
+- Users think in terms of columns, not characters
+- Simpler implementation with predictable behavior
+- Matches behavior of database tools like `psql` expanded mode
+
+##### Preserve Column Offset on Vertical Scroll
+
+**Chosen**: Yes, preserve `col_offset` when scrolling vertically
+**Alternative**: Reset to column 0 on vertical scroll
+**Rationale**:
+- Users may be examining a specific column across many rows
+- Resetting would be disorienting
+- No performance impact (render always uses current offsets)
+
+##### Indicator Cell Design
+
+**Chosen**: Dedicated indicator cells at edges with `(+N cols)` format
+**Alternative**: Status bar only, no inline indicators
+**Rationale**:
+- Inline indicators provide immediate context
+- Arrow indicators (`<--` / `-->`) in data rows reinforce navigation direction
+- Does not require users to look at status bar
+
+#### Code Linkage
+
+| Component | File Path | Key Functions |
+|-----------|-----------|---------------|
+| Pager state | `src/commands/repl/pager.rs` | `Pager::new()`, `Pager::run()` |
+| Column calculation | `src/commands/repl/pager.rs` | `visible_column_count()` |
+| Navigation | `src/commands/repl/pager.rs` | `handle_key()` |
+| Rendering | `src/commands/repl/pager.rs` | `render()`, `render_header()`, `render_row()` |
+| Status bar | `src/commands/repl/pager.rs` | `render_status_bar()` |
+| Help display | `src/commands/repl/pager.rs` | `show_help()` (to be added) |
+| Configuration | `src/commands/repl/pager.rs` | `PagerConfig` |
+| Activation check | `src/commands/repl/pager.rs` | `should_page()`, `display_with_pager()` |
+| Executor integration | `src/commands/repl/executor.rs` | `execute_sql_with_state()` |
+| State management | `src/commands/repl/state.rs` | `ReplState::is_pager_enabled()` |
 
 ### Statement Execution
 

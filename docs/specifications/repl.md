@@ -1027,13 +1027,15 @@ Result paging uses a three-layer strategy:
 
 **Objective:** Display manageable subset of columns, navigate horizontally through remaining columns.
 
-**Column Navigation:**
-- `←` (Left Arrow): Shift window left by 1 column
-- `→` (Right Arrow): Shift window right by 1 column
-- `Ctrl-←`: Jump to first column group
-- `Ctrl-→`: Jump to last column group
-- `Home`: Jump to first column
-- `End`: Jump to last column
+**Navigation Details:** See "Horizontal Column Navigation" section below for complete requirements (REQ-PAGER-HORIZ-001 through REQ-PAGER-HORIZ-014).
+
+**Key Capabilities:**
+- Left/right arrow navigation to scroll one column at a time
+- Vim-style h/l keys for horizontal movement
+- H/L keys to jump to first/last columns
+- Column position indicators showing hidden columns
+- Column range display in status bar
+- Preserved horizontal position during vertical scrolling
 
 **Column Position Indicator:**
 ```
@@ -1071,6 +1073,449 @@ Columns 1-5 of 23 | Rows 1-20 of 1,234 (2%)
 ```
 Rows 1-20 of 1,234 (2%)
 ```
+
+#### Horizontal Column Navigation
+
+When result sets exceed terminal width, horizontal navigation enables exploration of all columns through left/right scrolling.
+
+**REQ-PAGER-HORIZ-001: Horizontal Scrolling Activation**
+
+The pager SHALL enable horizontal scrolling when the combined width of all columns exceeds the available terminal width:
+
+1. **REQ-PAGER-HORIZ-001.1** - Calculate total required width: sum of all column widths plus borders/padding
+2. **REQ-PAGER-HORIZ-001.2** - Compare against current terminal width
+3. **REQ-PAGER-HORIZ-001.3** - If total width exceeds terminal width, enable horizontal navigation
+4. **REQ-PAGER-HORIZ-001.4** - Initial view displays leftmost columns that fit within terminal width
+5. **REQ-PAGER-HORIZ-001.5** - Display indicators showing additional columns exist beyond viewport
+
+**Rationale:** Users need to know when horizontal navigation is available and which columns are currently visible.
+
+**Example Scenario:**
+```
+Terminal width: 80 characters
+Result set: 23 columns, total width 350 characters
+
+Initial view shows columns 1-5 (fit within 80 chars)
+Right arrow available to scroll right
+Status bar shows: "Columns 1-5 of 23"
+```
+
+**REQ-PAGER-HORIZ-002: Right Arrow Navigation**
+
+The right arrow key SHALL scroll the viewport one column to the right when hidden columns exist:
+
+1. **REQ-PAGER-HORIZ-002.1** - Right arrow (→) key scrolls viewport one column rightward
+2. **REQ-PAGER-HORIZ-002.2** - Leftmost visible column shifts out of view
+3. **REQ-PAGER-HORIZ-002.3** - Next hidden column becomes visible on the right
+4. **REQ-PAGER-HORIZ-002.4** - Column width calculations maintain table formatting consistency
+5. **REQ-PAGER-HORIZ-002.5** - If already at rightmost position (all columns visible or last column displayed), right arrow has no effect
+6. **REQ-PAGER-HORIZ-002.6** - Visual indicator updates to reflect new column range
+
+**Rationale:** Right arrow provides intuitive "move right" navigation consistent with standard UI conventions.
+
+**Example Interaction:**
+```
+Initial view:
+┌──────┬─────────┬──────────┬────────┐
+│ id   │ name    │ email    │ dept   │
+├──────┼─────────┼──────────┼────────┤
+│ 1    │ Alice   │ a@co.com │ IT     │
+└──────┴─────────┴──────────┴────────┘
+Columns 1-4 of 23 | (+19 cols) →
+
+[Press → key]
+
+After scroll:
+┌─────────┬──────────┬────────┬────────┐
+│ name    │ email    │ dept   │ salary │
+├─────────┼──────────┼────────┼────────┤
+│ Alice   │ a@co.com │ IT     │ 75000  │
+└─────────┴──────────┴────────┴────────┘
+(+1 cols) ← | Columns 2-5 of 23 | (+18 cols) →
+```
+
+**Edge Cases:**
+- Already at rightmost position: Right arrow does nothing
+- Single additional column: Right arrow reveals final column and removes right indicator
+
+**REQ-PAGER-HORIZ-003: Left Arrow Navigation**
+
+The left arrow key SHALL scroll the viewport one column to the left when the view has been scrolled right:
+
+1. **REQ-PAGER-HORIZ-003.1** - Left arrow (←) key scrolls viewport one column leftward
+2. **REQ-PAGER-HORIZ-003.2** - Rightmost visible column shifts out of view
+3. **REQ-PAGER-HORIZ-003.3** - Previous hidden column becomes visible on the left
+4. **REQ-PAGER-HORIZ-003.4** - If already at leftmost position (first column visible), left arrow has no effect
+5. **REQ-PAGER-HORIZ-003.5** - Visual indicator updates to reflect new column range
+
+**Rationale:** Left arrow provides intuitive "move left" navigation, enabling users to return to previously viewed columns.
+
+**Example Interaction:**
+```
+Scrolled view:
+┌─────────┬──────────┬────────┬────────┐
+│ name    │ email    │ dept   │ salary │
+├─────────┼──────────┼────────┼────────┤
+│ Alice   │ a@co.com │ IT     │ 75000  │
+└─────────┴──────────┴────────┴────────┘
+(+1 cols) ← | Columns 2-5 of 23 | (+18 cols) →
+
+[Press ← key]
+
+After scroll left:
+┌──────┬─────────┬──────────┬────────┐
+│ id   │ name    │ email    │ dept   │
+├──────┼─────────┼──────────┼────────┤
+│ 1    │ Alice   │ a@co.com │ IT     │
+└──────┴─────────┴──────────┴────────┘
+Columns 1-4 of 23 | (+19 cols) →
+```
+
+**Edge Cases:**
+- Already at leftmost position: Left arrow does nothing
+- One column scrolled: Left arrow returns to initial view, removes left indicator
+
+**REQ-PAGER-HORIZ-004: Right-Side Column Indicator**
+
+The pager SHALL display a visual indicator in the rightmost column area when columns are hidden to the right:
+
+1. **REQ-PAGER-HORIZ-004.1** - Indicator format: `(+N cols)` where N is count of hidden columns
+2. **REQ-PAGER-HORIZ-004.2** - Indicator positioned in status bar on right side
+3. **REQ-PAGER-HORIZ-004.3** - Indicator includes right arrow symbol (→) to suggest navigation direction
+4. **REQ-PAGER-HORIZ-004.4** - Indicator updates dynamically as user scrolls (N decreases)
+5. **REQ-PAGER-HORIZ-004.5** - Indicator disappears when rightmost column is visible
+6. **REQ-PAGER-HORIZ-004.6** - Indicator count includes ALL hidden columns to the right, not just immediately adjacent
+
+**Rationale:** Users need clear indication of hidden content and how many columns remain unexplored.
+
+**Example Display:**
+```
+Status bar when 19 columns hidden on right:
+Columns 1-4 of 23 | (+19 cols) →
+
+Status bar when 10 columns hidden on right:
+Columns 9-13 of 23 | (+10 cols) →
+
+Status bar when at rightmost position:
+(+15 cols) ← | Columns 19-23 of 23
+```
+
+**REQ-PAGER-HORIZ-005: Left-Side Column Indicator**
+
+The pager SHALL display a visual indicator when columns are hidden to the left (user has scrolled right):
+
+1. **REQ-PAGER-HORIZ-005.1** - Indicator format: `(+N cols)` where N is count of hidden columns
+2. **REQ-PAGER-HORIZ-005.2** - Indicator positioned in status bar on left side
+3. **REQ-PAGER-HORIZ-005.3** - Indicator includes left arrow symbol (←) to suggest navigation direction
+4. **REQ-PAGER-HORIZ-005.4** - Indicator updates dynamically as user scrolls left/right
+5. **REQ-PAGER-HORIZ-005.5** - Indicator disappears when leftmost column (first column) is visible
+6. **REQ-PAGER-HORIZ-005.6** - Indicator count includes ALL hidden columns to the left
+
+**Rationale:** Users need awareness of hidden columns on the left to navigate back effectively.
+
+**Example Display:**
+```
+Status bar when 3 columns hidden on left:
+(+3 cols) ← | Columns 4-8 of 23 | (+15 cols) →
+
+Status bar when 10 columns hidden on left:
+(+10 cols) ← | Columns 11-15 of 23 | (+8 cols) →
+
+Status bar when scrolled to middle:
+(+10 cols) ← | Columns 11-15 of 23 | (+8 cols) →
+```
+
+**REQ-PAGER-HORIZ-006: Status Bar Column Range Display**
+
+The status bar SHALL display the current column range visible in the viewport:
+
+1. **REQ-PAGER-HORIZ-006.1** - Format: `Columns X-Y of Z` where X=first visible column number, Y=last visible column number, Z=total column count
+2. **REQ-PAGER-HORIZ-006.2** - Column numbers start at 1 (not 0)
+3. **REQ-PAGER-HORIZ-006.3** - Range updates immediately as user scrolls horizontally
+4. **REQ-PAGER-HORIZ-006.4** - When all columns fit in viewport, display: `Columns 1-Z of Z` (no horizontal navigation available)
+5. **REQ-PAGER-HORIZ-006.5** - Display alongside row position indicator: `Columns X-Y of Z | Rows A-B of C (P%)`
+6. **REQ-PAGER-HORIZ-006.6** - Column range SHALL be accurate and match actual displayed columns
+
+**Rationale:** Users need precise information about their current position within the column set.
+
+**Example Displays:**
+```
+Narrow result (all columns fit):
+Columns 1-8 of 8 | Rows 1-20 of 1,234 (2%)
+
+Wide result at start:
+Columns 1-5 of 23 | Rows 1-20 of 1,234 (2%)
+
+Wide result scrolled right:
+Columns 8-12 of 23 | Rows 1-20 of 1,234 (2%)
+
+Wide result at end:
+Columns 19-23 of 23 | Rows 1-20 of 1,234 (2%)
+```
+
+**REQ-PAGER-HORIZ-007: Vim-Style h/l Keybindings**
+
+The pager SHALL support Vim-style h/l keys for horizontal navigation alongside arrow keys:
+
+1. **REQ-PAGER-HORIZ-007.1** - `h` key scrolls left (equivalent to left arrow ←)
+2. **REQ-PAGER-HORIZ-007.2** - `l` key scrolls right (equivalent to right arrow →)
+3. **REQ-PAGER-HORIZ-007.3** - `h` and `l` behavior matches arrow key behavior exactly (same scroll amount, same edge handling)
+4. **REQ-PAGER-HORIZ-007.4** - Keys work in lowercase only (uppercase reserved for jump commands)
+5. **REQ-PAGER-HORIZ-007.5** - Keys SHALL be documented in help text alongside arrow keys
+
+**Rationale:** Vim users expect h/j/k/l navigation; providing h/l for horizontal scrolling maintains consistency with vertical j/k navigation already supported.
+
+**Example Interaction:**
+```
+[Press 'l' key - same effect as right arrow]
+Scrolls one column right
+
+[Press 'h' key - same effect as left arrow]
+Scrolls one column left
+```
+
+**REQ-PAGER-HORIZ-008: Jump to First Column**
+
+The pager SHALL support jumping to the first column instantly:
+
+1. **REQ-PAGER-HORIZ-008.1** - `H` key (uppercase) jumps to leftmost column position
+2. **REQ-PAGER-HORIZ-008.2** - Viewport resets to show columns starting from column 1
+3. **REQ-PAGER-HORIZ-008.3** - Left indicator disappears (no hidden columns on left)
+4. **REQ-PAGER-HORIZ-008.4** - Status bar updates to show "Columns 1-N of Z"
+5. **REQ-PAGER-HORIZ-008.5** - If already at first column, command has no effect (idempotent)
+6. **REQ-PAGER-HORIZ-008.6** - Jump preserves current vertical scroll position (row number unchanged)
+
+**Rationale:** Users need quick navigation to beginning of wide result sets without repeated left arrow presses.
+
+**Example Interaction:**
+```
+Before jump (scrolled right):
+(+10 cols) ← | Columns 11-15 of 23 | (+8 cols) →
+
+[Press 'H' key]
+
+After jump:
+Columns 1-5 of 23 | (+18 cols) →
+```
+
+**REQ-PAGER-HORIZ-009: Jump to Last Column**
+
+The pager SHALL support jumping to the last column instantly:
+
+1. **REQ-PAGER-HORIZ-009.1** - `L` key (uppercase) jumps to rightmost column position
+2. **REQ-PAGER-HORIZ-009.2** - Viewport adjusts to show maximum columns that fit, ending with the last column
+3. **REQ-PAGER-HORIZ-009.3** - Right indicator disappears (no hidden columns on right)
+4. **REQ-PAGER-HORIZ-009.4** - Status bar updates to show "Columns M-Z of Z" where Z is last column
+5. **REQ-PAGER-HORIZ-009.5** - If already showing last column, command has no effect (idempotent)
+6. **REQ-PAGER-HORIZ-009.6** - Jump preserves current vertical scroll position (row number unchanged)
+
+**Rationale:** Users need quick navigation to end of wide result sets to see trailing columns without repeated right arrow presses.
+
+**Example Interaction:**
+```
+Before jump (at start):
+Columns 1-5 of 23 | (+18 cols) →
+
+[Press 'L' key]
+
+After jump:
+(+18 cols) ← | Columns 19-23 of 23
+```
+
+**REQ-PAGER-HORIZ-010: Column Position Preservation During Vertical Scrolling**
+
+The pager SHALL maintain horizontal scroll position when user scrolls vertically:
+
+1. **REQ-PAGER-HORIZ-010.1** - When user scrolls down (j, ↓, Space, Page Down), column viewport remains unchanged
+2. **REQ-PAGER-HORIZ-010.2** - When user scrolls up (k, ↑, b, Page Up), column viewport remains unchanged
+3. **REQ-PAGER-HORIZ-010.3** - When user jumps vertically (g, G, Home, End), column viewport remains unchanged
+4. **REQ-PAGER-HORIZ-010.4** - Horizontal position persists across all vertical navigation operations
+5. **REQ-PAGER-HORIZ-010.5** - Status bar continues showing current column range during vertical scrolling
+6. **REQ-PAGER-HORIZ-010.6** - Only explicit horizontal navigation commands (←, →, h, l, H, L) change column position
+
+**Rationale:** Users exploring specific columns need to scroll vertically through rows without losing their horizontal context.
+
+**Example Interaction:**
+```
+User scrolls right to columns 8-12:
+Columns 8-12 of 23 | Rows 1-20 of 500
+
+[Press 'j' to scroll down one row]
+Columns 8-12 of 23 | Rows 2-21 of 500
+[Column range unchanged]
+
+[Press Space to page down]
+Columns 8-12 of 23 | Rows 21-40 of 500
+[Column range unchanged]
+
+[Press 'G' to jump to last row]
+Columns 8-12 of 23 | Rows 481-500 of 500
+[Column range unchanged]
+```
+
+**Edge Cases:**
+- User at rightmost columns, scrolls down: Column position preserved
+- User at leftmost columns, pages up: Column position preserved
+- User in middle columns, jumps to first row: Column position preserved
+
+**REQ-PAGER-HORIZ-011: Horizontal Navigation in Help Text**
+
+The pager help text SHALL document horizontal navigation keys clearly:
+
+1. **REQ-PAGER-HORIZ-011.1** - Help text activated by `?` key displays horizontal navigation section
+2. **REQ-PAGER-HORIZ-011.2** - Section title: "Horizontal Navigation" (separate from vertical navigation)
+3. **REQ-PAGER-HORIZ-011.3** - List all horizontal navigation keys with descriptions:
+   - `←` or `h`: Scroll left one column
+   - `→` or `l`: Scroll right one column
+   - `H`: Jump to first column
+   - `L`: Jump to last column
+4. **REQ-PAGER-HORIZ-011.4** - Help text SHALL explain column indicators: `(+N cols) ←` and `(+N cols) →`
+5. **REQ-PAGER-HORIZ-011.5** - Help text SHALL note that column position is preserved during vertical scrolling
+6. **REQ-PAGER-HORIZ-011.6** - Help text organized logically: Navigation (vertical, horizontal), Exit, Help
+
+**Rationale:** Discoverability is critical; users must be able to learn horizontal navigation features from within the pager.
+
+**Example Help Text:**
+```
+tq Pager Help
+═════════════
+
+Vertical Navigation:
+  j, ↓         Scroll down one row
+  k, ↑         Scroll up one row
+  Space        Page down
+  b            Page up
+  g, Home      Jump to first row
+  G, End       Jump to last row
+
+Horizontal Navigation:
+  ←, h         Scroll left one column
+  →, l         Scroll right one column
+  H            Jump to first column
+  L            Jump to last column
+
+Column indicators: (+N cols) ← means N hidden columns on left
+                   (+N cols) → means N hidden columns on right
+
+Note: Column position is preserved when scrolling vertically.
+
+Exit:
+  q, Esc       Exit pager, return to REPL prompt
+
+Help:
+  ?            Show this help
+```
+
+**REQ-PAGER-HORIZ-012: Exit Pager with Horizontal Navigation Active**
+
+The pager SHALL exit cleanly regardless of current horizontal scroll position:
+
+1. **REQ-PAGER-HORIZ-012.1** - `q` key exits pager and returns to REPL prompt
+2. **REQ-PAGER-HORIZ-012.2** - `Esc` key exits pager and returns to REPL prompt
+3. **REQ-PAGER-HORIZ-012.3** - Exit behavior identical whether user is at leftmost, middle, or rightmost column position
+4. **REQ-PAGER-HORIZ-012.4** - Exit SHALL NOT depend on horizontal scroll state
+5. **REQ-PAGER-HORIZ-012.5** - Pager state (including column position) SHALL be reset for next query result
+
+**Rationale:** Exit mechanism must be reliable and independent of navigation state.
+
+**Example Interaction:**
+```
+User scrolled to columns 15-20 of 30:
+(+14 cols) ← | Columns 15-20 of 30 | (+10 cols) →
+
+[Press 'q']
+
+tq> _
+[Back at REPL prompt, pager state cleared]
+```
+
+**REQ-PAGER-HORIZ-013: Horizontal Paging Disabled Mode**
+
+When paging is disabled via `/pager off`, horizontal scrolling SHALL be unavailable:
+
+1. **REQ-PAGER-HORIZ-013.1** - `/pager off` command disables both vertical and horizontal paging
+2. **REQ-PAGER-HORIZ-013.2** - Wide result sets SHALL be displayed in full width
+3. **REQ-PAGER-HORIZ-013.3** - If result width exceeds terminal width, columns SHALL be truncated or wrapped according to formatter
+4. **REQ-PAGER-HORIZ-013.4** - No interactive navigation available (arrow keys not captured)
+5. **REQ-PAGER-HORIZ-013.5** - No column indicators displayed
+6. **REQ-PAGER-HORIZ-013.6** - No status bar displayed
+7. **REQ-PAGER-HORIZ-013.7** - `/pager on` command re-enables both vertical and horizontal paging
+
+**Rationale:** Users need option to bypass interactive paging for scripting, copying output, or personal preference.
+
+**Example Behavior:**
+```
+tq> /pager off
+Result paging disabled
+
+tq> SELECT * FROM wide_table;
+┌──────┬─────────┬──────────┬────────┬────────┬─────────┬─[truncated]
+│ col1 │ col2    │ col3     │ col4   │ col5   │ col6    │ ...
+├──────┼─────────┼──────────┼────────┼────────┼─────────┼─[truncated]
+│ val1 │ val2    │ val3     │ val4   │ val5   │ val6    │ ...
+└──────┴─────────┴──────────┴────────┴────────┴─────────┴─[truncated]
+
+500 rows in set (0.234s)
+
+tq> /pager on
+Result paging enabled
+
+tq> SELECT * FROM wide_table;
+[Enters interactive pager with horizontal and vertical navigation]
+```
+
+**REQ-PAGER-HORIZ-014: Integration with Vertical Paging Keys**
+
+Horizontal and vertical navigation SHALL operate independently without key conflicts:
+
+1. **REQ-PAGER-HORIZ-014.1** - Arrow keys SHALL be context-aware:
+   - `↑` (Up Arrow): Vertical navigation only (previous row)
+   - `↓` (Down Arrow): Vertical navigation only (next row)
+   - `←` (Left Arrow): Horizontal navigation only (previous column)
+   - `→` (Right Arrow): Horizontal navigation only (next column)
+2. **REQ-PAGER-HORIZ-014.2** - Vim keys SHALL be consistent:
+   - `j`: Vertical navigation (down one row)
+   - `k`: Vertical navigation (up one row)
+   - `h`: Horizontal navigation (left one column)
+   - `l`: Horizontal navigation (right one column)
+3. **REQ-PAGER-HORIZ-014.3** - Special keys SHALL maintain semantics:
+   - `Space`: Vertical page down only
+   - `b`: Vertical page up only
+   - `g` / `G`: Vertical jump (first/last row)
+   - `H` / `L`: Horizontal jump (first/last column)
+4. **REQ-PAGER-HORIZ-014.4** - No key SHALL trigger both horizontal and vertical navigation simultaneously
+5. **REQ-PAGER-HORIZ-014.5** - Status bar SHALL reflect current position in both dimensions
+
+**Rationale:** Clear separation of horizontal and vertical navigation prevents confusion and enables intuitive two-dimensional exploration.
+
+**Example Interaction:**
+```
+Initial position:
+Columns 1-5 of 23 | Rows 1-20 of 500
+
+[Press →] - Horizontal scroll right:
+Columns 2-6 of 23 | Rows 1-20 of 500
+
+[Press ↓] - Vertical scroll down:
+Columns 2-6 of 23 | Rows 2-21 of 500
+
+[Press h] - Horizontal scroll left:
+Columns 1-5 of 23 | Rows 2-21 of 500
+
+[Press j] - Vertical scroll down:
+Columns 1-5 of 23 | Rows 3-22 of 500
+
+[Press L] - Jump to last column:
+Columns 19-23 of 23 | Rows 3-22 of 500
+
+[Press G] - Jump to last row:
+Columns 19-23 of 23 | Rows 481-500 of 500
+```
+
+**Edge Cases:**
+- User rapidly alternates between horizontal and vertical navigation: Both dimensions update correctly
+- User at edge positions (first/last row AND first/last column): Appropriate keys disabled, others work
+- Terminal resize during navigation: Both horizontal and vertical viewports recalculate
 
 #### Pager Exit Behavior (CRITICAL)
 
@@ -1111,51 +1556,71 @@ The pager SHALL display a two-line status bar at the bottom of the terminal with
 
 1. **REQ-PAGER-001.1** - Position: Bottom two lines of terminal viewport
 2. **REQ-PAGER-001.2** - Visual separation: Top and bottom borders using box-drawing characters
-3. **REQ-PAGER-001.3** - Line 1 content: Position indicators and navigation summary
-4. **REQ-PAGER-001.4** - Line 2 content: Additional navigation keys and exit instructions
+3. **REQ-PAGER-001.3** - Line 1 content: Position indicators (column and row ranges) and column indicators
+4. **REQ-PAGER-001.4** - Line 2 content: Navigation hints and exit instructions
 5. **REQ-PAGER-001.5** - Status bar SHALL remain visible at all times during paging
 
 **REQ-PAGER-002: Status Bar Content Requirements**
 
 The status bar SHALL display the following information:
 
-1. **REQ-PAGER-002.1** - Column position: `Columns X-Y of Z` format (when horizontal scrolling available)
+1. **REQ-PAGER-002.1** - Column position: `Columns X-Y of Z` format (when horizontal scrolling available, see REQ-PAGER-HORIZ-006)
 2. **REQ-PAGER-002.2** - Row position: `Rows X-Y of Z (P%)` format with percentage indicator
-3. **REQ-PAGER-002.3** - Navigation hints: Key bindings for common operations
-4. **REQ-PAGER-002.4** - Exit instructions: Clear indication of how to exit pager
+3. **REQ-PAGER-002.3** - Column indicators: Left `(+N cols) ←` and right `(+N cols) →` when columns hidden (see REQ-PAGER-HORIZ-004, REQ-PAGER-HORIZ-005)
+4. **REQ-PAGER-002.4** - Navigation hints: Key bindings for horizontal and vertical navigation
+5. **REQ-PAGER-002.5** - Exit instructions: Clear indication of how to exit pager
 
 **REQ-PAGER-003: Navigation Hints Clarity**
 
 The status bar navigation hints SHALL be clear and discoverable:
 
-1. **REQ-PAGER-003.1** - Horizontal navigation: `←→: columns` or `← →: scroll columns` when applicable
-2. **REQ-PAGER-003.2** - Vertical navigation: `↑↓ Space b: rows` or similar concise format
-3. **REQ-PAGER-003.3** - Jump commands: `g/G: first/last` for quick navigation
-4. **REQ-PAGER-003.4** - Exit commands: `q/Esc: exit pager` prominently displayed
+1. **REQ-PAGER-003.1** - Horizontal navigation: `←→: columns` or `h/l: columns` when horizontal scrolling available
+2. **REQ-PAGER-003.2** - Vertical navigation: `↑↓ Space b: rows` or `j/k Space b: rows` format
+3. **REQ-PAGER-003.3** - Jump commands: `H/L: first/last col` and `g/G: first/last row` for quick navigation
+4. **REQ-PAGER-003.4** - Exit commands: `q/Esc: exit` prominently displayed
 5. **REQ-PAGER-003.5** - Hints SHALL be concise (fit within terminal width)
 6. **REQ-PAGER-003.6** - Hints SHALL prioritize most commonly used keys
+7. **REQ-PAGER-003.7** - Help hint: `?: help` to discover all navigation keys
 
 **REQ-PAGER-004: Dynamic Status Bar Adaptation**
 
 The status bar SHALL adapt to result set characteristics:
 
-1. **REQ-PAGER-004.1** - Single column width result: Omit horizontal navigation hints
-2. **REQ-PAGER-004.2** - Wide result sets: Display horizontal navigation prominently
+1. **REQ-PAGER-004.1** - Narrow result (all columns fit): Omit horizontal navigation hints and column indicators
+2. **REQ-PAGER-004.2** - Wide result sets: Display horizontal navigation hints and column indicators
 3. **REQ-PAGER-004.3** - Short result sets (fits in viewport): Indicate all rows visible
-4. **REQ-PAGER-004.4** - Terminal width changes: Reflow status bar content dynamically
+4. **REQ-PAGER-004.4** - Terminal width changes: Recalculate column/row layout and reflow status bar dynamically
 
-**Layout (Two-Line Status Bar at Bottom):**
+**Layout Examples:**
+
+**Wide Result (Horizontal Navigation Available):**
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
-│ Columns 1-5 of 23 | Rows 1-20 of 1,234 (2%) | ← →: columns | ↑↓ Space: rows│
-│ g/G: first/last | q/Esc: exit pager                                        │
+│ Columns 1-5 of 23 | Rows 1-20 of 1,234 (2%)           | (+18 cols) →      │
+│ ←→ h/l: columns | ↑↓ j/k: rows | Space/b: page | H/L g/G: jump | q: exit  │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Alternative Compact Layout (Single-Line for Narrow Terminals):**
+**Wide Result (Scrolled Right, Both Indicators):**
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
-│ Cols 1-5/23 | Rows 1-20/1234 (2%) | ←→↑↓: navigate | Space: page | q: exit │
+│ (+3 cols) ← | Columns 4-8 of 23 | Rows 1-20 of 1,234 (2%) | (+15 cols) →  │
+│ ←→ h/l: columns | ↑↓ j/k: rows | Space/b: page | H/L g/G: jump | q: exit  │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Narrow Result (All Columns Fit, No Horizontal Navigation):**
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│ Rows 1-20 of 1,234 (2%)                                                    │
+│ ↑↓ j/k: rows | Space/b: page | g/G: first/last | ?: help | q: exit        │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Compact Layout (Single-Line for Very Narrow Terminals):**
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│ Cols 1-5/23 | Rows 1-20/1234 (2%) | ←→↑↓: move | Space: page | q: exit    │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
