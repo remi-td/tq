@@ -354,17 +354,38 @@ impl Pager {
         let mut total_width = 1 + left_indicator_width;
         let mut count = 0;
 
+        log::debug!(
+            "visible_column_count: term_width={}, left_ind={}, right_ind={}, start_width={}",
+            self.term_width,
+            left_indicator_width,
+            right_indicator_width,
+            total_width
+        );
+
         for col in self.data.columns.iter().skip(self.col_offset) {
             // Column rendering: " " + value(width) + " " + "│" = width + 3
             let col_width = col.display_width + 3;
             // Account for right indicator when checking if column fits
             let available_width = self.term_width.saturating_sub(right_indicator_width);
+
+            log::debug!(
+                "  Col '{}': width={}, col_width={}, total_width={}, available={}, fits={}",
+                col.header,
+                col.display_width,
+                col_width,
+                total_width,
+                available_width,
+                total_width + col_width <= available_width
+            );
+
             if total_width + col_width > available_width && count > 0 {
                 break;
             }
             total_width += col_width;
             count += 1;
         }
+
+        log::debug!("visible_column_count result: {} columns, total_width={}", count, total_width);
 
         count.max(1) // Always show at least 1 column
     }
@@ -402,6 +423,16 @@ impl Pager {
             self.data.columns.len(),
             self.term_width
         );
+
+        // Debug: log column widths being rendered
+        for i in self.col_offset..end_col {
+            log::debug!(
+                "  Rendering column {}: '{}' width={}",
+                i,
+                self.data.columns[i].header,
+                self.data.columns[i].display_width
+            );
+        }
 
         // Render top border
         self.render_border(&mut stdout, "top")?;
