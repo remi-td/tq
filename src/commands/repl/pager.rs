@@ -299,6 +299,7 @@ impl Pager {
         let page_size = config.effective_page_size();
 
         let data = TableData::parse_from_content(&content).unwrap_or_else(|| {
+            log::warn!("Failed to parse table data, using fallback single-column display");
             // Fallback: create single-column display
             TableData {
                 columns: vec![ColumnData {
@@ -309,6 +310,23 @@ impl Pager {
                 row_count: content.lines().count(),
             }
         });
+
+        log::debug!(
+            "Pager initialized: {} columns, {} rows, term_width={}, page_size={}",
+            data.columns.len(),
+            data.row_count,
+            term_width,
+            page_size
+        );
+        for (i, col) in data.columns.iter().enumerate() {
+            log::debug!(
+                "  Column {}: '{}' width={} values={}",
+                i,
+                col.header,
+                col.display_width,
+                col.values.len()
+            );
+        }
 
         Pager {
             data,
@@ -375,6 +393,15 @@ impl Pager {
         let visible_cols = self.visible_column_count();
         let end_col = (self.col_offset + visible_cols).min(self.data.columns.len());
         let end_row = (self.row_offset + self.page_size).min(self.data.row_count);
+
+        log::debug!(
+            "Pager render: col_offset={}, visible_cols={}, end_col={}, total_cols={}, term_width={}",
+            self.col_offset,
+            visible_cols,
+            end_col,
+            self.data.columns.len(),
+            self.term_width
+        );
 
         // Render top border
         self.render_border(&mut stdout, "top")?;
