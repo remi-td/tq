@@ -328,14 +328,17 @@ impl Pager {
         let hidden_right_possible = self.data.columns.len().saturating_sub(self.col_offset + 1) > 0;
 
         // Reserve space for indicator cells if columns are hidden
+        // Indicator rendering: " " + centered(10) + " " + "│" = 13 chars total
         let left_indicator_width = if hidden_left > 0 { INDICATOR_WIDTH + 3 } else { 0 };
         let right_indicator_width = if hidden_right_possible { INDICATOR_WIDTH + 3 } else { 0 };
 
-        let mut total_width = 3 + left_indicator_width; // Left border + left indicator
+        // Start with leading border (1 char) + left indicator (if any)
+        let mut total_width = 1 + left_indicator_width;
         let mut count = 0;
 
         for col in self.data.columns.iter().skip(self.col_offset) {
-            let col_width = col.display_width + 3; // Cell + separator
+            // Column rendering: " " + value(width) + " " + "│" = width + 3
+            let col_width = col.display_width + 3;
             // Account for right indicator when checking if column fits
             let available_width = self.term_width.saturating_sub(right_indicator_width);
             if total_width + col_width > available_width && count > 0 {
