@@ -62,7 +62,7 @@ impl Default for PagerConfig {
             vertical_paging: true,
             horizontal_scrolling: true,
             min_rows_for_paging: 25,
-            min_cols_for_scrolling: 120,
+            min_cols_for_scrolling: 0,  // Use terminal width (fixed in Sprint 29.1)
             page_size: 0,     // Auto-detect
             visible_width: 0, // Auto-detect
         }
