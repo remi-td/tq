@@ -453,7 +453,8 @@ impl Pager {
         let hidden_left = self.hidden_columns_left();
         let hidden_right = self.hidden_columns_right();
 
-        let mut row_str = String::from("│");
+        // Write leading border FIRST (matches render_row pattern)
+        write!(stdout, "│")?;
 
         // Left indicator cell (if columns hidden to left)
         if hidden_left > 0 {
@@ -463,8 +464,7 @@ impl Pager {
             execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
             write!(stdout, "{}", padded)?;
             execute!(stdout, ResetColor)?;
-            row_str.clear();
-            row_str.push('│');
+            write!(stdout, "│")?;
         }
 
         // Data column headers
@@ -472,24 +472,21 @@ impl Pager {
             let padded = format!(" {:^width$} ", col.header, width = col.display_width);
             // Use bold/cyan for header
             execute!(stdout, SetForegroundColor(Color::Cyan))?;
-            write!(stdout, "{}", row_str)?;
             write!(stdout, "{}", padded)?;
             execute!(stdout, ResetColor)?;
-            row_str.clear();
-            row_str.push('│');
+            write!(stdout, "│")?;
         }
 
         // Right indicator cell (if columns hidden to right)
         if hidden_right > 0 {
             let indicator = format!("(+{} cols)", hidden_right);
             let padded = format!(" {:^width$} ", indicator, width = INDICATOR_WIDTH);
-            write!(stdout, "│")?;
             execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
             write!(stdout, "{}", padded)?;
             execute!(stdout, ResetColor)?;
+            write!(stdout, "│")?;
         }
 
-        write!(stdout, "│")?;
         writeln!(stdout)
     }
 
