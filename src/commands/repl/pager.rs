@@ -354,6 +354,18 @@ impl Pager {
         let mut total_width = 1 + left_indicator_width;
         let mut count = 0;
 
+        // Write debug to file
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/tq_pager_debug.log")
+        {
+            use std::io::Write;
+            let _ = writeln!(f, "\n=== visible_column_count ===");
+            let _ = writeln!(f, "term_width={}, left_ind={}, right_ind={}, start_width={}",
+                self.term_width, left_indicator_width, right_indicator_width, total_width);
+        }
+
         log::debug!(
             "visible_column_count: term_width={}, left_ind={}, right_ind={}, start_width={}",
             self.term_width,
@@ -367,6 +379,17 @@ impl Pager {
             let col_width = col.display_width + 3;
             // Account for right indicator when checking if column fits
             let available_width = self.term_width.saturating_sub(right_indicator_width);
+
+            // Write to file
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .append(true)
+                .open("/tmp/tq_pager_debug.log")
+            {
+                use std::io::Write;
+                let _ = writeln!(f, "  '{}': width={}, col_width={}, total={}, avail={}, fits={}",
+                    col.header, col.display_width, col_width, total_width, available_width,
+                    total_width + col_width <= available_width);
+            }
 
             log::debug!(
                 "  Col '{}': width={}, col_width={}, total_width={}, available={}, fits={}",
@@ -383,6 +406,15 @@ impl Pager {
             }
             total_width += col_width;
             count += 1;
+        }
+
+        // Write result to file
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .append(true)
+            .open("/tmp/tq_pager_debug.log")
+        {
+            use std::io::Write;
+            let _ = writeln!(f, "Result: {} columns, total_width={}\n", count, total_width);
         }
 
         log::debug!("visible_column_count result: {} columns, total_width={}", count, total_width);
@@ -406,6 +438,18 @@ impl Pager {
 
     /// Render the current view
     fn render(&self) -> io::Result<()> {
+        // Write debug info to file (logs don't work in raw mode)
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/tq_pager_debug.log")
+        {
+            use std::io::Write;
+            let _ = writeln!(f, "\n=== RENDER CALL ===");
+            let _ = writeln!(f, "col_offset={}, total_cols={}, term_width={}",
+                self.col_offset, self.data.columns.len(), self.term_width);
+        }
+
         let mut stdout = io::stdout();
 
         // Clear screen and move to top
@@ -414,6 +458,19 @@ impl Pager {
         let visible_cols = self.visible_column_count();
         let end_col = (self.col_offset + visible_cols).min(self.data.columns.len());
         let end_row = (self.row_offset + self.page_size).min(self.data.row_count);
+
+        // Write more debug info
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .append(true)
+            .open("/tmp/tq_pager_debug.log")
+        {
+            use std::io::Write;
+            let _ = writeln!(f, "visible_cols={}, end_col={}", visible_cols, end_col);
+            for i in self.col_offset..end_col {
+                let _ = writeln!(f, "  Col {}: '{}' width={}",
+                    i, self.data.columns[i].header, self.data.columns[i].display_width);
+            }
+        }
 
         log::debug!(
             "Pager render: col_offset={}, visible_cols={}, end_col={}, total_cols={}, term_width={}",
