@@ -361,13 +361,25 @@ fn render_data_row(
 /// - In TTY mode: Shows columns that fit, with "(+n cols)" indicator for hidden ones
 /// - In batch mode: Shows ALL columns without truncation
 pub fn write<W: Write>(result: &QueryResult, writer: &mut W, options: &TableOptions) -> Result<()> {
+    write_with_width_constraint(result, writer, options, get_terminal_width())
+}
+
+/// Write query results showing ALL columns without truncation
+/// Used by the pager to get full table output for horizontal scrolling
+pub fn write_all_columns<W: Write>(result: &QueryResult, writer: &mut W, options: &TableOptions) -> Result<()> {
+    write_with_width_constraint(result, writer, options, None)
+}
+
+fn write_with_width_constraint<W: Write>(
+    result: &QueryResult,
+    writer: &mut W,
+    options: &TableOptions,
+    terminal_width: Option<usize>,
+) -> Result<()> {
     if result.is_empty() {
         writeln!(writer, "No results returned.")?;
         return Ok(());
     }
-
-    // Get terminal width (None for batch mode)
-    let terminal_width = get_terminal_width();
 
     // Prepare data
     let column_names: Vec<String> = result.columns.iter().map(|c| c.name.clone()).collect();
@@ -409,6 +421,26 @@ pub fn write_with_timing<W: Write>(
     options: &TableOptions,
 ) -> Result<()> {
     write(result, writer, options)?;
+
+    // Add row count and timing
+    writeln!(
+        writer,
+        "{} row(s) in set ({:.3}s)",
+        result.row_count,
+        result.execution_time.as_secs_f64()
+    )?;
+
+    Ok(())
+}
+
+/// Write query results with ALL columns and timing footer
+/// Used by the pager to get full table output for horizontal scrolling
+pub fn write_all_columns_with_timing<W: Write>(
+    result: &QueryResult,
+    writer: &mut W,
+    options: &TableOptions,
+) -> Result<()> {
+    write_all_columns(result, writer, options)?;
 
     // Add row count and timing
     writeln!(

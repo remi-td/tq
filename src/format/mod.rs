@@ -90,6 +90,16 @@ pub fn write_output_with_timing<W: Write>(
     }
 }
 
+/// Write query results for pager (shows ALL columns without truncation)
+/// Sprint 29 fix: Pager needs full table output to implement horizontal scrolling
+pub fn write_output_for_pager<W: Write>(
+    result: &QueryResult,
+    writer: &mut W,
+    options: &FormatOptions,
+) -> Result<()> {
+    table::write_all_columns_with_timing(result, writer, &options.table)
+}
+
 /// Helper to format to string
 pub fn format_to_string(
     result: &QueryResult,

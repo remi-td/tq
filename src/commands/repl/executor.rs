@@ -14,7 +14,7 @@ use super::state::ReplState;
 use crate::cli::OutputFormat;
 use crate::db::DatabaseClient;
 use crate::error::Result;
-use crate::format::{write_output_with_timing, FormatOptions};
+use crate::format::{write_output_for_pager, write_output_with_timing, FormatOptions};
 use std::io::Write;
 use std::time::{Duration, Instant};
 
@@ -171,14 +171,13 @@ pub fn execute_sql_with_state<W: Write>(
     let pager_enabled = state.is_pager_enabled();
 
     if pager_enabled {
-        // Format output for pager
+        // Format output for pager with ALL columns (no truncation)
+        // Sprint 29 fix: Pager needs full table to implement horizontal scrolling
         let mut output_buffer = Vec::new();
-        write_output_with_timing(
+        write_output_for_pager(
             &result_clone,
             &mut output_buffer,
-            OutputFormat::Table,
             &format_options,
-            true, // Always show timing in REPL
         )?;
         let output_str = String::from_utf8_lossy(&output_buffer).to_string();
 
