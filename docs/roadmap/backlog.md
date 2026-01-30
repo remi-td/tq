@@ -1,7 +1,7 @@
 # Feature Backlog
 
-**Last Updated:** 2026-01-28
-**Next Sprint:** Sprint 28
+**Last Updated:** 2026-01-30
+**Next Sprint:** Sprint 30
 
 ---
 

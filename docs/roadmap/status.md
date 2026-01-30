@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
-**Last Updated:** 2026-01-28
-**Current Version:** 1.12.1
-**Latest Sprint:** Sprint 28 Complete (Pager UX + Startup Cleanup)
+**Last Updated:** 2026-01-30
+**Current Version:** 1.13.0
+**Latest Sprint:** Sprint 29 Complete (Interactive Horizontal Paging)
 
 ---
 
@@ -58,7 +58,7 @@ All core features are complete and tested.
 | Vi keybindings | ✅ | [REPL Mode](../specifications/repl.md#vi-mode) | v1.3.0 |
 | Emacs keybindings | ✅ | [REPL Mode](../specifications/repl.md#emacs-mode) | v1.3.0 |
 | SQL syntax highlighting | ✅ | [REPL Mode](../specifications/repl.md#syntax-highlighting) | v1.3.0 |
-| Result paging (horizontal) | ✅ | [REPL Mode](../specifications/repl.md#column-windowing) | v1.3.0 |
+| Result paging (horizontal) | ✅ | [REPL Mode](../specifications/repl.md#horizontal-column-navigation) | v1.3.0, enhanced v1.13.0 (Sprint 29) |
 | Result paging (vertical) | ✅ | [REPL Mode](../specifications/repl.md#vertical-paging) | v1.3.0 |
 | Query timing display | ✅ | [REPL Mode](../specifications/repl.md#timing-display) | v1.3.0 |
 
@@ -138,6 +138,16 @@ All core features are complete and tested.
 - Build cleanup: Removed build.rs success warning for cleaner development experience
 - Status bar improvements: Better navigation hints in pager mode
 
+**Sprint 29 Implementation (v1.13.0):**
+- Interactive horizontal paging: Full implementation with Left/Right arrow navigation for wide result sets
+- Vim keybindings: h/l for horizontal scrolling, H/L for jump to first/last column
+- Column indicators: Visual feedback with `(+N cols) ←` and `(+N cols) →` indicators
+- Status bar: Dynamic "Columns X-Y of Z" display showing current column range
+- Help text: ? key shows comprehensive pager navigation controls including horizontal
+- Position preservation: Column position maintained during vertical scrolling
+- Pager integration: Re-enabled in executor with proper state management
+- 23 interactive tests: Comprehensive test coverage for all horizontal paging features
+
 ---
 
 ## Batch Mode
@@ -205,7 +215,7 @@ All core features are complete and tested.
 - **Total Features**: 62
 - **Implemented**: 57 (92%)
 - **Planned**: 5 (8%)
-- **Test Pass Rate**: 100% (386/386 tests: 322 unit, 39 integration, 25 interactive)
+- **Test Pass Rate**: 100% (386/386 tests: 330 unit, 8 integration, 48 interactive)
 - **Code Coverage**: 40% (baseline established)
 - **Latest Sprint**: Sprint 27 - Bug Fix + Documentation (Sessions bug fix, LICENSE, README)
 
