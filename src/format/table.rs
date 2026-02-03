@@ -382,12 +382,6 @@ pub fn write<W: Write>(result: &QueryResult, writer: &mut W, options: &TableOpti
     write_with_width_constraint(result, writer, options, get_terminal_width())
 }
 
-/// Write query results showing ALL columns without truncation
-/// Used by the pager to get full table output for horizontal scrolling
-pub fn write_all_columns<W: Write>(result: &QueryResult, writer: &mut W, options: &TableOptions) -> Result<()> {
-    write_with_width_constraint(result, writer, options, None)
-}
-
 fn write_with_width_constraint<W: Write>(
     result: &QueryResult,
     writer: &mut W,
@@ -407,16 +401,9 @@ fn write_with_width_constraint<W: Write>(
         .map(|row| row.iter().map(|v| v.display()).collect())
         .collect();
 
-    // For pager mode (terminal_width=None), limit column widths to 40 chars
-    // The pager will handle horizontal scrolling across columns
-    let max_column_width = if terminal_width.is_none() {
-        Some(40) // Match MAX_COLUMN_WIDTH in pager.rs
-    } else {
-        None
-    };
-
-    // Select columns to display
-    let selection = select_visible_columns(&column_names, &column_values, terminal_width, max_column_width);
+    // Select columns to display based on terminal width
+    // Sprint 30: Pager no longer uses this - it formats from QueryResult directly
+    let selection = select_visible_columns(&column_names, &column_values, terminal_width, None);
 
     // Render the table
     let table_output = render_table(result, &selection, options);
@@ -447,26 +434,6 @@ pub fn write_with_timing<W: Write>(
     options: &TableOptions,
 ) -> Result<()> {
     write(result, writer, options)?;
-
-    // Add row count and timing
-    writeln!(
-        writer,
-        "{} row(s) in set ({:.3}s)",
-        result.row_count,
-        result.execution_time.as_secs_f64()
-    )?;
-
-    Ok(())
-}
-
-/// Write query results with ALL columns and timing footer
-/// Used by the pager to get full table output for horizontal scrolling
-pub fn write_all_columns_with_timing<W: Write>(
-    result: &QueryResult,
-    writer: &mut W,
-    options: &TableOptions,
-) -> Result<()> {
-    write_all_columns(result, writer, options)?;
 
     // Add row count and timing
     writeln!(
@@ -611,7 +578,7 @@ mod tests {
             "Bob".to_string(),
             "Charlie".to_string(),
         ];
-        let width = calculate_column_width("name", &values, 100);
+        let width = calculate_column_width("name", &values, 100, None);
         // "Charlie" is 7 chars, header "name" is 4 chars, so max is 7 + 2 = 9
         assert_eq!(width, 9);
     }
@@ -619,7 +586,7 @@ mod tests {
     #[test]
     fn test_column_width_uses_header_when_larger() {
         let values = vec!["A".to_string(), "B".to_string()];
-        let width = calculate_column_width("very_long_header", &values, 100);
+        let width = calculate_column_width("very_long_header", &values, 100, None);
         // Header is 16 chars, values are 1 char, so width = 16 + 2 = 18
         assert_eq!(width, 18);
     }

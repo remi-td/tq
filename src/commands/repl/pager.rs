@@ -1,19 +1,34 @@
 //! Custom Result Pager for Large Result Sets
 //!
-//! Sprint 8: Complete rewrite to fix critical bugs:
-//! - Bug 3.1: 'q' now returns to REPL instead of exiting program
-//! - Bug 3.2: Column windowing for wide tables (shows 4-6 readable columns)
-//! - Bug 3.3: Cell truncation at 100 chars for long values
+//! Sprint 30: Architectural refactor to accept QueryResult directly instead of
+//! pre-formatted strings. This fixes the fundamental Sprint 29 bug where the
+//! pager received 1221-character-wide pre-formatted tables for 117-char terminals.
 //!
-//! This pager uses crossterm for terminal control and implements
-//! a custom event loop that properly returns control to the REPL.
+//! ## Architecture Change
 //!
-//! Features:
-//! - Column windowing: Show readable columns, navigate with Left/Right
+//! Sprint 29 (broken): Executor → format table → string → Pager parses string
+//! Sprint 30 (fixed):  Executor → QueryResult → Pager formats at render time
+//!
+//! By accepting structured data, the pager can:
+//! - Calculate column widths based on actual terminal width
+//! - Select which columns fit without pre-rendering all columns
+//! - Navigate horizontally at the column level, not character level
+//!
+//! ## Features
+//!
+//! - Column windowing: Show columns that fit terminal, navigate with h/l
 //! - Row paging: Navigate with j/k, Space/b, g/G
 //! - Cell truncation: Long values truncated with ellipsis
 //! - Safe exit: 'q' returns to REPL, never exits program
+//!
+//! ## Key Bindings
+//!
+//! Vertical: j/k (row), Space/b (page), g/G (first/last)
+//! Horizontal: h/l (column), H/L (first/last column)
+//! Help: ? (show help overlay)
+//! Exit: q/Esc (return to REPL)
 
+use crate::db::{Alignment, QueryResult};
 use crossterm::{
     cursor::{Hide, MoveTo, Show},
     event::{self, Event, KeyCode, KeyEvent},
@@ -25,7 +40,7 @@ use crossterm::{
     },
 };
 use std::io::{self, Write};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthStr;
 
 /// Maximum characters to display in a cell before truncation
 const MAX_CELL_LENGTH: usize = 100;
@@ -62,9 +77,9 @@ impl Default for PagerConfig {
             vertical_paging: true,
             horizontal_scrolling: true,
             min_rows_for_paging: 25,
-            min_cols_for_scrolling: 0,  // Use terminal width (fixed in Sprint 29.1)
-            page_size: 0,     // Auto-detect
-            visible_width: 0, // Auto-detect
+            min_cols_for_scrolling: 0, // Use terminal width
+            page_size: 0,              // Auto-detect
+            visible_width: 0,          // Auto-detect
         }
     }
 }
@@ -84,9 +99,8 @@ impl PagerConfig {
         if self.page_size > 0 {
             self.page_size
         } else {
-            // Try to get terminal height, default to 24
             terminal_size()
-                .map(|(_, h)| (h as usize).saturating_sub(5)) // Reserve for header and status
+                .map(|(_, h)| (h as usize).saturating_sub(5))
                 .unwrap_or(20)
         }
     }
@@ -96,158 +110,100 @@ impl PagerConfig {
         if self.visible_width > 0 {
             self.visible_width
         } else {
-            // Try to get terminal width, default to 120
             terminal_size().map(|(w, _)| w as usize).unwrap_or(120)
         }
     }
 }
 
-/// A single column with its data
+/// A single column with its calculated display properties
 #[derive(Debug, Clone)]
-struct ColumnData {
-    /// Column header name
-    header: String,
-    /// Cell values for each row
-    values: Vec<String>,
-    /// Calculated display width for this column
+struct ColumnInfo {
+    /// Column name (header)
+    name: String,
+    /// Calculated display width for this column (content width, not including borders)
     display_width: usize,
+    /// Alignment for this column
+    alignment: Alignment,
 }
 
-/// Represents the parsed and processed table data for paging
+/// Represents the structured table data for paging
+///
+/// Sprint 30: Built directly from QueryResult, no string parsing
 #[derive(Debug)]
 pub struct TableData {
-    /// Columns with their data
-    columns: Vec<ColumnData>,
+    /// Column information with calculated widths
+    columns: Vec<ColumnInfo>,
+    /// Cell values as strings (pre-truncated)
+    /// Indexed as [row_index][column_index]
+    cell_values: Vec<Vec<String>>,
     /// Total number of rows
     row_count: usize,
 }
 
 impl TableData {
-    /// Parse table content from formatted string
+    /// Create TableData directly from QueryResult
     ///
-    /// This parses the comfy-table output format and extracts columns and values.
-    /// It applies cell truncation during parsing.
-    pub fn parse_from_content(content: &str) -> Option<Self> {
-        let lines: Vec<&str> = content.lines().collect();
-        if lines.len() < 3 {
-            return None;
-        }
+    /// Sprint 30: This is the NEW method that replaces parse_from_content().
+    /// By accepting QueryResult directly, we can calculate proper column widths
+    /// based on actual data without the overhead of string parsing.
+    ///
+    /// # Arguments
+    /// * `result` - The query result with columns and rows
+    /// * `max_col_width` - Maximum width for any column (typically MAX_COLUMN_WIDTH)
+    pub fn from_query_result(result: &QueryResult, max_col_width: usize) -> Self {
+        let mut columns = Vec::with_capacity(result.columns.len());
+        let mut cell_values: Vec<Vec<String>> = vec![Vec::new(); result.rows.len()];
 
-        // Find header row (first row with actual content between separators)
-        let header_idx = lines.iter().position(|l| {
-            l.contains('│')
-                && !l.chars().all(|c| {
-                    c == '─'
-                        || c == '│'
-                        || c == '┌'
-                        || c == '┐'
-                        || c == '├'
-                        || c == '┤'
-                        || c == '└'
-                        || c == '┘'
-                        || c == '╭'
-                        || c == '╮'
-                        || c == '╰'
-                        || c == '╯'
-                        || c == '┼'
-                        || c.is_whitespace()
-                })
-        })?;
+        for (col_idx, col_meta) in result.columns.iter().enumerate() {
+            // Truncate header if needed
+            let header = truncate_cell(&col_meta.name, max_col_width.saturating_sub(2));
+            let header_width = header.width();
 
-        // Parse header
-        let header_line = lines[header_idx];
-        let headers: Vec<String> = parse_row_cells(header_line);
-        if headers.is_empty() {
-            return None;
-        }
+            // Calculate max value width for this column
+            let mut max_value_width = header_width;
 
-        // Find data rows
-        let mut rows: Vec<Vec<String>> = Vec::new();
-        for line in lines.iter().skip(header_idx + 1) {
-            if line.contains('│') && !is_separator_line(line) {
-                let cells = parse_row_cells(line);
-                if cells.len() == headers.len() {
-                    // Apply truncation to each cell
-                    let truncated_cells: Vec<String> = cells
-                        .into_iter()
-                        .map(|c| truncate_cell(&c, MAX_CELL_LENGTH))
-                        .collect();
-                    rows.push(truncated_cells);
-                }
+            for (row_idx, row) in result.rows.iter().enumerate() {
+                let value = if col_idx < row.len() {
+                    row[col_idx].display()
+                } else {
+                    "[NULL]".to_string()
+                };
+
+                // Truncate cell value
+                let truncated = truncate_cell(&value, MAX_CELL_LENGTH);
+                let value_width = truncated.width();
+
+                max_value_width = max_value_width.max(value_width);
+                cell_values[row_idx].push(truncated);
             }
+
+            // Apply width constraints
+            let display_width = max_value_width
+                .max(MIN_COLUMN_WIDTH)
+                .min(max_col_width);
+
+            columns.push(ColumnInfo {
+                name: header,
+                display_width,
+                alignment: col_meta.data_type.alignment(),
+            });
         }
 
-        // Build column data
-        let mut columns: Vec<ColumnData> = headers
-            .into_iter()
-            .map(|h| {
-                let truncated_header = truncate_cell(&h, MAX_COLUMN_WIDTH - 2);
-                ColumnData {
-                    display_width: truncated_header.width().max(MIN_COLUMN_WIDTH),
-                    header: truncated_header,
-                    values: Vec::new(),
-                }
-            })
-            .collect();
-
-        // Populate column values and calculate widths
-        for row in &rows {
-            for (i, value) in row.iter().enumerate() {
-                if i < columns.len() {
-                    let value_width = value.width();
-                    columns[i].display_width = columns[i]
-                        .display_width
-                        .max(value_width)
-                        .min(MAX_COLUMN_WIDTH);
-                    columns[i].values.push(value.clone());
-                }
-            }
-        }
-
-        Some(TableData {
+        TableData {
             columns,
-            row_count: rows.len(),
-        })
-    }
-}
-
-/// Parse cells from a table row line
-///
-/// Sprint 8 Bug Fix: Simplified and more robust parsing logic
-fn parse_row_cells(line: &str) -> Vec<String> {
-    let parts: Vec<&str> = line.split('│').collect();
-
-    // Skip first (before first │) and last (after last │) which are empty or borders
-    if parts.len() <= 2 {
-        return vec![];
+            cell_values,
+            row_count: result.rows.len(),
+        }
     }
 
-    parts[1..parts.len() - 1]
-        .iter()
-        .map(|s| s.trim().to_string())
-        .collect()
-}
-
-/// Check if a line is a separator line (borders only)
-fn is_separator_line(line: &str) -> bool {
-    line.chars().all(|c| {
-        c == '─'
-            || c == '│'
-            || c == '┌'
-            || c == '┐'
-            || c == '├'
-            || c == '┤'
-            || c == '└'
-            || c == '┘'
-            || c == '╭'
-            || c == '╮'
-            || c == '╰'
-            || c == '╯'
-            || c == '┼'
-            || c == '┬'
-            || c == '┴'
-            || c.is_whitespace()
-    })
+    /// Get cell value for a specific row and column index
+    fn get_cell(&self, row_idx: usize, col_idx: usize) -> &str {
+        self.cell_values
+            .get(row_idx)
+            .and_then(|row| row.get(col_idx))
+            .map(|s| s.as_str())
+            .unwrap_or("")
+    }
 }
 
 /// Truncate a cell value to max_length with ellipsis
@@ -260,9 +216,8 @@ fn truncate_cell(value: &str, max_length: usize) -> String {
         let mut result = String::new();
         let mut width = 0;
         for c in trimmed.chars() {
-            let char_width = c.width().unwrap_or(1);
+            let char_width = unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
             if width + char_width + 1 > max_length {
-                // Leave room for ellipsis
                 break;
             }
             result.push(c);
@@ -275,8 +230,10 @@ fn truncate_cell(value: &str, max_length: usize) -> String {
 
 /// Pager state for navigation
 pub struct Pager {
-    /// Table data
+    /// Table data (structured from QueryResult)
     data: TableData,
+    /// Query execution time for status bar
+    execution_time: std::time::Duration,
     /// Current row offset (first visible row)
     row_offset: usize,
     /// Current column offset (first visible column)
@@ -286,30 +243,26 @@ pub struct Pager {
     /// Terminal width
     term_width: usize,
     /// Terminal height
-    #[allow(dead_code)]
     term_height: usize,
-    /// Total row count in result
+    /// Total row count in result (may differ from data.row_count if limited)
     total_rows: usize,
 }
 
 impl Pager {
-    /// Create a new pager with parsed table data
-    pub fn new(content: String, row_count: usize, config: &PagerConfig) -> Self {
+    /// Create a new pager from QueryResult
+    ///
+    /// Sprint 30: NEW constructor that accepts QueryResult directly.
+    /// This eliminates the string parsing step that caused Sprint 29 issues.
+    ///
+    /// # Arguments
+    /// * `result` - The query result to display
+    /// * `config` - Pager configuration
+    pub fn new(result: &QueryResult, config: &PagerConfig) -> Self {
         let (term_width, term_height) = terminal_size().unwrap_or((120, 24));
         let page_size = config.effective_page_size();
 
-        let data = TableData::parse_from_content(&content).unwrap_or_else(|| {
-            log::warn!("Failed to parse table data, using fallback single-column display");
-            // Fallback: create single-column display
-            TableData {
-                columns: vec![ColumnData {
-                    header: "Output".to_string(),
-                    values: content.lines().map(|s| s.to_string()).collect(),
-                    display_width: term_width as usize - 4,
-                }],
-                row_count: content.lines().count(),
-            }
-        });
+        // Build table data from QueryResult with appropriate column width limit
+        let data = TableData::from_query_result(result, MAX_COLUMN_WIDTH);
 
         log::debug!(
             "Pager initialized: {} columns, {} rows, term_width={}, page_size={}",
@@ -318,88 +271,50 @@ impl Pager {
             term_width,
             page_size
         );
-        for (i, col) in data.columns.iter().enumerate() {
-            log::debug!(
-                "  Column {}: '{}' width={} values={}",
-                i,
-                col.header,
-                col.display_width,
-                col.values.len()
-            );
-        }
 
         Pager {
             data,
+            execution_time: result.execution_time,
             row_offset: 0,
             col_offset: 0,
             page_size,
             term_width: term_width as usize,
             term_height: term_height as usize,
-            total_rows: row_count,
+            total_rows: result.row_count,
         }
     }
 
     /// Calculate how many columns can fit in the terminal width
-    /// Sprint 28: Accounts for indicator cells when columns are hidden
+    ///
+    /// Sprint 30: Uses actual column widths from TableData, calculated at
+    /// construction time from QueryResult.
     fn visible_column_count(&self) -> usize {
         let hidden_left = self.hidden_columns_left();
-        let hidden_right_possible = self.data.columns.len().saturating_sub(self.col_offset + 1) > 0;
+        let hidden_right_possible =
+            self.data.columns.len().saturating_sub(self.col_offset + 1) > 0;
 
         // Reserve space for indicator cells if columns are hidden
         // Indicator rendering: " " + centered(10) + " " + "│" = 13 chars total
-        let left_indicator_width = if hidden_left > 0 { INDICATOR_WIDTH + 3 } else { 0 };
-        let right_indicator_width = if hidden_right_possible { INDICATOR_WIDTH + 3 } else { 0 };
+        let left_indicator_width = if hidden_left > 0 {
+            INDICATOR_WIDTH + 3
+        } else {
+            0
+        };
+        let right_indicator_width = if hidden_right_possible {
+            INDICATOR_WIDTH + 3
+        } else {
+            0
+        };
 
         // Start with leading border (1 char) + left indicator (if any)
         let mut total_width = 1 + left_indicator_width;
         let mut count = 0;
-
-        // Write debug to file
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open("/tmp/tq_pager_debug.log")
-        {
-            use std::io::Write;
-            let _ = writeln!(f, "\n=== visible_column_count ===");
-            let _ = writeln!(f, "term_width={}, left_ind={}, right_ind={}, start_width={}",
-                self.term_width, left_indicator_width, right_indicator_width, total_width);
-        }
-
-        log::debug!(
-            "visible_column_count: term_width={}, left_ind={}, right_ind={}, start_width={}",
-            self.term_width,
-            left_indicator_width,
-            right_indicator_width,
-            total_width
-        );
 
         for col in self.data.columns.iter().skip(self.col_offset) {
             // Column rendering: " " + value(width) + " " + "│" = width + 3
             let col_width = col.display_width + 3;
             // Account for right indicator when checking if column fits
             let available_width = self.term_width.saturating_sub(right_indicator_width);
-
-            // Write to file
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .append(true)
-                .open("/tmp/tq_pager_debug.log")
-            {
-                use std::io::Write;
-                let _ = writeln!(f, "  '{}': width={}, col_width={}, total={}, avail={}, fits={}",
-                    col.header, col.display_width, col_width, total_width, available_width,
-                    total_width + col_width <= available_width);
-            }
-
-            log::debug!(
-                "  Col '{}': width={}, col_width={}, total_width={}, available={}, fits={}",
-                col.header,
-                col.display_width,
-                col_width,
-                total_width,
-                available_width,
-                total_width + col_width <= available_width
-            );
 
             if total_width + col_width > available_width && count > 0 {
                 break;
@@ -408,28 +323,15 @@ impl Pager {
             count += 1;
         }
 
-        // Write result to file
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .append(true)
-            .open("/tmp/tq_pager_debug.log")
-        {
-            use std::io::Write;
-            let _ = writeln!(f, "Result: {} columns, total_width={}\n", count, total_width);
-        }
-
-        log::debug!("visible_column_count result: {} columns, total_width={}", count, total_width);
-
         count.max(1) // Always show at least 1 column
     }
 
     /// Calculate number of columns hidden to the left
-    /// Sprint 28: For column position indicators
     fn hidden_columns_left(&self) -> usize {
         self.col_offset
     }
 
     /// Calculate number of columns hidden to the right
-    /// Sprint 28: For column position indicators
     fn hidden_columns_right(&self) -> usize {
         let visible = self.visible_column_count();
         let end_col = (self.col_offset + visible).min(self.data.columns.len());
@@ -438,18 +340,6 @@ impl Pager {
 
     /// Render the current view
     fn render(&self) -> io::Result<()> {
-        // Write debug info to file (logs don't work in raw mode)
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open("/tmp/tq_pager_debug.log")
-        {
-            use std::io::Write;
-            let _ = writeln!(f, "\n=== RENDER CALL ===");
-            let _ = writeln!(f, "col_offset={}, total_cols={}, term_width={}",
-                self.col_offset, self.data.columns.len(), self.term_width);
-        }
-
         let mut stdout = io::stdout();
 
         // Clear screen and move to top
@@ -459,46 +349,14 @@ impl Pager {
         let end_col = (self.col_offset + visible_cols).min(self.data.columns.len());
         let end_row = (self.row_offset + self.page_size).min(self.data.row_count);
 
-        // Write more debug info
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .append(true)
-            .open("/tmp/tq_pager_debug.log")
-        {
-            use std::io::Write;
-            let _ = writeln!(f, "visible_cols={}, end_col={}", visible_cols, end_col);
-            for i in self.col_offset..end_col {
-                let _ = writeln!(f, "  Col {}: '{}' width={}",
-                    i, self.data.columns[i].header, self.data.columns[i].display_width);
-            }
-        }
-
-        log::debug!(
-            "Pager render: col_offset={}, visible_cols={}, end_col={}, total_cols={}, term_width={}",
-            self.col_offset,
-            visible_cols,
-            end_col,
-            self.data.columns.len(),
-            self.term_width
-        );
-
-        // Debug: log column widths being rendered
-        for i in self.col_offset..end_col {
-            log::debug!(
-                "  Rendering column {}: '{}' width={}",
-                i,
-                self.data.columns[i].header,
-                self.data.columns[i].display_width
-            );
-        }
-
         // Render top border
-        self.render_border(&mut stdout, "top")?;
+        self.render_border(&mut stdout, BorderType::Top)?;
 
         // Render header row
         self.render_header(&mut stdout, self.col_offset, end_col)?;
 
         // Render header separator
-        self.render_border(&mut stdout, "middle")?;
+        self.render_border(&mut stdout, BorderType::Middle)?;
 
         // Render data rows
         for row_idx in self.row_offset..end_row {
@@ -506,7 +364,7 @@ impl Pager {
         }
 
         // Render bottom border
-        self.render_border(&mut stdout, "bottom")?;
+        self.render_border(&mut stdout, BorderType::Bottom)?;
 
         // Render status bar
         self.render_status_bar(&mut stdout)?;
@@ -515,13 +373,11 @@ impl Pager {
     }
 
     /// Render a table border
-    /// Sprint 28: Updated to include indicator cell borders when columns are hidden
-    fn render_border(&self, stdout: &mut impl Write, position: &str) -> io::Result<()> {
-        let (left, middle, right, line) = match position {
-            "top" => ('╭', '┬', '╮', '─'),
-            "middle" => ('├', '┼', '┤', '─'),
-            "bottom" => ('╰', '┴', '╯', '─'),
-            _ => ('├', '┼', '┤', '─'),
+    fn render_border(&self, stdout: &mut impl Write, border_type: BorderType) -> io::Result<()> {
+        let (left, middle, right, line) = match border_type {
+            BorderType::Top => ('╭', '┬', '╮', '─'),
+            BorderType::Middle => ('├', '┼', '┤', '─'),
+            BorderType::Bottom => ('╰', '┴', '╯', '─'),
         };
 
         let visible_cols = self.visible_column_count();
@@ -561,7 +417,8 @@ impl Pager {
     }
 
     /// Render the header row
-    /// Sprint 28: Updated to include column position indicator cells
+    ///
+    /// Sprint 30: Formats directly from TableData columns, no string parsing
     fn render_header(
         &self,
         stdout: &mut impl Write,
@@ -571,14 +428,12 @@ impl Pager {
         let hidden_left = self.hidden_columns_left();
         let hidden_right = self.hidden_columns_right();
 
-        // Write leading border FIRST (matches render_row pattern)
         write!(stdout, "│")?;
 
         // Left indicator cell (if columns hidden to left)
         if hidden_left > 0 {
             let indicator = format!("(+{} cols)", hidden_left);
             let padded = format!(" {:^width$} ", indicator, width = INDICATOR_WIDTH);
-            // Write indicator with dim color
             execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
             write!(stdout, "{}", padded)?;
             execute!(stdout, ResetColor)?;
@@ -587,8 +442,7 @@ impl Pager {
 
         // Data column headers
         for col in &self.data.columns[start_col..end_col] {
-            let padded = format!(" {:^width$} ", col.header, width = col.display_width);
-            // Use bold/cyan for header
+            let padded = format!(" {:^width$} ", col.name, width = col.display_width);
             execute!(stdout, SetForegroundColor(Color::Cyan))?;
             write!(stdout, "{}", padded)?;
             execute!(stdout, ResetColor)?;
@@ -610,8 +464,7 @@ impl Pager {
 
     /// Render a data row
     ///
-    /// Sprint 8 Bug Fix: Write leading border, simplified logic
-    /// Sprint 28: Updated to include column position indicator cells
+    /// Sprint 30: Formats directly from TableData cell values with proper alignment
     fn render_row(
         &self,
         stdout: &mut impl Write,
@@ -622,12 +475,10 @@ impl Pager {
         let hidden_left = self.hidden_columns_left();
         let hidden_right = self.hidden_columns_right();
 
-        // Sprint 8 Fix: Write leading border FIRST
         write!(stdout, "│")?;
 
         // Left indicator cell (if columns hidden to left)
         if hidden_left > 0 {
-            // Show left arrow indicator in data rows
             let indicator = "    <--   ";
             execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
             write!(stdout, " {} ", indicator)?;
@@ -635,15 +486,19 @@ impl Pager {
             write!(stdout, "│")?;
         }
 
-        for col in &self.data.columns[start_col..end_col] {
-            let value = col.values.get(row_idx).map(|s| s.as_str()).unwrap_or("");
+        for (vis_idx, col) in self.data.columns[start_col..end_col].iter().enumerate() {
+            let col_idx = start_col + vis_idx;
+            let value = self.data.get_cell(row_idx, col_idx);
             let is_null = value == "[NULL]";
 
-            // Pad value to column width
-            let padded = format!(" {:width$} ", value, width = col.display_width);
+            // Format value with alignment
+            let padded = match col.alignment {
+                Alignment::Right => format!(" {:>width$} ", value, width = col.display_width),
+                Alignment::Center => format!(" {:^width$} ", value, width = col.display_width),
+                Alignment::Left => format!(" {:width$} ", value, width = col.display_width),
+            };
 
             if is_null {
-                // Dim color for NULL values
                 execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
                 write!(stdout, "{}", padded)?;
                 execute!(stdout, ResetColor)?;
@@ -651,13 +506,11 @@ impl Pager {
                 write!(stdout, "{}", padded)?;
             }
 
-            // Write column separator
             write!(stdout, "│")?;
         }
 
         // Right indicator cell (if columns hidden to right)
         if hidden_right > 0 {
-            // Show right arrow indicator in data rows
             let indicator = "   -->    ";
             execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
             write!(stdout, " {} ", indicator)?;
@@ -669,7 +522,6 @@ impl Pager {
     }
 
     /// Render the status bar
-    /// Sprint 28: Updated with clearer navigation hints and column indicators
     fn render_status_bar(&self, stdout: &mut impl Write) -> io::Result<()> {
         let visible_cols = self.visible_column_count();
         let end_col = (self.col_offset + visible_cols).min(self.data.columns.len());
@@ -700,15 +552,15 @@ impl Pager {
             progress
         );
 
+        let timing = format!("{:.3}s", self.execution_time.as_secs_f64());
+
         // Build navigation hints based on what navigation is possible
         let mut nav_parts = Vec::new();
 
-        // Horizontal navigation (only show if columns are hidden)
         if hidden_left > 0 || hidden_right > 0 {
             nav_parts.push("<- ->: scroll cols");
         }
 
-        // Vertical navigation
         nav_parts.push("j/k Space/b: rows");
         nav_parts.push("g/G: first/last");
         nav_parts.push("?: help");
@@ -718,7 +570,11 @@ impl Pager {
 
         writeln!(stdout)?;
         execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
-        writeln!(stdout, "{} | {} | {}", col_status, row_status, nav_hints)?;
+        writeln!(
+            stdout,
+            "{} | {} | {} | {}",
+            col_status, row_status, timing, nav_hints
+        )?;
         execute!(stdout, ResetColor)?;
 
         Ok(())
@@ -764,11 +620,11 @@ impl Pager {
                 }
             }
 
-            // Ctrl-Left: Jump to first column
+            // Jump to first column
             KeyCode::Char('H') => {
                 self.col_offset = 0;
             }
-            // Ctrl-Right: Jump to last column window
+            // Jump to last column window
             KeyCode::Char('L') => {
                 let visible = self.visible_column_count();
                 self.col_offset = self.data.columns.len().saturating_sub(visible);
@@ -781,15 +637,13 @@ impl Pager {
 
             _ => {}
         }
-        Ok(true) // Continue paging
+        Ok(true)
     }
 
     /// Display help overlay showing all navigation keys
-    /// REQ-PAGER-HORIZ-011: Help text documents horizontal navigation keys
     fn show_help(&mut self) -> io::Result<()> {
         let mut stdout = io::stdout();
 
-        // Clear screen and show help
         execute!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
 
         let help_text = r#"
@@ -844,7 +698,6 @@ Press any key to return to results..."#;
 
     /// Run the pager event loop
     pub fn run(&mut self) -> io::Result<()> {
-        // Enter alternate screen and raw mode
         let mut stdout = io::stdout();
         enable_raw_mode()?;
         execute!(stdout, EnterAlternateScreen, Hide)?;
@@ -857,7 +710,7 @@ Press any key to return to results..."#;
             if event::poll(std::time::Duration::from_millis(100))? {
                 if let Event::Key(key) = event::read()? {
                     if !self.handle_key(key)? {
-                        break; // Exit pager
+                        break;
                     }
                     self.render()?;
                 }
@@ -870,7 +723,6 @@ Press any key to return to results..."#;
             }
         }
 
-        // Leave alternate screen and disable raw mode
         execute!(stdout, Show, LeaveAlternateScreen)?;
         disable_raw_mode()?;
 
@@ -878,106 +730,69 @@ Press any key to return to results..."#;
     }
 }
 
-/// Represents paged output with navigation state (legacy API compatibility)
-#[allow(dead_code)]
-pub struct PagedOutput {
-    /// The formatted table lines
-    lines: Vec<String>,
-    /// Current vertical scroll position (line index)
-    scroll_y: usize,
-    /// Current horizontal scroll position (column index)
-    scroll_x: usize,
-    /// Total width of the widest line
-    max_line_width: usize,
-    /// Pager configuration
-    config: PagerConfig,
-    /// Whether content needs paging
-    needs_vertical_paging: bool,
-    /// Whether content needs horizontal scrolling
-    needs_horizontal_scrolling: bool,
+/// Border type for rendering
+#[derive(Debug, Clone, Copy)]
+enum BorderType {
+    Top,
+    Middle,
+    Bottom,
 }
 
-impl PagedOutput {
-    /// Create a new paged output from formatted table lines
-    pub fn new(content: String, config: PagerConfig) -> Self {
-        let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-        let max_line_width = lines.iter().map(|l| l.width()).max().unwrap_or(0);
-
-        let page_size = config.effective_page_size();
-        let visible_width = config.effective_visible_width();
-
-        let needs_vertical_paging = config.vertical_paging
-            && lines.len() > config.min_rows_for_paging
-            && lines.len() > page_size;
-
-        let needs_horizontal_scrolling = config.horizontal_scrolling
-            && max_line_width > config.min_cols_for_scrolling
-            && max_line_width > visible_width;
-
-        Self {
-            lines,
-            scroll_y: 0,
-            scroll_x: 0,
-            max_line_width,
-            config,
-            needs_vertical_paging,
-            needs_horizontal_scrolling,
-        }
+/// Check if content should be paged based on configuration and result size
+pub fn should_page(result: &QueryResult, config: &PagerConfig) -> bool {
+    if !config.vertical_paging && !config.horizontal_scrolling {
+        return false;
     }
 
-    /// Check if this output needs any paging
-    pub fn needs_paging(&self) -> bool {
-        self.needs_vertical_paging || self.needs_horizontal_scrolling
-    }
+    let page_size = config.effective_page_size();
+    let visible_width = config.effective_visible_width();
 
-    /// Get the total number of lines
-    pub fn total_lines(&self) -> usize {
-        self.lines.len()
-    }
+    // Check vertical paging threshold
+    let needs_vertical = config.vertical_paging
+        && result.row_count > config.min_rows_for_paging
+        && result.row_count > page_size;
 
-    /// Get the full content as a string
-    pub fn content(&self) -> String {
-        self.lines.join("\n")
-    }
+    // Check horizontal scrolling - estimate if columns would exceed terminal width
+    // Use MAX_COLUMN_WIDTH as upper bound for column width estimation
+    let estimated_width: usize = result
+        .columns
+        .iter()
+        .map(|c| c.name.len().clamp(MIN_COLUMN_WIDTH, MAX_COLUMN_WIDTH) + 3)
+        .sum();
+    let needs_horizontal = config.horizontal_scrolling
+        && result.columns.len() > config.min_cols_for_scrolling
+        && estimated_width > visible_width;
+
+    needs_vertical || needs_horizontal
 }
 
-/// Display content using the custom pager for interactive scrolling
+/// Display QueryResult using the pager
 ///
-/// Sprint 8: Complete rewrite using crossterm instead of minus.
-/// CRITICAL: 'q' now returns to REPL instead of exiting the program.
+/// Sprint 30: New entry point that accepts QueryResult directly.
 ///
 /// # Arguments
-/// * `content` - The content to display (typically formatted table output)
-/// * `row_count` - Number of rows in the result (for the status bar)
+/// * `result` - The query result to display
 /// * `config` - Pager configuration
 ///
 /// # Returns
 /// * `Ok(true)` if paging was used
-/// * `Ok(false)` if content didn't need paging (should be displayed directly)
+/// * `Ok(false)` if content didn't need paging
 /// * `Err` if paging failed
 pub fn display_with_pager(
-    content: &str,
-    row_count: usize,
+    result: &QueryResult,
     config: &PagerConfig,
 ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
-    let paged = PagedOutput::new(content.to_string(), config.clone());
-
-    if !paged.needs_paging() {
-        // Content doesn't need paging - return false so caller can display directly
+    if !should_page(result, config) {
         return Ok(false);
     }
 
     log::debug!(
-        "Starting custom pager for {} lines ({} rows)",
-        paged.total_lines(),
-        row_count
+        "Starting pager for {} columns, {} rows",
+        result.columns.len(),
+        result.row_count
     );
 
-    // Create and run the pager
-    let mut pager = Pager::new(content.to_string(), row_count, config);
-
-    // Run pager - this blocks until user presses 'q'
-    // CRITICAL: This returns normally, it does NOT exit the program
+    let mut pager = Pager::new(result, config);
     pager.run()?;
 
     log::debug!("Pager exited normally, returning to REPL");
@@ -985,32 +800,27 @@ pub fn display_with_pager(
     Ok(true)
 }
 
-/// Check if content should be paged based on configuration and size
-pub fn should_page(content: &str, config: &PagerConfig) -> bool {
-    if !config.vertical_paging && !config.horizontal_scrolling {
-        return false;
-    }
-
-    let lines: Vec<&str> = content.lines().collect();
-    let line_count = lines.len();
-    let max_width = lines.iter().map(|l| l.width()).max().unwrap_or(0);
-
-    let page_size = config.effective_page_size();
-    let visible_width = config.effective_visible_width();
-
-    let needs_vertical =
-        config.vertical_paging && line_count > config.min_rows_for_paging && line_count > page_size;
-
-    let needs_horizontal = config.horizontal_scrolling
-        && max_width > config.min_cols_for_scrolling
-        && max_width > visible_width;
-
-    needs_vertical || needs_horizontal
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::{ColumnMetadata, TeradataType, Value};
+    use std::time::Duration;
+
+    fn create_test_result(num_cols: usize, num_rows: usize) -> QueryResult {
+        let columns: Vec<ColumnMetadata> = (0..num_cols)
+            .map(|i| ColumnMetadata::new(format!("col{}", i), TeradataType::Varchar, true))
+            .collect();
+
+        let rows: Vec<Vec<Value>> = (0..num_rows)
+            .map(|r| {
+                (0..num_cols)
+                    .map(|c| Value::String(format!("val_{}_{}", r, c)))
+                    .collect()
+            })
+            .collect();
+
+        QueryResult::new(columns, rows, Duration::from_millis(100))
+    }
 
     #[test]
     fn test_pager_config_default() {
@@ -1028,13 +838,25 @@ mod tests {
     }
 
     #[test]
-    fn test_paged_output_no_paging_needed() {
-        let content = "Line 1\nLine 2\nLine 3".to_string();
-        let config = PagerConfig::default();
-        let paged = PagedOutput::new(content, config);
+    fn test_table_data_from_query_result() {
+        let result = create_test_result(3, 2);
+        let data = TableData::from_query_result(&result, MAX_COLUMN_WIDTH);
 
-        // With default min_rows_for_paging=25, 3 lines shouldn't need paging
-        assert!(!paged.needs_paging());
+        assert_eq!(data.columns.len(), 3);
+        assert_eq!(data.row_count, 2);
+        assert_eq!(data.cell_values.len(), 2);
+        assert_eq!(data.cell_values[0].len(), 3);
+    }
+
+    #[test]
+    fn test_table_data_cell_access() {
+        let result = create_test_result(2, 2);
+        let data = TableData::from_query_result(&result, MAX_COLUMN_WIDTH);
+
+        assert_eq!(data.get_cell(0, 0), "val_0_0");
+        assert_eq!(data.get_cell(0, 1), "val_0_1");
+        assert_eq!(data.get_cell(1, 0), "val_1_0");
+        assert_eq!(data.get_cell(1, 1), "val_1_1");
     }
 
     #[test]
@@ -1047,7 +869,6 @@ mod tests {
     fn test_truncate_cell_long() {
         let value = "This is a very long string that should be truncated";
         let truncated = truncate_cell(value, 20);
-        // The display width should be <= 20, byte length may be longer due to ellipsis
         assert!(truncated.width() <= 20);
         assert!(truncated.ends_with('…'));
     }
@@ -1059,130 +880,93 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_row_cells() {
-        let line = "│ id │ name │ value │";
-        let cells = parse_row_cells(line);
-        assert_eq!(cells, vec!["id", "name", "value"]);
-    }
-
-    #[test]
-    fn test_is_separator_line() {
-        assert!(is_separator_line("├────┼────────┼───────┤"));
-        assert!(is_separator_line("╭────┬────────┬───────╮"));
-        assert!(!is_separator_line("│ id │ name   │ value │"));
-    }
-
-    #[test]
-    fn test_should_page_small_content() {
-        let content = "Line 1\nLine 2\nLine 3";
+    fn test_should_page_small_result() {
+        let result = create_test_result(3, 5);
         let config = PagerConfig::default();
-        assert!(!should_page(content, &config));
-    }
-
-    // Sprint 28: Tests for column indicator calculations
-    #[test]
-    fn test_indicator_width_constant() {
-        // Verify INDICATOR_WIDTH can hold typical indicators like "(+99 cols)"
-        // The indicator format "(+99 cols)" is 10 chars, so INDICATOR_WIDTH must be >= 10
-        let sample_indicator = "(+99 cols)";
-        assert!(
-            INDICATOR_WIDTH >= sample_indicator.len(),
-            "INDICATOR_WIDTH {} must be >= {} to hold indicators like '{}'",
-            INDICATOR_WIDTH,
-            sample_indicator.len(),
-            sample_indicator
-        );
+        assert!(!should_page(&result, &config));
     }
 
     #[test]
-    fn test_hidden_columns_at_start() {
-        // When col_offset is 0, no columns are hidden to the left
-        let content = r#"╭──────┬──────┬──────╮
-│ col1 │ col2 │ col3 │
-├──────┼──────┼──────┤
-│ a    │ b    │ c    │
-╰──────┴──────┴──────╯"#;
+    fn test_should_page_many_rows() {
+        let result = create_test_result(3, 100);
         let config = PagerConfig::default();
-        let pager = Pager::new(content.to_string(), 1, &config);
+        // Should need paging due to row count
+        assert!(should_page(&result, &config));
+    }
+
+    #[test]
+    fn test_pager_initial_state() {
+        let result = create_test_result(5, 10);
+        let config = PagerConfig::default();
+        let pager = Pager::new(&result, &config);
+
+        assert_eq!(pager.row_offset, 0);
+        assert_eq!(pager.col_offset, 0);
+        assert_eq!(pager.total_rows, 10);
+        assert_eq!(pager.data.columns.len(), 5);
+    }
+
+    #[test]
+    fn test_pager_hidden_columns_at_start() {
+        let result = create_test_result(3, 2);
+        let config = PagerConfig::default();
+        let pager = Pager::new(&result, &config);
+
+        // At start, no columns hidden to left
         assert_eq!(pager.hidden_columns_left(), 0);
     }
 
     #[test]
-    fn test_table_data_parse_columns() {
-        let content = r#"╭──────┬──────┬──────╮
-│ col1 │ col2 │ col3 │
-├──────┼──────┼──────┤
-│ a    │ b    │ c    │
-│ d    │ e    │ f    │
-╰──────┴──────┴──────╯"#;
-        let data = TableData::parse_from_content(content).unwrap();
-        assert_eq!(data.columns.len(), 3);
-        assert_eq!(data.row_count, 2);
-    }
-
-    // Sprint 29: Tests for horizontal navigation features
-    #[test]
-    fn test_pager_initial_column_offset() {
-        // New pager should start at column offset 0
-        let content = r#"╭──────┬──────┬──────╮
-│ col1 │ col2 │ col3 │
-├──────┼──────┼──────┤
-│ a    │ b    │ c    │
-╰──────┴──────┴──────╯"#;
-        let config = PagerConfig::default();
-        let pager = Pager::new(content.to_string(), 1, &config);
-        assert_eq!(pager.col_offset, 0);
-    }
-
-    #[test]
     fn test_pager_visible_column_count_minimum_one() {
-        // Should always show at least one column
-        let content = r#"╭──────┬──────┬──────╮
-│ col1 │ col2 │ col3 │
-├──────┼──────┼──────┤
-│ a    │ b    │ c    │
-╰──────┴──────┴──────╯"#;
+        let result = create_test_result(3, 2);
         let config = PagerConfig::default();
-        let pager = Pager::new(content.to_string(), 1, &config);
+        let pager = Pager::new(&result, &config);
+
+        // Should always show at least one column
         assert!(pager.visible_column_count() >= 1);
     }
 
     #[test]
-    fn test_pager_hidden_columns_right_calculation() {
-        // With 3 columns and starting at offset 0, hidden right depends on terminal width
-        let content = r#"╭──────┬──────┬──────╮
-│ col1 │ col2 │ col3 │
-├──────┼──────┼──────┤
-│ a    │ b    │ c    │
-╰──────┴──────┴──────╯"#;
-        let config = PagerConfig::default();
-        let pager = Pager::new(content.to_string(), 1, &config);
-        // hidden_columns_right = total_cols - (col_offset + visible_cols)
-        let expected_hidden = pager
-            .data
-            .columns
-            .len()
-            .saturating_sub(pager.col_offset + pager.visible_column_count());
-        assert_eq!(pager.hidden_columns_right(), expected_hidden);
+    fn test_indicator_width_constant() {
+        // Verify INDICATOR_WIDTH can hold typical indicators like "(+99 cols)"
+        let sample_indicator = "(+99 cols)";
+        assert!(
+            INDICATOR_WIDTH >= sample_indicator.len(),
+            "INDICATOR_WIDTH {} must be >= {} to hold indicators",
+            INDICATOR_WIDTH,
+            sample_indicator.len()
+        );
     }
 
     #[test]
-    fn test_status_bar_includes_help_hint() {
-        // Verify the status bar nav_parts include help key
-        // This is a code structure test - the status bar should mention '?'
-        // We test this by verifying the constant behavior in the code
-        let mut buffer = Vec::new();
-        let content = r#"╭──────┬──────╮
-│ col1 │ col2 │
-├──────┼──────┤
-│ a    │ b    │
-╰──────┴──────╯"#;
-        let config = PagerConfig::default();
-        let pager = Pager::new(content.to_string(), 1, &config);
-        // render_status_bar writes to buffer - we just verify no panic
-        let _ = pager.render_status_bar(&mut buffer);
-        let output = String::from_utf8_lossy(&buffer);
-        // Status bar should mention help key
-        assert!(output.contains("?") || output.contains("help"));
+    fn test_column_alignment_preserved() {
+        let columns = vec![
+            ColumnMetadata::new("id", TeradataType::Integer, false),
+            ColumnMetadata::new("name", TeradataType::Varchar, true),
+            ColumnMetadata::new("active", TeradataType::Boolean, false),
+        ];
+        let rows = vec![vec![
+            Value::Integer(1),
+            Value::String("Alice".into()),
+            Value::Boolean(true),
+        ]];
+        let result = QueryResult::new(columns, rows, Duration::from_millis(50));
+
+        let data = TableData::from_query_result(&result, MAX_COLUMN_WIDTH);
+
+        assert_eq!(data.columns[0].alignment, Alignment::Right); // Integer
+        assert_eq!(data.columns[1].alignment, Alignment::Left); // Varchar
+        assert_eq!(data.columns[2].alignment, Alignment::Center); // Boolean
+    }
+
+    #[test]
+    fn test_null_value_display() {
+        let columns = vec![ColumnMetadata::new("col", TeradataType::Varchar, true)];
+        let rows = vec![vec![Value::Null]];
+        let result = QueryResult::new(columns, rows, Duration::from_millis(50));
+
+        let data = TableData::from_query_result(&result, MAX_COLUMN_WIDTH);
+
+        assert_eq!(data.get_cell(0, 0), "[NULL]");
     }
 }

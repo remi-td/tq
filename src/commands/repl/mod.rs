@@ -40,7 +40,7 @@ use std::sync::{Arc, Mutex};
 pub use executor::{execute_sql, execute_sql_with_state, QueryTiming};
 pub use highlighter::SqlHighlighter;
 pub use metacommands::handle_metacommand;
-pub use pager::{display_with_pager, should_page, PagedOutput, PagerConfig};
+pub use pager::{display_with_pager, should_page, PagerConfig};
 pub use prompt::TqPrompt;
 pub use sql_context::{analyze_context, CompletionContext, TableReference};
 pub use state::ReplState;

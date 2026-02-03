@@ -7,14 +7,20 @@
 //! - Enhanced timing display with breakdown
 //! - Result paging for large result sets (Sprint 8 integration)
 //! - Automatic row limiting for SELECT queries
+//!
+//! ## Sprint 30: Pager Architecture Change
+//!
+//! The pager now accepts `QueryResult` directly instead of pre-formatted strings.
+//! This eliminates the Sprint 29 bug where 1221-char-wide tables were wrapped
+//! on 117-char terminals. Column widths are calculated at render time based
+//! on actual terminal dimensions.
 
-// Sprint 29: Pager re-enabled with horizontal scrolling support
 use super::pager::{display_with_pager, PagerConfig};
 use super::state::ReplState;
 use crate::cli::OutputFormat;
 use crate::db::DatabaseClient;
 use crate::error::Result;
-use crate::format::{write_output_for_pager, write_output_with_timing, FormatOptions};
+use crate::format::{write_output_with_timing, FormatOptions};
 use std::io::Write;
 use std::time::{Duration, Instant};
 
@@ -166,41 +172,39 @@ pub fn execute_sql_with_state<W: Write>(
         .with_header(true)
         .with_color(use_color);
 
-    // Sprint 29: Pager re-enabled with horizontal scrolling support
+    // Sprint 30: Pager accepts QueryResult directly (not pre-formatted strings)
+    // This fixes the Sprint 29 bug where 1221-char tables wrapped on 117-char terminals.
     // Check if pager is enabled in state (controlled by /pager on|off metacommand)
     let pager_enabled = state.is_pager_enabled();
 
     if pager_enabled {
-        // Format output for pager with ALL columns (no truncation)
-        // Sprint 29 fix: Pager needs full table to implement horizontal scrolling
-        let mut output_buffer = Vec::new();
-        write_output_for_pager(
-            &result_clone,
-            &mut output_buffer,
-            &format_options,
-        )?;
-        let output_str = String::from_utf8_lossy(&output_buffer).to_string();
-
-        // DEBUG: Save formatted table to file for inspection
-        if let Ok(mut f) = std::fs::File::create("/tmp/tq_formatted_table.txt") {
-            use std::io::Write;
-            let _ = write!(f, "{}", output_str);
-        }
-
-        // Try to use pager - if it's not needed (small result), it returns false
+        // Sprint 30: Pass QueryResult directly to pager - no pre-formatting!
+        // The pager calculates column widths at render time based on terminal size.
         let pager_config = PagerConfig::default();
-        match display_with_pager(&output_str, row_count, &pager_config) {
+        match display_with_pager(&result_clone, &pager_config) {
             Ok(true) => {
                 // Pager was used, output already displayed
             }
             Ok(false) => {
-                // Pager not needed, write directly to output
-                writer.write_all(&output_buffer)?;
+                // Pager not needed (small result), format and write directly
+                write_output_with_timing(
+                    &result_clone,
+                    writer,
+                    OutputFormat::Table,
+                    &format_options,
+                    true,
+                )?;
             }
             Err(e) => {
                 // Pager failed, fall back to direct output
                 log::warn!("Pager failed, falling back to direct output: {}", e);
-                writer.write_all(&output_buffer)?;
+                write_output_with_timing(
+                    &result_clone,
+                    writer,
+                    OutputFormat::Table,
+                    &format_options,
+                    true,
+                )?;
             }
         }
     } else {

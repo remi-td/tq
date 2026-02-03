@@ -188,18 +188,29 @@ Horizontal paging extends the existing pager infrastructure to provide column-by
 
 **Related Specification**: `docs/specifications/repl.md#large-result-handling--result-paging`
 
-#### Architecture
+#### Architecture (Sprint 30 Refactor)
+
+**IMPORTANT**: Sprint 30 refactored the pager architecture to fix a fundamental bug where pre-formatted table strings (1221+ chars wide) caused garbled output on narrow terminals (117 chars).
+
+**Previous Architecture (Sprint 29 - BROKEN)**:
+```
+Executor -> Format ALL columns to string -> Pager parses string -> Wrapped/garbled output
+```
+
+**New Architecture (Sprint 30 - FIXED)**:
+```
+Executor -> QueryResult -> Pager calculates widths at render time -> Clean output
+```
+
+The pager now accepts `QueryResult` directly instead of pre-formatted strings. Column widths are calculated at render time based on actual terminal dimensions, ensuring output never exceeds terminal width.
 
 ```
-Horizontal Paging Flow:
+Horizontal Paging Flow (Sprint 30):
 
 Query Result (N columns, M rows)
         |
         v
-Table Formatter (comfy-table)
-        |
-        v
-Pager Activation Check
+Pager Activation Check (should_page)
         |
     +---+---+
     |       |
@@ -207,17 +218,18 @@ Pager Activation Check
 Pager ON   Pager OFF
     |       |
     v       v
-Pager::new()  Direct Output
-    |         (truncated columns)
+Pager::new(&result)  Direct Table Format
+    |                (width-constrained)
     v
-TableData::parse_from_content()
+TableData::from_query_result()
     |
     v
-Calculate Visible Columns (visible_column_count)
+Calculate Visible Columns (term_width aware)
     |
     v
 Interactive Event Loop:
     +--> Render visible window (col_offset to col_offset+visible)
+    |    (formats from structured data, respects terminal width)
     |        |
     |        v
     |    Key Event
@@ -225,11 +237,54 @@ Interactive Event Loop:
     |    +---+---+
     |    |   |   |
     |    v   v   v
-    |   <-  ->   q
-    |   |   |    |
-    |   v   v    v
-    |  col--  col++  Exit
+    |   h/l  j/k  q
+    |   |    |    |
+    |   v    v    v
+    |  col   row  Exit
     +---+----+
+```
+
+#### TableData Construction (Sprint 30)
+
+Sprint 30 introduced `TableData::from_query_result()` which builds structured table data directly from `QueryResult`, eliminating the need to parse pre-formatted strings.
+
+```rust
+// src/commands/repl/pager.rs
+
+/// Create TableData directly from QueryResult
+///
+/// Sprint 30: This method calculates column widths from actual data
+/// at construction time, enabling proper width management at render time.
+pub fn from_query_result(result: &QueryResult, max_col_width: usize) -> Self {
+    let mut columns = Vec::with_capacity(result.columns.len());
+    let mut cell_values: Vec<Vec<String>> = vec![Vec::new(); result.rows.len()];
+
+    for (col_idx, col_meta) in result.columns.iter().enumerate() {
+        // Truncate header if needed
+        let header = truncate_cell(&col_meta.name, max_col_width.saturating_sub(2));
+        let mut max_value_width = header.width();
+
+        for (row_idx, row) in result.rows.iter().enumerate() {
+            let value = row[col_idx].display();
+            let truncated = truncate_cell(&value, MAX_CELL_LENGTH);
+            max_value_width = max_value_width.max(truncated.width());
+            cell_values[row_idx].push(truncated);
+        }
+
+        // Apply width constraints
+        let display_width = max_value_width
+            .max(MIN_COLUMN_WIDTH)
+            .min(max_col_width);
+
+        columns.push(ColumnInfo {
+            name: header,
+            display_width,
+            alignment: col_meta.data_type.alignment(),
+        });
+    }
+
+    TableData { columns, cell_values, row_count: result.rows.len() }
+}
 ```
 
 #### Column Windowing Algorithm
@@ -249,11 +304,11 @@ fn visible_column_count(&self) -> usize {
     let left_indicator_width = if hidden_left > 0 { INDICATOR_WIDTH + 3 } else { 0 };
     let right_indicator_width = if hidden_right_possible { INDICATOR_WIDTH + 3 } else { 0 };
 
-    let mut total_width = 3 + left_indicator_width; // Left border + left indicator
+    let mut total_width = 1 + left_indicator_width; // Left border + left indicator
     let mut count = 0;
 
     for col in self.data.columns.iter().skip(self.col_offset) {
-        let col_width = col.display_width + 3; // Cell + separator
+        let col_width = col.display_width + 3; // " " + value + " " + "│"
         let available_width = self.term_width.saturating_sub(right_indicator_width);
         if total_width + col_width > available_width && count > 0 {
             break;
@@ -435,9 +490,9 @@ Press any key to return...
 }
 ```
 
-#### Integration with Executor
+#### Integration with Executor (Sprint 30)
 
-The executor conditionally invokes the pager based on state and output size:
+The executor passes `QueryResult` directly to the pager instead of pre-formatted strings:
 
 ```rust
 // src/commands/repl/executor.rs
@@ -451,23 +506,40 @@ pub fn execute_sql_with_state<W: Write>(
 ) -> Result<usize> {
     // ... execute query ...
 
-    // Format output to buffer first
-    let mut buffer = Vec::new();
-    write_output_with_timing(&result_clone, &mut buffer, OutputFormat::Table, &format_options, true)?;
-    let formatted = String::from_utf8_lossy(&buffer);
+    let pager_enabled = state.is_pager_enabled();
 
-    // Check if paging is needed and enabled
-    if state.is_pager_enabled() && should_page(&formatted, &PagerConfig::default()) {
-        // Use interactive pager
-        display_with_pager(&formatted, row_count, &PagerConfig::default())?;
+    if pager_enabled {
+        // Sprint 30: Pass QueryResult directly to pager - NO pre-formatting!
+        // The pager calculates column widths at render time based on terminal size.
+        let pager_config = PagerConfig::default();
+        match display_with_pager(&result_clone, &pager_config) {
+            Ok(true) => {
+                // Pager was used, output already displayed
+            }
+            Ok(false) => {
+                // Pager not needed (small result), format and write directly
+                write_output_with_timing(&result_clone, writer, OutputFormat::Table, &format_options, true)?;
+            }
+            Err(e) => {
+                // Pager failed, fall back to direct output
+                log::warn!("Pager failed: {}", e);
+                write_output_with_timing(&result_clone, writer, OutputFormat::Table, &format_options, true)?;
+            }
+        }
     } else {
-        // Direct output (no paging)
-        writer.write_all(&buffer)?;
+        // Pager disabled - format and write output directly
+        write_output_with_timing(&result_clone, writer, OutputFormat::Table, &format_options, true)?;
     }
 
     Ok(row_count)
 }
 ```
+
+**Key Difference from Sprint 29**:
+- Sprint 29: `display_with_pager(&formatted_string, row_count, &config)` - received pre-formatted table
+- Sprint 30: `display_with_pager(&result, &config)` - receives structured data
+
+This ensures the pager always has access to the original column metadata and can calculate proper widths for the current terminal dimensions.
 
 #### Terminal Resize Handling
 
