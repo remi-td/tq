@@ -3618,6 +3618,296 @@ fn handle_sample_error(
 
 ---
 
+## Shared Utilities for SQL Generation
+
+This section documents the shared utilities for SQL generation and Teradata type formatting, enabling consistent behavior across REPL metacommands and batch mode commands.
+
+### Overview
+
+The data sampling commands (`/sample`, `/peek`) require common functionality for:
+1. **Teradata type formatting**: Converting Teradata type codes to human-readable strings
+2. **SQL identifier quoting**: Preventing SQL injection and handling special characters in identifiers
+3. **SQL string escaping**: Escaping single quotes in string literals
+
+These utilities are shared between:
+- `src/commands/sample.rs` (batch mode)
+- `src/commands/repl/metacommands.rs` (REPL mode)
+- `src/db/metadata.rs` (metadata queries)
+
+### Module Organization
+
+```
+src/sql/
+├── mod.rs              # Module exports
+├── parser.rs           # Statement parsing (existing)
+├── identifiers.rs      # SQL identifier utilities (NEW)
+└── types.rs            # Teradata type formatting (NEW)
+```
+
+The `src/sql/` module is the natural home for SQL-related utilities, extending the existing `parser.rs` functionality.
+
+### Teradata Type Formatting
+
+The `format_column_type()` function converts Teradata type codes from DBC.ColumnsV to human-readable type strings.
+
+```rust
+// src/sql/types.rs
+
+/// Format Teradata column type from type code and dimensions.
+///
+/// Converts Teradata internal type codes (from DBC.ColumnsV) to
+/// human-readable SQL type names with appropriate precision/scale.
+///
+/// # Arguments
+/// * `type_code` - Teradata type code (e.g., "CV", "I", "D")
+/// * `length` - Column length (for VARCHAR, CHAR, BYTE types)
+/// * `precision` - Decimal total digits (for DECIMAL type)
+/// * `scale` - Decimal fractional digits (for DECIMAL type)
+///
+/// # Examples
+/// ```
+/// use tq::sql::types::format_column_type;
+///
+/// assert_eq!(format_column_type("CV", Some(100), None, None), "VARCHAR(100)");
+/// assert_eq!(format_column_type("I", None, None, None), "INTEGER");
+/// assert_eq!(format_column_type("D", None, Some(10), Some(2)), "DECIMAL(10,2)");
+/// ```
+pub fn format_column_type(
+    type_code: &str,
+    length: Option<i32>,
+    precision: Option<i32>,
+    scale: Option<i32>,
+) -> String {
+    match type_code.trim() {
+        // Character types
+        "CV" => format!("VARCHAR({})", length.unwrap_or(0)),
+        "CF" => format!("CHAR({})", length.unwrap_or(0)),
+
+        // Integer types
+        "I" => "INTEGER".to_string(),
+        "I1" => "BYTEINT".to_string(),
+        "I2" => "SMALLINT".to_string(),
+        "I8" => "BIGINT".to_string(),
+
+        // Numeric types
+        "D" => {
+            if let (Some(p), Some(s)) = (precision, scale) {
+                format!("DECIMAL({},{})", p, s)
+            } else {
+                "DECIMAL".to_string()
+            }
+        }
+        "F" => "FLOAT".to_string(),
+
+        // Date/time types
+        "DA" => "DATE".to_string(),
+        "TS" => "TIMESTAMP".to_string(),
+        "TZ" => "TIMESTAMP WITH TIME ZONE".to_string(),
+        "AT" => "TIME".to_string(),
+
+        // Binary types
+        "BV" => format!("VARBYTE({})", length.unwrap_or(0)),
+        "BF" => format!("BYTE({})", length.unwrap_or(0)),
+
+        // LOB types
+        "CO" => "CLOB".to_string(),
+        "BO" => "BLOB".to_string(),
+
+        // Special types
+        "JN" => "JSON".to_string(),
+
+        // Unknown - pass through
+        other => other.to_string(),
+    }
+}
+```
+
+**Teradata Type Code Reference:**
+
+| Code | Type | Dimensions |
+|------|------|------------|
+| CV | VARCHAR | length |
+| CF | CHAR | length |
+| I | INTEGER | none |
+| I1 | BYTEINT | none |
+| I2 | SMALLINT | none |
+| I8 | BIGINT | none |
+| D | DECIMAL | precision, scale |
+| F | FLOAT | none |
+| DA | DATE | none |
+| TS | TIMESTAMP | none |
+| TZ | TIMESTAMP WITH TIME ZONE | none |
+| AT | TIME | none |
+| BV | VARBYTE | length |
+| BF | BYTE | length |
+| CO | CLOB | none |
+| BO | BLOB | none |
+| JN | JSON | none |
+
+### SQL Identifier Quoting
+
+The `quote_identifier()` function properly quotes SQL identifiers to prevent injection and handle special characters.
+
+```rust
+// src/sql/identifiers.rs
+
+/// Quote a SQL identifier for safe use in dynamic SQL.
+///
+/// Teradata uses double quotes for delimited identifiers. This function:
+/// 1. Wraps the identifier in double quotes
+/// 2. Escapes any existing double quotes by doubling them
+///
+/// # Arguments
+/// * `identifier` - The identifier (database, table, or column name)
+///
+/// # Examples
+/// ```
+/// use tq::sql::identifiers::quote_identifier;
+///
+/// // Simple identifier
+/// assert_eq!(quote_identifier("employees"), "\"employees\"");
+///
+/// // Identifier with spaces
+/// assert_eq!(quote_identifier("my table"), "\"my table\"");
+///
+/// // Identifier with quotes
+/// assert_eq!(quote_identifier("my\"table"), "\"my\"\"table\"");
+/// ```
+pub fn quote_identifier(identifier: &str) -> String {
+    // Escape embedded double quotes by doubling them
+    let escaped = identifier.replace('"', "\"\"");
+    format!("\"{}\"", escaped)
+}
+
+/// Quote a fully qualified table name (database.table).
+///
+/// Parses the qualified name and quotes each component separately.
+///
+/// # Arguments
+/// * `qualified_name` - The table name, optionally with database prefix
+///
+/// # Examples
+/// ```
+/// use tq::sql::identifiers::quote_qualified_name;
+///
+/// assert_eq!(quote_qualified_name("db.table"), "\"db\".\"table\"");
+/// assert_eq!(quote_qualified_name("my db.my table"), "\"my db\".\"my table\"");
+/// ```
+pub fn quote_qualified_name(qualified_name: &str) -> String {
+    if let Some(dot_pos) = qualified_name.find('.') {
+        let database = &qualified_name[..dot_pos];
+        let table = &qualified_name[dot_pos + 1..];
+        format!("{}.{}", quote_identifier(database), quote_identifier(table))
+    } else {
+        quote_identifier(qualified_name)
+    }
+}
+```
+
+**Quoting Rules:**
+
+1. **Always quote**: All identifiers in generated SQL should be quoted to prevent injection
+2. **Escape embedded quotes**: Double any existing `"` characters within the identifier
+3. **Preserve case**: Teradata preserves case for quoted identifiers
+4. **Handle qualified names**: Parse `database.table` and quote each component
+
+### SQL String Escaping
+
+The `escape_sql_string()` function escapes single quotes in string literals for WHERE clauses.
+
+```rust
+// src/sql/identifiers.rs
+
+/// Escape a string value for use in SQL WHERE clauses.
+///
+/// This is for string LITERALS (values), not identifiers.
+/// Escapes single quotes by doubling them.
+///
+/// # Arguments
+/// * `value` - The string value to escape
+///
+/// # Examples
+/// ```
+/// use tq::sql::identifiers::escape_sql_string;
+///
+/// assert_eq!(escape_sql_string("O'Brien"), "O''Brien");
+/// assert_eq!(escape_sql_string("test"), "test");
+/// ```
+pub fn escape_sql_string(value: &str) -> String {
+    value.replace('\'', "''")
+}
+```
+
+**Important Distinction:**
+
+| Function | Purpose | Delimiter | Example Input | Example Output |
+|----------|---------|-----------|---------------|----------------|
+| `quote_identifier()` | Table/column names | Double quotes | `my table` | `"my table"` |
+| `escape_sql_string()` | String literals in WHERE | Single quotes | `O'Brien` | `O''Brien` |
+
+### Integration Pattern
+
+Commands that generate SQL should use these utilities consistently:
+
+```rust
+// src/commands/sample.rs
+
+use crate::sql::identifiers::{quote_qualified_name, escape_sql_string};
+use crate::sql::types::format_column_type;
+
+pub fn execute_sample(...) -> Result<()> {
+    // Quote table name for safe SQL
+    let quoted_table = quote_qualified_name(&qualified_name);
+
+    // Generate safe SQL
+    let sql = format!(
+        "SELECT * FROM {} SAMPLE {}",
+        quoted_table, sample_size
+    );
+
+    // For metadata queries, escape string values
+    let columns_sql = format!(
+        "SELECT ColumnName, ColumnType FROM DBC.ColumnsV \
+         WHERE DatabaseName = '{}'",
+        escape_sql_string(database)
+    );
+
+    // Format column types for display
+    for row in result.rows {
+        let type_display = format_column_type(&type_code, length, precision, scale);
+    }
+}
+```
+
+### Security Considerations
+
+1. **SQL Injection Prevention**: Always use `quote_identifier()` for table/column names in generated SQL
+2. **No User SQL in Metacommands**: The `/sample` and `/peek` commands construct SQL programmatically, never executing user-provided SQL directly
+3. **String Values**: Use `escape_sql_string()` for WHERE clause values when querying system views
+4. **Defense in Depth**: Even though tq is a local CLI tool, proper quoting prevents accidents with unusual table names
+
+### Code Linkage
+
+| Component | File Path | Key Functions |
+|-----------|-----------|---------------|
+| Type formatting | `src/sql/types.rs` | `format_column_type()` |
+| Identifier quoting | `src/sql/identifiers.rs` | `quote_identifier()`, `quote_qualified_name()` |
+| String escaping | `src/sql/identifiers.rs` | `escape_sql_string()` |
+| Module exports | `src/sql/mod.rs` | Re-exports for public API |
+| Batch sample | `src/commands/sample.rs` | Uses shared utilities |
+| REPL sample | `src/commands/repl/metacommands.rs` | Uses shared utilities |
+| Metadata queries | `src/db/metadata.rs` | Uses `escape_sql_string()` |
+
+### Migration Plan
+
+1. **Create new modules**: Add `src/sql/types.rs` and `src/sql/identifiers.rs`
+2. **Move functions**: Extract `format_column_type()` from `sample.rs`, `escape_sql_string()` from `metacommands.rs` and `metadata.rs`
+3. **Update imports**: Change imports in consuming modules to use shared utilities
+4. **Add identifier quoting**: Update SQL generation to use `quote_identifier()`
+5. **Consolidate tests**: Move tests to new modules, remove duplicates
+
+---
+
 ## Future Enhancements
 
 - Query history search (Ctrl-R) - already supported by reedline

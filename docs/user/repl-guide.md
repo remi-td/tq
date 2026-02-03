@@ -41,7 +41,7 @@ Available metacommands:
     /list        Schema inspection (databases, tables, views)
     /logon       Connect/switch database
     /pager       Enable/disable result paging
-    /peek        Show first rows and column info
+    /peek        Show first rows and column info (optional row count)
     /ping        Test connection
     /quit        Exit REPL
     /reconnect   Reconnect to database
@@ -498,15 +498,34 @@ First 5 rows:
 └────────────┴─────────────────┴───────────┴─────────┴──────────┘
 ```
 
+**Customize row count:**
+
+Specify how many rows to preview:
+
+```sql
+tq> /peek products 10
+
+Table: PRODUCTION.products
+Type: Table
+Approximate Rows: 15,432
+
+Columns:
+[... column metadata ...]
+
+First 10 rows:
+[... 10 rows of data ...]
+```
+
 **What you get:**
 - Table metadata (type, row count)
 - Column information (names, types, nullable)
-- First 5 rows of actual data
+- First N rows of actual data (default: 5, customizable)
 
 **When to use:**
 - Understanding unfamiliar tables
 - Quick combined view of structure and content
 - Verifying table has expected columns and data
+- Use custom row count for larger or smaller previews
 
 **Qualified names:**
 
@@ -515,6 +534,7 @@ Both commands support database.table syntax:
 ```sql
 tq> /sample staging.test_data 20
 tq> /peek development.customers
+tq> /peek development.customers 10
 ```
 
 **Error handling:**
@@ -697,7 +717,7 @@ tq> /quit
 5. **Use short aliases** - Commands like `\l`, `\dt`, `\d` save typing
 6. **Write readable multi-line queries** - They're stored as single history entries, so formatting makes them easier to recall and edit
 7. **Sample before selecting** - Use `/sample` to inspect data before writing complex queries
-8. **Peek for quick exploration** - `/peek` shows structure and data together, perfect for unfamiliar tables
+8. **Peek for quick exploration** - `/peek` shows structure and data together, perfect for unfamiliar tables. Use `/peek table 10` to see more rows
 9. **Start with small samples** - When exploring large tables, use `/sample table 10` to avoid overwhelming output
 10. **Combine sampling with patterns** - First use `/list tables pattern%` to find tables, then `/sample` to inspect them
 11. **The pager is experimental** - By default, wide results show with truncation. You can try `/pager on` to test interactive navigation

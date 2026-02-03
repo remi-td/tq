@@ -17,12 +17,16 @@
 //!
 //! Sprint 26 additions:
 //! - /sessions - List active database sessions with performance metrics
+//!
+//! Sprint 34 refactoring:
+//! - Use shared sql::escape_sql_string and sql::quote_qualified_name utilities
 
 use super::metadata_completer::CompletionState;
 use super::state::ReplState;
 use crate::cli::LogonMechanism;
 use crate::db::{ConnectionConfig, DatabaseClient};
 use crate::error::Result;
+use crate::sql::{escape_sql_string, quote_qualified_name};
 use std::io::Write;
 use std::time::{Duration, Instant};
 
@@ -1215,10 +1219,7 @@ fn execute_describe<W: Write>(
     Ok(())
 }
 
-/// Escape single quotes in SQL strings to prevent injection
-fn escape_sql_string(s: &str) -> String {
-    s.replace('\'', "''")
-}
+// Note: escape_sql_string is imported from crate::sql::escape_sql_string
 
 /// Format nullable indicator
 fn format_nullable(s: &str) -> String {
@@ -1901,8 +1902,9 @@ fn execute_sample<W: Write>(
     // Resolve qualified table name
     let qualified_name = resolve_table_name(table_name, completion_state);
 
-    // Generate SQL using Teradata SAMPLE clause
-    let sql = format!("SELECT * FROM {} SAMPLE {}", qualified_name, sample_size);
+    // Generate SQL using Teradata SAMPLE clause with properly quoted identifier
+    let quoted_name = quote_table_reference(&qualified_name);
+    let sql = format!("SELECT * FROM {} SAMPLE {}", quoted_name, sample_size);
 
     writeln!(writer)?;
 
@@ -2052,8 +2054,9 @@ fn execute_peek<W: Write>(
 
     writeln!(writer)?;
 
-    // Now fetch first 5 rows using TOP
-    let data_sql = format!("SELECT TOP 5 * FROM {}", qualified_name);
+    // Now fetch first 5 rows using TOP with properly quoted identifier
+    let quoted_name = quote_table_reference(&qualified_name);
+    let data_sql = format!("SELECT TOP 5 * FROM {}", quoted_name);
     let start = Instant::now();
 
     match client.execute(&data_sql) {
@@ -2086,6 +2089,7 @@ fn execute_peek<W: Write>(
 ///
 /// If the table name already contains a dot, it's returned as-is.
 /// Otherwise, uses the current database from connection state.
+/// This returns the unquoted name for display purposes.
 fn resolve_table_name(name: &str, state: &CompletionState) -> String {
     if name.contains('.') {
         // Already qualified
@@ -2099,6 +2103,23 @@ fn resolve_table_name(name: &str, state: &CompletionState) -> String {
         } else {
             format!("{}.{}", current_db, name)
         }
+    }
+}
+
+/// Quote a table reference for safe use in SQL queries
+///
+/// Handles both qualified (database.table) and unqualified (table) names.
+/// Uses double-quote quoting following ANSI SQL standards.
+///
+/// Sprint 34: Added for security hardening of data sampling commands
+fn quote_table_reference(qualified_name: &str) -> String {
+    if let Some(dot_pos) = qualified_name.find('.') {
+        let db = &qualified_name[..dot_pos];
+        let table = &qualified_name[dot_pos + 1..];
+        quote_qualified_name(db, table)
+    } else {
+        // Unqualified name - just quote the table
+        crate::sql::quote_identifier(qualified_name)
     }
 }
 
@@ -2221,12 +2242,7 @@ mod tests {
         assert!(output_str.contains("/describe"));
     }
 
-    #[test]
-    fn test_escape_sql_string() {
-        assert_eq!(escape_sql_string("test"), "test");
-        assert_eq!(escape_sql_string("test's"), "test''s");
-        assert_eq!(escape_sql_string("it's a 'test'"), "it''s a ''test''");
-    }
+    // Note: escape_sql_string tests are in src/sql/identifiers.rs
 
     #[test]
     fn test_format_nullable() {
@@ -2249,6 +2265,37 @@ mod tests {
         assert_eq!(truncate_string("this is a long string", 10), "this is...");
         assert_eq!(truncate_string("test", 3), "...");
         assert_eq!(truncate_string("ab", 2), "ab");
+    }
+
+    // Sprint 34: Quote table reference tests
+    #[test]
+    fn test_quote_table_reference_simple() {
+        assert_eq!(quote_table_reference("employees"), "\"employees\"");
+    }
+
+    #[test]
+    fn test_quote_table_reference_qualified() {
+        assert_eq!(
+            quote_table_reference("prod.employees"),
+            "\"prod\".\"employees\""
+        );
+    }
+
+    #[test]
+    fn test_quote_table_reference_with_spaces() {
+        assert_eq!(
+            quote_table_reference("my database.my table"),
+            "\"my database\".\"my table\""
+        );
+    }
+
+    #[test]
+    fn test_quote_table_reference_with_quotes() {
+        // Edge case: embedded quotes should be escaped
+        assert_eq!(
+            quote_table_reference("db\"x.tbl\"y"),
+            "\"db\"\"x\".\"tbl\"\"y\""
+        );
     }
 
     // Sprint 12/13: Export argument parsing tests

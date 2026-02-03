@@ -304,6 +304,48 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 - **Pager Manual Validation**: Documented but NOT EXECUTED (no human tester) - pager disabled by default for user protection
 - **Acceptance**: All automated tests pass + all 25 ACs covered + zero regressions
 
+### Sprint 34: Technical Debt Cleanup (Maintenance Sprint)
+
+**Sprint 34 Context:** Maintenance sprint addressing technical debt from Sprint 33 review - code duplication, security hardening, and documentation synchronization.
+
+**Sprint 34 Test Cases (3 test documents covering 15 acceptance criteria):**
+
+#### Track 1: Code Quality - Extract Duplicate Code
+- **TC-034-CODE-QUALITY-001**: Extract format_column_type() to Shared Module (AC-1 to AC-5)
+  - Unit tests for shared type formatting utility (12 tests)
+  - Code review verification (module structure, no duplicates, imports)
+  - Regression suite validation (471 tests must pass)
+
+#### Track 2: Security Hardening - SQL Identifier Quoting
+- **TC-034-SECURITY-001**: SQL Identifier Quoting for Security Hardening (AC-6 to AC-10)
+  - Unit tests for quote_identifier() function (7 tests)
+  - Unit tests for quote_qualified_name() function (5 tests)
+  - SQL generation tests with quoting (5 tests)
+  - Integration tests with special character table names (2 tests, database-dependent)
+  - Regression suite validation (471 tests must pass)
+
+#### Track 3: Documentation Synchronization
+- **TC-034-DOCUMENTATION-001**: Documentation Synchronization (AC-11 to AC-15)
+  - Manual review of /peek specification update (REQ-SAMPLE-004.1)
+  - Manual review of pager status badges
+  - Code review for spec/impl alignment
+  - Regression tests to confirm no code changes
+
+#### Test Summary
+- **TC-034-SUMMARY**: Sprint 34 test execution plan and coverage matrix
+
+**Sprint 34 Test Strategy:**
+- **Test Count**: 3 test case documents + 1 summary document
+- **Estimated Test Functions**: 29 new automated tests + 471 regression tests = 500 total
+- **Type**: Maintenance Sprint (Technical Debt Cleanup)
+- **Database Required**: Optional (only for Track 2 integration tests - can skip with BLOCKED verdict)
+- **Test Types**: Unit (29 new tests) + Code Review (6 verifications) + Manual Review (5 documentation reviews) + Regression (471 existing tests)
+- **Critical Success**: 100% test pass rate (500/500) + zero regressions + all 15 ACs satisfied
+- **Track 1 Focus**: Code quality - extract duplicates, shared utilities
+- **Track 2 Focus**: Security - SQL identifier quoting for injection prevention
+- **Track 3 Focus**: Documentation - synchronize specs with implementation
+- **Acceptance**: All automated tests pass + code review clean + documentation aligned + zero regressions
+
 ### Security
 - **TC022**: Security - No Password Exposure
 - **TC-SECURITY-001**: Password File Permission Enforcement - 0644 Rejected (Sprint 17)

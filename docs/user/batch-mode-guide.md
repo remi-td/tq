@@ -934,53 +934,116 @@ In batch mode (when piping to files or other commands), all columns are shown wi
 
 ### Data Sampling
 
-#### Using Teradata SAMPLE Clause
+#### Quick Sampling with `tq sample`
 
-For exploring large tables, use Teradata's built-in SAMPLE clause:
+tq provides a dedicated `sample` command for fast random data exploration:
 
 ```bash
-# Random 1000 rows
-tq query "SELECT * FROM large_table SAMPLE 1000"
+# Sample 10 rows (default)
+tq sample employees
 
+# Sample custom row count
+tq sample customers 50
+
+# Sample from qualified table name
+tq sample staging.test_data 20
+
+# Export sample to CSV
+tq sample huge_table 100 --format csv --output sample.csv
+
+# Sample as JSON
+tq sample products 25 --format json
+```
+
+**How `tq sample` works:**
+- Uses Teradata's SAMPLE clause for efficient random sampling
+- Default: 10 rows if count not specified
+- Maximum: 1000 rows per sample
+- Fast even on huge tables (no full table scan)
+
+**Common use cases:**
+- Quick data inspection during development
+- Validating ETL results
+- Finding example values for testing
+- Checking data quality
+
+#### Table Structure and Data with `tq peek`
+
+Get table metadata and sample data in one command:
+
+```bash
+# Peek at table (shows 5 rows + metadata by default)
+tq peek products
+
+# Peek with custom row count
+tq peek customers 10
+
+# Peek at qualified table name
+tq peek development.orders 15
+
+# Export peek results to JSON
+tq peek employees 20 --format json --output peek.json
+```
+
+**What you get:**
+- Table metadata (type, row count estimate)
+- Column information (name, type, nullable, precision)
+- First N rows of actual data (default: 5)
+
+**Example output:**
+
+```bash
+$ tq peek products
+
+Table: PRODUCTION.products
+Type: Table
+Approximate Rows: 15,432
+
+Column Information:
+┌─────────────┬──────────────┬──────────┬───────────┐
+│ Column      │ Type         │ Nullable │ Precision │
+├─────────────┼──────────────┼──────────┼───────────┤
+│ product_id  │ INTEGER      │ NO       │ -         │
+│ name        │ VARCHAR(100) │ NO       │ 100       │
+│ category    │ VARCHAR(50)  │ YES      │ 50        │
+│ price       │ DECIMAL(10,2)│ YES      │ 10,2      │
+│ in_stock    │ INTEGER      │ YES      │ -         │
+└─────────────┴──────────────┴──────────┴───────────┘
+
+First 5 rows:
+┌────────────┬─────────────────┬───────────┬─────────┬──────────┐
+│ product_id │ name            │ category  │ price   │ in_stock │
+├────────────┼─────────────────┼───────────┼─────────┼──────────┤
+│ 1001       │ Laptop Pro      │ Computer  │ 1299.99 │ 45       │
+│ 1002       │ Wireless Mouse  │ Computer  │ 29.99   │ 230      │
+│ 1003       │ USB-C Cable     │ Computer  │ 12.99   │ 890      │
+│ 1004       │ Desk Chair      │ Furniture │ 249.99  │ 12       │
+│ 1005       │ Monitor 27"     │ Computer  │ 399.99  │ 67       │
+└────────────┴─────────────────┴───────────┴─────────┴──────────┘
+```
+
+**When to use:**
+- Understanding unfamiliar tables
+- Combining structure and data inspection
+- Quick validation of table contents
+- Scripting data exploration workflows
+
+#### Advanced: Using Teradata SAMPLE Clause in SQL
+
+For more complex sampling scenarios, you can use Teradata's SAMPLE clause directly:
+
+```bash
 # Random 10% of rows
 tq query "SELECT * FROM large_table SAMPLE 0.10"
 
-# Sample with specific columns
-tq query "SELECT id, name, status FROM customers SAMPLE 50" --format csv
+# Sample with specific columns and filters
+tq query "SELECT id, name, status FROM customers WHERE region='US' SAMPLE 50" --format csv
 ```
 
-**How SAMPLE works:**
-- Teradata returns random rows without scanning full table
-- Fast even on billion-row tables
-- Can specify row count (e.g., 1000) or percentage (e.g., 0.10 for 10%)
+**SAMPLE clause features:**
+- Can specify percentage (e.g., 0.10 for 10%)
 - Works with WHERE, ORDER BY, and other clauses
-
-**Common patterns:**
-
-```bash
-# Quick data inspection
-tq query "SELECT * FROM production_data SAMPLE 10"
-
-# Sample filtered data
-tq query "SELECT * FROM orders WHERE date > '2024-01-01' SAMPLE 100"
-
-# Export sample to CSV
-tq query "SELECT * FROM huge_table SAMPLE 1000" --format csv --output sample.csv
-```
-
-#### Peeking at Table Structure
-
-To quickly see both table structure and sample data:
-
-```bash
-# First, describe the table
-tq query "SELECT * FROM DBC.ColumnsV WHERE DatabaseName='mydb' AND TableName='mytable'"
-
-# Then sample some rows
-tq query "SELECT TOP 5 * FROM mydb.mytable"
-```
-
-**Note:** Dedicated `tq sample` and `tq peek` convenience commands are planned for future releases. For now, use SQL SAMPLE clause and TOP keyword for data exploration.
+- Combine with aggregations for statistical sampling
 
 ---
 

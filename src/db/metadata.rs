@@ -8,8 +8,11 @@
 //! - Session-scoped: Cache is cleared on connection change (/logon)
 //! - Timeout handling: Queries time out after configured duration
 //! - Graceful degradation: Failures don't crash REPL
+//!
+//! Sprint 34: Refactored to use shared sql::escape_sql_string utility
 
 use crate::db::DatabaseClient;
+use crate::sql::escape_sql_string;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -811,10 +814,7 @@ impl MetadataCache {
     }
 }
 
-/// Escape single quotes in SQL strings
-fn escape_sql_string(s: &str) -> String {
-    s.replace('\'', "''")
-}
+// Note: escape_sql_string is imported from crate::sql::escape_sql_string
 
 #[cfg(test)]
 mod tests {
@@ -954,12 +954,7 @@ mod tests {
         assert!(results.is_empty());
     }
 
-    #[test]
-    fn test_escape_sql_string() {
-        assert_eq!(escape_sql_string("test"), "test");
-        assert_eq!(escape_sql_string("test's"), "test''s");
-        assert_eq!(escape_sql_string("it's a 'test'"), "it''s a ''test''");
-    }
+    // Note: escape_sql_string tests are in src/sql/identifiers.rs
 
     // Sprint 20: Tests for database caching
 

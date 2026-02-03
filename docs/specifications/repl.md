@@ -1016,6 +1016,8 @@ active | false
 
 ### Large Result Handling & Result Paging
 
+**Status:** EXPERIMENTAL - Interactive pager is disabled by default. Enable with `/pager on`.
+
 Result paging uses a three-layer strategy:
 1. **Column Windowing** - Limit visible columns to maintain readability
 2. **Cell Truncation** - Limit cell content length to prevent layout breaks
@@ -2380,7 +2382,7 @@ Data sampling commands provide fast exploratory data analysis without writing fu
 | Command | Description | Example |
 |---------|-------------|---------|
 | `/sample <table> [n]` | Show random sample (default 10 rows) | `/sample employees 20` |
-| `/peek <table>` | Show first 5 rows and column info | `/peek employees` |
+| `/peek <table> [n]` | Show first N rows and column info (default 5) | `/peek employees 10` |
 
 ---
 
@@ -2389,11 +2391,11 @@ Data sampling commands provide fast exploratory data analysis without writing fu
 The `/sample` and `/peek` commands SHALL be available as metacommands in REPL mode with the following characteristics:
 
 1. **REQ-SAMPLE-001.1** - `/sample` primary syntax: `/sample <table> [n]`
-2. **REQ-SAMPLE-001.2** - `/peek` primary syntax: `/peek <table>`
+2. **REQ-SAMPLE-001.2** - `/peek` primary syntax: `/peek <table> [n]`
 3. **REQ-SAMPLE-001.3** - Both commands SHALL execute immediately (no semicolon required)
 4. **REQ-SAMPLE-001.4** - Commands SHALL be case-insensitive (`/Sample`, `/PEEK` are valid)
 5. **REQ-SAMPLE-001.5** - Table name parameter is REQUIRED (error if omitted)
-6. **REQ-SAMPLE-001.6** - Row count parameter for `/sample` is OPTIONAL (defaults to 10)
+6. **REQ-SAMPLE-001.6** - Row count parameter for both commands is OPTIONAL (`/sample` defaults to 10, `/peek` defaults to 5)
 
 **Rationale:** Simple, discoverable syntax consistent with existing metacommands like `/describe` and `/list tables`.
 
@@ -2407,6 +2409,9 @@ tq> /sample employees 50
 
 tq> /peek products
 [Shows first 5 rows + column metadata from products table]
+
+tq> /peek products 10
+[Shows first 10 rows + column metadata from products table]
 ```
 
 ---
@@ -2491,15 +2496,17 @@ Example: /sample employees 10
 
 The `/peek` command SHALL provide a quick preview of table contents with column metadata:
 
-1. **REQ-SAMPLE-004.1** - Retrieve first 5 rows from table (fixed, not configurable)
-2. **REQ-SAMPLE-004.2** - SQL generation: `SELECT TOP 5 * FROM <table>`
+1. **REQ-SAMPLE-004.1** - Retrieve first N rows from table (default: 5, configurable via optional N parameter)
+2. **REQ-SAMPLE-004.2** - SQL generation: `SELECT TOP N * FROM <table>` where N defaults to 5
 3. **REQ-SAMPLE-004.3** - Display column metadata BEFORE data rows
 4. **REQ-SAMPLE-004.4** - Column metadata SHALL include: name, data type, nullable, precision/scale (if applicable)
 5. **REQ-SAMPLE-004.5** - Display data rows in table format
-6. **REQ-SAMPLE-004.6** - If table has fewer than 5 rows, display all available rows
+6. **REQ-SAMPLE-004.6** - If table has fewer than N rows, display all available rows
 7. **REQ-SAMPLE-004.7** - If table is empty, display column metadata only with "Table is empty" message
+8. **REQ-SAMPLE-004.8** - Optional N parameter: `/peek <table> [N]` allows custom row count
+9. **REQ-SAMPLE-004.9** - Parameter validation: N must be positive integer
 
-**Rationale:** Fixed 5-row preview provides quick table understanding without overwhelming output. Column metadata helps users understand data structure before sampling or querying.
+**Rationale:** Default 5-row preview provides quick table understanding without overwhelming output. Optional N parameter allows flexibility for different table sizes. Column metadata helps users understand data structure before sampling or querying.
 
 **Example Interaction:**
 ```sql
@@ -2531,6 +2538,43 @@ First 5 rows:
 └─────────────┴────────────┴───────────┴────────────┴───────────┘
 
 (Query time: 0.023s)
+```
+
+**Custom row count:**
+```sql
+tq> /peek employees 10
+
+Table: PRODUCTION.employees
+Approximate Rows: 42,573
+
+Column Information:
+┌───────────────┬──────────────┬──────────┬───────────┐
+│ Column        │ Type         │ Nullable │ Precision │
+├───────────────┼──────────────┼──────────┼───────────┤
+│ employee_id   │ INTEGER      │ NO       │ -         │
+│ first_name    │ VARCHAR(50)  │ YES      │ 50        │
+│ last_name     │ VARCHAR(50)  │ YES      │ 50        │
+│ hire_date     │ DATE         │ YES      │ -         │
+│ salary        │ DECIMAL(10,2)│ YES      │ 10,2      │
+└───────────────┴──────────────┴──────────┴───────────┘
+
+First 10 rows:
+┌─────────────┬────────────┬───────────┬────────────┬───────────┐
+│ employee_id │ first_name │ last_name │ hire_date  │ salary    │
+├─────────────┼────────────┼───────────┼────────────┼───────────┤
+│ 1           │ Alice      │ Anderson  │ 2020-01-15 │ 75000.00  │
+│ 2           │ Bob        │ Brown     │ 2019-03-22 │ 82000.00  │
+│ 3           │ Carol      │ Chen      │ 2021-07-01 │ 68000.00  │
+│ 4           │ David      │ Davis     │ 2018-11-30 │ 95000.00  │
+│ 5           │ Emma       │ Evans     │ 2022-02-14 │ 71000.00  │
+│ 6           │ Frank      │ Foster    │ 2020-08-10 │ 79000.00  │
+│ 7           │ Grace      │ Garcia    │ 2019-12-05 │ 88000.00  │
+│ 8           │ Henry      │ Harris    │ 2021-03-18 │ 73000.00  │
+│ 9           │ Iris       │ Irving    │ 2022-06-21 │ 69000.00  │
+│ 10          │ Jack       │ Johnson   │ 2020-04-09 │ 91000.00  │
+└─────────────┴────────────┴───────────┴────────────┴───────────┘
+
+(Query time: 0.028s)
 ```
 
 **Empty table:**

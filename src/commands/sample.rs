@@ -5,10 +5,12 @@
 //! - Peek: First N rows plus column metadata using TOP clause
 //!
 //! Sprint 33: Initial implementation
+//! Sprint 34: Refactored to use shared sql utilities for type formatting and identifier quoting
 
 use crate::cli::{OutputFormat, PeekArgs, SampleArgs};
 use crate::db::{ColumnInfo, DatabaseClient, QueryResult};
 use crate::error::{Result, TqError};
+use crate::sql::{escape_sql_string, format_column_type, quote_qualified_name};
 use std::io::Write;
 
 /// Default sample size when not specified
@@ -42,10 +44,11 @@ pub fn execute_sample<W: Write>(
     // Parse table name (may be qualified or unqualified)
     let (database, table_name) = parse_table_name(&args.table, client.config().database.as_str());
 
-    // Build the sample query using SAMPLE clause
+    // Build the sample query using SAMPLE clause with properly quoted identifiers
     let sql = format!(
-        "SELECT * FROM {}.{} SAMPLE {}",
-        database, table_name, sample_size
+        "SELECT * FROM {} SAMPLE {}",
+        quote_qualified_name(database, table_name),
+        sample_size
     );
 
     log::debug!("Executing sample query: {}", sql);
@@ -87,10 +90,11 @@ pub fn execute_peek<W: Write>(
     // First, get column metadata
     let columns = get_column_metadata(client, database, table_name)?;
 
-    // Build query for first N rows
+    // Build query for first N rows with properly quoted identifiers
     let sql = format!(
-        "SELECT TOP {} * FROM {}.{}",
-        args.count, database, table_name
+        "SELECT TOP {} * FROM {}",
+        args.count,
+        quote_qualified_name(database, table_name)
     );
 
     log::debug!("Executing peek query: {}", sql);
@@ -130,6 +134,7 @@ fn get_column_metadata(
     table_name: &str,
 ) -> Result<Vec<ColumnInfo>> {
     // Query column information from DBC.ColumnsV
+    // Use escape_sql_string for the WHERE clause string values
     let sql = format!(
         r#"SELECT
             ColumnName,
@@ -142,8 +147,8 @@ fn get_column_metadata(
         WHERE DatabaseName = '{}'
           AND TableName = '{}'
         ORDER BY ColumnId"#,
-        database.to_uppercase(),
-        table_name.to_uppercase()
+        escape_sql_string(&database.to_uppercase()),
+        escape_sql_string(&table_name.to_uppercase())
     );
 
     let result = client.execute(&sql)?;
@@ -183,41 +188,6 @@ fn get_column_metadata(
         .collect();
 
     Ok(columns)
-}
-
-/// Format column type from Teradata type code
-fn format_column_type(
-    type_code: &str,
-    length: Option<i32>,
-    precision: Option<i32>,
-    scale: Option<i32>,
-) -> String {
-    match type_code.trim() {
-        "CV" => format!("VARCHAR({})", length.unwrap_or(0)),
-        "CF" => format!("CHAR({})", length.unwrap_or(0)),
-        "I" => "INTEGER".to_string(),
-        "I1" => "BYTEINT".to_string(),
-        "I2" => "SMALLINT".to_string(),
-        "I8" => "BIGINT".to_string(),
-        "D" => {
-            if let (Some(p), Some(s)) = (precision, scale) {
-                format!("DECIMAL({},{})", p, s)
-            } else {
-                "DECIMAL".to_string()
-            }
-        }
-        "F" => "FLOAT".to_string(),
-        "DA" => "DATE".to_string(),
-        "TS" => "TIMESTAMP".to_string(),
-        "TZ" => "TIMESTAMP WITH TIME ZONE".to_string(),
-        "AT" => "TIME".to_string(),
-        "BV" => format!("VARBYTE({})", length.unwrap_or(0)),
-        "BF" => format!("BYTE({})", length.unwrap_or(0)),
-        "CO" => "CLOB".to_string(),
-        "BO" => "BLOB".to_string(),
-        "JN" => "JSON".to_string(),
-        other => other.to_string(),
-    }
 }
 
 /// Handle sample/peek query errors with user-friendly messages
@@ -513,53 +483,7 @@ mod tests {
         assert_eq!(table, "employees");
     }
 
-    #[test]
-    fn test_format_column_type_varchar() {
-        let result = format_column_type("CV", Some(100), None, None);
-        assert_eq!(result, "VARCHAR(100)");
-    }
-
-    #[test]
-    fn test_format_column_type_char() {
-        let result = format_column_type("CF", Some(10), None, None);
-        assert_eq!(result, "CHAR(10)");
-    }
-
-    #[test]
-    fn test_format_column_type_integer() {
-        let result = format_column_type("I", None, None, None);
-        assert_eq!(result, "INTEGER");
-    }
-
-    #[test]
-    fn test_format_column_type_decimal() {
-        let result = format_column_type("D", None, Some(10), Some(2));
-        assert_eq!(result, "DECIMAL(10,2)");
-    }
-
-    #[test]
-    fn test_format_column_type_decimal_no_precision() {
-        let result = format_column_type("D", None, None, None);
-        assert_eq!(result, "DECIMAL");
-    }
-
-    #[test]
-    fn test_format_column_type_date() {
-        let result = format_column_type("DA", None, None, None);
-        assert_eq!(result, "DATE");
-    }
-
-    #[test]
-    fn test_format_column_type_timestamp() {
-        let result = format_column_type("TS", None, None, None);
-        assert_eq!(result, "TIMESTAMP");
-    }
-
-    #[test]
-    fn test_format_column_type_unknown() {
-        let result = format_column_type("XX", None, None, None);
-        assert_eq!(result, "XX");
-    }
+    // Note: format_column_type tests are in src/sql/types.rs
 
     #[test]
     fn test_escape_csv_simple() {
