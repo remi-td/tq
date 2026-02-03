@@ -74,7 +74,7 @@ fn get_terminal_width() -> Option<usize> {
 }
 
 /// Calculate minimum width needed for a column
-fn calculate_column_width(header: &str, values: &[String], max_sample: usize) -> usize {
+fn calculate_column_width(header: &str, values: &[String], max_sample: usize, max_width: Option<usize>) -> usize {
     let header_width = header.len();
     let max_value_width = values
         .iter()
@@ -83,8 +83,14 @@ fn calculate_column_width(header: &str, values: &[String], max_sample: usize) ->
         .max()
         .unwrap_or(0);
 
-    // Minimum width is max of header and content, plus 2 for spacing (1 on each side)
-    std::cmp::max(header_width, max_value_width) + 2
+    // Calculate natural width (max of header and content, plus 2 for spacing)
+    let natural_width = std::cmp::max(header_width, max_value_width) + 2;
+
+    // Apply maximum width if specified (for pager mode)
+    match max_width {
+        Some(max) => std::cmp::min(natural_width, max),
+        None => natural_width,
+    }
 }
 
 /// Select which columns to display based on terminal width
@@ -92,17 +98,18 @@ fn select_visible_columns(
     column_names: &[String],
     column_values: &[Vec<String>],
     terminal_width: Option<usize>,
+    max_column_width: Option<usize>,
 ) -> ColumnSelection {
     let total_columns = column_names.len();
 
-    // Batch mode (non-TTY): show all columns
+    // Batch mode (non-TTY) or pager mode: show all columns
     let Some(term_width) = terminal_width else {
         let widths: Vec<usize> = column_names
             .iter()
             .enumerate()
             .map(|(i, name)| {
                 let values: Vec<String> = column_values.iter().map(|row| row[i].clone()).collect();
-                calculate_column_width(name, &values, 100)
+                calculate_column_width(name, &values, 100, max_column_width)
             })
             .collect();
 
@@ -126,7 +133,7 @@ fn select_visible_columns(
 
     for (idx, name) in column_names.iter().enumerate() {
         let values: Vec<String> = column_values.iter().map(|row| row[idx].clone()).collect();
-        let col_width = calculate_column_width(name, &values, 100);
+        let col_width = calculate_column_width(name, &values, 100, None);
 
         // Separator width: │ between columns (1 char)
         let separator_width = if visible.is_empty() { 0 } else { 1 };
@@ -161,7 +168,7 @@ fn select_visible_columns(
     // Ensure at least one column is shown
     if visible.is_empty() && !column_names.is_empty() {
         let values: Vec<String> = column_values.iter().map(|row| row[0].clone()).collect();
-        let col_width = calculate_column_width(&column_names[0], &values, 100);
+        let col_width = calculate_column_width(&column_names[0], &values, 100, None);
         visible.push(0);
         widths.push(col_width);
     }
@@ -400,8 +407,16 @@ fn write_with_width_constraint<W: Write>(
         .map(|row| row.iter().map(|v| v.display()).collect())
         .collect();
 
+    // For pager mode (terminal_width=None), limit column widths to 40 chars
+    // The pager will handle horizontal scrolling across columns
+    let max_column_width = if terminal_width.is_none() {
+        Some(40) // Match MAX_COLUMN_WIDTH in pager.rs
+    } else {
+        None
+    };
+
     // Select columns to display
-    let selection = select_visible_columns(&column_names, &column_values, terminal_width);
+    let selection = select_visible_columns(&column_names, &column_values, terminal_width, max_column_width);
 
     // Render the table
     let table_output = render_table(result, &selection, options);
@@ -625,7 +640,7 @@ mod tests {
             "engineering".to_string(),
         ]];
 
-        let selection = select_visible_columns(&column_names, &column_values, None);
+        let selection = select_visible_columns(&column_names, &column_values, None, None);
 
         assert_eq!(selection.visible_columns.len(), 4);
         assert_eq!(selection.hidden_count, 0);
@@ -651,7 +666,7 @@ mod tests {
         ]];
 
         // Very narrow terminal (50 chars) - should truncate
-        let selection = select_visible_columns(&column_names, &column_values, Some(50));
+        let selection = select_visible_columns(&column_names, &column_values, Some(50), None);
 
         // Should have fewer than all columns
         assert!(selection.visible_columns.len() < 5);
@@ -668,7 +683,7 @@ mod tests {
         let column_names = vec!["id".to_string(), "name".to_string()];
         let column_values = vec![vec!["1".to_string(), "Alice".to_string()]];
 
-        let selection = select_visible_columns(&column_names, &column_values, Some(200));
+        let selection = select_visible_columns(&column_names, &column_values, Some(200), None);
 
         assert_eq!(selection.visible_columns.len(), 2);
         assert_eq!(selection.hidden_count, 0);
@@ -692,7 +707,7 @@ mod tests {
             .collect();
 
         // Force narrow terminal
-        let selection = select_visible_columns(&column_names, &column_values, Some(60));
+        let selection = select_visible_columns(&column_names, &column_values, Some(60), None);
 
         // If truncation happened, we should see the indicator
         if selection.hidden_count > 0 {
@@ -739,7 +754,7 @@ mod tests {
             .collect();
 
         // Force truncation with narrow terminal
-        let selection = select_visible_columns(&column_names, &column_values, Some(50));
+        let selection = select_visible_columns(&column_names, &column_values, Some(50), None);
 
         if selection.hidden_count > 0 {
             // Hidden names should be populated
@@ -759,7 +774,7 @@ mod tests {
         let column_names = vec!["very_long_column_name".to_string()];
         let column_values = vec![vec!["some_value".to_string()]];
 
-        let selection = select_visible_columns(&column_names, &column_values, Some(10));
+        let selection = select_visible_columns(&column_names, &column_values, Some(10), None);
 
         // Must show at least one column
         assert!(!selection.visible_columns.is_empty());
