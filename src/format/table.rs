@@ -21,6 +21,11 @@ use crate::error::Result;
 use crossterm::terminal;
 use std::io::{IsTerminal, Write};
 
+/// Maximum column width for table output (content chars, excluding padding)
+/// This prevents individual columns from dominating display space.
+/// Values exceeding this will be truncated with ellipsis.
+const MAX_COLUMN_WIDTH: usize = 100;
+
 /// Table formatting options
 #[derive(Debug, Clone)]
 pub struct TableOptions {
@@ -74,7 +79,21 @@ fn get_terminal_width() -> Option<usize> {
 }
 
 /// Calculate minimum width needed for a column
-fn calculate_column_width(header: &str, values: &[String], max_sample: usize, max_width: Option<usize>) -> usize {
+///
+/// Width is calculated from actual cell content (content-based width calculation):
+/// 1. Scan header and all sampled values
+/// 2. Take maximum of header length and max value length
+/// 3. Cap at effective maximum (explicit max_width or MAX_COLUMN_WIDTH default)
+/// 4. Add 2 for padding (1 space on each side)
+///
+/// This ensures columns are sized to actual content, not schema type definitions,
+/// while preventing any single column from dominating display space.
+fn calculate_column_width(
+    header: &str,
+    values: &[String],
+    max_sample: usize,
+    max_width: Option<usize>,
+) -> usize {
     let header_width = header.len();
     let max_value_width = values
         .iter()
@@ -83,14 +102,15 @@ fn calculate_column_width(header: &str, values: &[String], max_sample: usize, ma
         .max()
         .unwrap_or(0);
 
-    // Calculate natural width (max of header and content, plus 2 for spacing)
-    let natural_width = std::cmp::max(header_width, max_value_width) + 2;
+    // Content width: max of header and data
+    let content_width = std::cmp::max(header_width, max_value_width);
 
-    // Apply maximum width if specified (for pager mode)
-    match max_width {
-        Some(max) => std::cmp::min(natural_width, max),
-        None => natural_width,
-    }
+    // Apply maximum cap (use explicit max_width if provided, otherwise default to MAX_COLUMN_WIDTH)
+    let effective_max = max_width.unwrap_or(MAX_COLUMN_WIDTH);
+    let capped_width = std::cmp::min(content_width, effective_max);
+
+    // Add padding (2 chars: 1 space on each side)
+    capped_width + 2
 }
 
 /// Select which columns to display based on terminal width
@@ -746,5 +766,172 @@ mod tests {
         // Must show at least one column
         assert!(!selection.visible_columns.is_empty());
         assert_eq!(selection.visible_columns[0], 0);
+    }
+
+    // Sprint 32: Content-based column width tests
+
+    #[test]
+    fn test_column_width_max_cap_applied() {
+        // Test that MAX_COLUMN_WIDTH cap is applied even when max_width is None
+        // Create a very long string that exceeds MAX_COLUMN_WIDTH (100)
+        let long_value = "x".repeat(150);
+        let values = vec![long_value];
+        let width = calculate_column_width("col", &values, 100, None);
+        // Should be capped at MAX_COLUMN_WIDTH (100) + 2 padding = 102
+        assert_eq!(width, MAX_COLUMN_WIDTH + 2);
+    }
+
+    #[test]
+    fn test_column_width_explicit_max_overrides_default() {
+        // Test that explicit max_width overrides the default MAX_COLUMN_WIDTH
+        let long_value = "x".repeat(150);
+        let values = vec![long_value];
+        // Explicit max of 40 (like pager uses)
+        let width = calculate_column_width("col", &values, 100, Some(40));
+        // Should be capped at 40 + 2 padding = 42
+        assert_eq!(width, 42);
+    }
+
+    #[test]
+    fn test_column_width_null_value_representation() {
+        // Test that [NULL] (6 chars) is correctly sized
+        let values = vec!["[NULL]".to_string()];
+        let width = calculate_column_width("col", &values, 100, None);
+        // "[NULL]" is 6 chars, header "col" is 3 chars, so width = 6 + 2 = 8
+        assert_eq!(width, 8);
+    }
+
+    #[test]
+    fn test_column_width_null_is_considered_in_max() {
+        // Test that [NULL] can be the determining factor for width
+        let values = vec![
+            "A".to_string(),
+            "B".to_string(),
+            "[NULL]".to_string(), // 6 chars - should determine width
+        ];
+        let width = calculate_column_width("id", &values, 100, None);
+        // max content is 6 ([NULL]), header is 2, so width = 6 + 2 = 8
+        assert_eq!(width, 8);
+    }
+
+    #[test]
+    fn test_column_width_empty_strings() {
+        // Test that empty strings don't cause issues and header determines width
+        let values = vec!["".to_string(), "".to_string(), "".to_string()];
+        let width = calculate_column_width("Status", &values, 100, None);
+        // All values are empty, so header "Status" (6 chars) determines width
+        assert_eq!(width, 8); // 6 + 2 padding
+    }
+
+    #[test]
+    fn test_column_width_mixed_empty_and_content() {
+        // Test that empty strings don't affect width when other values exist
+        let values = vec![
+            "active".to_string(),
+            "".to_string(),
+            "pending".to_string(), // 7 chars - should determine width
+        ];
+        let width = calculate_column_width("stat", &values, 100, None);
+        // "pending" is 7 chars, header is 4, so width = 7 + 2 = 9
+        assert_eq!(width, 9);
+    }
+
+    #[test]
+    fn test_column_width_numeric_values() {
+        // Test numeric values (represented as strings)
+        let values = vec![
+            "1".to_string(),
+            "42".to_string(),
+            "1500".to_string(), // 4 chars
+        ];
+        let width = calculate_column_width("amount", &values, 100, None);
+        // "amount" is 6 chars, max value "1500" is 4 chars
+        // Header wins: 6 + 2 = 8
+        assert_eq!(width, 8);
+    }
+
+    #[test]
+    fn test_column_width_large_numbers() {
+        // Test larger numeric values that exceed header length
+        let values = vec![
+            "1000000".to_string(),  // 7 chars
+            "99999999".to_string(), // 8 chars
+        ];
+        let width = calculate_column_width("id", &values, 100, None);
+        // "99999999" is 8 chars, header "id" is 2 chars
+        // Value wins: 8 + 2 = 10
+        assert_eq!(width, 10);
+    }
+
+    #[test]
+    fn test_column_width_exactly_at_max() {
+        // Test value exactly at MAX_COLUMN_WIDTH
+        let exact_max_value = "x".repeat(MAX_COLUMN_WIDTH);
+        let values = vec![exact_max_value];
+        let width = calculate_column_width("col", &values, 100, None);
+        // Exactly at max: 100 + 2 = 102
+        assert_eq!(width, MAX_COLUMN_WIDTH + 2);
+    }
+
+    #[test]
+    fn test_column_width_one_over_max() {
+        // Test value one character over MAX_COLUMN_WIDTH
+        let over_max_value = "x".repeat(MAX_COLUMN_WIDTH + 1);
+        let values = vec![over_max_value];
+        let width = calculate_column_width("col", &values, 100, None);
+        // Capped at max: 100 + 2 = 102 (not 103)
+        assert_eq!(width, MAX_COLUMN_WIDTH + 2);
+    }
+
+    #[test]
+    fn test_column_width_sampling_limit() {
+        // Test that max_sample parameter limits how many values are considered
+        let mut values: Vec<String> = (0..50).map(|_| "short".to_string()).collect();
+        values.push("this_is_a_very_long_value".to_string()); // 25 chars at position 50
+
+        // Sample only first 10 rows - should not see the long value
+        let width = calculate_column_width("col", &values, 10, None);
+        // Only sees "short" (5 chars) and header "col" (3 chars)
+        assert_eq!(width, 7); // 5 + 2 padding
+
+        // Sample all rows - should see the long value
+        let width_all = calculate_column_width("col", &values, 100, None);
+        // Sees "this_is_a_very_long_value" (25 chars)
+        assert_eq!(width_all, 27); // 25 + 2 padding
+    }
+
+    #[test]
+    fn test_column_width_unicode_basic() {
+        // Test basic Unicode characters (non-ASCII)
+        // Note: This uses byte length, not display width
+        // "cafe" with accent: "caf\u{00e9}" is 4 display chars but 5 bytes in UTF-8
+        let values = vec!["cafe".to_string(), "naïve".to_string()]; // naïve has ï (2 bytes)
+        let width = calculate_column_width("word", &values, 100, None);
+        // "naïve" is 6 bytes (n, a, ï[2], v, e), header is 4
+        // Current implementation uses byte length
+        assert!(width >= 6); // At least 6 + 2 = 8
+    }
+
+    #[test]
+    fn test_column_width_constant_value() {
+        // Verify the MAX_COLUMN_WIDTH constant is set correctly
+        assert_eq!(MAX_COLUMN_WIDTH, 100);
+    }
+
+    #[test]
+    fn test_select_columns_respects_max_width() {
+        // Test that select_visible_columns respects max_column_width parameter
+        let column_names = vec!["col1".to_string()];
+        let long_value = "x".repeat(150);
+        let column_values = vec![vec![long_value]];
+
+        // Without max_width constraint, uses default MAX_COLUMN_WIDTH
+        let selection_default = select_visible_columns(&column_names, &column_values, None, None);
+        assert_eq!(selection_default.column_widths[0], MAX_COLUMN_WIDTH + 2);
+
+        // With explicit max_width of 50
+        let selection_constrained =
+            select_visible_columns(&column_names, &column_values, None, Some(50));
+        assert_eq!(selection_constrained.column_widths[0], 52); // 50 + 2 padding
     }
 }

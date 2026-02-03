@@ -42,16 +42,153 @@ The table formatting approach focuses on terminal width awareness:
 - No truncation or column hiding
 - Optimized for piping and file redirection
 
+### Column Width Calculation
+
+#### REQ-TABLE-WIDTH-001: Content-Based Width Calculation
+
+**Requirement:** Column widths shall be calculated from actual cell content, not from database schema type definitions.
+
+**Rationale:** Schema types often define maximum capacity (e.g., VARCHAR(64)) that significantly exceeds typical content length (e.g., 15 characters). Width calculation based on actual content maximizes information density in table displays.
+
+**Calculation Logic:**
+```
+column_width = max(
+  max_content_length_across_all_rows,
+  header_length
+)
+```
+
+**Example:**
+- Column: `DatabaseName VARCHAR(64)`
+- Actual content: "SystemDB" (8 chars), "TempDB" (6 chars), "UserDB" (6 chars)
+- Header: "DatabaseName" (12 chars)
+- **Calculated width: 12 characters** (not 64)
+
+#### REQ-TABLE-WIDTH-002: Maximum Width Cap
+
+**Requirement:** Individual column widths shall be capped at a maximum limit to prevent single columns from dominating display space.
+
+**Rationale:** Prevents columns with occasional long values from consuming excessive terminal width, ensuring balanced display across multiple columns.
+
+**Specification:**
+- Default maximum: 100 characters per column
+- Values exceeding maximum are truncated with ellipsis: `Long value that ex...`
+- Width calculation considers truncated length, not original content length
+
+**Example:**
+- Content: 150-character string
+- Displayed: First 97 chars + "..." (100 chars total)
+- Column width: 100 characters
+
+#### REQ-TABLE-WIDTH-003: Minimum Width Enforcement
+
+**Requirement:** Column widths shall never be smaller than the column header length.
+
+**Rationale:** Headers must remain fully visible for column identification. Short content should not compress headers.
+
+**Example:**
+- Header: "AccountName" (11 chars)
+- Content: "A" (1 char), "B" (1 char)
+- **Column width: 11 characters** (header length)
+
+#### REQ-TABLE-WIDTH-004: NULL Value Width Handling
+
+**Requirement:** NULL values shall be represented as `[NULL]` (6 characters) and included in width calculations.
+
+**Rationale:** NULL representation must be visible and factored into column width to prevent layout breaks when NULL values appear.
+
+**Example:**
+- Content: "Alice", "Bob", `[NULL]`
+- Widths considered: 5, 3, 6
+- Max content width: 6 characters (from `[NULL]`)
+
+#### REQ-TABLE-WIDTH-005: Numeric Column Right-Alignment
+
+**Requirement:** Numeric columns shall remain right-aligned within their content-calculated width.
+
+**Rationale:** Right alignment for numbers is essential for readability, especially when comparing values or performing mental arithmetic.
+
+**Example:**
+```
+┌──────┬────────┐
+│ id   │ amount │
+├──────┼────────┤
+│    1 │    9.5 │
+│   42 │  123.0 │
+│  103 │ 1500.2 │
+└──────┴────────┘
+```
+
+#### REQ-TABLE-WIDTH-006: Empty String Width Handling
+
+**Requirement:** Empty strings shall be treated as zero-width content, with column width determined by header or other non-empty values.
+
+**Rationale:** Empty values should not influence column width calculation; headers or actual content should dictate width.
+
+**Example:**
+- Header: "Status" (6 chars)
+- Content: "active", "", "pending"
+- **Column width: 7 characters** (longest content: "pending")
+
+#### REQ-TABLE-WIDTH-007: Width Calculation Timing
+
+**Requirement:** Column widths shall be calculated once per result set, after all rows are fetched, before rendering begins.
+
+**Rationale:** Accurate width calculation requires examining all row content. Single-pass calculation prevents layout inconsistencies during rendering.
+
+**Performance Consideration:** For large result sets (10,000+ rows), width calculation should complete within 100ms to avoid perceived delay.
+
 ### Column Truncation Strategy
 
 When columns don't fit in terminal width:
 
 1. **Prioritize Leftmost Columns** - Show columns from left to right until width exhausted
-2. **Calculate Minimum Width** - Each column gets minimum width based on content
+2. **Calculate Content-Based Width** - Each column gets width based on actual content (see REQ-TABLE-WIDTH-001 through REQ-TABLE-WIDTH-007)
 3. **Add Truncation Indicator** - When columns are hidden:
    - Header: Show `| (+n cols) |` in rightmost position
    - Body: Show `| ... |` in rightmost position
 4. **No Padding** - Columns are NOT padded, just basic spacing
+
+#### REQ-TABLE-WIDTH-008: Multi-Byte Character Support
+
+**Requirement:** Width calculations shall account for multi-byte Unicode characters (e.g., emoji, CJK characters) using display width, not byte count.
+
+**Rationale:** Display width differs from byte count for Unicode. A 3-byte emoji may display as 2 columns, while a 1-byte ASCII displays as 1 column.
+
+**Example:**
+- Content: "Hello 👋" (byte count: 10, display width: 8)
+- **Column width uses: 8** (display width)
+
+**Implementation Note:** Use Unicode display width calculation (UAX #11 East Asian Width).
+
+#### REQ-TABLE-WIDTH-009: Consistency Across Result Sets
+
+**Requirement:** Multiple queries in the same session may produce different column widths based on their respective result set content.
+
+**Rationale:** Each query result should optimize its own display density. Fixed widths across queries would sacrifice information density.
+
+**Example:**
+```sql
+-- Query 1: Short names
+SELECT DatabaseName FROM DBC.Databases WHERE DatabaseName LIKE 'Sys%';
+-- Column width: ~12 chars (header + short content)
+
+-- Query 2: Long names
+SELECT DatabaseName FROM DBC.Databases WHERE DatabaseName LIKE 'ProductionBackup%';
+-- Column width: ~25 chars (header + longer content)
+```
+
+#### REQ-TABLE-WIDTH-010: Batch Mode Behavior
+
+**Requirement:** In batch mode (non-TTY contexts), content-based width calculation still applies, but no terminal width limit is enforced.
+
+**Rationale:** Batch mode should show all columns. Content-based widths still improve readability by avoiding excessive whitespace from schema-defined types.
+
+**Example (piped output):**
+```bash
+tq query "SELECT * FROM DBC.Databases" | less
+# All columns visible, widths calculated from content, no truncation
+```
 
 **Example with 80-column terminal:**
 
@@ -71,6 +208,44 @@ When columns don't fit in terminal width:
 **Footer Message:**
 - When columns are truncated, show: `n columns hidden: col1, col2, col3`
 - Suggest: `Use --format csv or --format json to see all columns`
+
+### Content-Based Width: Before and After
+
+#### Example: `SELECT * FROM DBC.Databases` in 117-character terminal
+
+**Before (Schema-Based Width):**
+```
+┌──────────────────────────────────────────────────────────────────┬──────────────────────────────────────────────────────────────────┬──────────────┐
+│ DatabaseName                                                     │ CreatorName                                                      │ (+14 cols)   │
+├──────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┼──────────────┤
+│ SystemDB                                                         │ DBC                                                              │ ...          │
+│ TempDB                                                           │ DBC                                                              │ ...          │
+│ UserDB                                                           │ DBC                                                              │ ...          │
+└──────────────────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────┴──────────────┘
+
+14 columns hidden: OwnerName, AccountName, ProtectionType, JournalFlag, PermSpace, SpoolSpace, TempSpace, ...
+3 rows in set (0.045s)
+```
+- Schema: `DatabaseName VARCHAR(64)`, `CreatorName VARCHAR(64)`
+- Result: 2 columns visible, 64 chars each = 128+ chars consumed
+- Problem: Actual content only ~10 chars, massive wasted space
+
+**After (Content-Based Width):**
+```
+┌──────────────┬─────────────┬───────────┬─────────────┬────────────────┬─────────────┬───────────┬───────────┬───────────┬─────────────┐
+│ DatabaseName │ CreatorName │ OwnerName │ AccountName │ ProtectionType │ JournalFlag │ PermSpace │ SpoolSpace│ TempSpace │ (+7 cols)   │
+├──────────────┼─────────────┼───────────┼─────────────┼────────────────┼─────────────┼───────────┼───────────┼───────────┼─────────────┤
+│ SystemDB     │ DBC         │ DBC       │ $SYSTEM     │ None           │ None        │  1048576  │    524288 │    262144 │ ...         │
+│ TempDB       │ DBC         │ DBC       │ $SYSTEM     │ None           │ None        │        0  │         0 │  1048576  │ ...         │
+│ UserDB       │ DBC         │ UserAdmin │ $USER       │ Read           │ Dual        │  5242880  │  1048576  │    524288 │ ...         │
+└──────────────┴─────────────┴───────────┴─────────────┴────────────────┴─────────────┴───────────┴───────────┴───────────┴─────────────┘
+
+7 columns hidden: CreateTimeStamp, LastAlterName, LastAlterTimeStamp, ...
+3 rows in set (0.045s)
+```
+- Width: Based on max(content, header) per column
+- Result: 9 columns visible (was 2), 7 hidden (was 14)
+- Benefit: 4.5x more columns visible, significantly improved information density
 
 ### ASCII Table (Default)
 

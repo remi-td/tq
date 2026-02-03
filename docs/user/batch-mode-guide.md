@@ -914,6 +914,24 @@ tq query "SELECT * FROM huge_table" --format csv --output huge.csv
 
 Rows written incrementally, not buffered in memory.
 
+**Table format optimization:**
+
+When using table format output (the default for terminal display), tq calculates column widths based on actual content rather than database schema types. This means:
+
+- Columns are sized to fit their actual data, not the VARCHAR(N) or CHAR(N) schema width
+- More columns fit on screen for wide tables
+- Maximum column width is capped at 100 characters
+- Works in both interactive (TTY) and batch (piped) contexts
+
+Example:
+```bash
+# Schema: DatabaseName VARCHAR(64), but actual content ~15 chars
+# tq shows compact columns, not 64-character-wide columns
+tq query "SELECT * FROM DBC.Databases"
+```
+
+In batch mode (when piping to files or other commands), all columns are shown without terminal width limits, but columns are still sized efficiently based on content.
+
 ### Sampling
 
 Use Teradata's SAMPLE clause for large tables:

@@ -261,6 +261,58 @@ tq> SELECT * FROM employees WHERE department = 'IT';
 3 rows in set (0.045s)
 ```
 
+### Smart Column Widths
+
+tq automatically calculates column widths based on actual content, not database schema types. This dramatically improves information density for wide tables.
+
+**How it works:**
+
+Instead of using the schema-defined type width (e.g., VARCHAR(64) = 64 characters), tq measures the actual content in each column and sizes columns accordingly. This means columns with short values don't waste space, allowing more columns to fit on screen.
+
+**Example: Querying system tables**
+
+```sql
+tq> SELECT * FROM DBC.Databases;
+```
+
+**Before (schema-based widths):**
+Only 2 columns visible because VARCHAR(64) fields take 64+ characters each:
+
+```
+┌──────────────────────────────────────────────────────────────────┬──────────────────────────────────────────────────────────────────┬──────────────┐
+│ DatabaseName                                                     │ CreatorName                                                      │ (+14 cols)   │
+├──────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────┼──────────────┤
+│ SystemDB                                                         │ DBC                                                              │ ...          │
+│ TempDB                                                           │ DBC                                                              │ ...          │
+│ UserDB                                                           │ DBC                                                              │ ...          │
+└──────────────────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────┴──────────────┘
+
+14 columns hidden: OwnerName, AccountName, ProtectionType, JournalFlag, PermSpace, SpoolSpace, TempSpace, ...
+```
+
+**After (content-based widths):**
+9 columns visible because columns are sized to actual content (~10-15 characters):
+
+```
+┌──────────────┬─────────────┬───────────┬─────────────┬────────────────┬─────────────┬───────────┬───────────┬───────────┬─────────────┐
+│ DatabaseName │ CreatorName │ OwnerName │ AccountName │ ProtectionType │ JournalFlag │ PermSpace │ SpoolSpace│ TempSpace │ (+7 cols)   │
+├──────────────┼─────────────┼───────────┼─────────────┼────────────────┼─────────────┼───────────┼───────────┼───────────┼─────────────┤
+│ SystemDB     │ DBC         │ DBC       │ $SYSTEM     │ None           │ None        │  1048576  │    524288 │    262144 │ ...         │
+│ TempDB       │ DBC         │ DBC       │ $SYSTEM     │ None           │ None        │        0  │         0 │  1048576  │ ...         │
+│ UserDB       │ DBC         │ UserAdmin │ $USER       │ Read           │ Dual        │  5242880  │  1048576  │    524288 │ ...         │
+└──────────────┴─────────────┴───────────┴─────────────┴────────────────┴─────────────┴───────────┴───────────┴───────────┴─────────────┘
+
+7 columns hidden: CreateTimeStamp, LastAlterName, LastAlterTimeStamp, ...
+```
+
+**Result:** 4.5x more columns visible (9 vs 2), significantly improving data exploration efficiency.
+
+**Technical details:**
+- Column width = maximum of content length and header length across all rows
+- Maximum width capped at 100 characters per column (very long values are truncated with "...")
+- Works for all data types: strings, numbers, dates, NULL values
+- Preserves alignment: numbers right-aligned, text left-aligned
+
 ### Multi-line Queries
 
 Queries can span multiple lines. Press ENTER to continue on a new line:

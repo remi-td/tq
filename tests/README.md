@@ -268,6 +268,38 @@ cargo tarpaulin --out Html
 open tarpaulin-report.html
 ```
 
+## Performance Benchmarking
+
+Performance benchmarks use the criterion crate to measure and track performance over time.
+
+### Running Benchmarks
+
+```bash
+# Install criterion (if not already in dev-dependencies)
+# Already included in Cargo.toml
+
+# Run all benchmarks
+cargo bench
+
+# Run specific benchmark
+cargo bench table_formatting
+
+# Generate HTML report
+cargo bench -- --save-baseline my_baseline
+```
+
+### Benchmark Organization
+
+Benchmarks are located in `benches/` directory:
+- `benches/table_formatting.rs` - Table rendering and column width calculation benchmarks
+
+### Sprint 32 Benchmarks
+
+Sprint 32 added benchmarks for content-based column width calculation:
+- Baseline: Schema-based width (legacy)
+- Content-based: New width calculation from actual content
+- Performance requirement: <10% regression or <1ms absolute for typical tables
+
 ## Continuous Integration
 
 The test suite is designed to work in CI environments:
@@ -275,6 +307,7 @@ The test suite is designed to work in CI environments:
 1. **Fast tests** (`cargo test`): Run on every commit, no external dependencies
 2. **Live tests** (`cargo test -- --ignored`): Run with database access (optional)
 3. **Clippy** (`cargo clippy --all-targets --all-features`): Enforced with zero warnings
+4. **Benchmarks** (`cargo bench`): Optional, tracks performance over time
 
 ### CI Commands
 
@@ -286,6 +319,9 @@ cargo test --test integration_tests
 
 # Optional (with database)
 cargo test -- --ignored
+
+# Optional (performance tracking)
+cargo bench
 ```
 
 ## Sprint 15: Sprint 13 Validation Tests
