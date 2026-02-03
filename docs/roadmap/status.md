@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-02-03
-**Current Version:** 1.13.0
-**Latest Sprint:** Sprint 31 Complete (Framework Crisis Recovery - Documentation + Pager Fix)
+**Current Version:** 1.14.0
+**Latest Sprint:** Sprint 32 Complete (Content-Based Column Width + GitHub README Fix)
 
 ---
 
@@ -159,6 +159,23 @@ All core features are complete and tested.
 - Dead code removal: Cleaned up write_output_for_pager(), write_all_columns() functions
 - Crisis deliberation: Multi-agent analysis documented in sprint-30-crisis-deliberation.md
 
+**Sprint 31 Maintenance (v1.13.0):**
+- Framework crisis recovery: Honest documentation of testing limitations
+- Pager bug fix: Two-pass cell truncation (root cause: cell value exceeds display width)
+- Testing philosophy updates: Manual validation requirements for visual features
+- Sprint 29 review correction: Downgraded 9.5/10 to 2/10 (honest assessment)
+- Quality validator role clarified: Advisory verdict, not blocking
+- Framework integrity restored through transparency
+
+**Sprint 32 Features (v1.14.0):**
+- **Content-based column width** (Issue #13): Columns sized to actual content, not schema types
+- MAX_COLUMN_WIDTH constant (100 chars): Prevents columns from dominating display
+- Table information density: 4.5x improvement (2 cols → 9 cols at 117-char terminal)
+- 15 comprehensive unit tests: NULL, empty strings, numeric, Unicode, cap boundaries
+- GitHub README fix (Issue #12): Root README now displays on repository landing page
+- Documentation updates: Specifications, design, user guides
+- Sprint 31 lessons applied: Type 4 classification, manual validation protocol
+
 ---
 
 ## Batch Mode
@@ -223,12 +240,12 @@ All core features are complete and tested.
 
 ## Summary Statistics
 
-- **Total Features**: 62
-- **Implemented**: 57 (92%)
+- **Total Features**: 63
+- **Implemented**: 58 (92%)
 - **Planned**: 5 (8%)
-- **Test Pass Rate**: 100% (386/386 tests: 330 unit, 8 integration, 48 interactive)
+- **Test Pass Rate**: 100% (394/394 tests: 355 unit, 39 integration)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 27 - Bug Fix + Documentation (Sessions bug fix, LICENSE, README)
+- **Latest Sprint**: Sprint 32 - Content-Based Column Width + GitHub README Fix
 
 ---
 
