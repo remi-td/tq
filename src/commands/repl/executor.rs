@@ -181,6 +181,12 @@ pub fn execute_sql_with_state<W: Write>(
         )?;
         let output_str = String::from_utf8_lossy(&output_buffer).to_string();
 
+        // DEBUG: Save formatted table to file for inspection
+        if let Ok(mut f) = std::fs::File::create("/tmp/tq_formatted_table.txt") {
+            use std::io::Write;
+            let _ = write!(f, "{}", output_str);
+        }
+
         // Try to use pager - if it's not needed (small result), it returns false
         let pager_config = PagerConfig::default();
         match display_with_pager(&output_str, row_count, &pager_config) {
