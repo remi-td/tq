@@ -223,8 +223,84 @@ fn connection_timeout_returns_clear_error() {
 }
 ```
 
+## Testing Limitations and Manual Validation
+
+### What Automated Tests Cannot Validate
+
+**Critical Insight from Sprint 29/30:** Automated tests with 100% pass rate delivered completely broken features. This section documents the fundamental limitations of automated testing.
+
+**Visual/Rendering Features:**
+- Actual rendered output in a terminal
+- Column alignment and table formatting
+- Text wrapping and truncation behavior
+- Color display correctness
+- Alternate screen buffer content (pager, full-screen modes)
+
+**Interactive Features:**
+- Real terminal input/output timing
+- PTY behavior differences from unit test environment
+- User perception of responsiveness
+- Navigation flow across alternate screens
+
+**Terminal-Dependent Behavior:**
+- Output at specific terminal widths (80, 117, 120, 160 chars)
+- Resize handling
+- Scrollback buffer behavior
+- ANSI escape sequence rendering
+
+### The Sprint 29/30 Lesson
+
+**Pattern Observed:**
+- Sprint 29: 386/386 tests passed (100%) - Feature completely broken
+- Sprint 30: 449/449 tests passed (100%) - Feature still broken
+- Total investment: $81 for zero working functionality
+
+**Root Cause:** Tests validated code structure and internal logic, not actual user-visible output. The pager wrote to alternate screen buffer which was invisible to test framework.
+
+**Key Learning:** A test pass rate of 100% means nothing if tests do not validate what users actually see and experience.
+
+### When Manual Validation is Mandatory
+
+Manual validation is **REQUIRED** (not optional) for:
+
+1. **Pager/alternate screen features** - Cannot capture alternate buffer content
+2. **Terminal width-dependent rendering** - Must test at multiple actual widths
+3. **Visual formatting** - Table alignment, column widths, borders
+4. **Interactive navigation** - Real terminal input/response cycles
+5. **Any feature where automated tests cannot capture actual output**
+
+### Manual Validation Process
+
+1. **Build release binary**: `cargo build --release`
+2. **Test at multiple terminal widths**: 80, 117, 120, 160 characters
+3. **Use real database connection**: Not mocks
+4. **Capture evidence**: Use `script` command or screenshots
+5. **Human verification**: Developer or coordinator confirms correct behavior
+
+### Test Type Selection for Visual Features
+
+| Feature Type | Unit Tests | Integration Tests | Interactive Tests | Manual Validation |
+|--------------|------------|-------------------|-------------------|-------------------|
+| Pure logic | Primary | Secondary | - | - |
+| Output formatting | Primary | Secondary | - | Verify |
+| REPL interaction | Tertiary | Secondary | Primary | **Required** |
+| Pager rendering | Tertiary | - | Primary | **Required** |
+| Alternate screen | - | - | Limited | **Required** |
+
+### Sprint Quality Gate Update
+
+**Sprint Closure Requirements:**
+1. All automated tests pass (necessary but not sufficient)
+2. Manual validation completed for visual/interactive features
+3. Manual validation evidence documented in test results
+4. Coordinator approval based on actual functionality, not test metrics
+
+**quality-validator verdict is ADVISORY for visual features.** The sprint coordinator must manually verify before approval.
+
 ## Conclusion
 
 Effective testing validates user experience, not just code mechanics. The goal is confidence that features work as specified, not arbitrary coverage percentages.
 
-When in doubt, ask: "If this test passes, can I be confident the user experience is correct?"
+**Critical Update:** For visual and interactive features, automated test pass rates are necessary but NOT sufficient. Manual validation by a human is REQUIRED before claiming a feature works.
+
+When in doubt, ask: "If this test passes, can I be confident the user experience is correct?" For visual features, the answer is often "No - I need to see it with my own eyes."

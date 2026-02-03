@@ -63,7 +63,7 @@ impl ReplState {
             last_result: None,
             last_sql: None,
             was_limited: false,
-            pager_enabled: false, // Sprint 30: Disabled by default (feature not working)
+            pager_enabled: true, // Sprint 31: Enabled by default (bug fixed)
             colors_enabled: atty::is(atty::Stream::Stdout), // Enable colors for TTY
             metadata_cache: MetadataCache::new(database),
             connection_string: None,

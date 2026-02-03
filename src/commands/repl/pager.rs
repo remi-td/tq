@@ -42,9 +42,6 @@ use crossterm::{
 use std::io::{self, Write};
 use unicode_width::UnicodeWidthStr;
 
-/// Maximum characters to display in a cell before truncation
-const MAX_CELL_LENGTH: usize = 100;
-
 /// Minimum column width (including padding)
 const MIN_COLUMN_WIDTH: usize = 8;
 
@@ -147,21 +144,50 @@ impl TableData {
     /// By accepting QueryResult directly, we can calculate proper column widths
     /// based on actual data without the overhead of string parsing.
     ///
+    /// Sprint 31: CRITICAL FIX - Cell values must be truncated to display_width,
+    /// not MAX_CELL_LENGTH. The previous code could store 100-char values but
+    /// set display_width to 40, causing line overflow when format! expanded.
+    ///
     /// # Arguments
     /// * `result` - The query result with columns and rows
     /// * `max_col_width` - Maximum width for any column (typically MAX_COLUMN_WIDTH)
     pub fn from_query_result(result: &QueryResult, max_col_width: usize) -> Self {
+        // PASS 1: Calculate display_width for each column
+        let mut column_widths: Vec<usize> = Vec::with_capacity(result.columns.len());
+
+        for (col_idx, col_meta) in result.columns.iter().enumerate() {
+            // Header width (truncated to max_col_width - 2 for padding)
+            let header = truncate_cell(&col_meta.name, max_col_width.saturating_sub(2));
+            let header_width = header.width();
+
+            // Find max value width in this column
+            let mut max_value_width = header_width;
+            for row in &result.rows {
+                let value = if col_idx < row.len() {
+                    row[col_idx].display()
+                } else {
+                    "[NULL]".to_string()
+                };
+                let value_width = value.trim().width();
+                max_value_width = max_value_width.max(value_width);
+            }
+
+            // Apply width constraints: MIN <= display_width <= max_col_width
+            let display_width = max_value_width.max(MIN_COLUMN_WIDTH).min(max_col_width);
+            column_widths.push(display_width);
+        }
+
+        // PASS 2: Build columns and truncate cell values to display_width
         let mut columns = Vec::with_capacity(result.columns.len());
         let mut cell_values: Vec<Vec<String>> = vec![Vec::new(); result.rows.len()];
 
         for (col_idx, col_meta) in result.columns.iter().enumerate() {
-            // Truncate header if needed
-            let header = truncate_cell(&col_meta.name, max_col_width.saturating_sub(2));
-            let header_width = header.width();
+            let display_width = column_widths[col_idx];
 
-            // Calculate max value width for this column
-            let mut max_value_width = header_width;
+            // Truncate header to display_width
+            let header = truncate_cell(&col_meta.name, display_width);
 
+            // Truncate cell values to display_width (not MAX_CELL_LENGTH!)
             for (row_idx, row) in result.rows.iter().enumerate() {
                 let value = if col_idx < row.len() {
                     row[col_idx].display()
@@ -169,18 +195,10 @@ impl TableData {
                     "[NULL]".to_string()
                 };
 
-                // Truncate cell value
-                let truncated = truncate_cell(&value, MAX_CELL_LENGTH);
-                let value_width = truncated.width();
-
-                max_value_width = max_value_width.max(value_width);
+                // CRITICAL: Truncate to display_width, not MAX_CELL_LENGTH
+                let truncated = truncate_cell(&value, display_width);
                 cell_values[row_idx].push(truncated);
             }
-
-            // Apply width constraints
-            let display_width = max_value_width
-                .max(MIN_COLUMN_WIDTH)
-                .min(max_col_width);
 
             columns.push(ColumnInfo {
                 name: header,
@@ -696,6 +714,194 @@ Press any key to return to results..."#;
         Ok(())
     }
 
+    /// Render the current view to a string buffer for testing/debugging.
+    ///
+    /// This method renders the table to a buffer instead of stdout,
+    /// allowing validation of rendered output width without terminal interaction.
+    ///
+    /// Sprint 31: Added to enable debugging of width calculation mismatch.
+    #[cfg(test)]
+    pub fn render_to_buffer(&self) -> String {
+        let mut buffer = Vec::new();
+
+        let visible_cols = self.visible_column_count();
+        let end_col = (self.col_offset + visible_cols).min(self.data.columns.len());
+        let end_row = (self.row_offset + self.page_size).min(self.data.row_count);
+
+        // Render top border
+        self.render_border_to_buffer(&mut buffer, BorderType::Top);
+
+        // Render header row
+        self.render_header_to_buffer(&mut buffer, self.col_offset, end_col);
+
+        // Render header separator
+        self.render_border_to_buffer(&mut buffer, BorderType::Middle);
+
+        // Render data rows
+        for row_idx in self.row_offset..end_row {
+            self.render_row_to_buffer(&mut buffer, row_idx, self.col_offset, end_col);
+        }
+
+        // Render bottom border
+        self.render_border_to_buffer(&mut buffer, BorderType::Bottom);
+
+        String::from_utf8_lossy(&buffer).to_string()
+    }
+
+    /// Render a table border to buffer (no ANSI escapes)
+    #[cfg(test)]
+    fn render_border_to_buffer(&self, buffer: &mut Vec<u8>, border_type: BorderType) {
+        let (left, middle, right, line) = match border_type {
+            BorderType::Top => ('╭', '┬', '╮', '─'),
+            BorderType::Middle => ('├', '┼', '┤', '─'),
+            BorderType::Bottom => ('╰', '┴', '╯', '─'),
+        };
+
+        let visible_cols = self.visible_column_count();
+        let end_col = (self.col_offset + visible_cols).min(self.data.columns.len());
+        let hidden_left = self.hidden_columns_left();
+        let hidden_right = self.hidden_columns_right();
+
+        let mut border = String::new();
+        border.push(left);
+
+        // Left indicator cell border (if columns hidden to left)
+        if hidden_left > 0 {
+            border.push_str(&line.to_string().repeat(INDICATOR_WIDTH + 2));
+            border.push(middle);
+        }
+
+        // Data column borders
+        for (i, col) in self.data.columns[self.col_offset..end_col]
+            .iter()
+            .enumerate()
+        {
+            border.push_str(&line.to_string().repeat(col.display_width + 2));
+            if i < end_col - self.col_offset - 1 {
+                border.push(middle);
+            }
+        }
+
+        // Right indicator cell border (if columns hidden to right)
+        if hidden_right > 0 {
+            border.push(middle);
+            border.push_str(&line.to_string().repeat(INDICATOR_WIDTH + 2));
+        }
+
+        border.push(right);
+        border.push('\n');
+
+        buffer.extend(border.as_bytes());
+    }
+
+    /// Render header row to buffer (no ANSI escapes)
+    #[cfg(test)]
+    fn render_header_to_buffer(&self, buffer: &mut Vec<u8>, start_col: usize, end_col: usize) {
+        let hidden_left = self.hidden_columns_left();
+        let hidden_right = self.hidden_columns_right();
+
+        let mut line = String::new();
+        line.push('│');
+
+        // Left indicator cell (if columns hidden to left)
+        if hidden_left > 0 {
+            let indicator = format!("(+{} cols)", hidden_left);
+            let padded = format!(" {:^width$} ", indicator, width = INDICATOR_WIDTH);
+            line.push_str(&padded);
+            line.push('│');
+        }
+
+        // Data column headers
+        for col in &self.data.columns[start_col..end_col] {
+            let padded = format!(" {:^width$} ", col.name, width = col.display_width);
+            line.push_str(&padded);
+            line.push('│');
+        }
+
+        // Right indicator cell (if columns hidden to right)
+        if hidden_right > 0 {
+            let indicator = format!("(+{} cols)", hidden_right);
+            let padded = format!(" {:^width$} ", indicator, width = INDICATOR_WIDTH);
+            line.push_str(&padded);
+            line.push('│');
+        }
+
+        line.push('\n');
+        buffer.extend(line.as_bytes());
+    }
+
+    /// Render data row to buffer (no ANSI escapes)
+    #[cfg(test)]
+    fn render_row_to_buffer(
+        &self,
+        buffer: &mut Vec<u8>,
+        row_idx: usize,
+        start_col: usize,
+        end_col: usize,
+    ) {
+        let hidden_left = self.hidden_columns_left();
+        let hidden_right = self.hidden_columns_right();
+
+        let mut line = String::new();
+        line.push('│');
+
+        // Left indicator cell (if columns hidden to left)
+        if hidden_left > 0 {
+            let indicator = "    <--   ";
+            line.push_str(&format!(" {} ", indicator));
+            line.push('│');
+        }
+
+        for (vis_idx, col) in self.data.columns[start_col..end_col].iter().enumerate() {
+            let col_idx = start_col + vis_idx;
+            let value = self.data.get_cell(row_idx, col_idx);
+
+            // Format value with alignment
+            let padded = match col.alignment {
+                Alignment::Right => format!(" {:>width$} ", value, width = col.display_width),
+                Alignment::Center => format!(" {:^width$} ", value, width = col.display_width),
+                Alignment::Left => format!(" {:width$} ", value, width = col.display_width),
+            };
+            line.push_str(&padded);
+            line.push('│');
+        }
+
+        // Right indicator cell (if columns hidden to right)
+        if hidden_right > 0 {
+            let indicator = "   -->    ";
+            line.push_str(&format!(" {} ", indicator));
+            line.push('│');
+        }
+
+        line.push('\n');
+        buffer.extend(line.as_bytes());
+    }
+
+    /// Calculate expected line width (for debugging/testing)
+    #[cfg(test)]
+    fn calculate_expected_line_width(&self) -> usize {
+        let visible_cols = self.visible_column_count();
+        let end_col = (self.col_offset + visible_cols).min(self.data.columns.len());
+        let hidden_left = self.hidden_columns_left();
+        let hidden_right = self.hidden_columns_right();
+
+        let mut width = 1; // Leading border
+
+        if hidden_left > 0 {
+            width += INDICATOR_WIDTH + 3; // " " + indicator + " " + "│"
+        }
+
+        for col in &self.data.columns[self.col_offset..end_col] {
+            width += col.display_width + 3; // " " + content + " " + "│"
+        }
+
+        if hidden_right > 0 {
+            width += INDICATOR_WIDTH + 3;
+        }
+
+        width
+    }
+
     /// Run the pager event loop
     pub fn run(&mut self) -> io::Result<()> {
         let mut stdout = io::stdout();
@@ -968,5 +1174,269 @@ mod tests {
         let data = TableData::from_query_result(&result, MAX_COLUMN_WIDTH);
 
         assert_eq!(data.get_cell(0, 0), "[NULL]");
+    }
+
+    // Sprint 31: Width validation tests using render_to_buffer
+
+    /// Create a test result with wide columns to force horizontal scrolling
+    fn create_wide_test_result(num_cols: usize, num_rows: usize) -> QueryResult {
+        let columns: Vec<ColumnMetadata> = (0..num_cols)
+            .map(|i| {
+                ColumnMetadata::new(
+                    format!("column_name_with_longer_text_{}", i),
+                    TeradataType::Varchar,
+                    true,
+                )
+            })
+            .collect();
+
+        let rows: Vec<Vec<Value>> = (0..num_rows)
+            .map(|r| {
+                (0..num_cols)
+                    .map(|c| Value::String(format!("value_row{}_col{}_data", r, c)))
+                    .collect()
+            })
+            .collect();
+
+        QueryResult::new(columns, rows, Duration::from_millis(100))
+    }
+
+    /// Helper to create a pager with a specific terminal width
+    fn create_pager_with_width(result: &QueryResult, term_width: usize) -> Pager {
+        let config = PagerConfig::default();
+        let mut pager = Pager::new(result, &config);
+        pager.term_width = term_width;
+        pager.page_size = 10;
+        pager
+    }
+
+    /// Assert no line in the rendered output exceeds terminal width
+    fn assert_no_overflow(rendered: &str, term_width: usize) {
+        for (line_num, line) in rendered.lines().enumerate() {
+            let line_width = UnicodeWidthStr::width(line);
+            assert!(
+                line_width <= term_width,
+                "Line {} overflows: {} chars > {} terminal width.\nLine: '{}'",
+                line_num + 1,
+                line_width,
+                term_width,
+                line
+            );
+        }
+    }
+
+    #[test]
+    fn test_render_width_80_columns() {
+        let result = create_wide_test_result(20, 5);
+        let pager = create_pager_with_width(&result, 80);
+
+        let rendered = pager.render_to_buffer();
+
+        assert_no_overflow(&rendered, 80);
+        assert!(
+            rendered.contains('│'),
+            "Rendered output should contain table borders"
+        );
+    }
+
+    #[test]
+    fn test_render_width_117_columns() {
+        // 117 is the user-reported problematic width
+        let result = create_wide_test_result(20, 5);
+        let pager = create_pager_with_width(&result, 117);
+
+        let rendered = pager.render_to_buffer();
+
+        assert_no_overflow(&rendered, 117);
+    }
+
+    #[test]
+    fn test_render_width_120_columns() {
+        let result = create_wide_test_result(20, 5);
+        let pager = create_pager_with_width(&result, 120);
+
+        let rendered = pager.render_to_buffer();
+
+        assert_no_overflow(&rendered, 120);
+    }
+
+    #[test]
+    fn test_render_width_160_columns() {
+        let result = create_wide_test_result(20, 5);
+        let pager = create_pager_with_width(&result, 160);
+
+        let rendered = pager.render_to_buffer();
+
+        assert_no_overflow(&rendered, 160);
+    }
+
+    #[test]
+    fn test_expected_vs_actual_width() {
+        let result = create_wide_test_result(10, 3);
+        let pager = create_pager_with_width(&result, 100);
+
+        let expected = pager.calculate_expected_line_width();
+        let rendered = pager.render_to_buffer();
+
+        // Check that actual matches expected for each line
+        for (line_num, line) in rendered.lines().enumerate() {
+            let actual_width = UnicodeWidthStr::width(line);
+            // Allow some variance due to status bar, but data lines should match
+            if line.starts_with('│') || line.starts_with('╭') || line.starts_with('├') || line.starts_with('╰') {
+                assert!(
+                    actual_width <= expected + 2, // Small tolerance for unicode char differences
+                    "Line {}: actual width {} != expected width {}\nLine: '{}'",
+                    line_num + 1,
+                    actual_width,
+                    expected,
+                    line
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_render_with_hidden_columns_left() {
+        let result = create_wide_test_result(15, 3);
+        let mut pager = create_pager_with_width(&result, 80);
+
+        // Scroll right so there are hidden columns on the left
+        pager.col_offset = 3;
+
+        let rendered = pager.render_to_buffer();
+
+        assert_no_overflow(&rendered, 80);
+        // Should contain left indicator
+        assert!(
+            rendered.contains("<--"),
+            "Should show left indicator when columns hidden to left"
+        );
+    }
+
+    #[test]
+    fn test_render_with_hidden_columns_right() {
+        let result = create_wide_test_result(15, 3);
+        let pager = create_pager_with_width(&result, 80);
+
+        // At col_offset 0, should have columns hidden to the right
+        let rendered = pager.render_to_buffer();
+
+        assert_no_overflow(&rendered, 80);
+        // Should contain right indicator
+        assert!(
+            rendered.contains("-->"),
+            "Should show right indicator when columns hidden to right"
+        );
+    }
+
+    #[test]
+    fn test_render_all_columns_visible() {
+        // Small result that fits entirely
+        let result = create_test_result(2, 2);
+        let pager = create_pager_with_width(&result, 120);
+
+        let rendered = pager.render_to_buffer();
+
+        assert_no_overflow(&rendered, 120);
+        // Should NOT contain indicators
+        assert!(
+            !rendered.contains("<--") && !rendered.contains("-->"),
+            "Should not show indicators when all columns visible"
+        );
+    }
+
+    #[test]
+    fn test_narrow_terminal_minimum_one_column() {
+        // Very narrow terminal
+        let result = create_wide_test_result(10, 2);
+        let pager = create_pager_with_width(&result, 30);
+
+        // Should still be able to render at least one column
+        let visible = pager.visible_column_count();
+        assert!(visible >= 1, "Should always show at least one column");
+
+        let rendered = pager.render_to_buffer();
+        // Even if it overflows, it should render something
+        assert!(!rendered.is_empty(), "Should render something");
+    }
+
+    #[test]
+    fn test_render_debug_at_117_width() {
+        // Debug test for the user-reported problematic width
+        let result = create_wide_test_result(20, 3);
+        let pager = create_pager_with_width(&result, 117);
+
+        eprintln!("\n=== DEBUG: Pager at 117 char width ===");
+        eprintln!("Terminal width: {}", pager.term_width);
+        eprintln!("Visible columns: {}", pager.visible_column_count());
+        eprintln!("Hidden left: {}", pager.hidden_columns_left());
+        eprintln!("Hidden right: {}", pager.hidden_columns_right());
+        eprintln!("Expected line width: {}", pager.calculate_expected_line_width());
+
+        let rendered = pager.render_to_buffer();
+
+        eprintln!("\n--- Rendered output (lines) ---");
+        for (i, line) in rendered.lines().enumerate() {
+            let width = UnicodeWidthStr::width(line);
+            let status = if width <= 117 { "OK" } else { "OVERFLOW" };
+            eprintln!("Line {}: {} chars [{}] '{}'", i + 1, width, status, line);
+        }
+        eprintln!("--- End rendered output ---\n");
+
+        // Validate
+        for (i, line) in rendered.lines().enumerate() {
+            let width = UnicodeWidthStr::width(line);
+            assert!(
+                width <= 117,
+                "Line {} overflow: {} > 117",
+                i + 1,
+                width
+            );
+        }
+    }
+
+    #[test]
+    fn test_unicode_box_char_width() {
+        // Verify box drawing characters have width 1
+        assert_eq!(UnicodeWidthStr::width("│"), 1, "Vertical bar should be width 1");
+        assert_eq!(UnicodeWidthStr::width("─"), 1, "Horizontal bar should be width 1");
+        assert_eq!(UnicodeWidthStr::width("╭"), 1, "Top-left corner should be width 1");
+        assert_eq!(UnicodeWidthStr::width("╮"), 1, "Top-right corner should be width 1");
+        assert_eq!(UnicodeWidthStr::width("╰"), 1, "Bottom-left corner should be width 1");
+        assert_eq!(UnicodeWidthStr::width("╯"), 1, "Bottom-right corner should be width 1");
+        assert_eq!(UnicodeWidthStr::width("┬"), 1, "T-down should be width 1");
+        assert_eq!(UnicodeWidthStr::width("┴"), 1, "T-up should be width 1");
+        assert_eq!(UnicodeWidthStr::width("├"), 1, "T-right should be width 1");
+        assert_eq!(UnicodeWidthStr::width("┤"), 1, "T-left should be width 1");
+        assert_eq!(UnicodeWidthStr::width("┼"), 1, "Cross should be width 1");
+    }
+
+    #[test]
+    fn test_cell_value_exceeds_display_width() {
+        // This test exposes the bug: cell values may be wider than display_width
+        // because truncation happens at MAX_CELL_LENGTH (100), not display_width (40)
+        let long_value = "This is a value that is longer than MAX_COLUMN_WIDTH of forty characters";
+        let columns = vec![ColumnMetadata::new("col", TeradataType::Varchar, true)];
+        let rows = vec![vec![Value::String(long_value.to_string())]];
+        let result = QueryResult::new(columns, rows, Duration::from_millis(50));
+
+        let data = TableData::from_query_result(&result, MAX_COLUMN_WIDTH);
+
+        // The display_width should be capped at MAX_COLUMN_WIDTH
+        assert_eq!(data.columns[0].display_width, MAX_COLUMN_WIDTH);
+
+        // The cell value should be truncated to fit within display_width
+        let cell_value = data.get_cell(0, 0);
+        let cell_width = UnicodeWidthStr::width(cell_value);
+
+        // THIS ASSERTION CATCHES THE BUG:
+        // Cell value must be <= display_width, otherwise format! will expand
+        assert!(
+            cell_width <= MAX_COLUMN_WIDTH,
+            "Cell value width {} exceeds display_width {}. Value: '{}'",
+            cell_width,
+            MAX_COLUMN_WIDTH,
+            cell_value
+        );
     }
 }

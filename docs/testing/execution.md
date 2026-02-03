@@ -404,3 +404,168 @@ Test evidence should include:
 - **Resolution**: How failures were fixed
 
 See `tests/README.md` for evidence template.
+
+## Manual Validation Process
+
+### When Manual Validation is Required
+
+Manual validation is **MANDATORY** (not optional) for:
+
+1. **Pager/alternate screen features** - Automated tests cannot capture alternate buffer
+2. **Terminal width-dependent rendering** - Must test at actual terminal widths
+3. **Visual formatting** - Table alignment, borders, column layout
+4. **Interactive navigation** - Real input/output cycles in terminal
+5. **Any feature where tests passed but functionality was broken** (see Sprint 29/30)
+
+### Step-by-Step Manual Validation
+
+#### 1. Build the Binary
+
+```bash
+cargo build --release
+```
+
+#### 2. Set Up Test Environment
+
+```bash
+# Load test credentials
+source .env
+
+# Verify connection works
+./target/release/tq ping
+```
+
+#### 3. Test at Multiple Terminal Widths
+
+For each width (80, 117, 120, 160 chars):
+
+```bash
+# macOS: Resize terminal
+printf '\e[8;40;80t'    # 80 columns
+sleep 0.5
+
+# Verify width
+tput cols
+
+# Test feature
+./target/release/tq repl --logon "$TQ_LOGON"
+```
+
+#### 4. Capture Evidence with Script Command
+
+```bash
+# Start recording
+script -q /tmp/manual_test_80_chars.txt
+
+# Run tests manually
+./target/release/tq repl --logon "$TQ_LOGON"
+# Execute query, observe output, test navigation
+
+# End recording
+exit
+
+# Analyze for width overflow
+wc -L /tmp/manual_test_80_chars.txt  # Max line length
+awk '{ if (length > 80) print NR": "length }' /tmp/manual_test_80_chars.txt
+```
+
+#### 5. Visual Verification Checklist
+
+For pager/table features, verify:
+
+- [ ] Table borders align correctly
+- [ ] Column headers centered properly
+- [ ] Data cells aligned to column
+- [ ] No line wrapping or overflow
+- [ ] Navigation keys work (arrows, h/j/k/l)
+- [ ] Status bar displays correct position
+- [ ] Exit returns to REPL cleanly
+
+#### 6. Document Evidence
+
+Create evidence file in `tests/results/sprint-N/`:
+
+```markdown
+## Manual Validation Evidence
+
+**Date:** YYYY-MM-DD
+**Tester:** [name or role]
+**Feature:** [feature name]
+
+### Terminal Widths Tested
+
+| Width | Result | Notes |
+|-------|--------|-------|
+| 80    | PASS/FAIL | [observations] |
+| 117   | PASS/FAIL | [observations] |
+| 120   | PASS/FAIL | [observations] |
+| 160   | PASS/FAIL | [observations] |
+
+### Evidence Files
+
+- `/tmp/manual_test_80_chars.txt`
+- [screenshots if applicable]
+
+### Verdict
+
+[ ] Feature works correctly at all tested widths
+[ ] Feature has issues: [describe]
+```
+
+### Sprint Closure Gate
+
+**For features requiring manual validation:**
+
+1. Automated tests pass: YES/NO
+2. Manual validation completed: YES/NO
+3. Manual validation passed: YES/NO
+4. Evidence documented: YES/NO
+
+**All four must be YES for sprint closure.**
+
+If manual validation fails, sprint is BLOCKED. Return to implementation.
+
+### Common Manual Validation Failures
+
+#### Failure: Line Overflow
+
+**Symptom:** Lines wrap unexpectedly in terminal
+
+**Debug:**
+```bash
+# Find overflowing lines
+awk -v w=80 '{ if (length > w) print NR": "length" chars" }' output.txt
+```
+
+**Root Cause:** Width calculation doesn't match rendered width
+
+#### Failure: Alignment Issues
+
+**Symptom:** Columns misaligned, borders don't line up
+
+**Debug:**
+- Check ANSI escape sequences are excluded from width calculation
+- Verify unicode_width is used for wide characters
+
+#### Failure: Navigation Broken
+
+**Symptom:** Keys don't respond or cause unexpected behavior
+
+**Debug:**
+- Test in raw mode terminal
+- Verify crossterm events are being captured
+
+### The Sprint 29/30 Warning
+
+**Context:** Two consecutive sprints shipped with 100% test pass rate but completely broken pager functionality.
+
+**Lesson:** For visual/interactive features:
+- Test pass rate is NECESSARY but NOT SUFFICIENT
+- If you cannot manually verify the feature works, it does not work
+- "Tests pass" does not mean "feature works"
+
+**New Standard:** Sprint closure requires:
+1. Automated tests pass (proves code structure is correct)
+2. Manual validation passes (proves user experience is correct)
+
+Neither alone is sufficient. Both are required.

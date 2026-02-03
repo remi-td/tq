@@ -2,29 +2,42 @@
 
 **Sprint Duration:** 2026-01-30 (Single-day ambitious sprint)
 **Sprint Type:** Feature Sprint
-**Status:** COMPLETE - ONE substantial feature delivered
+**Status:** FAILED - Feature did not work despite passing tests
 **Version:** 1.13.0 (minor version bump for new horizontal paging feature)
+
+---
+
+## SPRINT 31 CORRECTION
+
+**This review was originally rated 9.5/10 "Excellent" but the feature was completely broken.**
+
+The original assessment was based on test metrics (386/386 tests passing) rather than actual functionality. User immediately reported the feature was "absolutely not working" with garbled output.
+
+**Corrected Assessment:** 2/10 (Critical Failure - feature broken despite tests)
+
+**Root Cause (identified in Sprint 31):** Cell values were truncated to `MAX_CELL_LENGTH` (100 chars) but `display_width` was capped at 40 chars. When rendering, Rust's `format!` macro expanded to fit the full value width, causing line overflow.
+
+**Lesson Applied:** Test pass rates are meaningless if tests do not validate actual user experience. For visual/interactive features, manual validation is mandatory.
 
 ---
 
 ## 1. Executive Summary
 
-**Overall Assessment:** 9.5/10 (Excellent - Ambitious goal achieved with zero technical debt)
+**Overall Assessment:** 2/10 (CRITICAL FAILURE - See correction above)
 
-Sprint 29 successfully delivered interactive horizontal paging for wide result sets, addressing GitHub Issue #7 and the user's request for an "ambitious" sprint. The feature enables DBAs and analysts to explore datasets with 30+ columns using intuitive arrow key and Vim keybinding navigation, with clear visual indicators showing column position.
+~~Sprint 29 successfully delivered interactive horizontal paging for wide result sets~~ Sprint 29 delivered a broken horizontal paging feature that produced garbled output despite 100% test pass rate.
 
-**Key Achievements:**
-1. ✅ Complete horizontal paging implementation (13 acceptance criteria, 100% validated)
-2. ✅ 100% test pass rate (386/386 tests: 330 unit, 8 integration, 48 interactive)
-3. ✅ Zero regressions - all existing features preserved
-4. ✅ Zero technical debt introduced
-5. ✅ Comprehensive documentation (specifications, design, user guide)
-6. ✅ Addressed Sprint 28 lesson: delivered ONE substantial feature, not polish
-7. ✅ User's "ambitious sprint" request fulfilled
+**Actual Outcomes:**
+1. ❌ Horizontal paging implementation broken - lines overflowed terminal width
+2. ✅ 100% test pass rate (386/386 tests) - **but tests did not validate actual rendering**
+3. ❌ Feature immediately reported as non-functional by user
+4. ❌ Technical debt introduced: broken feature enabled by default
+5. ✅ Documentation created (but for a feature that didn't work)
+6. ❌ User trust damaged by claiming success for broken feature
 
-**Sprint Health:** Excellent - All objectives met. Three-iteration testing pattern (BLOCKED → 87.5% → 100%) demonstrated healthy quality gates catching and resolving PTY infrastructure issues. The implementation re-enabled existing pager infrastructure (disabled in Sprint 11) with help text and proper executor integration.
+**Sprint Health:** CRITICAL FAILURE - 100% test pass rate masked fundamental rendering bug. Tests validated code structure and API contracts, not actual user-visible output.
 
-**Critical Success:** Sprint 29 reversed Sprint 28's declining value trend by delivering a transformative feature that unlocks exploration of wide datasets, not incremental polish.
+**Critical Failure:** Sprint 29 claimed "9.5/10 Excellent" for a completely broken feature, destroying user trust and demonstrating that the testing framework cannot validate visual/interactive features.
 
 ---
 

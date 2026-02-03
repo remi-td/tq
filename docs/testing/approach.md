@@ -365,11 +365,133 @@ Evaluate test quality by:
 - **Clarity**: Tests should be readable without comments
 - **Coverage**: Validate user-critical paths
 
+## Testing Limitations by Feature Type
+
+### The Fundamental Gap: Sprint 29/30 Post-Mortem
+
+Two consecutive sprints achieved 100% test pass rates while delivering completely broken pager functionality:
+
+| Sprint | Tests Passed | Feature Status | User Assessment |
+|--------|--------------|----------------|-----------------|
+| Sprint 29 | 386/386 (100%) | Broken | "absolutely not working" |
+| Sprint 30 | 449/449 (100%) | Still broken | "exact same issue" |
+
+**Root Cause Analysis:**
+
+Tests validated:
+- API contracts (compile-time verification)
+- Configuration management
+- Logic flow and branching
+- Data structure integrity
+
+Tests did NOT validate:
+- Actual rendered output width
+- Visual alignment in real terminal
+- Alternate screen buffer content
+- User-perceived functionality
+
+### Feature Types and Their Testing Limitations
+
+#### Type 1: Pure Logic (Full Automated Coverage Possible)
+
+Features: Parsing, calculations, data transformations, business rules
+
+**Limitations:** None - automated tests can fully validate
+
+**Example:** Connection string parsing, SQL formatting
+
+#### Type 2: I/O-Based (Partial Automated Coverage)
+
+Features: File operations, network calls, database queries
+
+**Limitations:**
+- Environment-dependent behavior
+- Timing and timeout variations
+- Network/disk failure scenarios
+
+**Mitigation:** Integration tests with real dependencies + edge case mocking
+
+#### Type 3: Terminal Output (Limited Automated Coverage)
+
+Features: Table formatting, colored output, progress indicators
+
+**Limitations:**
+- ANSI escape sequences not captured in test output
+- Terminal width effects not reproducible
+- Visual alignment not verifiable
+
+**Mitigation:** Integration tests for content + **manual visual verification**
+
+#### Type 4: Interactive/Alternate Screen (Minimal Automated Coverage)
+
+Features: Pager, full-screen modes, interactive navigation
+
+**Limitations:**
+- Alternate screen buffer invisible to test framework
+- PTY timing differs from real terminal
+- User interaction sequences not reproducible
+- Terminal resize behavior untestable
+
+**Mitigation:** Limited PTY tests for state changes + **MANDATORY manual validation**
+
+### Testing Strategy by Limitation Type
+
+#### For Type 4 Features (Interactive/Alternate Screen)
+
+**DO NOT:**
+- Trust 100% test pass rate as proof of functionality
+- Build more test infrastructure when tests cannot capture output
+- Claim feature works without manual terminal verification
+
+**DO:**
+- Use automated tests for what they CAN validate (state changes, API contracts)
+- Require manual validation at multiple terminal widths (80, 117, 120, 160)
+- Capture manual test evidence with `script` command
+- Block sprint closure until manual validation passes
+
+#### Validation Checklist for Type 4 Features
+
+Before claiming a Type 4 feature is complete:
+
+- [ ] Automated tests pass (necessary but not sufficient)
+- [ ] Manual test at 80 char terminal width
+- [ ] Manual test at 117 char terminal width (user-reported problematic width)
+- [ ] Manual test at 120 char terminal width
+- [ ] Manual test at 160 char terminal width
+- [ ] Evidence captured (script output or screenshots)
+- [ ] Human verification that output is correct
+
+### Test Infrastructure Reality Check
+
+**Sprint 30 Track 3 Infrastructure:**
+- 1,552 lines of test utilities (visual_validator.rs, terminal_simulator.rs)
+- 92 utility tests (all passing)
+- 28 dimensional tests (all passing)
+- **Bugs caught:** Zero
+- **Rendering issues detected:** Zero
+
+**Lesson:** More test infrastructure does not equal better validation when the fundamental problem is that tests cannot capture the output being validated.
+
+### The "Can We Actually Test This?" Question
+
+Before building test infrastructure, ask:
+
+1. **Can automated tests capture the actual user-visible output?**
+   - If NO: Manual validation is required, not more test code
+
+2. **Would a passing test prove the feature works from user perspective?**
+   - If NO: The test validates the wrong thing
+
+3. **Has this type of feature failed in the past despite tests passing?**
+   - If YES: Previous approach was wrong, need different strategy
+
 ## Continuous Integration
 
 Tests run automatically:
 - **On every commit**: Unit tests and fast integration tests
 - **On PR**: Full test suite including interactive tests
 - **Nightly**: Extended integration tests with real database
+
+**Note:** CI test pass rate is necessary but NOT sufficient for visual/interactive features. Manual validation gates must be passed before sprint closure.
 
 See `.github/workflows/` for CI configuration.
