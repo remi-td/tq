@@ -1,7 +1,7 @@
 # Feature Backlog
 
-**Last Updated:** 2026-01-30
-**Next Sprint:** Sprint 30
+**Last Updated:** 2026-02-03
+**Next Sprint:** Sprint 34
 
 ---
 
@@ -95,12 +95,6 @@ No P0 features currently in backlog. All critical features have been implemented
 - Spec: [Configuration - Validation](../specifications/configuration.md#validation)
 
 ### REPL Enhancements
-
-**Data Sampling Commands**
-- `/sample <table> [n]` - Show random sample of rows
-- `/peek <table>` - Show first 5 rows with column info
-- Quick data exploration without writing SQL
-- Spec: [REPL Mode - Data Sampling](../specifications/repl.md#data-sampling)
 
 **Query Editing**
 - `/edit` - Open last query in $EDITOR

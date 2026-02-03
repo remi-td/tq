@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-02-03
-**Current Version:** 1.14.0
-**Latest Sprint:** Sprint 32 Complete (Content-Based Column Width + GitHub README Fix)
+**Current Version:** 1.15.0
+**Latest Sprint:** Sprint 33 Complete (Pager Bug Fix + Data Sampling Commands)
 
 ---
 
@@ -176,6 +176,16 @@ All core features are complete and tested.
 - Documentation updates: Specifications, design, user guides
 - Sprint 31 lessons applied: Type 4 classification, manual validation protocol
 
+**Sprint 33 Features (v1.15.0):**
+- **Pager bug fix** (Issue #14): Fixed Unicode width mismatch causing garbled output
+- **Pager disabled by default**: User protection from rendering issues (opt-in with `/pager on`)
+- **Data sampling commands**: `/sample` and `/peek` for fast data exploration
+- **Random sampling**: `/sample <table> [n]` with Teradata SAMPLE clause (default 10, max 1000 rows)
+- **Table preview**: `/peek <table>` shows first 5 rows + column metadata
+- **Batch mode integration**: `tq sample` and `tq peek` CLI commands
+- **Tab completion**: Data sampling commands in metacommand completion menu
+- 22 new unit tests, 471 total tests (100% pass rate)
+
 ---
 
 ## Batch Mode
@@ -238,14 +248,29 @@ All core features are complete and tested.
 
 ---
 
+## Data Sampling
+
+| Feature | Status | Spec Reference | Since |
+|---------|--------|----------------|-------|
+| `/sample` command (REPL) | ✅ | [REPL Mode](../specifications/repl.md#data-sampling) | v1.15.0 (Sprint 33) |
+| `/peek` command (REPL) | ✅ | [REPL Mode](../specifications/repl.md#data-sampling) | v1.15.0 (Sprint 33) |
+| `tq sample` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#sample-command) | v1.15.0 (Sprint 33) |
+| `tq peek` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#peek-command) | v1.15.0 (Sprint 33) |
+| Random sampling (SAMPLE clause) | ✅ | [REPL Mode](../specifications/repl.md#data-sampling) | v1.15.0 (Sprint 33) |
+| Column metadata display | ✅ | [REPL Mode](../specifications/repl.md#data-sampling) | v1.15.0 (Sprint 33) |
+| Qualified name support | ✅ | [REPL Mode](../specifications/repl.md#data-sampling) | v1.15.0 (Sprint 33) |
+| Tab completion integration | ✅ | [REPL Mode](../specifications/repl.md#data-sampling) | v1.15.0 (Sprint 33) |
+
+---
+
 ## Summary Statistics
 
-- **Total Features**: 63
-- **Implemented**: 58 (92%)
-- **Planned**: 5 (8%)
-- **Test Pass Rate**: 100% (394/394 tests: 355 unit, 39 integration)
+- **Total Features**: 71
+- **Implemented**: 66 (93%)
+- **Planned**: 5 (7%)
+- **Test Pass Rate**: 100% (471/471 tests: 384 unit, 39 integration, 48 interactive)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 32 - Content-Based Column Width + GitHub README Fix
+- **Latest Sprint**: Sprint 33 - Pager Bug Fix + Data Sampling Commands
 
 ---
 
