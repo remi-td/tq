@@ -210,7 +210,7 @@ cargo test --test integration_tests test_readme
 
 ## Test Case Files Location
 
-All test case files are located in `/Users/remi.turpaud/Code/genAI/tq/tests/cases/`
+All test case files are located in `tests/cases/`
 
 ### Bug Fix Test Cases
 - `TC-SESS-BUG-001.md`

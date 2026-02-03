@@ -357,23 +357,23 @@ If Option A is chosen, sprint coordinator MUST personally complete manual valida
 
 ### Sprint Planning and Strategy
 
-- `/Users/remi.turpaud/Code/genAI/tq/docs/sprints/sprint-31-planning.md`
-- `/Users/remi.turpaud/Code/genAI/tq/docs/sprints/sprint-31-test-strategy.md`
+- `docs/sprints/sprint-31-planning.md`
+- `docs/sprints/sprint-31-test-strategy.md`
 
 ### Design
 
-- `/Users/remi.turpaud/Code/genAI/tq/docs/design/sprint-31-pager-resolution.md`
+- `docs/design/sprint-31-pager-resolution.md`
 
 ### Historical Context
 
-- `/Users/remi.turpaud/Code/genAI/tq/docs/sprints/sprint-29-review.md` (needs update)
-- `/Users/remi.turpaud/Code/genAI/tq/docs/sprints/sprint-30-review.md` (honest assessment template)
+- `docs/sprints/sprint-29-review.md` (needs update)
+- `docs/sprints/sprint-30-review.md` (honest assessment template)
 
 ### Testing Documentation
 
-- `/Users/remi.turpaud/Code/genAI/tq/docs/testing/philosophy.md` (needs update)
-- `/Users/remi.turpaud/Code/genAI/tq/docs/testing/approach.md` (current)
-- `/Users/remi.turpaud/Code/genAI/tq/docs/testing/execution.md` (needs update)
+- `docs/testing/philosophy.md` (needs update)
+- `docs/testing/approach.md` (current)
+- `docs/testing/execution.md` (needs update)
 
 ---
 

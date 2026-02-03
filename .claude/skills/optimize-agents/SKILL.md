@@ -131,7 +131,7 @@ Read subagent transcripts to identify clarifying questions:
 
 ```bash
 # Find most recent subagent transcript
-transcript=$(ls -t ~/.claude/projects/-Users-remi-turpaud-Code-genAI-tq/*/subagents/*.jsonl | head -1)
+transcript=$(ls -t ~/.claude/projects/<PROJECT>/*/subagents/*.jsonl | head -1)
 
 # Search for question patterns
 jq -r 'select(.message.content) | .message.content[] | select(.type == "text") | .text' "$transcript" | grep -E "What is|How do I|Where should|Should I" | head -10
@@ -148,7 +148,7 @@ Analyze tool usage in transcripts:
 
 ```bash
 # Count Read operations per file
-transcript=$(ls -t ~/.claude/projects/-Users-remi-turpaud-Code-genAI-tq/*/subagents/agent-*.jsonl | head -1)
+transcript=$(ls -t ~/.claude/projects/<PROJECT>/*/subagents/agent-*.jsonl | head -1)
 
 jq -r 'select(.message.content) | .message.content[] | select(.type == "tool_use" and .name == "Read") | .input.file_path' "$transcript" | sort | uniq -c | sort -rn | head -10
 ```

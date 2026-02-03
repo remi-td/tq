@@ -299,7 +299,7 @@ Per `docs/testing/philosophy.md` line 298:
 
 ## Test Case Files
 
-All test case files located in: `/Users/remi.turpaud/Code/genAI/tq/tests/cases/`
+All test case files located in: `tests/cases/`
 
 **Unit Tests:**
 - `TC-032-001.md` - Content-based width calculation

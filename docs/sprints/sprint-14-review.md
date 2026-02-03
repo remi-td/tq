@@ -73,7 +73,7 @@ Sprint 14 successfully resolved a critical quality infrastructure crisis identif
 **Impact:** Future developers (human or AI) have clear guidance on writing tests for REPL features.
 
 **Files created:**
-- `/Users/remi.turpaud/Code/genAI/tq/tests/README.md` (NEW, 350 lines)
+- `tests/README.md` (NEW, 350 lines)
 
 **Time invested:** ~2 hours (Architect)
 
@@ -116,9 +116,9 @@ Sprint 14 successfully resolved a critical quality infrastructure crisis identif
 - Clear test type decision tree (when to use unit vs integration vs interactive)
 
 **Files created/updated:**
-- `/Users/remi.turpaud/Code/genAI/tq/docs/builder/definitions/done.md` (NEW, 350 lines)
-- `/Users/remi.turpaud/Code/genAI/tq/docs/builder/testing-checklist.md` (NEW, 450 lines)
-- `/Users/remi.turpaud/Code/genAI/tq/docs/builder/testing-guidelines.md` (UPDATED, +200 lines)
+- `docs/builder/definitions/done.md` (NEW, 350 lines)
+- `docs/builder/testing-checklist.md` (NEW, 450 lines)
+- `docs/builder/testing-guidelines.md` (UPDATED, +200 lines)
 
 **Time invested:** ~3 hours (UX Designer)
 

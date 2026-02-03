@@ -319,7 +319,7 @@ cargo bench table_formatting
 
 **Test Case Documents:**
 ```
-/Users/remi.turpaud/Code/genAI/tq/tests/cases/
+tests/cases/
 ├── TC-032-001.md  (Unit: Content-based width calculation)
 ├── TC-032-002.md  (Unit: Max width cap)
 ├── TC-032-003.md  (Unit: NULL handling)
@@ -335,13 +335,13 @@ cargo bench table_formatting
 
 **Test Strategy:**
 ```
-/Users/remi.turpaud/Code/genAI/tq/tests/strategy/
+tests/strategy/
 └── sprint-32-test-strategy.md  (Comprehensive strategy document)
 ```
 
 **Test Results (to be created during execution):**
 ```
-/Users/remi.turpaud/Code/genAI/tq/tests/results/sprint-32/
+tests/results/sprint-32/
 ├── REPORT.md  (quality-validator test execution report)
 └── manual-validation/
     ├── test-117.txt  (PRIMARY TEST evidence)

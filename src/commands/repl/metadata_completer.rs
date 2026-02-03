@@ -289,6 +289,17 @@ const METACOMMANDS: &[MetacommandDef] = &[
         aliases: &["s"],
         description: "List active sessions with performance metrics",
     },
+    // Sprint 33: Data sampling commands
+    MetacommandDef {
+        name: "sample",
+        aliases: &[],
+        description: "Random sample rows from table",
+    },
+    MetacommandDef {
+        name: "peek",
+        aliases: &[],
+        description: "Preview first rows and column metadata",
+    },
 ];
 
 /// Complete metacommands based on user input prefix
@@ -1107,5 +1118,33 @@ mod tests {
         let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
         // /s should match /sessions (which has alias /s), /session, and /sample
         assert!(values.contains(&"/sessions"));
+        assert!(values.contains(&"/session"));
+        assert!(values.contains(&"/sample"));
+    }
+
+    // Sprint 33: Tests for data sampling commands tab completion
+    #[test]
+    fn test_complete_metacommands_sample() {
+        let suggestions = complete_metacommands("sam", 0, 4);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].value, "/sample");
+        assert!(suggestions[0].description.as_ref().unwrap().contains("Random"));
+    }
+
+    #[test]
+    fn test_complete_metacommands_peek() {
+        let suggestions = complete_metacommands("pee", 0, 4);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].value, "/peek");
+        assert!(suggestions[0].description.as_ref().unwrap().contains("Preview"));
+    }
+
+    #[test]
+    fn test_complete_metacommands_p_shows_peek_and_pager_and_ping() {
+        let suggestions = complete_metacommands("p", 0, 2);
+        let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
+        assert!(values.contains(&"/peek"));
+        assert!(values.contains(&"/pager"));
+        assert!(values.contains(&"/ping"));
     }
 }

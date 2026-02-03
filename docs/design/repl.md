@@ -3209,6 +3209,415 @@ eprintln!("build.rs: Copied {} to {}", lib_name, lib_dest.display());
 
 ---
 
+## Sprint 33: Pager Bug Fix and Data Sampling Commands
+
+This section documents the technical design for Sprint 33, which addresses the pager rendering bug (Issue #14) and implements data sampling commands (`/sample`, `/peek`).
+
+### Pager Bug Fix - Root Cause Analysis
+
+**GitHub Issue:** #14 - [BUG] Pager broken and on by default
+
+**Problem Statement:** Despite Sprint 31's two-pass truncation fix, the pager still produces garbled output with misaligned columns and improper line breaks.
+
+#### Root Cause #1: format! Width Specifier Uses Character Count, Not Display Width
+
+The pager's cell rendering uses Rust's `format!` macro with width specifier:
+
+```rust
+// Current code (render_row, lines 512-516)
+let padded = match col.alignment {
+    Alignment::Right => format!(" {:>width$} ", value, width = col.display_width),
+    Alignment::Center => format!(" {:^width$} ", value, width = col.display_width),
+    Alignment::Left => format!(" {:width$} ", value, width = col.display_width),
+};
+```
+
+**The Bug:** `format!` pads to `width` **characters**, not `width` display columns. But `display_width` was calculated using `UnicodeWidthStr::width()` which returns **visual width**.
+
+**For ASCII data:** This works because character count equals visual width.
+
+**For wide characters (CJK, emoji):** This creates misalignment:
+- "日本" has 2 chars but 4 visual width
+- `format!("{:10}", "日本")` adds 8 spaces (to reach 10 chars)
+- Result: 4 visual + 8 spaces = 12 visual width (expected 10)
+
+**Demonstration:**
+```
+ASCII "aaaaa" (5 chars, 5 visual) padded to 10:
+"aaaaa     " = 10 visual width (correct)
+
+CJK "日本語" (3 chars, 6 visual) padded to 10:
+"日本語       " = 13 visual width (WRONG - expected 10)
+```
+
+**Fix:** Replace `format!` width specifier with manual display-width-aware padding:
+
+```rust
+/// Pad a string to the specified display width
+fn pad_to_display_width(value: &str, width: usize, alignment: Alignment) -> String {
+    let visual_width = UnicodeWidthStr::width(value);
+    let padding = width.saturating_sub(visual_width);
+    match alignment {
+        Alignment::Left => format!(" {}{} ", value, " ".repeat(padding)),
+        Alignment::Right => format!(" {}{} ", " ".repeat(padding), value),
+        Alignment::Center => {
+            let left = padding / 2;
+            let right = padding - left;
+            format!(" {}{}{} ", " ".repeat(left), value, " ".repeat(right))
+        }
+    }
+}
+```
+
+#### Root Cause #2: Event Loop Bug
+
+The `run()` method has a bug where it calls `event::read()` twice after a single `event::poll()`:
+
+```rust
+// Current code (run, lines 916-928) - BUGGY
+if event::poll(std::time::Duration::from_millis(100))? {
+    if let Event::Key(key) = event::read()? {
+        // handle key...
+    }
+    if let Event::Resize(w, h) = event::read().unwrap_or(Event::FocusGained) {
+        // handle resize...
+    }
+}
+```
+
+After `poll()` returns true, there's only ONE event in the queue. The second `event::read()` either blocks or fails.
+
+**Fix:** Use a single `match` statement:
+
+```rust
+// Fixed code
+if event::poll(std::time::Duration::from_millis(100))? {
+    match event::read()? {
+        Event::Key(key) => {
+            if !self.handle_key(key)? {
+                break;
+            }
+            self.render()?;
+        }
+        Event::Resize(w, h) => {
+            self.term_width = w as usize;
+            self.term_height = h as usize;
+            self.page_size = self.term_height.saturating_sub(5);
+            self.render()?;
+        }
+        _ => {}
+    }
+}
+```
+
+#### Why Tests Passed But Real Data Failed
+
+1. **Tests use ASCII-only data** where character count equals visual width
+2. **Tests use `render_to_buffer()`** which doesn't involve actual terminal rendering
+3. **Tests mock terminal width** rather than using real terminal detection
+4. **Real Teradata data** may contain non-ASCII characters or data patterns that expose the width mismatch
+
+#### Mitigation Strategy
+
+1. **Immediate:** Disable pager by default (`pager_enabled: false` in state.rs)
+2. **Fix #1:** Implement display-width-aware padding function
+3. **Fix #2:** Correct the event loop bug
+4. **Testing:** Add tests with Unicode/CJK data to catch width calculation issues
+5. **User option:** Users can still enable pager with `/pager on` if desired
+
+#### Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/commands/repl/state.rs` | Set `pager_enabled: false` |
+| `src/commands/repl/pager.rs` | Add `pad_to_display_width()` function |
+| `src/commands/repl/pager.rs` | Update `render_row()` to use new padding |
+| `src/commands/repl/pager.rs` | Update `render_header()` to use new padding |
+| `src/commands/repl/pager.rs` | Fix event loop in `run()` |
+| `src/commands/repl/pager.rs` | Add Unicode width tests |
+
+---
+
+### Data Sampling Commands Design
+
+**Related Specification:** `docs/specifications/repl.md#data-sampling-commands` (REQ-SAMPLE-001 through REQ-SAMPLE-015)
+
+#### Overview
+
+Data sampling commands (`/sample` and `/peek`) provide fast exploratory data analysis without writing full SQL queries. They target data analysts and DBAs who need quick table inspection during REPL sessions.
+
+| Command | Purpose | SQL Generated |
+|---------|---------|---------------|
+| `/sample <table> [n]` | Random sample (default 10 rows) | `SELECT * FROM <table> SAMPLE <n>` |
+| `/peek <table>` | First 5 rows + column info | `SELECT TOP 5 * FROM <table>` |
+
+#### Architecture
+
+```
+User Input: /sample employees 20
+       │
+       v
+Metacommand Parser (mod.rs)
+       │
+       v
+SampleCommand::execute()
+       │
+       ├─→ Parse arguments (table name, optional count)
+       │
+       ├─→ Validate table name (qualified or unqualified)
+       │
+       ├─→ Validate sample size (1-1000)
+       │
+       ├─→ Generate SQL: SELECT * FROM employees SAMPLE 20
+       │
+       ├─→ Execute query via connection
+       │
+       ├─→ Format result (table/csv/json based on current format)
+       │
+       └─→ Display with header/footer
+```
+
+#### Implementation Location
+
+```
+src/commands/repl/
+├── mod.rs              # Add /sample and /peek to metacommand dispatch
+├── metacommands.rs     # Implement SampleCommand and PeekCommand
+└── executor.rs         # Reuse existing query execution infrastructure
+```
+
+#### SampleCommand Implementation
+
+```rust
+/// /sample <table> [n] - Display random sample of rows
+pub fn handle_sample(
+    args: &str,
+    conn: &mut Connection,
+    state: &mut ReplState,
+) -> Result<MetacommandResult, Box<dyn std::error::Error + Send + Sync>> {
+    // Parse arguments
+    let parts: Vec<&str> = args.split_whitespace().collect();
+    if parts.is_empty() {
+        return Err("Usage: /sample <table> [n]\nExample: /sample employees 20".into());
+    }
+
+    let table_name = parts[0];
+    let sample_size: usize = parts.get(1)
+        .map(|s| s.parse())
+        .transpose()?
+        .unwrap_or(10);
+
+    // Validate sample size (REQ-SAMPLE-003)
+    if sample_size == 0 || sample_size > 1000 {
+        return Err(format!(
+            "Sample size must be between 1 and 1000 (got {})\n\
+             Example: /sample {} 100",
+            sample_size, table_name
+        ).into());
+    }
+
+    // Resolve qualified table name (REQ-SAMPLE-005)
+    let qualified_name = resolve_table_name(table_name, state)?;
+
+    // Generate and execute SQL (REQ-SAMPLE-002)
+    let sql = format!("SELECT * FROM {} SAMPLE {}", qualified_name, sample_size);
+    let result = execute_query(conn, &sql)?;
+
+    // Display with header (REQ-SAMPLE-014)
+    println!("\nRandom sample from {} ({} rows):", qualified_name, result.row_count);
+    display_result(&result, state)?;
+    println!("{} rows sampled (Query time: {:.3}s)",
+             result.row_count,
+             result.execution_time.as_secs_f64());
+
+    Ok(MetacommandResult::Continue)
+}
+```
+
+#### PeekCommand Implementation
+
+```rust
+/// /peek <table> - Display first 5 rows with column metadata
+pub fn handle_peek(
+    args: &str,
+    conn: &mut Connection,
+    state: &mut ReplState,
+) -> Result<MetacommandResult, Box<dyn std::error::Error + Send + Sync>> {
+    let table_name = args.trim();
+    if table_name.is_empty() {
+        return Err("Usage: /peek <table>\nExample: /peek employees".into());
+    }
+
+    // Resolve qualified table name
+    let qualified_name = resolve_table_name(table_name, state)?;
+
+    // Display column metadata (REQ-SAMPLE-004.3, 004.4)
+    println!("\nTable: {}", qualified_name);
+
+    // Fetch and display column info (reuse /describe infrastructure)
+    let column_info = fetch_column_metadata(conn, &qualified_name)?;
+    display_column_metadata(&column_info)?;
+
+    // Fetch first 5 rows (REQ-SAMPLE-004.1, 004.2)
+    let sql = format!("SELECT TOP 5 * FROM {}", qualified_name);
+    let result = execute_query(conn, &sql)?;
+
+    if result.row_count == 0 {
+        println!("\nTable is empty");
+    } else {
+        println!("\nFirst {} rows:", result.row_count);
+        display_result(&result, state)?;
+    }
+
+    println!("(Query time: {:.3}s)", result.execution_time.as_secs_f64());
+
+    Ok(MetacommandResult::Continue)
+}
+```
+
+#### Table Name Resolution
+
+```rust
+/// Resolve table name to fully qualified form
+fn resolve_table_name(
+    name: &str,
+    state: &ReplState
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    if name.contains('.') {
+        // Already qualified: database.table
+        Ok(name.to_string())
+    } else {
+        // Need current database
+        let current_db = state.connection_info().database.clone();
+        if current_db.is_empty() {
+            return Err(format!(
+                "No current database. Use qualified name: /sample DATABASE.{}",
+                name
+            ).into());
+        }
+        Ok(format!("{}.{}", current_db, name))
+    }
+}
+```
+
+#### Tab Completion Integration (REQ-SAMPLE-009)
+
+Add to `MetadataCompleter`:
+
+```rust
+// In metadata_completer.rs
+
+fn complete_metacommand_args(&self, cmd: &str, partial: &str) -> Vec<Suggestion> {
+    match cmd {
+        "/sample" | "/peek" => {
+            // Complete table names from current database
+            self.complete_table_names(partial)
+        }
+        _ => vec![]
+    }
+}
+```
+
+#### Help Text Integration (REQ-SAMPLE-010)
+
+Add to metacommand help:
+
+```rust
+MetacommandDef {
+    name: "sample",
+    aliases: &[],
+    description: "Show random sample of rows from table"
+},
+MetacommandDef {
+    name: "peek",
+    aliases: &[],
+    description: "Show first 5 rows and column info"
+},
+```
+
+#### Batch Mode Integration (REQ-SAMPLE-011)
+
+Add subcommands to CLI:
+
+```rust
+// In cli.rs
+#[derive(Subcommand)]
+pub enum Commands {
+    // ... existing commands ...
+
+    /// Show random sample of rows from table
+    Sample {
+        /// Table name (database.table or table)
+        table: String,
+        /// Number of rows to sample (default: 10, max: 1000)
+        #[arg(default_value = "10")]
+        count: usize,
+    },
+
+    /// Show first rows and column info
+    Peek {
+        /// Table name (database.table or table)
+        table: String,
+    },
+}
+```
+
+#### Error Handling (REQ-SAMPLE-006, 007)
+
+```rust
+/// Handle sampling errors with user-friendly messages
+fn handle_sample_error(
+    err: &TeradataError,
+    table_name: &str
+) -> String {
+    match err.code() {
+        Some(3807) => format!(
+            "Table '{}' not found.\n\
+             Use /list tables to see available tables.",
+            table_name
+        ),
+        Some(3523) => format!(
+            "Permission denied on '{}'.\n\
+             You need SELECT privilege on this table.\n\
+             Contact your DBA or try: GRANT SELECT ON {} TO <your_user>;",
+            table_name, table_name
+        ),
+        _ => format!("Error sampling '{}': {}", table_name, err)
+    }
+}
+```
+
+#### Code Linkage
+
+| Component | Location | Function |
+|-----------|----------|----------|
+| Metacommand dispatch | `mod.rs` | Add `/sample`, `/peek` to match |
+| Sample handler | `metacommands.rs` | `handle_sample()` |
+| Peek handler | `metacommands.rs` | `handle_peek()` |
+| Table resolution | `metacommands.rs` | `resolve_table_name()` |
+| Tab completion | `metadata_completer.rs` | `complete_metacommand_args()` |
+| Batch commands | `cli.rs` | `Commands::Sample`, `Commands::Peek` |
+| Batch handlers | `main.rs` | Route to new command handlers |
+
+#### Design Trade-offs
+
+**Sample vs. Random Selection:**
+- Using `SAMPLE n` instead of `ORDER BY RANDOM() LIMIT n`
+- SAMPLE is Teradata-specific but much more efficient (no sort)
+- Non-deterministic: each execution may return different rows
+
+**Peek Row Count:**
+- Fixed at 5 rows (not configurable) per spec
+- Rationale: `/peek` is for quick inspection, use `/sample` for more rows
+- Reduces complexity and user confusion
+
+**Column Metadata Display:**
+- Reuses `/describe` infrastructure for column info
+- Displayed before data rows for context
+- Includes: name, type, nullable, precision (if applicable)
+
+---
+
 ## Future Enhancements
 
 - Query history search (Ctrl-R) - already supported by reedline

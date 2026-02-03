@@ -63,7 +63,7 @@ impl ReplState {
             last_result: None,
             last_sql: None,
             was_limited: false,
-            pager_enabled: true, // Sprint 31: Enabled by default (bug fixed)
+            pager_enabled: false, // Sprint 33: Disabled by default (Issue #14 - pager still broken)
             colors_enabled: atty::is(atty::Stream::Stdout), // Enable colors for TTY
             metadata_cache: MetadataCache::new(database),
             connection_string: None,
@@ -391,5 +391,18 @@ mod tests {
         // Clear should not panic even if cache is empty
         state.clear_metadata_cache();
         assert!(!state.metadata_cache().has_tables());
+    }
+
+    /// Sprint 33: Pager must be disabled by default (Issue #14)
+    #[test]
+    fn test_pager_disabled_by_default() {
+        let config = create_test_config();
+        let state = ReplState::new(config);
+
+        // Pager should be DISABLED by default to protect users from rendering bugs
+        assert!(
+            !state.is_pager_enabled(),
+            "Pager must be disabled by default (Issue #14)"
+        );
     }
 }

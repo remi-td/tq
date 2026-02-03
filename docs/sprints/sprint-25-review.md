@@ -93,7 +93,7 @@ Two features implemented with excellent quality and professional execution.
 **Approach:** File deletion with cross-reference verification
 
 **Implementation:**
-- Deleted `/Users/remi.turpaud/Code/genAI/tq/docs/user/roadmap.md` (336 lines)
+- Deleted `docs/user/roadmap.md` (336 lines)
 - Verified single source of truth at `docs/roadmap/roadmap.md`
 - Confirmed zero broken links in production documentation
 - Historical references appropriately preserved in sprint planning documents

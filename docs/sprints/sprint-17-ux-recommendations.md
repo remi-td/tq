@@ -23,7 +23,7 @@ Sprint 17 features are production-ready with exceptional UX quality. Recommendat
 
 **Action:** Mark Sprint 17 features as ✅📝 Implemented and tested
 
-**Location:** `/Users/remi.turpaud/Code/genAI/tq/docs/builder/specifications.md`
+**Location:** `docs/builder/specifications.md`
 
 **Change:**
 ```diff
@@ -53,7 +53,7 @@ Sprint 17 features are production-ready with exceptional UX quality. Recommendat
 
 **Action:** Sync specification with actual implementation
 
-**Location:** `/Users/remi.turpaud/Code/genAI/tq/docs/builder/detailed-specifications/cli-interface.md`
+**Location:** `docs/builder/detailed-specifications/cli-interface.md`
 
 #### Change 1: Help Command Error Format (§4.4.1, lines 93-96)
 

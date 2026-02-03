@@ -39,7 +39,7 @@ Comprehensive test case design for Sprint 10 (Batch Mode Foundation) has been co
 
 **Total:** 1,500+ lines of detailed test specifications
 
-**Location:** `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC066.md` through `TC070.md`
+**Location:** `tests/cases/TC066.md` through `TC070.md`
 
 ---
 
@@ -519,15 +519,15 @@ Sprint 10 testing is complete when:
 ## Files Delivered
 
 ### Test Case Documents
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC066.md` - stdin with echo
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC067.md` - File input
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC068.md` - stdin with heredoc
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC069.md` - Multiple statements
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC070.md` - Error handling
+- `tests/cases/TC066.md` - stdin with echo
+- `tests/cases/TC067.md` - File input
+- `tests/cases/TC068.md` - stdin with heredoc
+- `tests/cases/TC069.md` - Multiple statements
+- `tests/cases/TC070.md` - Error handling
 
 ### Planning Documents
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/SPRINT10-TEST-PLAN.md` - Comprehensive test plan
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/SPRINT10-TEST-SUMMARY.md` - This document
+- `tests/cases/SPRINT10-TEST-PLAN.md` - Comprehensive test plan
+- `tests/cases/SPRINT10-TEST-SUMMARY.md` - This document
 
 **Total Documentation:** ~3,000 lines of test specifications and planning
 

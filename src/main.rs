@@ -108,6 +108,32 @@ fn run(cli: Cli) -> Result<()> {
                 commands::sessions(&client, &args, &mut stdout, use_color)?;
             }
         }
+        // Sprint 33: Sample command for random data sampling
+        Command::Sample(args) => {
+            if args.output.is_some() {
+                // Write to file
+                let file = std::fs::File::create(args.output.as_ref().unwrap())?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::sample(&client, &args, &mut writer, use_color)?;
+            } else {
+                // Write to stdout
+                let mut stdout = io::stdout();
+                commands::sample(&client, &args, &mut stdout, use_color)?;
+            }
+        }
+        // Sprint 33: Peek command for data preview with column metadata
+        Command::Peek(args) => {
+            if args.output.is_some() {
+                // Write to file
+                let file = std::fs::File::create(args.output.as_ref().unwrap())?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::peek(&client, &args, &mut writer, use_color)?;
+            } else {
+                // Write to stdout
+                let mut stdout = io::stdout();
+                commands::peek(&client, &args, &mut stdout, use_color)?;
+            }
+        }
         // Help and Profiles already handled above
         Command::Help(_) | Command::Profiles => unreachable!(),
     }

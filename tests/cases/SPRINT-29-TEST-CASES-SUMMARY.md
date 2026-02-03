@@ -13,28 +13,28 @@
 ### 1. Test Case Files Created (16 detailed files)
 
 **Unit Test Cases (10 files):**
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC-HORIZ-001.md` - Right arrow column offset increment
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC-HORIZ-002.md` - Left arrow column offset decrement
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC-HORIZ-003.md` - Hidden columns right calculation
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC-HORIZ-004.md` - Hidden columns left calculation
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC-HORIZ-005.md` - Status bar column range text
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC-HORIZ-006.md` - Vim h/l key handling
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC-HORIZ-007.md` - H key jump to first column
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC-HORIZ-008.md` - L key jump to last column
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC-HORIZ-009.md` - Column position preserved during vertical scroll
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC-HORIZ-010.md` - Visible column count calculation
+- `tests/cases/TC-HORIZ-001.md` - Right arrow column offset increment
+- `tests/cases/TC-HORIZ-002.md` - Left arrow column offset decrement
+- `tests/cases/TC-HORIZ-003.md` - Hidden columns right calculation
+- `tests/cases/TC-HORIZ-004.md` - Hidden columns left calculation
+- `tests/cases/TC-HORIZ-005.md` - Status bar column range text
+- `tests/cases/TC-HORIZ-006.md` - Vim h/l key handling
+- `tests/cases/TC-HORIZ-007.md` - H key jump to first column
+- `tests/cases/TC-HORIZ-008.md` - L key jump to last column
+- `tests/cases/TC-HORIZ-009.md` - Column position preserved during vertical scroll
+- `tests/cases/TC-HORIZ-010.md` - Visible column count calculation
 
 **Interactive Test Cases (6 files):**
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC-HORIZ-011.md` - Right arrow scrolls right (AC-1)
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC-HORIZ-012.md` - Left arrow scrolls left (AC-2)
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC-HORIZ-013.md` - Right column indicator display (AC-3)
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC-HORIZ-014.md` - Left column indicator display (AC-4)
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC-HORIZ-015.md` - Pager exit returns to REPL (AC-5)
-- `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC-HORIZ-016.md` - Status bar column range display (AC-6)
+- `tests/cases/TC-HORIZ-011.md` - Right arrow scrolls right (AC-1)
+- `tests/cases/TC-HORIZ-012.md` - Left arrow scrolls left (AC-2)
+- `tests/cases/TC-HORIZ-013.md` - Right column indicator display (AC-3)
+- `tests/cases/TC-HORIZ-014.md` - Left column indicator display (AC-4)
+- `tests/cases/TC-HORIZ-015.md` - Pager exit returns to REPL (AC-5)
+- `tests/cases/TC-HORIZ-016.md` - Status bar column range display (AC-6)
 
 ### 2. Test Index Created
 
-**File:** `/Users/remi.turpaud/Code/genAI/tq/tests/cases/INDEX-SPRINT-29.md`
+**File:** `tests/cases/INDEX-SPRINT-29.md`
 
 **Contents:**
 - Complete test case index (70 tests)
@@ -47,7 +47,7 @@
 
 ### 3. Remaining Test Specifications
 
-**File:** `/Users/remi.turpaud/Code/genAI/tq/tests/cases/TC-HORIZ-REMAINING.md`
+**File:** `tests/cases/TC-HORIZ-REMAINING.md`
 
 **Contents:**
 - Detailed specifications for 54 remaining test cases

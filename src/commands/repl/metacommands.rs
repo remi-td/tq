@@ -366,8 +366,18 @@ pub fn handle_metacommand_with_state<W: Write>(
         }
 
         // Sprint 26: Sessions command
-        "sessions" | "s" => {
+        "sessions" => {
             crate::commands::sessions::execute_for_repl(completion_state.client(), writer)?;
+        }
+
+        // Sprint 33: Data sampling commands
+        "sample" => {
+            let args_str = args.join(" ");
+            execute_sample(completion_state, &args_str, writer)?;
+        }
+        "peek" => {
+            let args_str = args.join(" ");
+            execute_peek(completion_state, &args_str, writer)?;
         }
 
         // Unknown command
@@ -422,10 +432,20 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "  /dt                    Shortcut for /list tables")?;
     writeln!(writer, "  /dv                    Shortcut for /list views")?;
     writeln!(writer)?;
+    writeln!(writer, "Data Exploration:")?;
+    writeln!(
+        writer,
+        "  /sample <table> [n]    Show random sample (default: 10, max: 1000)"
+    )?;
+    writeln!(
+        writer,
+        "  /peek <table>          Show first 5 rows with column info"
+    )?;
+    writeln!(writer)?;
     writeln!(writer, "System Monitoring:")?;
     writeln!(
         writer,
-        "  /sessions, /s          List active sessions with performance metrics"
+        "  /sessions              List active sessions with performance metrics"
     )?;
     writeln!(writer)?;
     writeln!(writer, "SQL Execution:")?;
@@ -1790,6 +1810,336 @@ fn export_sql<W: Write>(
     } else {
         // Output to stdout
         writeln!(writer, "{}", sql_content)?;
+    }
+
+    Ok(())
+}
+
+// =============================================================================
+// Sprint 33: Data Sampling Commands
+// =============================================================================
+
+/// Default sample size for /sample command
+const DEFAULT_SAMPLE_SIZE: usize = 10;
+
+/// Maximum sample size for /sample command (prevent accidental large queries)
+const MAX_SAMPLE_SIZE: usize = 1000;
+
+/// Execute the /sample metacommand (Sprint 33)
+///
+/// Shows a random sample of rows from the specified table using Teradata SAMPLE clause.
+///
+/// Usage: /sample <table> [n]
+///   - table: Table name (unqualified or database.table)
+///   - n: Number of rows to sample (default: 10, max: 1000)
+fn execute_sample<W: Write>(
+    completion_state: &mut CompletionState,
+    args: &str,
+    writer: &mut W,
+) -> Result<()> {
+    let args_trimmed = args.trim();
+    if args_trimmed.is_empty() {
+        writeln!(writer)?;
+        writeln!(writer, "Usage: /sample <table> [n]")?;
+        writeln!(writer)?;
+        writeln!(writer, "Show random sample of rows from a table.")?;
+        writeln!(writer)?;
+        writeln!(writer, "Arguments:")?;
+        writeln!(writer, "  table   Table name (or database.table)")?;
+        writeln!(writer, "  n       Number of rows (default: {}, max: {})", DEFAULT_SAMPLE_SIZE, MAX_SAMPLE_SIZE)?;
+        writeln!(writer)?;
+        writeln!(writer, "Examples:")?;
+        writeln!(writer, "  /sample employees        Sample 10 rows from employees")?;
+        writeln!(writer, "  /sample orders 50        Sample 50 rows from orders")?;
+        writeln!(writer, "  /sample prod.items 100   Sample from different database")?;
+        writeln!(writer)?;
+        return Ok(());
+    }
+
+    // Parse arguments: table_name [sample_size]
+    let parts: Vec<&str> = args_trimmed.split_whitespace().collect();
+    let table_name = parts[0];
+
+    // Parse sample size
+    let sample_size: usize = if parts.len() > 1 {
+        match parts[1].parse::<usize>() {
+            Ok(n) => n,
+            Err(_) => {
+                writeln!(writer)?;
+                writeln!(writer, "Error: Invalid sample size '{}'", parts[1])?;
+                writeln!(writer, "Sample size must be a positive integer between 1 and {}", MAX_SAMPLE_SIZE)?;
+                writeln!(writer)?;
+                writeln!(writer, "Example: /sample {} 50", table_name)?;
+                writeln!(writer)?;
+                return Ok(());
+            }
+        }
+    } else {
+        DEFAULT_SAMPLE_SIZE
+    };
+
+    // Validate sample size
+    if sample_size == 0 {
+        writeln!(writer)?;
+        writeln!(writer, "Error: Sample size must be at least 1")?;
+        writeln!(writer)?;
+        writeln!(writer, "Example: /sample {} {}", table_name, DEFAULT_SAMPLE_SIZE)?;
+        writeln!(writer)?;
+        return Ok(());
+    }
+
+    if sample_size > MAX_SAMPLE_SIZE {
+        writeln!(writer)?;
+        writeln!(writer, "Error: Sample size {} exceeds maximum ({})", sample_size, MAX_SAMPLE_SIZE)?;
+        writeln!(writer)?;
+        writeln!(writer, "For larger samples, use SQL directly:")?;
+        writeln!(writer, "  SELECT * FROM {} SAMPLE {};", table_name, sample_size)?;
+        writeln!(writer)?;
+        return Ok(());
+    }
+
+    // Resolve qualified table name
+    let qualified_name = resolve_table_name(table_name, completion_state);
+
+    // Generate SQL using Teradata SAMPLE clause
+    let sql = format!("SELECT * FROM {} SAMPLE {}", qualified_name, sample_size);
+
+    writeln!(writer)?;
+
+    // Execute query
+    let client = completion_state.client();
+    let start = Instant::now();
+
+    match client.execute(&sql) {
+        Ok(result) => {
+            let elapsed = start.elapsed();
+
+            // Display header
+            writeln!(writer, "Random sample from {} ({} rows):", qualified_name, result.row_count)?;
+            writeln!(writer)?;
+
+            // Format and display result
+            if result.row_count > 0 {
+                let formatted = format_as_table(&result)?;
+                writeln!(writer, "{}", formatted)?;
+            }
+
+            // Footer with timing
+            writeln!(writer)?;
+            writeln!(
+                writer,
+                "{} rows sampled from {} (Query time: {:.3}s)",
+                result.row_count,
+                table_name,
+                elapsed.as_secs_f64()
+            )?;
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+            handle_sample_error(&error_msg, &qualified_name, writer)?;
+        }
+    }
+
+    writeln!(writer)?;
+    Ok(())
+}
+
+/// Execute the /peek metacommand (Sprint 33)
+///
+/// Shows first 5 rows and column metadata for quick table inspection.
+///
+/// Usage: /peek <table>
+fn execute_peek<W: Write>(
+    completion_state: &mut CompletionState,
+    args: &str,
+    writer: &mut W,
+) -> Result<()> {
+    let table_name = args.trim();
+    if table_name.is_empty() {
+        writeln!(writer)?;
+        writeln!(writer, "Usage: /peek <table>")?;
+        writeln!(writer)?;
+        writeln!(writer, "Show first 5 rows and column info for quick table inspection.")?;
+        writeln!(writer)?;
+        writeln!(writer, "Examples:")?;
+        writeln!(writer, "  /peek employees        Preview employees table")?;
+        writeln!(writer, "  /peek prod.items       Preview table in different database")?;
+        writeln!(writer)?;
+        return Ok(());
+    }
+
+    // Resolve qualified table name
+    let qualified_name = resolve_table_name(table_name, completion_state);
+
+    writeln!(writer)?;
+    writeln!(writer, "Table: {}", qualified_name)?;
+    writeln!(writer)?;
+
+    let client = completion_state.client();
+
+    // First, get column metadata using the same approach as /describe
+    let (database, table) = parse_qualified_name(&qualified_name);
+
+    let columns_sql = if let Some(db) = database {
+        format!(
+            r#"SELECT TRIM(ColumnName) AS column_name,
+                      TRIM(ColumnType) AS column_type,
+                      Nullable,
+                      ColumnLength,
+                      DecimalTotalDigits,
+                      DecimalFractionalDigits
+               FROM DBC.ColumnsV
+               WHERE DatabaseName = '{}'
+                 AND TableName = '{}'
+               ORDER BY ColumnId"#,
+            escape_sql_string(db),
+            escape_sql_string(table)
+        )
+    } else {
+        format!(
+            r#"SELECT TRIM(ColumnName) AS column_name,
+                      TRIM(ColumnType) AS column_type,
+                      Nullable,
+                      ColumnLength,
+                      DecimalTotalDigits,
+                      DecimalFractionalDigits
+               FROM DBC.ColumnsV
+               WHERE TableName = '{}'
+                 AND DatabaseName = DATABASE
+               ORDER BY ColumnId"#,
+            escape_sql_string(table)
+        )
+    };
+
+    // Display column information
+    writeln!(writer, "Column Information:")?;
+    match client.execute(&columns_sql) {
+        Ok(columns_result) => {
+            if columns_result.row_count == 0 {
+                writeln!(writer, "  (no column information available)")?;
+            } else {
+                writeln!(writer, "{:<25} {:<20} {:<10} {:<15}", "Column", "Type", "Nullable", "Size")?;
+                writeln!(writer, "{}", "-".repeat(70))?;
+
+                for row in &columns_result.rows {
+                    let col_name = row.first().map(|v| v.display()).unwrap_or_default();
+                    let col_type = row.get(1).map(|v| v.display()).unwrap_or_default();
+                    let nullable = row.get(2)
+                        .map(|v| format_nullable(&v.display()))
+                        .unwrap_or_else(|| "YES".to_string());
+                    let col_length = row.get(3).map(|v| v.display()).unwrap_or_default();
+                    let size_str = if col_length == "[NULL]" || col_length.is_empty() {
+                        "-".to_string()
+                    } else {
+                        col_length
+                    };
+
+                    writeln!(
+                        writer,
+                        "{:<25} {:<20} {:<10} {:<15}",
+                        truncate_string(&col_name, 24),
+                        truncate_string(&col_type, 19),
+                        nullable,
+                        truncate_string(&size_str, 14)
+                    )?;
+                }
+            }
+        }
+        Err(e) => {
+            writeln!(writer, "  (error loading column info: {})", e)?;
+        }
+    }
+
+    writeln!(writer)?;
+
+    // Now fetch first 5 rows using TOP
+    let data_sql = format!("SELECT TOP 5 * FROM {}", qualified_name);
+    let start = Instant::now();
+
+    match client.execute(&data_sql) {
+        Ok(result) => {
+            let elapsed = start.elapsed();
+
+            if result.row_count == 0 {
+                writeln!(writer, "Table is empty (0 rows)")?;
+            } else {
+                writeln!(writer, "First {} rows:", result.row_count)?;
+                writeln!(writer)?;
+                let formatted = format_as_table(&result)?;
+                writeln!(writer, "{}", formatted)?;
+            }
+
+            writeln!(writer)?;
+            writeln!(writer, "(Query time: {:.3}s)", elapsed.as_secs_f64())?;
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+            handle_sample_error(&error_msg, &qualified_name, writer)?;
+        }
+    }
+
+    writeln!(writer)?;
+    Ok(())
+}
+
+/// Resolve a table name to fully qualified form (database.table)
+///
+/// If the table name already contains a dot, it's returned as-is.
+/// Otherwise, uses the current database from connection state.
+fn resolve_table_name(name: &str, state: &CompletionState) -> String {
+    if name.contains('.') {
+        // Already qualified
+        name.to_string()
+    } else {
+        // Use current database
+        let current_db = state.current_database();
+        if current_db.is_empty() {
+            // No current database, return unqualified (query will use session default)
+            name.to_string()
+        } else {
+            format!("{}.{}", current_db, name)
+        }
+    }
+}
+
+/// Parse a qualified name into (database, table) parts
+fn parse_qualified_name(name: &str) -> (Option<&str>, &str) {
+    if let Some(dot_pos) = name.find('.') {
+        let db = &name[..dot_pos];
+        let tbl = &name[dot_pos + 1..];
+        (Some(db), tbl)
+    } else {
+        (None, name)
+    }
+}
+
+/// Handle errors from sample/peek commands with user-friendly messages
+fn handle_sample_error<W: Write>(
+    error_msg: &str,
+    table_name: &str,
+    writer: &mut W,
+) -> Result<()> {
+    let error_upper = error_msg.to_uppercase();
+
+    if error_upper.contains("3807") || error_upper.contains("OBJECT") && error_upper.contains("NOT EXIST") {
+        // Table not found error
+        writeln!(writer, "Error: Table '{}' not found.", table_name)?;
+        writeln!(writer)?;
+        writeln!(writer, "Suggestions:")?;
+        writeln!(writer, "  - Check the table name spelling")?;
+        writeln!(writer, "  - Use /list tables to see available tables")?;
+        writeln!(writer, "  - Try using qualified name: /sample database.{}",
+                 table_name.split('.').next_back().unwrap_or(table_name))?;
+    } else if error_upper.contains("3523") || error_upper.contains("PRIVILEGE") {
+        // Permission denied error
+        writeln!(writer, "Error: Permission denied on table '{}'.", table_name)?;
+        writeln!(writer)?;
+        writeln!(writer, "You need SELECT privilege on this table.")?;
+        writeln!(writer, "Contact your DBA or use:")?;
+        writeln!(writer, "  GRANT SELECT ON {} TO <your_username>;", table_name)?;
+    } else {
+        // Generic error
+        writeln!(writer, "Error: {}", error_msg)?;
     }
 
     Ok(())

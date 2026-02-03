@@ -28,7 +28,7 @@ The bugs fall into two categories:
 
 **Primary Cause: Incorrect `set_width` calculation in comfy-table**
 
-Location: `/Users/remi.turpaud/Code/genAI/tq/src/format/table.rs`, lines 54-59
+Location: `src/format/table.rs`, lines 54-59
 
 ```rust
 table.set_content_arrangement(ContentArrangement::Dynamic);
@@ -95,7 +95,7 @@ The tab completion system has multiple points of silent failure:
 
 #### Issue 1: Lock contention/failure not reported
 
-Location: `/Users/remi.turpaud/Code/genAI/tq/src/commands/repl/metadata_completer.rs`, lines 225-228
+Location: `src/commands/repl/metadata_completer.rs`, lines 225-228
 
 ```rust
 let Ok(mut state) = state.lock() else {
@@ -108,7 +108,7 @@ If lock acquisition fails, the user sees nothing. The `log::warn!` only goes to 
 
 #### Issue 2: Metadata loading failure not reported to user
 
-Location: `/Users/remi.turpaud/Code/genAI/tq/src/commands/repl/metadata_completer.rs`, lines 230-233
+Location: `src/commands/repl/metadata_completer.rs`, lines 230-233
 
 ```rust
 if !state.ensure_tables_loaded() {
@@ -120,7 +120,7 @@ If `ensure_tables_loaded()` returns false (query failed, timeout, etc.), the use
 
 #### Issue 3: Aggressive timeout on metadata queries
 
-Location: `/Users/remi.turpaud/Code/genAI/tq/src/db/metadata.rs`, lines 16-20
+Location: `src/db/metadata.rs`, lines 16-20
 
 ```rust
 pub const TABLE_QUERY_TIMEOUT: Duration = Duration::from_millis(500);
@@ -140,7 +140,7 @@ The Sprint 7 specification mentioned "Visual feedback when loading metadata" but
 
 #### Issue 5: Query may be failing silently
 
-Location: `/Users/remi.turpaud/Code/genAI/tq/src/db/metadata.rs`, lines 237-268
+Location: `src/db/metadata.rs`, lines 237-268
 
 ```rust
 match client.execute(sql) {
@@ -215,7 +215,7 @@ This is the most clear-cut root cause: the pager code exists (`src/commands/repl
 
 1. **Exports exist but are unused:**
 
-   Location: `/Users/remi.turpaud/Code/genAI/tq/src/commands/repl/mod.rs`, line 36
+   Location: `src/commands/repl/mod.rs`, line 36
    ```rust
    pub use pager::{PagedOutput, PagerConfig};
    ```
@@ -224,7 +224,7 @@ This is the most clear-cut root cause: the pager code exists (`src/commands/repl
 
 2. **Execution path bypasses pager:**
 
-   Location: `/Users/remi.turpaud/Code/genAI/tq/src/commands/repl/executor.rs`
+   Location: `src/commands/repl/executor.rs`
 
    The `execute_sql_with_state` function directly calls:
    ```rust
@@ -241,7 +241,7 @@ This is the most clear-cut root cause: the pager code exists (`src/commands/repl
 
 3. **State tracks pager setting but never uses it:**
 
-   Location: `/Users/remi.turpaud/Code/genAI/tq/src/commands/repl/state.rs`, lines 155-162
+   Location: `src/commands/repl/state.rs`, lines 155-162
    ```rust
    pub fn set_pager(&mut self, enabled: bool) {
        self.pager_enabled = enabled;
@@ -327,7 +327,7 @@ The project already has `minus = { version = "5.6", features = ["search"] }` as 
 
 **Primary Cause: Hardcoded MySQL/PostgreSQL syntax in hint message**
 
-Location: `/Users/remi.turpaud/Code/genAI/tq/src/commands/repl/executor.rs`, lines 83-89 and 169-175
+Location: `src/commands/repl/executor.rs`, lines 83-89 and 169-175
 
 ```rust
 if limited {
@@ -443,19 +443,19 @@ Sprint reviews marked features "complete" when:
 ## Files Requiring Modification
 
 ### Bug 1 (Table Padding)
-- `/Users/remi.turpaud/Code/genAI/tq/src/format/table.rs` - Fix width calculation
+- `src/format/table.rs` - Fix width calculation
 
 ### Bug 2 (Tab Completion)
-- `/Users/remi.turpaud/Code/genAI/tq/src/commands/repl/metadata_completer.rs` - Add error feedback
-- `/Users/remi.turpaud/Code/genAI/tq/src/db/metadata.rs` - Improve error handling
+- `src/commands/repl/metadata_completer.rs` - Add error feedback
+- `src/db/metadata.rs` - Improve error handling
 
 ### Bug 3 (Paging)
-- `/Users/remi.turpaud/Code/genAI/tq/src/commands/repl/executor.rs` - Integrate pager
-- `/Users/remi.turpaud/Code/genAI/tq/src/commands/repl/pager.rs` - May need enhancements
-- `/Users/remi.turpaud/Code/genAI/tq/src/commands/repl/mod.rs` - Wire up pager
+- `src/commands/repl/executor.rs` - Integrate pager
+- `src/commands/repl/pager.rs` - May need enhancements
+- `src/commands/repl/mod.rs` - Wire up pager
 
 ### Bug 4 (LIMIT Hint)
-- `/Users/remi.turpaud/Code/genAI/tq/src/commands/repl/executor.rs` - Change hint text (2 locations)
+- `src/commands/repl/executor.rs` - Change hint text (2 locations)
 
 ---
 

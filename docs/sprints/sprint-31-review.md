@@ -128,7 +128,7 @@ Sprint 31 was initiated as a crisis recovery sprint to address the fundamental b
 
 ### Sprint 29 Review Correction
 
-**Updated:** `/Users/remi.turpaud/Code/genAI/tq/docs/sprints/sprint-29-review.md`
+**Updated:** `docs/sprints/sprint-29-review.md`
 
 **Changes:**
 - Added correction notice at top of document

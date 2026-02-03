@@ -41,9 +41,11 @@ Available metacommands:
     /list        Schema inspection (databases, tables, views)
     /logon       Connect/switch database
     /pager       Enable/disable result paging
+    /peek        Show first rows and column info
     /ping        Test connection
     /quit        Exit REPL
     /reconnect   Reconnect to database
+    /sample      Show random sample
     /session     Show session info
     /sessions    List all database sessions
     /timing      Enable/disable query timing
@@ -409,6 +411,133 @@ Each press of ↑ recalls one complete statement, whether it was typed on one li
 
 ## Other Useful Commands
 
+### Data Sampling Commands
+
+Quick commands to sample data from tables without writing full SQL queries.
+
+#### Sample Random Rows
+
+Get a random sample from any table:
+
+```sql
+tq> /sample employees
+
+Random sample from PRODUCTION.employees (10 rows):
+┌─────────────┬────────────┬───────────┬─────────────────────┐
+│ employee_id │ first_name │ last_name │ email               │
+├─────────────┼────────────┼───────────┼─────────────────────┤
+│ 157         │ Diana      │ Davis     │ diana@company.com   │
+│ 023         │ Frank      │ Foster    │ frank@company.com   │
+│ 091         │ Helen      │ Harris    │ helen@company.com   │
+│ 234         │ Ivan       │ Ivanov    │ ivan@company.com    │
+│ 012         │ Julia      │ Jackson   │ julia@company.com   │
+│ 187         │ Kevin      │ King      │ kevin@company.com   │
+│ 145         │ Laura      │ Lee       │ laura@company.com   │
+│ 098         │ Mike       │ Miller    │ mike@company.com    │
+│ 203         │ Nancy      │ Nelson    │ nancy@company.com   │
+│ 176         │ Oscar      │ Olson     │ oscar@company.com   │
+└─────────────┴────────────┴───────────┴─────────────────────┘
+
+10 rows sampled from employees (Query time: 0.045s)
+```
+
+**Specify sample size:**
+
+```sql
+tq> /sample customers 50
+
+Random sample from PRODUCTION.customers (50 rows):
+[Shows 50 random rows...]
+
+50 rows sampled from customers (Query time: 0.092s)
+```
+
+**How it works:**
+- Default: 10 rows if count not specified
+- Maximum: 1000 rows (prevents accidental huge queries)
+- Uses Teradata SAMPLE clause for true random sampling
+- Fast even on huge tables
+
+**Common uses:**
+- Quick data inspection during exploration
+- Checking data quality without full table scans
+- Validating ETL results
+- Finding example values for testing
+
+#### Peek at Table Structure and Data
+
+Get a quick preview of table structure with sample data:
+
+```sql
+tq> /peek products
+
+Table: PRODUCTION.products
+Type: Table
+Approximate Rows: 15,432
+
+Columns:
+┌─────────────┬──────────────┬──────────┬──────────┐
+│ Column      │ Type         │ Nullable │ Comments │
+├─────────────┼──────────────┼──────────┼──────────┤
+│ product_id  │ INTEGER      │ NO       │ PK       │
+│ name        │ VARCHAR(100) │ NO       │          │
+│ category    │ VARCHAR(50)  │ YES      │          │
+│ price       │ DECIMAL(10,2)│ YES      │          │
+│ in_stock    │ INTEGER      │ YES      │          │
+└─────────────┴──────────────┴──────────┴──────────┘
+
+First 5 rows:
+┌────────────┬─────────────────┬───────────┬─────────┬──────────┐
+│ product_id │ name            │ category  │ price   │ in_stock │
+├────────────┼─────────────────┼───────────┼─────────┼──────────┤
+│ 1001       │ Laptop Pro      │ Computer  │ 1299.99 │ 45       │
+│ 1002       │ Wireless Mouse  │ Computer  │ 29.99   │ 230      │
+│ 1003       │ USB-C Cable     │ Computer  │ 12.99   │ 890      │
+│ 1004       │ Desk Chair      │ Furniture │ 249.99  │ 12       │
+│ 1005       │ Monitor 27"     │ Computer  │ 399.99  │ 67       │
+└────────────┴─────────────────┴───────────┴─────────┴──────────┘
+```
+
+**What you get:**
+- Table metadata (type, row count)
+- Column information (names, types, nullable)
+- First 5 rows of actual data
+
+**When to use:**
+- Understanding unfamiliar tables
+- Quick combined view of structure and content
+- Verifying table has expected columns and data
+
+**Qualified names:**
+
+Both commands support database.table syntax:
+
+```sql
+tq> /sample staging.test_data 20
+tq> /peek development.customers
+```
+
+**Error handling:**
+
+Clear messages for common issues:
+
+```sql
+tq> /sample nonexistent_table
+Error: Table not found
+
+Table 'nonexistent_table' does not exist in database 'production'.
+Use /list tables to see available tables.
+
+tq> /sample employees 5000
+Error: Invalid sample size
+
+Sample size must be between 1 and 1000.
+Requested: 5000
+Maximum: 1000
+
+Example: /sample employees 1000
+```
+
 ### Describe Tables
 
 See the structure of a table:
@@ -567,11 +696,11 @@ tq> /quit
 4. **Watch for loading indicators** - They tell you when tq is fetching data
 5. **Use short aliases** - Commands like `\l`, `\dt`, `\d` save typing
 6. **Write readable multi-line queries** - They're stored as single history entries, so formatting makes them easier to recall and edit
-7. **Master jump keys in the pager** - Press **L** to see the last columns or **H** to return to the start. Much faster than repeated arrow presses
-8. **Lock your column view** - When you find interesting columns, your horizontal position stays fixed while you scroll through rows
-9. **Check column indicators** - The `(+N cols) →` and `(+N cols) ←` indicators tell you exactly how many columns are hidden
-10. **Press ? in the pager** - If you forget navigation keys, the help screen is always one keypress away
-11. **Disable paging when needed** - Use `/pager off` if you prefer to see all columns at once (even if truncated)
+7. **Sample before selecting** - Use `/sample` to inspect data before writing complex queries
+8. **Peek for quick exploration** - `/peek` shows structure and data together, perfect for unfamiliar tables
+9. **Start with small samples** - When exploring large tables, use `/sample table 10` to avoid overwhelming output
+10. **Combine sampling with patterns** - First use `/list tables pattern%` to find tables, then `/sample` to inspect them
+11. **The pager is experimental** - By default, wide results show with truncation. You can try `/pager on` to test interactive navigation
 
 ## Keyboard Shortcuts Reference
 
@@ -762,24 +891,34 @@ Notice the column range (4-7) stays the same while the row range changed. You ca
 - **Y**: Last visible column number
 - **Z**: Total number of columns
 
-### Disabling the Pager
+### About the Interactive Pager
 
-If you prefer to see all columns at once (even if they're truncated), you can disable the pager:
+**Status: Experimental (Disabled by Default)**
+
+The interactive pager is currently experimental and disabled by default. When query results are too wide for your terminal, they will be displayed with truncated columns rather than entering pager mode.
+
+**Why disabled?** The pager is undergoing refinement to ensure perfect column alignment and rendering across all terminal widths. Rather than risk a suboptimal experience, it's off by default while improvements continue.
+
+**Want to try it?** You can enable the pager if you'd like to test it:
+
+```sql
+tq> /pager on
+Pager enabled (experimental)
+
+tq> SELECT * FROM wide_table;
+[Enters interactive pager mode if result is wide]
+```
+
+Once enabled, you can navigate with j/k/h/l keys and q to exit (see navigation keys section above).
+
+**Disable it again:**
 
 ```sql
 tq> /pager off
 Pager disabled
-
-tq> SELECT * FROM wide_table;
-[Result displays all columns, may be truncated to fit terminal width]
 ```
 
-Re-enable it with:
-
-```sql
-tq> /pager on
-Pager enabled
-```
+When the pager is disabled (default), wide results display all columns with truncation as needed to fit your terminal width.
 
 ### Quick Reference: Navigation Keys
 

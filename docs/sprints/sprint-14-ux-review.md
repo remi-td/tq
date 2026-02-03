@@ -34,7 +34,7 @@ This UX review evaluates:
 
 ### 1.1 Definition of Done (done.md)
 
-**Location:** `/Users/remi.turpaud/Code/genAI/tq/docs/builder/definitions/done.md`
+**Location:** `docs/builder/definitions/done.md`
 **Length:** 264 lines
 **Version:** 1.0.0
 
@@ -96,7 +96,7 @@ Exceptional first version. The document is immediately actionable, clearly writt
 
 ### 1.2 Testing Checklist (testing-checklist.md)
 
-**Location:** `/Users/remi.turpaud/Code/genAI/tq/docs/builder/testing-checklist.md`
+**Location:** `docs/builder/testing-checklist.md`
 **Length:** 432 lines
 **Version:** 1.0.0
 
@@ -167,7 +167,7 @@ Comprehensive and well-structured. The phase-specific organization is excellent.
 
 ### 1.3 Test Infrastructure Guide (tests/README.md)
 
-**Location:** `/Users/remi.turpaud/Code/genAI/tq/tests/README.md`
+**Location:** `tests/README.md`
 **Length:** 290 lines
 
 #### Strengths
@@ -234,7 +234,7 @@ Excellent quick reference for running tests. The troubleshooting section shows r
 
 ### 1.4 Specifications Synchronization (specifications.md)
 
-**Location:** `/Users/remi.turpaud/Code/genAI/tq/docs/builder/specifications.md`
+**Location:** `docs/builder/specifications.md`
 **Updated in Sprint 14**
 
 #### Sprint 14 Changes Analysis

@@ -23,7 +23,7 @@ All query results show generic column names ("col1", "col2", "col3", etc.) inste
 
 ### Root Cause
 
-**File**: `/Users/remi.turpaud/Code/genAI/tq/src/db/client.rs`
+**File**: `src/db/client.rs`
 **Lines**: 307-331
 
 The `infer_columns()` function generates synthetic column names because it only processes row data, not column metadata:
@@ -80,7 +80,7 @@ The 4th element in the tuple is `column_metadata` - a JSON string containing the
 
 #### Step 1: Call metadata function after creating rows
 
-**File**: `/Users/remi.turpaud/Code/genAI/tq/src/db/client.rs`
+**File**: `src/db/client.rs`
 
 In `execute_and_fetch()` and related functions, after calling `rustgo_create_rows_wrapper()`:
 
@@ -278,7 +278,7 @@ fn execute_and_fetch(
 
 #### Step 6: Add error type
 
-In `/Users/remi.turpaud/Code/genAI/tq/src/error.rs`, add new error variants:
+In `src/error.rs`, add new error variants:
 
 ```rust
 #[error("Failed to fetch column metadata: {0}")]
@@ -363,7 +363,7 @@ id,name
 
 ### Automated Test
 
-Add to `/Users/remi.turpaud/Code/genAI/tq/tests/integration_tests.rs`:
+Add to `tests/integration_tests.rs`:
 
 ```rust
 #[test]
@@ -447,7 +447,7 @@ The MVP specification (`docs/builder/detailed-specifications/interactive-mode-mv
 
 **Implementation**:
 
-**File**: `/Users/remi.turpaud/Code/genAI/tq/src/commands/repl/executor.rs`
+**File**: `src/commands/repl/executor.rs`
 
 ```rust
 pub fn execute_sql<W: Write>(
@@ -561,7 +561,7 @@ mod tests {
 
 **Configuration**:
 
-Make limit configurable in `/Users/remi.turpaud/Code/genAI/tq/src/cli.rs`:
+Make limit configurable in `src/cli.rs`:
 
 ```rust
 #[derive(Parser, Debug)]

@@ -262,7 +262,7 @@ Excellent iteration discipline:
 ### Test 1.1: Verify File Deletion
 
 **Command:**
-test ! -f /Users/remi.turpaud/Code/genAI/tq/docs/user/roadmap.md &&
+test ! -f docs/user/roadmap.md &&
   echo "✅ PASS: File deleted" || echo "❌ FAIL: File still exists"
 
 **Result:** ✅ PASS

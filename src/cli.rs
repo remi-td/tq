@@ -211,6 +211,22 @@ pub enum Command {
     ///
     /// Requires SELECT privilege on DBC.MonitorSession.
     Sessions(SessionsArgs),
+
+    /// Random sample of rows from a table
+    ///
+    /// Retrieves a random sample of rows from a table using Teradata's
+    /// SAMPLE clause for efficient sampling without full table scan.
+    ///
+    /// Example: tq sample employees 10
+    Sample(SampleArgs),
+
+    /// Preview first rows and column metadata from a table
+    ///
+    /// Displays the first few rows of a table along with column metadata
+    /// (name, type, nullable). Useful for quick data exploration.
+    ///
+    /// Example: tq peek employees
+    Peek(PeekArgs),
 }
 
 /// Arguments for the help command
@@ -338,6 +354,72 @@ pub struct SessionsArgs {
     /// Write output to file instead of stdout
     ///
     /// If the file exists, it will be overwritten.
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for the sample command (Sprint 33)
+#[derive(Parser, Debug)]
+pub struct SampleArgs {
+    /// Table name to sample from
+    ///
+    /// Can be unqualified (uses current database) or qualified (database.table).
+    #[arg(value_name = "TABLE")]
+    pub table: String,
+
+    /// Number of rows to sample (default: 10, max: 1000)
+    ///
+    /// Uses Teradata's SAMPLE clause for efficient random sampling.
+    #[arg(value_name = "N", default_value = "10")]
+    pub count: usize,
+
+    /// Output format
+    ///
+    /// table: Human-readable ASCII table (default)
+    /// json: JSON array of objects
+    /// csv: Comma-separated values
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for the peek command (Sprint 33)
+#[derive(Parser, Debug)]
+pub struct PeekArgs {
+    /// Table name to peek at
+    ///
+    /// Can be unqualified (uses current database) or qualified (database.table).
+    #[arg(value_name = "TABLE")]
+    pub table: String,
+
+    /// Number of rows to display (default: 5)
+    #[arg(value_name = "N", default_value = "5")]
+    pub count: usize,
+
+    /// Output format
+    ///
+    /// table: Human-readable ASCII table (default)
+    /// json: JSON object with columns and rows
+    /// csv: Comma-separated values (columns section, then data)
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
 }
@@ -801,5 +883,126 @@ mod tests {
         let args = vec!["tq", "profiles"];
         let cli = Cli::try_parse_from(args).unwrap();
         assert!(matches!(cli.command, Command::Profiles));
+    }
+
+    // Sprint 33: Tests for sample command
+    #[test]
+    fn test_cli_sample_with_table() {
+        let args = vec!["tq", "sample", "employees"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Sample(args) = cli.command {
+            assert_eq!(args.table, "employees");
+            assert_eq!(args.count, 10); // default
+            assert_eq!(args.format, OutputFormat::Table);
+        } else {
+            panic!("Expected Sample command");
+        }
+    }
+
+    #[test]
+    fn test_cli_sample_with_count() {
+        let args = vec!["tq", "sample", "employees", "50"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Sample(args) = cli.command {
+            assert_eq!(args.table, "employees");
+            assert_eq!(args.count, 50);
+        } else {
+            panic!("Expected Sample command");
+        }
+    }
+
+    #[test]
+    fn test_cli_sample_with_format() {
+        let args = vec!["tq", "sample", "--format", "json", "employees", "20"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Sample(args) = cli.command {
+            assert_eq!(args.format, OutputFormat::Json);
+            assert_eq!(args.table, "employees");
+            assert_eq!(args.count, 20);
+        } else {
+            panic!("Expected Sample command");
+        }
+    }
+
+    #[test]
+    fn test_cli_sample_with_output() {
+        let args = vec!["tq", "sample", "--output", "sample.csv", "employees"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Sample(args) = cli.command {
+            assert_eq!(args.output, Some(PathBuf::from("sample.csv")));
+        } else {
+            panic!("Expected Sample command");
+        }
+    }
+
+    #[test]
+    fn test_cli_sample_qualified_table() {
+        let args = vec!["tq", "sample", "demo_db.employees", "25"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Sample(args) = cli.command {
+            assert_eq!(args.table, "demo_db.employees");
+            assert_eq!(args.count, 25);
+        } else {
+            panic!("Expected Sample command");
+        }
+    }
+
+    // Sprint 33: Tests for peek command
+    #[test]
+    fn test_cli_peek_with_table() {
+        let args = vec!["tq", "peek", "employees"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Peek(args) = cli.command {
+            assert_eq!(args.table, "employees");
+            assert_eq!(args.count, 5); // default
+            assert_eq!(args.format, OutputFormat::Table);
+        } else {
+            panic!("Expected Peek command");
+        }
+    }
+
+    #[test]
+    fn test_cli_peek_with_count() {
+        let args = vec!["tq", "peek", "employees", "10"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Peek(args) = cli.command {
+            assert_eq!(args.table, "employees");
+            assert_eq!(args.count, 10);
+        } else {
+            panic!("Expected Peek command");
+        }
+    }
+
+    #[test]
+    fn test_cli_peek_with_format() {
+        let args = vec!["tq", "peek", "--format", "json", "employees"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Peek(args) = cli.command {
+            assert_eq!(args.format, OutputFormat::Json);
+        } else {
+            panic!("Expected Peek command");
+        }
+    }
+
+    #[test]
+    fn test_cli_peek_with_output() {
+        let args = vec!["tq", "peek", "--output", "peek.json", "employees"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Peek(args) = cli.command {
+            assert_eq!(args.output, Some(PathBuf::from("peek.json")));
+        } else {
+            panic!("Expected Peek command");
+        }
+    }
+
+    #[test]
+    fn test_cli_peek_qualified_table() {
+        let args = vec!["tq", "peek", "demo_db.employees"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Peek(args) = cli.command {
+            assert_eq!(args.table, "demo_db.employees");
+        } else {
+            panic!("Expected Peek command");
+        }
     }
 }

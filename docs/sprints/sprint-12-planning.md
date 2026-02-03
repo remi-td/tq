@@ -599,7 +599,7 @@ User context: "so it can be presented to our clients and users"
 
 **Sprint Coordinator:** Claude (Main Agent)
 **Planning Date:** 2026-01-19
-**Approval Required:** User (remi.turpaud)
+**Approval Required:** User (user)
 
 **Ready to Proceed:** Pending user approval of this plan
 

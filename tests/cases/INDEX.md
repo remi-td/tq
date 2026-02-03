@@ -1,9 +1,9 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.7.0 (Sprint 18 - Maintenance)
-**Last Updated:** 2026-01-21
-**Base Commit:** [Sprint 18 - Critical Bug Fixes]
+**Version:** 1.8.0 (Sprint 33 - Pager Bug Fix + Data Sampling)
+**Last Updated:** 2026-02-03
+**Base Commit:** [Sprint 33 - In Progress]
 
 ## Overview
 
@@ -268,6 +268,41 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 - **Critical Focus**: Bug fix must not regress Sprint 26 functionality
 - **Manual Reviews**: LICENSE legal review and README quality review are BLOCKING for release
 - **Acceptance**: 100% bug fix validation + legal compliance + professional README
+
+### Sprint 33: Pager Bug Fix + Data Sampling Commands
+
+**Sprint 33 Context:** Fix pager rendering bug from Issue #14 (disable by default) + deliver data exploration feature with `/sample` and `/peek` commands.
+
+**Sprint 33 Test Cases (10 total: 9 automated + 1 manual documented):**
+
+#### Feature 1: Pager Bug Fix (Issue #14) - 1 test + verification
+- **TC-033-001**: Pager Disabled by Default - Unit test for AC-3 (pager_enabled: false)
+- **TC-033-PAGER-MANUAL**: Manual Visual Validation - Documented test case for pager rendering at terminal width 117 (NOT EXECUTABLE - no human tester)
+- **Existing Tests Verification**: 27 pager unit tests + 48 interactive tests must pass (AC-4, AC-5, AC-10)
+
+#### Feature 2: Data Sampling Commands - 8 tests
+- **TC-033-002**: Unit Tests - /sample Command (parsing, SQL generation, validation)
+- **TC-033-003**: Unit Tests - /peek Command (parsing, metadata query generation)
+- **TC-033-004**: Integration Tests - /sample Command (live database execution)
+- **TC-033-005**: Integration Tests - /peek Command (metadata + data retrieval)
+- **TC-033-006**: Interactive Tests - /sample in REPL (PTY, tab completion, help)
+- **TC-033-007**: Interactive Tests - /peek in REPL (PTY, tab completion, help)
+- **TC-033-008**: Batch Mode Tests - tq sample CLI command
+- **TC-033-009**: Batch Mode Tests - tq peek CLI command
+
+#### Test Coverage Summary
+- **TC-033-COVERAGE**: Comprehensive test coverage matrix mapping all 25 acceptance criteria to test cases
+
+**Sprint 33 Test Strategy:**
+- **Test Count**: 10 test case documents (9 automated + 1 manual documented)
+- **Estimated Test Functions**: 61-66 automated tests
+- **Type**: Mixed Sprint (Bug Fix + Feature)
+- **Database Required**: Yes (for data sampling integration/interactive/batch tests)
+- **PTY Required**: Yes (for interactive tests)
+- **Test Types**: Unit (3 docs, ~18 tests) + Integration (2 docs, ~18 tests) + Interactive (2 docs, ~13 tests) + Batch (2 docs, ~15 tests) + Manual (1 doc, documented only)
+- **Critical Success**: 100% automated test pass rate + pager disabled by default
+- **Pager Manual Validation**: Documented but NOT EXECUTED (no human tester) - pager disabled by default for user protection
+- **Acceptance**: All automated tests pass + all 25 ACs covered + zero regressions
 
 ### Security
 - **TC022**: Security - No Password Exposure

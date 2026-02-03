@@ -2375,10 +2375,614 @@ Foreign Keys:
 
 ### Data Sampling Commands
 
+Data sampling commands provide fast exploratory data analysis without writing full SQL queries. These commands target data analysts and DBAs who need quick table inspection during interactive sessions.
+
 | Command | Description | Example |
 |---------|-------------|---------|
 | `/sample <table> [n]` | Show random sample (default 10 rows) | `/sample employees 20` |
 | `/peek <table>` | Show first 5 rows and column info | `/peek employees` |
+
+---
+
+**REQ-SAMPLE-001: Command Availability and Syntax**
+
+The `/sample` and `/peek` commands SHALL be available as metacommands in REPL mode with the following characteristics:
+
+1. **REQ-SAMPLE-001.1** - `/sample` primary syntax: `/sample <table> [n]`
+2. **REQ-SAMPLE-001.2** - `/peek` primary syntax: `/peek <table>`
+3. **REQ-SAMPLE-001.3** - Both commands SHALL execute immediately (no semicolon required)
+4. **REQ-SAMPLE-001.4** - Commands SHALL be case-insensitive (`/Sample`, `/PEEK` are valid)
+5. **REQ-SAMPLE-001.5** - Table name parameter is REQUIRED (error if omitted)
+6. **REQ-SAMPLE-001.6** - Row count parameter for `/sample` is OPTIONAL (defaults to 10)
+
+**Rationale:** Simple, discoverable syntax consistent with existing metacommands like `/describe` and `/list tables`.
+
+**Example Usage:**
+```sql
+tq> /sample employees
+[Shows 10 random rows from employees table]
+
+tq> /sample employees 50
+[Shows 50 random rows from employees table]
+
+tq> /peek products
+[Shows first 5 rows + column metadata from products table]
+```
+
+---
+
+**REQ-SAMPLE-002: `/sample` Command Behavior**
+
+The `/sample` command SHALL retrieve a random sample of rows from the specified table:
+
+1. **REQ-SAMPLE-002.1** - Sample SHALL be truly random using Teradata SAMPLE clause
+2. **REQ-SAMPLE-002.2** - Default sample size: 10 rows
+3. **REQ-SAMPLE-002.3** - User-specified sample size: 1 to 1000 rows (inclusive)
+4. **REQ-SAMPLE-002.4** - SQL generation: `SELECT * FROM <table> SAMPLE <n>`
+5. **REQ-SAMPLE-002.5** - Sample SHALL include all columns from the table
+6. **REQ-SAMPLE-002.6** - Column order SHALL match table definition order
+7. **REQ-SAMPLE-002.7** - If table has fewer rows than requested, return all available rows
+8. **REQ-SAMPLE-002.8** - Each execution MAY return different rows (non-deterministic sampling)
+
+**Rationale:** Teradata SAMPLE clause provides efficient random sampling without full table scans. Non-deterministic behavior enables exploration of different data patterns.
+
+**Example Interaction:**
+```sql
+tq> /sample customers 20
+
+Random sample from PRODUCTION.customers (20 rows):
+┌─────────┬───────────────┬─────────────────────────┬───────────┐
+│ cust_id │ name          │ email                   │ region    │
+├─────────┼───────────────┼─────────────────────────┼───────────┤
+│ 10234   │ Alice Johnson │ alice.j@example.com     │ Northeast │
+│ 45671   │ Bob Smith     │ bob.smith@example.com   │ West      │
+│ 78234   │ Carol Lee     │ carol.lee@example.com   │ Southeast │
+│ ...     │ ...           │ ...                     │ ...       │
+└─────────┴───────────────┴─────────────────────────┴───────────┘
+
+20 rows sampled from customers (Query time: 0.045s)
+```
+
+---
+
+**REQ-SAMPLE-003: Sample Size Validation**
+
+The `/sample` command SHALL validate the row count parameter:
+
+1. **REQ-SAMPLE-003.1** - Minimum sample size: 1 row
+2. **REQ-SAMPLE-003.2** - Maximum sample size: 1000 rows
+3. **REQ-SAMPLE-003.3** - Sample size MUST be a positive integer
+4. **REQ-SAMPLE-003.4** - Non-numeric values SHALL trigger error
+5. **REQ-SAMPLE-003.5** - Zero or negative values SHALL trigger error
+6. **REQ-SAMPLE-003.6** - Values exceeding 1000 SHALL trigger error with suggestion
+
+**Rationale:** Prevent accidental large queries that could impact performance. 1000-row limit balances exploration needs with system responsiveness.
+
+**Error Cases:**
+
+**Invalid sample size (non-numeric):**
+```sql
+tq> /sample employees abc
+
+Error: Invalid sample size 'abc'
+Sample size must be a positive integer between 1 and 1000
+Example: /sample employees 50
+```
+
+**Sample size exceeds maximum:**
+```sql
+tq> /sample employees 5000
+
+Error: Sample size 5000 exceeds maximum (1000)
+For larger samples, use SQL: SELECT * FROM employees SAMPLE 5000;
+```
+
+**Zero or negative sample size:**
+```sql
+tq> /sample employees 0
+
+Error: Sample size must be at least 1
+Example: /sample employees 10
+```
+
+---
+
+**REQ-SAMPLE-004: `/peek` Command Behavior**
+
+The `/peek` command SHALL provide a quick preview of table contents with column metadata:
+
+1. **REQ-SAMPLE-004.1** - Retrieve first 5 rows from table (fixed, not configurable)
+2. **REQ-SAMPLE-004.2** - SQL generation: `SELECT TOP 5 * FROM <table>`
+3. **REQ-SAMPLE-004.3** - Display column metadata BEFORE data rows
+4. **REQ-SAMPLE-004.4** - Column metadata SHALL include: name, data type, nullable, precision/scale (if applicable)
+5. **REQ-SAMPLE-004.5** - Display data rows in table format
+6. **REQ-SAMPLE-004.6** - If table has fewer than 5 rows, display all available rows
+7. **REQ-SAMPLE-004.7** - If table is empty, display column metadata only with "Table is empty" message
+
+**Rationale:** Fixed 5-row preview provides quick table understanding without overwhelming output. Column metadata helps users understand data structure before sampling or querying.
+
+**Example Interaction:**
+```sql
+tq> /peek employees
+
+Table: PRODUCTION.employees
+Approximate Rows: 42,573
+
+Column Information:
+┌───────────────┬──────────────┬──────────┬───────────┐
+│ Column        │ Type         │ Nullable │ Precision │
+├───────────────┼──────────────┼──────────┼───────────┤
+│ employee_id   │ INTEGER      │ NO       │ -         │
+│ first_name    │ VARCHAR(50)  │ YES      │ 50        │
+│ last_name     │ VARCHAR(50)  │ YES      │ 50        │
+│ hire_date     │ DATE         │ YES      │ -         │
+│ salary        │ DECIMAL(10,2)│ YES      │ 10,2      │
+└───────────────┴──────────────┴──────────┴───────────┘
+
+First 5 rows:
+┌─────────────┬────────────┬───────────┬────────────┬───────────┐
+│ employee_id │ first_name │ last_name │ hire_date  │ salary    │
+├─────────────┼────────────┼───────────┼────────────┼───────────┤
+│ 1           │ Alice      │ Anderson  │ 2020-01-15 │ 75000.00  │
+│ 2           │ Bob        │ Brown     │ 2019-03-22 │ 82000.00  │
+│ 3           │ Carol      │ Chen      │ 2021-07-01 │ 68000.00  │
+│ 4           │ David      │ Davis     │ 2018-11-30 │ 95000.00  │
+│ 5           │ Emma       │ Evans     │ 2022-02-14 │ 71000.00  │
+└─────────────┴────────────┴───────────┴────────────┴───────────┘
+
+(Query time: 0.023s)
+```
+
+**Empty table:**
+```sql
+tq> /peek empty_table
+
+Table: PRODUCTION.empty_table
+Approximate Rows: 0
+
+Column Information:
+┌───────────┬──────────┬──────────┬───────────┐
+│ Column    │ Type     │ Nullable │ Precision │
+├───────────┼──────────┼──────────┼───────────┤
+│ id        │ INTEGER  │ NO       │ -         │
+│ name      │ VARCHAR  │ YES      │ 100       │
+└───────────┴──────────┴──────────┴───────────┘
+
+Table is empty (0 rows)
+```
+
+---
+
+**REQ-SAMPLE-005: Qualified Table Names Support**
+
+Both `/sample` and `/peek` commands SHALL support qualified table names:
+
+1. **REQ-SAMPLE-005.1** - Unqualified syntax: `/sample <table>` (uses current database)
+2. **REQ-SAMPLE-005.2** - Qualified syntax: `/sample <database>.<table>` (explicit database)
+3. **REQ-SAMPLE-005.3** - Qualified names SHALL work even when current database differs
+4. **REQ-SAMPLE-005.4** - If no current database AND unqualified name used, trigger error
+5. **REQ-SAMPLE-005.5** - Database and table names SHALL follow Teradata identifier rules
+6. **REQ-SAMPLE-005.6** - Case-insensitive matching for database and table names
+
+**Rationale:** Consistency with `/describe` and `/list tables` commands. Enables cross-database exploration.
+
+**Example Usage:**
+```sql
+tq> /sample production.orders 15
+[Samples from production.orders regardless of current database]
+
+tq> /peek staging.test_data
+[Peeks at staging.test_data table]
+
+tq> /sample orders
+[Uses current database context]
+```
+
+**Error case (no current database):**
+```sql
+tq> /sample orders
+
+Error: No current database selected
+Either specify database: /sample production.orders
+Or connect to a database: /logon user:pass@host/database
+```
+
+---
+
+**REQ-SAMPLE-006: Error Handling - Table Not Found**
+
+Both commands SHALL handle non-existent tables gracefully:
+
+1. **REQ-SAMPLE-006.1** - If table does not exist, display clear error message
+2. **REQ-SAMPLE-006.2** - Error SHALL suggest using `/list tables` to discover tables
+3. **REQ-SAMPLE-006.3** - Error SHALL include the full table name attempted (with database if qualified)
+4. **REQ-SAMPLE-006.4** - If table name is close to existing table (typo), suggest correction
+5. **REQ-SAMPLE-006.5** - Error SHALL return to REPL prompt (non-fatal)
+
+**Rationale:** Help users discover correct table names rather than just reporting failure.
+
+**Example Error:**
+```sql
+tq> /sample employes 10
+
+Error: Table 'employes' does not exist in database 'production'
+
+Did you mean 'employees'?
+
+Use /list tables to see all available tables
+```
+
+**Example (no suggestion):**
+```sql
+tq> /peek nonexistent_table
+
+Error: Table 'nonexistent_table' not found in database 'production'
+
+Use /list tables to see all available tables
+Use /list databases to see all databases
+```
+
+---
+
+**REQ-SAMPLE-007: Error Handling - Permission Denied**
+
+Both commands SHALL handle permission errors clearly:
+
+1. **REQ-SAMPLE-007.1** - If user lacks SELECT privilege, display permission error
+2. **REQ-SAMPLE-007.2** - Error SHALL explain required privilege (SELECT)
+3. **REQ-SAMPLE-007.3** - Error SHALL suggest contacting DBA or provide GRANT syntax example
+4. **REQ-SAMPLE-007.4** - Error SHALL include table name that caused permission failure
+
+**Rationale:** Security errors are common in enterprise databases. Clear guidance helps users resolve access issues.
+
+**Example Error:**
+```sql
+tq> /sample restricted_table 10
+
+Error: Permission denied on table 'restricted_table'
+
+You do not have SELECT privilege on PRODUCTION.restricted_table
+
+Contact your DBA to request access, or use:
+  GRANT SELECT ON production.restricted_table TO <your_username>;
+```
+
+---
+
+**REQ-SAMPLE-008: Output Format Compatibility**
+
+Both commands SHALL respect current output format settings:
+
+1. **REQ-SAMPLE-008.1** - Table format (default): Box-drawing table with borders
+2. **REQ-SAMPLE-008.2** - CSV format: Standard CSV output (header row + data rows)
+3. **REQ-SAMPLE-008.3** - JSON format: Array of objects (one object per row)
+4. **REQ-SAMPLE-008.4** - Format SHALL be controlled by `/set format <fmt>` metacommand
+5. **REQ-SAMPLE-008.5** - Column metadata (for `/peek`) SHALL adapt to output format
+6. **REQ-SAMPLE-008.6** - Summary footer SHALL adapt to output format (omitted in CSV/JSON)
+
+**Rationale:** Consistency with query result formatting. Enables scripting and data export workflows.
+
+**CSV Example:**
+```sql
+tq> /set format csv
+Output format set to: csv
+
+tq> /sample employees 3
+employee_id,first_name,last_name,hire_date,salary
+1,Alice,Anderson,2020-01-15,75000.00
+2,Bob,Brown,2019-03-22,82000.00
+3,Carol,Chen,2021-07-01,68000.00
+```
+
+**JSON Example:**
+```sql
+tq> /set format json
+Output format set to: json
+
+tq> /sample employees 2
+[
+  {
+    "employee_id": 1,
+    "first_name": "Alice",
+    "last_name": "Anderson",
+    "hire_date": "2020-01-15",
+    "salary": 75000.00
+  },
+  {
+    "employee_id": 2,
+    "first_name": "Bob",
+    "last_name": "Brown",
+    "hire_date": "2019-03-22",
+    "salary": 82000.00
+  }
+]
+```
+
+---
+
+**REQ-SAMPLE-009: Tab Completion Integration**
+
+Both commands SHALL be integrated into tab completion system:
+
+1. **REQ-SAMPLE-009.1** - Typing `/s<TAB>` SHALL suggest `/sample` and `/sessions`
+2. **REQ-SAMPLE-009.2** - Typing `/sa<TAB>` SHALL auto-complete to `/sample`
+3. **REQ-SAMPLE-009.3** - Typing `/p<TAB>` SHALL suggest `/peek` and `/pager`
+4. **REQ-SAMPLE-009.4** - Typing `/pe<TAB>` SHALL auto-complete to `/peek`
+5. **REQ-SAMPLE-009.5** - After `/sample ` (with space), SHALL suggest table names from current database
+6. **REQ-SAMPLE-009.6** - After `/peek ` (with space), SHALL suggest table names from current database
+7. **REQ-SAMPLE-009.7** - Table name completion SHALL support qualified names (`database.<TAB>`)
+8. **REQ-SAMPLE-009.8** - Commands SHALL appear in metacommand list when typing `/<TAB>`
+
+**Rationale:** Tab completion is critical for discoverability and efficient command entry.
+
+**Example Interaction:**
+```sql
+tq> /sa<TAB>
+tq> /sample _
+
+tq> /sample <TAB>
+Available tables in 'production':
+  customers    employees    orders    products
+
+tq> /sample emp<TAB>
+tq> /sample employees _
+
+tq> /peek staging.<TAB>
+Available tables in 'staging':
+  test_customers    test_orders    test_products
+```
+
+---
+
+**REQ-SAMPLE-010: Help Text Integration**
+
+Both commands SHALL be documented in help system:
+
+1. **REQ-SAMPLE-010.1** - `/help` command SHALL list both `/sample` and `/peek`
+2. **REQ-SAMPLE-010.2** - `/help sample` SHALL display detailed help for `/sample` command
+3. **REQ-SAMPLE-010.3** - `/help peek` SHALL display detailed help for `/peek` command
+4. **REQ-SAMPLE-010.4** - Help text SHALL include: description, syntax, examples, related commands
+5. **REQ-SAMPLE-010.5** - Help SHALL cross-reference related commands (`/describe`, `/list tables`)
+
+**Example Help Output:**
+```sql
+tq> /help sample
+
+/sample - Show random sample of table data
+
+SYNTAX:
+  /sample <table> [n]
+
+DESCRIPTION:
+  Retrieve a random sample of rows from the specified table using
+  Teradata's SAMPLE clause for efficient data exploration.
+
+  Default sample size: 10 rows
+  Maximum sample size: 1000 rows
+
+EXAMPLES:
+  /sample employees          Show 10 random rows from employees
+  /sample orders 50          Show 50 random rows from orders
+  /sample staging.test 5     Sample from different database
+
+RELATED COMMANDS:
+  /peek <table>              Show first 5 rows with column info
+  /describe <table>          Show table structure
+  /list tables               List all tables in database
+
+For more information, see documentation at: docs/user/metacommands.md
+```
+
+```sql
+tq> /help peek
+
+/peek - Quick preview of table with column metadata
+
+SYNTAX:
+  /peek <table>
+
+DESCRIPTION:
+  Show the first 5 rows of a table along with column metadata
+  (names, types, nullable status). Useful for quick table inspection
+  before writing queries or sampling data.
+
+EXAMPLES:
+  /peek employees            Preview employees table
+  /peek staging.test_data    Preview table in different database
+
+RELATED COMMANDS:
+  /sample <table> [n]        Show random sample of rows
+  /describe <table>          Show detailed table structure
+  /list tables               List all tables in database
+
+For more information, see documentation at: docs/user/metacommands.md
+```
+
+---
+
+**REQ-SAMPLE-011: Batch Mode Integration**
+
+Both commands SHALL be available in batch mode (one-shot execution):
+
+1. **REQ-SAMPLE-011.1** - Batch syntax: `tq sample <table> [n]` (without leading `/`)
+2. **REQ-SAMPLE-011.2** - Batch syntax: `tq peek <table>` (without leading `/`)
+3. **REQ-SAMPLE-011.3** - Connection SHALL be established, command executed, connection closed
+4. **REQ-SAMPLE-011.4** - Output format SHALL default to table (unless `--format` flag specified)
+5. **REQ-SAMPLE-011.5** - Exit code 0 on success, non-zero on error
+6. **REQ-SAMPLE-011.6** - Batch mode SHALL support `--format csv|json|table` flag
+7. **REQ-SAMPLE-011.7** - Connection credentials via `TQ_LOGON` env var or `--logon` flag
+
+**Rationale:** Enable scripting and automation workflows. Users should be able to sample data in shell scripts.
+
+**Batch Mode Examples:**
+```bash
+# Sample 20 rows using environment credentials
+$ export TQ_LOGON="user:pass@host:1025/production"
+$ tq sample employees 20
+
+# Peek at table with explicit connection
+$ tq peek customers --logon "user:pass@host/production"
+
+# Sample to CSV for processing
+$ tq sample orders 100 --format csv > orders_sample.csv
+
+# Sample and pipe to jq
+$ tq sample products 50 --format json | jq '.[] | select(.price > 100)'
+```
+
+---
+
+**REQ-SAMPLE-012: Performance Requirements**
+
+Both commands SHALL execute efficiently:
+
+1. **REQ-SAMPLE-012.1** - `/sample` target execution time: <1 second for sample sizes up to 1000 rows
+2. **REQ-SAMPLE-012.2** - `/peek` target execution time: <500ms (fetching only 5 rows)
+3. **REQ-SAMPLE-012.3** - Commands SHALL NOT perform full table scans
+4. **REQ-SAMPLE-012.4** - `/sample` SHALL use Teradata SAMPLE clause (efficient row sampling)
+5. **REQ-SAMPLE-012.5** - `/peek` SHALL use TOP clause (efficient row limiting)
+6. **REQ-SAMPLE-012.6** - Loading indicator: Display "Sampling data..." if query exceeds 500ms
+7. **REQ-SAMPLE-012.7** - Query cancellation: Ctrl-C SHALL cancel query and return to prompt
+8. **REQ-SAMPLE-012.8** - Commands SHALL work efficiently on tables with billions of rows
+
+**Rationale:** Fast execution is critical for interactive exploration. Teradata SAMPLE clause provides efficient random sampling without scanning entire tables.
+
+**Example (with loading indicator):**
+```sql
+tq> /sample huge_table 1000
+Sampling data from huge_table...
+[Query completes after 800ms]
+
+Random sample from PRODUCTION.huge_table (1000 rows):
+[Table output...]
+
+1000 rows sampled (Query time: 0.812s)
+```
+
+---
+
+**REQ-SAMPLE-013: Connection State Handling**
+
+Both commands SHALL handle connection state appropriately:
+
+1. **REQ-SAMPLE-013.1** - If no active connection, display connection error
+2. **REQ-SAMPLE-013.2** - Error SHALL suggest using `/logon` to establish connection
+3. **REQ-SAMPLE-013.3** - If connection lost during execution, display reconnection error
+4. **REQ-SAMPLE-013.4** - Connection errors SHALL return to REPL prompt (non-fatal)
+
+**Example Errors:**
+
+**No active connection:**
+```sql
+tq> /sample employees
+
+Error: No active database connection
+
+Connect to a database first:
+  /logon user:pass@host:1025/database
+
+Or use environment variable:
+  export TQ_LOGON="user:pass@host:1025/database"
+```
+
+**Connection lost during query:**
+```sql
+tq> /sample huge_table 1000
+Sampling data from huge_table...
+
+Error: Connection lost during query execution
+
+Use /reconnect to establish a new connection
+```
+
+---
+
+**REQ-SAMPLE-014: Result Display Headers**
+
+Both commands SHALL provide clear result headers:
+
+1. **REQ-SAMPLE-014.1** - `/sample` header format: `Random sample from <DATABASE>.<TABLE> (<N> rows):`
+2. **REQ-SAMPLE-014.2** - `/peek` header format: `Table: <DATABASE>.<TABLE>`
+3. **REQ-SAMPLE-014.3** - `/peek` SHALL display approximate row count from system catalog
+4. **REQ-SAMPLE-014.4** - Footer SHALL show query execution time
+5. **REQ-SAMPLE-014.5** - Footer SHALL indicate number of rows returned
+6. **REQ-SAMPLE-014.6** - Headers SHALL be omitted in CSV and JSON output formats
+
+**Rationale:** Clear headers help users understand what data they're viewing, especially when running multiple commands.
+
+**Sample Header Example:**
+```sql
+tq> /sample employees 25
+
+Random sample from PRODUCTION.employees (25 rows):
+┌─────────────┬────────────┬───────────┐
+│ employee_id │ first_name │ last_name │
+[...]
+└─────────────┴────────────┴───────────┘
+
+25 rows sampled from employees (Query time: 0.067s)
+```
+
+**Peek Header Example:**
+```sql
+tq> /peek customers
+
+Table: PRODUCTION.customers
+Approximate Rows: 1,234,567
+
+Column Information:
+[...]
+
+First 5 rows:
+[...]
+
+(Query time: 0.034s)
+```
+
+---
+
+**REQ-SAMPLE-015: Views and Table Types Support**
+
+Both commands SHALL support different table types:
+
+1. **REQ-SAMPLE-015.1** - Commands SHALL work on regular tables
+2. **REQ-SAMPLE-015.2** - Commands SHALL work on views
+3. **REQ-SAMPLE-015.3** - Commands SHALL work on volatile tables
+4. **REQ-SAMPLE-015.4** - Commands SHALL work on global temporary tables
+5. **REQ-SAMPLE-015.5** - Error handling SHALL differentiate between table types if query fails
+6. **REQ-SAMPLE-015.6** - For views with complex queries, performance may vary (document in help)
+
+**Rationale:** Teradata supports multiple table types. Commands should work consistently across all types.
+
+**Example (sampling a view):**
+```sql
+tq> /sample active_employees_view 15
+
+Random sample from PRODUCTION.active_employees_view (15 rows):
+┌─────────────┬────────────┬──────────┬────────────┐
+│ employee_id │ name       │ dept     │ hire_date  │
+[...]
+└─────────────┴────────────┴──────────┴────────────┘
+
+15 rows sampled from active_employees_view (Query time: 0.123s)
+Note: Sampling a view may take longer than sampling a table
+```
+
+**Example (peeking at volatile table):**
+```sql
+tq> /peek session_temp_results
+
+Table: PRODUCTION.session_temp_results (Volatile)
+Approximate Rows: 42
+
+Column Information:
+[...]
+
+First 5 rows:
+[...]
+
+(Query time: 0.012s)
+```
 
 ### Export Commands
 
@@ -2448,13 +3052,15 @@ id,name,email
 
 **`/pager on|off` Metacommand**
 
+**Status:** EXPERIMENTAL - The interactive pager is currently experimental and disabled by default due to ongoing rendering issues with wide result sets. Users may enable it with `/pager on` if they wish to test the feature.
+
 **Syntax**:
 ```
 /pager on       (enable result paging)
-/pager off      (disable paging, show all results)
+/pager off      (disable paging, show all results - DEFAULT)
 ```
 
-**Pager enabled (default)**:
+**Pager enabled (opt-in)**:
 ```sql
 tq> /pager on
 Result paging enabled

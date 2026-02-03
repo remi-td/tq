@@ -556,7 +556,7 @@ Showing first 100 rows. Use TOP N or SAMPLE N for different results.
 
 ## References
 
-- Sprint 9 Planning: `/Users/remi.turpaud/Code/genAI/tq/docs/builder/sprints/sprint-9-planning.md`
-- Error Handling Spec: `/Users/remi.turpaud/Code/genAI/tq/docs/builder/detailed-specifications/error-handling.md`
-- Current Implementation: `/Users/remi.turpaud/Code/genAI/tq/src/error.rs`
-- REPL Executor: `/Users/remi.turpaud/Code/genAI/tq/src/commands/repl/executor.rs`
+- Sprint 9 Planning: `docs/builder/sprints/sprint-9-planning.md`
+- Error Handling Spec: `docs/builder/detailed-specifications/error-handling.md`
+- Current Implementation: `src/error.rs`
+- REPL Executor: `src/commands/repl/executor.rs`

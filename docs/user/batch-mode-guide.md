@@ -932,9 +932,11 @@ tq query "SELECT * FROM DBC.Databases"
 
 In batch mode (when piping to files or other commands), all columns are shown without terminal width limits, but columns are still sized efficiently based on content.
 
-### Sampling
+### Data Sampling
 
-Use Teradata's SAMPLE clause for large tables:
+#### Using Teradata SAMPLE Clause
+
+For exploring large tables, use Teradata's built-in SAMPLE clause:
 
 ```bash
 # Random 1000 rows
@@ -942,7 +944,43 @@ tq query "SELECT * FROM large_table SAMPLE 1000"
 
 # Random 10% of rows
 tq query "SELECT * FROM large_table SAMPLE 0.10"
+
+# Sample with specific columns
+tq query "SELECT id, name, status FROM customers SAMPLE 50" --format csv
 ```
+
+**How SAMPLE works:**
+- Teradata returns random rows without scanning full table
+- Fast even on billion-row tables
+- Can specify row count (e.g., 1000) or percentage (e.g., 0.10 for 10%)
+- Works with WHERE, ORDER BY, and other clauses
+
+**Common patterns:**
+
+```bash
+# Quick data inspection
+tq query "SELECT * FROM production_data SAMPLE 10"
+
+# Sample filtered data
+tq query "SELECT * FROM orders WHERE date > '2024-01-01' SAMPLE 100"
+
+# Export sample to CSV
+tq query "SELECT * FROM huge_table SAMPLE 1000" --format csv --output sample.csv
+```
+
+#### Peeking at Table Structure
+
+To quickly see both table structure and sample data:
+
+```bash
+# First, describe the table
+tq query "SELECT * FROM DBC.ColumnsV WHERE DatabaseName='mydb' AND TableName='mytable'"
+
+# Then sample some rows
+tq query "SELECT TOP 5 * FROM mydb.mytable"
+```
+
+**Note:** Dedicated `tq sample` and `tq peek` convenience commands are planned for future releases. For now, use SQL SAMPLE clause and TOP keyword for data exploration.
 
 ---
 

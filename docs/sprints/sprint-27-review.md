@@ -143,7 +143,7 @@ let pe_state = match &row[3] {
 
 #### Feature 2: LICENSE File (#8) - DELIVERED ✅
 
-**Location:** `/Users/remi.turpaud/Code/genAI/tq/LICENSE` (293 lines)
+**Location:** `LICENSE` (293 lines)
 
 **Structure:**
 1. **tq Tool License** - MIT License (tq source code)
@@ -164,7 +164,7 @@ let pe_state = match &row[3] {
 
 #### Feature 3: README Restructure (#9) - DELIVERED ✅
 
-**Location:** `/Users/remi.turpaud/Code/genAI/tq/README.md` (311 lines)
+**Location:** `README.md` (311 lines)
 
 **Sections (in order):**
 1. **TLDR Summary** - Project tagline, "What is tq?", Quick Start

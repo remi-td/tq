@@ -448,28 +448,28 @@ Sprint 17 error messages demonstrate exceptional UX:
 
 1. **Update Cargo.toml version to 1.7.0** (Effort: 2 minutes)
    - Justification: New user-facing commands added in Sprint 17
-   - File: `/Users/remi.turpaud/Code/genAI/tq/Cargo.toml` line 3
+   - File: `Cargo.toml` line 3
 
 2. **Update specifications.md Sprint 17 status** (Effort: 5 minutes)
    - Mark all Sprint 17 features as ✅📝 Implemented and tested
-   - File: `/Users/remi.turpaud/Code/genAI/tq/docs/builder/specifications.md`
+   - File: `docs/builder/specifications.md`
 
 3. **Document breaking change in CHANGELOG** (Effort: 10 minutes)
    - Note password permission enforcement: warning → error
-   - Create `/Users/remi.turpaud/Code/genAI/tq/CHANGELOG.md` if missing
+   - Create `CHANGELOG.md` if missing
 
 #### P2 - Medium Priority
 
 1. **Sync cli-interface.md with implementation** (Effort: 30 minutes)
    - Profiles output format differs slightly from spec
    - Implementation is cleaner, update spec to match
-   - File: `/Users/remi.turpaud/Code/genAI/tq/docs/builder/detailed-specifications/cli-interface.md`
+   - File: `docs/builder/detailed-specifications/cli-interface.md`
 
 2. **Update testing-guidelines.md** (Effort: 2-3 hours)
    - Add "Batch CLI Command Testing" section based on Sprint 17 patterns
    - Document test evidence capture approach
    - Add security validation checklists
-   - File: `/Users/remi.turpaud/Code/genAI/tq/docs/builder/testing-guidelines.md`
+   - File: `docs/builder/testing-guidelines.md`
 
 3. **Convert manual tests to automated integration tests** (Effort: 3-4 hours)
    - TC-PROFILES-001, TC-PROFILES-002, TC-PROFILES-003

@@ -246,6 +246,35 @@ fn truncate_cell(value: &str, max_length: usize) -> String {
     }
 }
 
+/// Pad a string to the specified display width using visual width calculation
+///
+/// Sprint 33: Fixes Issue #14 - format! width specifier uses character count,
+/// not display width. This function correctly pads based on visual width,
+/// handling CJK characters and emoji that take 2 display columns per character.
+///
+/// # Arguments
+/// * `value` - The string to pad
+/// * `width` - Target display width (visual columns)
+/// * `alignment` - How to align the content within the padded space
+///
+/// # Returns
+/// A string with leading space, content, padding, and trailing space.
+/// Total visual width = width + 2 (for the surrounding spaces).
+fn pad_to_display_width(value: &str, width: usize, alignment: Alignment) -> String {
+    let visual_width = value.width();
+    let padding = width.saturating_sub(visual_width);
+
+    match alignment {
+        Alignment::Left => format!(" {}{} ", value, " ".repeat(padding)),
+        Alignment::Right => format!(" {}{} ", " ".repeat(padding), value),
+        Alignment::Center => {
+            let left_pad = padding / 2;
+            let right_pad = padding - left_pad;
+            format!(" {}{}{} ", " ".repeat(left_pad), value, " ".repeat(right_pad))
+        }
+    }
+}
+
 /// Pager state for navigation
 pub struct Pager {
     /// Table data (structured from QueryResult)
@@ -437,6 +466,7 @@ impl Pager {
     /// Render the header row
     ///
     /// Sprint 30: Formats directly from TableData columns, no string parsing
+    /// Sprint 33: Uses pad_to_display_width() for correct Unicode width handling
     fn render_header(
         &self,
         stdout: &mut impl Write,
@@ -451,6 +481,7 @@ impl Pager {
         // Left indicator cell (if columns hidden to left)
         if hidden_left > 0 {
             let indicator = format!("(+{} cols)", hidden_left);
+            // Indicators are ASCII-only, format! is safe here
             let padded = format!(" {:^width$} ", indicator, width = INDICATOR_WIDTH);
             execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
             write!(stdout, "{}", padded)?;
@@ -458,9 +489,9 @@ impl Pager {
             write!(stdout, "│")?;
         }
 
-        // Data column headers
+        // Data column headers - use display-width-aware padding
         for col in &self.data.columns[start_col..end_col] {
-            let padded = format!(" {:^width$} ", col.name, width = col.display_width);
+            let padded = pad_to_display_width(&col.name, col.display_width, Alignment::Center);
             execute!(stdout, SetForegroundColor(Color::Cyan))?;
             write!(stdout, "{}", padded)?;
             execute!(stdout, ResetColor)?;
@@ -470,6 +501,7 @@ impl Pager {
         // Right indicator cell (if columns hidden to right)
         if hidden_right > 0 {
             let indicator = format!("(+{} cols)", hidden_right);
+            // Indicators are ASCII-only, format! is safe here
             let padded = format!(" {:^width$} ", indicator, width = INDICATOR_WIDTH);
             execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
             write!(stdout, "{}", padded)?;
@@ -483,6 +515,7 @@ impl Pager {
     /// Render a data row
     ///
     /// Sprint 30: Formats directly from TableData cell values with proper alignment
+    /// Sprint 33: Uses pad_to_display_width() for correct Unicode width handling
     fn render_row(
         &self,
         stdout: &mut impl Write,
@@ -509,12 +542,8 @@ impl Pager {
             let value = self.data.get_cell(row_idx, col_idx);
             let is_null = value == "[NULL]";
 
-            // Format value with alignment
-            let padded = match col.alignment {
-                Alignment::Right => format!(" {:>width$} ", value, width = col.display_width),
-                Alignment::Center => format!(" {:^width$} ", value, width = col.display_width),
-                Alignment::Left => format!(" {:width$} ", value, width = col.display_width),
-            };
+            // Sprint 33: Use display-width-aware padding for correct Unicode handling
+            let padded = pad_to_display_width(value, col.display_width, col.alignment);
 
             if is_null {
                 execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
@@ -795,6 +824,7 @@ Press any key to return to results..."#;
     }
 
     /// Render header row to buffer (no ANSI escapes)
+    /// Sprint 33: Uses pad_to_display_width() for correct Unicode width handling
     #[cfg(test)]
     fn render_header_to_buffer(&self, buffer: &mut Vec<u8>, start_col: usize, end_col: usize) {
         let hidden_left = self.hidden_columns_left();
@@ -806,14 +836,15 @@ Press any key to return to results..."#;
         // Left indicator cell (if columns hidden to left)
         if hidden_left > 0 {
             let indicator = format!("(+{} cols)", hidden_left);
+            // Indicators are ASCII-only, format! is safe here
             let padded = format!(" {:^width$} ", indicator, width = INDICATOR_WIDTH);
             line.push_str(&padded);
             line.push('│');
         }
 
-        // Data column headers
+        // Data column headers - use display-width-aware padding
         for col in &self.data.columns[start_col..end_col] {
-            let padded = format!(" {:^width$} ", col.name, width = col.display_width);
+            let padded = pad_to_display_width(&col.name, col.display_width, Alignment::Center);
             line.push_str(&padded);
             line.push('│');
         }
@@ -821,6 +852,7 @@ Press any key to return to results..."#;
         // Right indicator cell (if columns hidden to right)
         if hidden_right > 0 {
             let indicator = format!("(+{} cols)", hidden_right);
+            // Indicators are ASCII-only, format! is safe here
             let padded = format!(" {:^width$} ", indicator, width = INDICATOR_WIDTH);
             line.push_str(&padded);
             line.push('│');
@@ -831,6 +863,7 @@ Press any key to return to results..."#;
     }
 
     /// Render data row to buffer (no ANSI escapes)
+    /// Sprint 33: Uses pad_to_display_width() for correct Unicode width handling
     #[cfg(test)]
     fn render_row_to_buffer(
         &self,
@@ -856,12 +889,8 @@ Press any key to return to results..."#;
             let col_idx = start_col + vis_idx;
             let value = self.data.get_cell(row_idx, col_idx);
 
-            // Format value with alignment
-            let padded = match col.alignment {
-                Alignment::Right => format!(" {:>width$} ", value, width = col.display_width),
-                Alignment::Center => format!(" {:^width$} ", value, width = col.display_width),
-                Alignment::Left => format!(" {:width$} ", value, width = col.display_width),
-            };
+            // Sprint 33: Use display-width-aware padding for correct Unicode handling
+            let padded = pad_to_display_width(value, col.display_width, col.alignment);
             line.push_str(&padded);
             line.push('│');
         }
@@ -903,6 +932,9 @@ Press any key to return to results..."#;
     }
 
     /// Run the pager event loop
+    ///
+    /// Sprint 33: Fixed bug where event::read() was called twice after single poll().
+    /// After poll() returns true, there is only ONE event in the queue.
     pub fn run(&mut self) -> io::Result<()> {
         let mut stdout = io::stdout();
         enable_raw_mode()?;
@@ -914,17 +946,24 @@ Press any key to return to results..."#;
         // Event loop
         loop {
             if event::poll(std::time::Duration::from_millis(100))? {
-                if let Event::Key(key) = event::read()? {
-                    if !self.handle_key(key)? {
-                        break;
+                // Sprint 33 Fix: Only call event::read() ONCE per poll() success.
+                // Previous code had a bug where it called read() twice.
+                match event::read()? {
+                    Event::Key(key) => {
+                        if !self.handle_key(key)? {
+                            break;
+                        }
+                        self.render()?;
                     }
-                    self.render()?;
-                }
-                if let Event::Resize(w, h) = event::read().unwrap_or(Event::FocusGained) {
-                    self.term_width = w as usize;
-                    self.term_height = h as usize;
-                    self.page_size = self.term_height.saturating_sub(5);
-                    self.render()?;
+                    Event::Resize(w, h) => {
+                        self.term_width = w as usize;
+                        self.term_height = h as usize;
+                        self.page_size = self.term_height.saturating_sub(5);
+                        self.render()?;
+                    }
+                    _ => {
+                        // Ignore other events (FocusGained, FocusLost, Mouse, Paste)
+                    }
                 }
             }
         }

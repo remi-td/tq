@@ -116,7 +116,7 @@ These fixes take **55 minutes total** and dramatically improve usability:
 
 ### Fix 1: Add Implementation Status to repl-mode.md (15 min)
 
-**File:** `/Users/remi.turpaud/Code/genAI/tq/docs/builder/detailed-specifications/repl-mode.md`
+**File:** `docs/builder/detailed-specifications/repl-mode.md`
 
 **Action:** Add status badge to section headers
 
@@ -141,7 +141,7 @@ These fixes take **55 minutes total** and dramatically improve usability:
 
 ### Fix 2: Add Test Status to specifications.md (30 min)
 
-**File:** `/Users/remi.turpaud/Code/genAI/tq/docs/builder/specifications.md`
+**File:** `docs/builder/specifications.md`
 
 **Action:** Replace status symbols with combined implementation + test status
 
@@ -172,7 +172,7 @@ These fixes take **55 minutes total** and dramatically improve usability:
 
 ### Fix 3: Add Quick Start to testing-checklist.md (10 min)
 
-**File:** `/Users/remi.turpaud/Code/genAI/tq/docs/builder/testing-checklist.md`
+**File:** `docs/builder/testing-checklist.md`
 
 **Action:** Add Quick Start section at line 1 (before "Overview")
 
@@ -356,7 +356,7 @@ These fixes take **55 minutes total** and dramatically improve usability:
 **Current:** Agent updates specs during Phase 2 (design)
 **Enhancement:** Agent proactively checks specs in Phase 0 (Reality Check)
 
-**Add to `/Users/remi.turpaud/Code/genAI/tq/.claude/agents/cli-ux-designer.md`:**
+**Add to `.claude/agents/cli-ux-designer.md`:**
 
 ```markdown
 ## Phase 0: Reality Check Responsibilities

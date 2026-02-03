@@ -129,8 +129,9 @@ tq> SELECT employee_id, first_name, last_name
 tq> /list databases          # List all databases
 tq> /list tables emp%        # List tables matching pattern
 tq> /describe employees      # Show table structure
+tq> /sample customers 20     # Quick random sample (20 rows)
+tq> /peek products           # Preview table structure + data
 tq> /sessions                # Monitor active database sessions
-tq> /export csv result.csv   # Export last result to CSV
 ```
 
 ### One-Shot Queries
@@ -198,7 +199,9 @@ Or use environment variables:
 - Tab completion for tables, columns, and SQL keywords
 - Command history with search (Ctrl-R)
 - Emacs and Vi editing modes
-- Metacommands: `/describe`, `/list`, `/export`, `/sessions`, and more
+- Schema exploration: `/list`, `/describe` for database introspection
+- Data sampling: `/sample` and `/peek` for quick data inspection
+- Session monitoring: `/sessions` to view active queries and resource usage
 
 ### Output Formats
 - Beautiful ASCII table output with box-drawing characters
