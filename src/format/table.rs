@@ -328,15 +328,26 @@ fn render_data_row(
         let width = selection.column_widths[i];
         let col = &columns[col_idx];
 
+        // Truncate value if it exceeds allocated width (accounting for padding)
+        // This prevents long values from breaking table alignment
+        let max_value_len = width.saturating_sub(2); // -2 for padding spaces
+        let truncated_value = if value.len() > max_value_len && max_value_len > 3 {
+            format!("{}...", &value[..max_value_len.saturating_sub(3)])
+        } else if value.len() > max_value_len {
+            value[..max_value_len].to_string()
+        } else {
+            value.clone()
+        };
+
         // Format value with alignment
         let formatted = match col.data_type.alignment() {
-            Alignment::Right => format!(" {:>width$}", value, width = width - 2),
-            Alignment::Center => format!(" {:^width$}", value, width = width - 2),
-            Alignment::Left => format!(" {:width$}", value, width = width - 2),
+            Alignment::Right => format!(" {:>width$}", truncated_value, width = width - 2),
+            Alignment::Center => format!(" {:^width$}", truncated_value, width = width - 2),
+            Alignment::Left => format!(" {:width$}", truncated_value, width = width - 2),
         };
 
         // Apply NULL styling if color is enabled
-        if options.use_color && value == "[NULL]" {
+        if options.use_color && truncated_value == "[NULL]" {
             // ANSI escape for dim/italic: \x1b[2;3m ... \x1b[0m
             row.push_str(&format!("\x1b[2;3m{}\x1b[0m", formatted));
         } else {
