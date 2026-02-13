@@ -40,6 +40,26 @@ mod tests {
         assert!(help.contains("profiles"));
     }
 
+    /// Sprint 36: Verify config help includes project config section
+    #[test]
+    fn test_config_help_includes_project_config() {
+        let help = config_help();
+        assert!(help.contains("PROJECT CONFIGURATION"));
+        assert!(help.contains(".tq.toml"));
+        assert!(help.contains(".tq.toml.example"));
+    }
+
+    /// Sprint 36: Verify config help shows 5-level precedence
+    #[test]
+    fn test_config_help_five_level_precedence() {
+        let help = config_help();
+        assert!(help.contains("1. Built-in defaults"));
+        assert!(help.contains("2. User config file"));
+        assert!(help.contains("3. Project config file"));
+        assert!(help.contains("4. Environment variables"));
+        assert!(help.contains("5. Command-line arguments"));
+    }
+
     #[test]
     fn test_credentials_help_not_empty() {
         let help = credentials_help();

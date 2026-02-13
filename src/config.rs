@@ -158,9 +158,31 @@ impl Config {
 
         // Project config (if found via directory traversal)
         // This overrides user config, enabling team-shared settings
+        // Sprint 36: Validate TOML syntax before merging; warn and skip on invalid
         if let Some(ref path) = project_config_path {
             log::debug!("Found project config: {}", path.display());
-            figment = figment.merge(Toml::file(path));
+            match std::fs::read_to_string(path) {
+                Ok(content) => {
+                    if let Err(parse_err) = content.parse::<toml::Table>() {
+                        eprintln!(
+                            "Warning: Invalid project config at {}: {}",
+                            path.display(),
+                            parse_err
+                        );
+                        // Continue without project config (graceful degradation)
+                    } else {
+                        figment = figment.merge(Toml::file(path));
+                    }
+                }
+                Err(io_err) => {
+                    eprintln!(
+                        "Warning: Invalid project config at {}: {}",
+                        path.display(),
+                        io_err
+                    );
+                    // Continue without project config (graceful degradation)
+                }
+            }
         }
 
         // Environment variables (TQ_HOST, TQ_PORT, etc.)
@@ -740,5 +762,39 @@ database = "projectdb"
 
         let config = with_current_dir(temp.path(), Config::load_project_only);
         assert!(config.is_none());
+    }
+
+    /// Sprint 36: Config::load() should gracefully handle invalid project config TOML
+    /// by emitting a warning and continuing with user config only.
+    #[test]
+    fn test_load_with_invalid_project_config_graceful_degradation() {
+        let temp = tempfile::tempdir().unwrap();
+
+        // Write invalid TOML to .tq.toml
+        let config_path = temp.path().join(".tq.toml");
+        std::fs::write(&config_path, "this is not valid [[ toml {{").unwrap();
+
+        // Config::load() should succeed (not error) despite invalid project config
+        let result = with_current_dir(temp.path(), Config::load);
+        assert!(result.is_ok(), "Config::load should succeed despite invalid project config");
+    }
+
+    /// Sprint 36: Config::load() should merge valid project config normally
+    #[test]
+    fn test_load_with_valid_project_config_merges() {
+        let temp = tempfile::tempdir().unwrap();
+
+        // Write valid TOML with a profile
+        let config_path = temp.path().join(".tq.toml");
+        std::fs::write(
+            &config_path,
+            "[profiles.project_test]\nhost = \"project.example.com\"\ndatabase = \"pdb\"\n",
+        )
+        .unwrap();
+
+        let config = with_current_dir(temp.path(), Config::load).unwrap();
+        assert!(config.profiles.contains_key("project_test"));
+        let profile = config.profiles.get("project_test").unwrap();
+        assert_eq!(profile.host.as_deref(), Some("project.example.com"));
     }
 }

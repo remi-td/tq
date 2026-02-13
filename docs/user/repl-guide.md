@@ -45,9 +45,11 @@ Available metacommands:
     /ping        Test connection
     /quit        Exit REPL
     /reconnect   Reconnect to database
+    /repeat      Re-execute last query
     /sample      Show random sample
     /session     Show session info
     /sessions    List all database sessions
+    /show        Show schema information (indexes)
     /timing      Enable/disable query timing
 ```
 
@@ -330,6 +332,51 @@ tq> SELECT
 
 The query executes when you end it with a semicolon (`;`).
 
+### Repeating Queries
+
+Re-execute your last query without retyping:
+
+```sql
+tq> SELECT COUNT(*) FROM employees WHERE department = 'IT';
+
+┌─────────┐
+│ Count   │
+├─────────┤
+│ 42      │
+└─────────┘
+
+tq> /repeat
+
+┌─────────┐
+│ Count   │
+├─────────┤
+│ 42      │
+└─────────┘
+```
+
+**Short alias:** `\r`
+
+```sql
+tq> \r
+[Re-executes last query]
+```
+
+**When to use:**
+- Checking if data changed after an operation
+- Running the same query repeatedly while monitoring changes
+- Quickly re-executing after reviewing results
+
+**No previous query:**
+
+If you haven't run any SQL yet, you'll see:
+
+```sql
+tq> /repeat
+No previous query to repeat
+```
+
+**Note:** Only SQL queries are repeated. Metacommands (like `/describe` or `/list`) are not stored as repeatable queries.
+
 ### Query History
 
 Use arrow keys to navigate your command history:
@@ -587,6 +634,97 @@ Columns:
 
 ```sql
 tq> \d employees
+```
+
+#### Show Table Indexes
+
+View index information for a table to understand query optimization and performance:
+
+```sql
+tq> /show indexes employees
+
+Indexes on PRODUCTION.employees:
+┌────────────────┬─────────────┬─────────────┬────────────────┐
+│ IndexName      │ IndexType   │ ColumnName  │ ColumnPosition │
+├────────────────┼─────────────┼─────────────┼────────────────┤
+│ PK_employees   │ Primary Key │ employee_id │ 1              │
+│ idx_dept       │ Secondary   │ department  │ 1              │
+│ idx_dept       │ Secondary   │ hire_date   │ 2              │
+│ idx_name       │ Secondary   │ last_name   │ 1              │
+│ idx_name       │ Secondary   │ first_name  │ 2              │
+└────────────────┴─────────────┴─────────────┴────────────────┘
+
+5 index columns across 3 indexes
+```
+
+**Qualified table names:**
+
+You can specify the database explicitly:
+
+```sql
+tq> /show indexes staging.employees
+
+Indexes on STAGING.employees:
+┌────────────────┬─────────────┬─────────────┬────────────────┐
+│ IndexName      │ IndexType   │ ColumnName  │ ColumnPosition │
+├────────────────┼─────────────┼─────────────┼────────────────┤
+│ PK_employees   │ Primary Key │ employee_id │ 1              │
+└────────────────┴─────────────┴─────────────┴────────────────┘
+
+1 index column across 1 index
+```
+
+**Short alias:** `\di`
+
+```sql
+tq> \di employees
+```
+
+**Understanding the output:**
+
+- **IndexName**: Name of the index in the database
+- **IndexType**: Type of index (Primary Key, Secondary, Unique)
+- **ColumnName**: Column included in the index
+- **ColumnPosition**: Position of the column within a multi-column index
+  - For composite indexes, position shows the order of columns
+  - Position 1 is the leading column, position 2 is second, etc.
+
+**Common index types:**
+
+- **Primary Key**: Unique identifier for table rows
+- **Secondary**: Non-unique index for faster lookups
+- **Unique**: Enforces uniqueness constraint
+- **Join Index**: Specialized Teradata index for join optimization
+
+**When to use:**
+
+- Understanding which columns are indexed before writing queries
+- Diagnosing slow query performance
+- Planning new indexes for query optimization
+- Verifying indexes exist after DDL operations
+
+**Error handling:**
+
+If the table doesn't exist:
+
+```sql
+tq> /show indexes nonexistent_table
+
+Error: Table not found
+
+Table 'nonexistent_table' does not exist in database 'production'.
+Use /list tables to see available tables.
+```
+
+If you don't have permission to view index information:
+
+```sql
+tq> /show indexes secure_table
+
+Error: Permission denied
+
+You do not have permission to view index information for 'secure_table'.
+Contact your database administrator if you need access.
 ```
 
 ### Check Connection

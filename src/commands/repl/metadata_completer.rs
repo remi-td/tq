@@ -300,6 +300,17 @@ const METACOMMANDS: &[MetacommandDef] = &[
         aliases: &[],
         description: "Preview first rows and column metadata",
     },
+    // Sprint 36: Repeat and show indexes commands
+    MetacommandDef {
+        name: "repeat",
+        aliases: &["r"],
+        description: "Re-execute last query",
+    },
+    MetacommandDef {
+        name: "show indexes",
+        aliases: &["di"],
+        description: "Show index information for a table",
+    },
 ];
 
 /// Complete metacommands based on user input prefix
@@ -320,6 +331,11 @@ fn complete_metacommands(prefix: &str, line_start: usize, cursor_pos: usize) -> 
     // Check if we're completing a subcommand (e.g., "/list tab" -> "/list tables")
     if !prefix_parts.is_empty() && prefix_parts[0] == "list" {
         return complete_list_subcommands(&prefix_parts, line_start, cursor_pos);
+    }
+
+    // Sprint 36: Check for /show subcommand completion
+    if !prefix_parts.is_empty() && prefix_parts[0] == "show" {
+        return complete_show_subcommands(&prefix_parts, line_start, cursor_pos);
     }
 
     // Filter metacommands by prefix
@@ -376,6 +392,40 @@ fn complete_list_subcommands(
         if partial.is_empty() || name.starts_with(partial) {
             suggestions.push(Suggestion {
                 value: format!("/list {}", name),
+                description: Some(description.to_string()),
+                style: None,
+                extra: None,
+                span: reedline::Span {
+                    start: line_start,
+                    end: cursor_pos,
+                },
+                append_whitespace: true,
+            });
+        }
+    }
+
+    suggestions
+}
+
+/// Complete /show subcommands (indexes)
+///
+/// Sprint 36: Tab completion for /show subcommands.
+fn complete_show_subcommands(
+    parts: &[&str],
+    line_start: usize,
+    cursor_pos: usize,
+) -> Vec<Suggestion> {
+    let subcommands = [("indexes", "Show index information for a table")];
+
+    // Get the partial subcommand (if any)
+    let partial = if parts.len() > 1 { parts[1] } else { "" };
+
+    let mut suggestions = Vec::new();
+
+    for (name, description) in subcommands {
+        if partial.is_empty() || name.starts_with(partial) {
+            suggestions.push(Suggestion {
+                value: format!("/show {}", name),
                 description: Some(description.to_string()),
                 style: None,
                 extra: None,
@@ -1146,5 +1196,58 @@ mod tests {
         assert!(values.contains(&"/peek"));
         assert!(values.contains(&"/pager"));
         assert!(values.contains(&"/ping"));
+    }
+
+    // Sprint 36: Tests for /repeat and /show indexes tab completion
+
+    #[test]
+    fn test_complete_metacommands_repeat() {
+        let suggestions = complete_metacommands("rep", 0, 4);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].value, "/repeat");
+        assert!(suggestions[0]
+            .description
+            .as_ref()
+            .unwrap()
+            .contains("Re-execute"));
+    }
+
+    #[test]
+    fn test_complete_metacommands_repeat_alias_r() {
+        let suggestions = complete_metacommands("r", 0, 2);
+        let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
+        // /r should match /repeat (alias "r")
+        assert!(values.contains(&"/repeat"));
+    }
+
+    #[test]
+    fn test_complete_metacommands_show() {
+        let suggestions = complete_metacommands("show", 0, 5);
+        let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
+        assert!(values.contains(&"/show indexes"));
+    }
+
+    #[test]
+    fn test_complete_show_subcommands() {
+        // "/show " should show "indexes" subcommand
+        let suggestions = complete_metacommands("show ", 0, 6);
+        let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
+        assert!(values.contains(&"/show indexes"));
+    }
+
+    #[test]
+    fn test_complete_show_subcommands_partial() {
+        // "/show ind" should match "/show indexes"
+        let suggestions = complete_metacommands("show ind", 0, 9);
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].value, "/show indexes");
+    }
+
+    #[test]
+    fn test_complete_metacommands_di_alias() {
+        let suggestions = complete_metacommands("di", 0, 3);
+        let values: Vec<&str> = suggestions.iter().map(|s| s.value.as_str()).collect();
+        // /di is an alias for /show indexes
+        assert!(values.contains(&"/show indexes"));
     }
 }

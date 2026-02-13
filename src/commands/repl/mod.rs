@@ -66,7 +66,10 @@ pub fn execute<W: Write>(
     // Initialize REPL state
     let mut state = {
         let cs = completion_state.lock().unwrap();
-        ReplState::new(cs.client().config().clone())
+        let mut s = ReplState::new(cs.client().config().clone());
+        // Sprint 36: Store default_limit so /repeat can re-use it
+        s.set_default_limit(args.default_limit);
+        s
     };
 
     // Pre-load ALL metadata BEFORE editor initialization for faster tab completion.

@@ -3908,6 +3908,577 @@ pub fn execute_sample(...) -> Result<()> {
 
 ---
 
+## Query Editing Commands
+
+### `/repeat` Command
+
+The `/repeat` metacommand re-executes the most recently executed SQL query without requiring the user to retype or recall it from history.
+
+**Related Specification**: `docs/specifications/repl.md` (Query Editing section)
+
+#### Design Approach
+
+The `/repeat` command leverages existing infrastructure in `ReplState` that already tracks the last executed SQL query.
+
+#### Implementation Details
+
+**State Tracking:**
+```rust
+// src/commands/repl/state.rs
+
+pub struct ReplState {
+    // ... other fields ...
+
+    /// Last SQL query executed (for /export and /repeat)
+    last_sql: Option<String>,
+
+    /// Whether last result was limited by default REPL limit
+    was_limited: bool,
+}
+
+impl ReplState {
+    /// Get the last SQL query
+    pub fn last_sql(&self) -> Option<&str> {
+        self.last_sql.as_deref()
+    }
+
+    /// Set the last SQL query and whether it was limited
+    pub fn set_last_query(&mut self, sql: String, was_limited: bool) {
+        self.last_sql = Some(sql);
+        self.was_limited = was_limited;
+    }
+}
+```
+
+**Command Handler:**
+```rust
+// src/commands/repl/metacommands.rs
+
+pub fn handle_metacommand_with_state<W: Write>(
+    input: &str,
+    state: &mut ReplState,
+    completion_state: &mut CompletionState,
+    writer: &mut W,
+) -> Result<bool> {
+    // ... existing command parsing ...
+
+    match command.as_str() {
+        // ... other commands ...
+
+        "repeat" | "r" => {
+            execute_repeat(state, completion_state, writer)?;
+        }
+
+        // ... remaining commands ...
+    }
+
+    Ok(true)
+}
+
+/// Execute the /repeat metacommand
+///
+/// Re-executes the most recently executed SQL query.
+fn execute_repeat<W: Write>(
+    state: &mut ReplState,
+    completion_state: &mut CompletionState,
+    writer: &mut W,
+) -> Result<()> {
+    // Check if there's a previous query
+    let sql = match state.last_sql() {
+        Some(s) => s.to_string(),
+        None => {
+            writeln!(writer)?;
+            writeln!(writer, "No previous query to repeat")?;
+            writeln!(writer)?;
+            return Ok(());
+        }
+    };
+
+    // Display what we're repeating
+    writeln!(writer)?;
+    writeln!(writer, "Repeating: {}", sql)?;
+    writeln!(writer)?;
+
+    // Execute the query using standard execution pipeline
+    let result = completion_state.client().execute(&sql)?;
+
+    // Format and display results (same as normal query execution)
+    let formatter = crate::output::TableFormatter::new();
+    let output = formatter.format(&result)?;
+
+    if state.is_pager_enabled() {
+        crate::commands::repl::pager::display_with_pager(&output, result.row_count)?;
+    } else {
+        write!(writer, "{}", output)?;
+    }
+
+    // Update state (keep last_sql unchanged - it's the same query)
+    state.set_last_result(result);
+
+    Ok(())
+}
+```
+
+#### Tab Completion
+
+The `/repeat` command is added to the metacommand completion list:
+
+```rust
+// src/commands/repl/metadata_completer.rs
+
+const METACOMMANDS: &[(&str, &str)] = &[
+    // ... existing metacommands ...
+    ("/repeat", "Re-execute last query"),
+    // ... remaining metacommands ...
+];
+```
+
+Short alias `\r` is supported through the command parser:
+```rust
+match command.as_str() {
+    "repeat" | "r" => { /* ... */ }
+}
+```
+
+#### Help Text
+
+Updated help output:
+```rust
+fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
+    writeln!(writer)?;
+    writeln!(writer, "Query Editing:")?;
+    writeln!(writer, "  /repeat, /r            Re-execute last query")?;
+    // ... rest of help ...
+}
+```
+
+#### Usage Examples
+
+```sql
+tq> SELECT COUNT(*) FROM employees WHERE department = 'IT';
++-------+
+| count |
++-------+
+|   142 |
++-------+
+(1 row)
+
+tq> /repeat
+Repeating: SELECT COUNT(*) FROM employees WHERE department = 'IT'
+
++-------+
+| count |
++-------+
+|   142 |
++-------+
+(1 row)
+
+tq> \r
+Repeating: SELECT COUNT(*) FROM employees WHERE department = 'IT'
+[same output]
+```
+
+**No previous query:**
+```sql
+tq> /repeat
+
+No previous query to repeat
+
+tq>
+```
+
+#### Code Linkage
+
+| Component | File Path | Key Functions |
+|-----------|-----------|---------------|
+| State tracking | `src/commands/repl/state.rs` | `last_sql()`, `set_last_query()` |
+| Command handler | `src/commands/repl/metacommands.rs` | `execute_repeat()` |
+| Tab completion | `src/commands/repl/metadata_completer.rs` | METACOMMANDS list |
+| Help text | `src/commands/repl/metacommands.rs` | `print_help_extended()` |
+
+#### Error Handling
+
+1. **No previous query**: Show clear message "No previous query to repeat"
+2. **Query execution fails**: Standard error handling (connection lost, syntax error, permission denied) - same as regular query execution
+3. **State consistency**: Last SQL is preserved on error - user can fix connection and retry
+
+---
+
+## Schema Inspection Commands
+
+### `/show indexes` Command
+
+The `/show indexes <table>` metacommand displays index information for a specified table by querying the Teradata system catalog.
+
+**Related Specification**: `docs/specifications/repl.md` (Schema Inspection Commands)
+
+#### Design Approach
+
+The `/show indexes` command follows the established pattern used by `/describe`, querying Teradata's `DBC.IndicesV` system view to retrieve index metadata.
+
+#### Teradata Catalog Query
+
+Teradata stores index information in the `DBC.IndicesV` view, which provides comprehensive details about all indexes in the database.
+
+**Key columns:**
+- `IndexNumber` - Unique index identifier
+- `IndexType` - Type code (P=Primary, S=Secondary, K=Primary Key, U=Unique, V=Value-ordered, etc.)
+- `ColumnName` - Column included in the index
+- `ColumnPosition` - Position of column within the index
+- `UniqueFlag` - Whether index enforces uniqueness (Y/N)
+
+**Query structure:**
+```sql
+SELECT
+    IndexNumber,
+    CASE IndexType
+        WHEN 'P' THEN 'Primary Index'
+        WHEN 'Q' THEN 'Partitioned Primary Index'
+        WHEN 'S' THEN 'Secondary Index'
+        WHEN 'K' THEN 'Primary Key'
+        WHEN 'U' THEN 'Unique Constraint'
+        WHEN 'V' THEN 'Value-ordered Secondary Index'
+        WHEN 'H' THEN 'Hash-ordered Covering Secondary Index'
+        ELSE IndexType
+    END AS IndexType,
+    ColumnName,
+    ColumnPosition,
+    CASE UniqueFlag
+        WHEN 'Y' THEN 'Unique'
+        ELSE 'Not Unique'
+    END AS Uniqueness
+FROM DBC.IndicesV
+WHERE DatabaseName = <database>
+  AND TableName = <table>
+ORDER BY IndexNumber, ColumnPosition
+```
+
+#### Implementation Details
+
+**Command Handler:**
+```rust
+// src/commands/repl/metacommands.rs
+
+pub fn handle_metacommand_with_state<W: Write>(
+    input: &str,
+    state: &mut ReplState,
+    completion_state: &mut CompletionState,
+    writer: &mut W,
+) -> Result<bool> {
+    // ... existing command parsing ...
+
+    match command.as_str() {
+        // ... other commands ...
+
+        "show" => {
+            if args.is_empty() {
+                writeln!(writer)?;
+                writeln!(writer, "Usage: /show <subcommand> [options]")?;
+                writeln!(writer)?;
+                writeln!(writer, "Subcommands:")?;
+                writeln!(writer, "  indexes <table>    Display index information")?;
+                writeln!(writer)?;
+                writeln!(writer, "Examples:")?;
+                writeln!(writer, "  /show indexes employees")?;
+                writeln!(writer, "  /show indexes mydb.customers")?;
+                writeln!(writer)?;
+            } else if args[0].to_lowercase() == "indexes" {
+                if args.len() < 2 {
+                    writeln!(writer, "Usage: /show indexes <table_name>")?;
+                    writeln!(writer, "       /show indexes <database>.<table_name>")?;
+                } else {
+                    execute_show_indexes(completion_state, args[1], writer)?;
+                }
+            } else {
+                writeln!(writer, "Unknown subcommand: {}", args[0])?;
+                writeln!(writer, "Type /show for available subcommands.")?;
+            }
+        }
+
+        // Short alias
+        "di" => {
+            if args.is_empty() {
+                writeln!(writer, "Usage: /di <table_name>")?;
+            } else {
+                execute_show_indexes(completion_state, args[0], writer)?;
+            }
+        }
+
+        // ... remaining commands ...
+    }
+
+    Ok(true)
+}
+
+/// Execute the /show indexes metacommand
+///
+/// Shows index information for a table from DBC.IndicesV
+fn execute_show_indexes<W: Write>(
+    completion_state: &CompletionState,
+    table_name: &str,
+    writer: &mut W,
+) -> Result<()> {
+    writeln!(writer)?;
+
+    // Parse table name - may be qualified (database.table) or unqualified
+    let (database, table) = if let Some(dot_pos) = table_name.find('.') {
+        let db = &table_name[..dot_pos];
+        let tbl = &table_name[dot_pos + 1..];
+        (Some(db), tbl)
+    } else {
+        (None, table_name)
+    };
+
+    // Build the query to fetch index information from DBC.IndicesV
+    let sql = if let Some(db) = database {
+        format!(
+            r#"SELECT
+                IndexNumber,
+                CASE IndexType
+                    WHEN 'P' THEN 'Primary Index'
+                    WHEN 'Q' THEN 'Partitioned Primary Index'
+                    WHEN 'S' THEN 'Secondary Index'
+                    WHEN 'K' THEN 'Primary Key'
+                    WHEN 'U' THEN 'Unique Constraint'
+                    WHEN 'V' THEN 'Value-ordered Secondary Index'
+                    WHEN 'H' THEN 'Hash-ordered Covering Secondary Index'
+                    WHEN 'O' THEN 'Value-ordered ALL Covering Secondary Index'
+                    WHEN 'I' THEN 'Ordering Column (Composite Secondary Index)'
+                    WHEN 'G' THEN 'Geospatial Nonunique Secondary Index'
+                    ELSE IndexType
+                END AS IndexType,
+                ColumnName,
+                ColumnPosition,
+                CASE UniqueFlag
+                    WHEN 'Y' THEN 'Unique'
+                    ELSE 'Not Unique'
+                END AS Uniqueness
+               FROM DBC.IndicesV
+               WHERE DatabaseName = '{}'
+                 AND TableName = '{}'
+               ORDER BY IndexNumber, ColumnPosition"#,
+            escape_sql_string(db),
+            escape_sql_string(table)
+        )
+    } else {
+        format!(
+            r#"SELECT
+                IndexNumber,
+                CASE IndexType
+                    WHEN 'P' THEN 'Primary Index'
+                    WHEN 'Q' THEN 'Partitioned Primary Index'
+                    WHEN 'S' THEN 'Secondary Index'
+                    WHEN 'K' THEN 'Primary Key'
+                    WHEN 'U' THEN 'Unique Constraint'
+                    WHEN 'V' THEN 'Value-ordered Secondary Index'
+                    WHEN 'H' THEN 'Hash-ordered Covering Secondary Index'
+                    WHEN 'O' THEN 'Value-ordered ALL Covering Secondary Index'
+                    WHEN 'I' THEN 'Ordering Column (Composite Secondary Index)'
+                    WHEN 'G' THEN 'Geospatial Nonunique Secondary Index'
+                    ELSE IndexType
+                END AS IndexType,
+                ColumnName,
+                ColumnPosition,
+                CASE UniqueFlag
+                    WHEN 'Y' THEN 'Unique'
+                    ELSE 'Not Unique'
+                END AS Uniqueness
+               FROM DBC.IndicesV
+               WHERE TableName = '{}'
+                 AND DatabaseName = DATABASE
+               ORDER BY IndexNumber, ColumnPosition"#,
+            escape_sql_string(table)
+        )
+    };
+
+    // Execute the query
+    match completion_state.client().execute(&sql) {
+        Ok(result) => {
+            if result.row_count == 0 {
+                writeln!(
+                    writer,
+                    "Table '{}' not found or has no indexes.",
+                    table_name
+                )?;
+                writeln!(writer)?;
+                writeln!(writer, "Suggestions:")?;
+                writeln!(writer, "  - Check the table name spelling")?;
+                writeln!(writer, "  - Use qualified name: database.table")?;
+                writeln!(writer, "  - Use /list tables to see available tables")?;
+                writeln!(writer)?;
+            } else {
+                // Display the results using table formatter
+                writeln!(writer, "Indexes for table '{}':", table_name)?;
+                writeln!(writer)?;
+
+                let formatter = crate::output::TableFormatter::new();
+                let output = formatter.format(&result)?;
+                write!(writer, "{}", output)?;
+
+                writeln!(writer)?;
+            }
+        }
+        Err(e) => {
+            // Handle common errors
+            let error_msg = e.to_string();
+
+            if error_msg.contains("does not exist") || error_msg.contains("not found") {
+                writeln!(writer, "Table '{}' not found.", table_name)?;
+                writeln!(writer)?;
+                writeln!(writer, "Use /list tables to see available tables.")?;
+            } else if error_msg.contains("permission") || error_msg.contains("access denied") {
+                writeln!(writer, "Permission denied accessing table '{}'.", table_name)?;
+                writeln!(writer)?;
+                writeln!(writer, "You may not have SELECT access to this table or DBC.IndicesV.")?;
+                writeln!(writer, "Contact your database administrator for access.")?;
+            } else {
+                writeln!(writer, "Error retrieving index information: {}", e)?;
+            }
+            writeln!(writer)?;
+        }
+    }
+
+    Ok(())
+}
+```
+
+#### Tab Completion
+
+The `/show indexes` command is added to the metacommand completion list:
+
+```rust
+// src/commands/repl/metadata_completer.rs
+
+const METACOMMANDS: &[(&str, &str)] = &[
+    // ... existing metacommands ...
+    ("/show indexes", "Display index information for a table"),
+    // ... remaining metacommands ...
+];
+```
+
+Short alias `\di` is supported as a separate metacommand entry:
+```rust
+match command.as_str() {
+    "show" => { /* handle /show subcommands */ }
+    "di" => { /* shortcut for /show indexes */ }
+}
+```
+
+#### Help Text
+
+Updated help output:
+```rust
+fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
+    writeln!(writer)?;
+    writeln!(writer, "Schema Inspection:")?;
+    writeln!(writer, "  /describe <table>, /d  Show table structure")?;
+    writeln!(writer, "  /show indexes <table>  Display index information")?;
+    writeln!(writer, "  /di <table>            Shortcut for /show indexes")?;
+    writeln!(writer, "  /list databases        List all accessible databases")?;
+    writeln!(writer, "  /list tables [pattern] List tables (optional glob pattern)")?;
+    writeln!(writer, "  /list views            List views in current database")?;
+    writeln!(writer, "  /dt                    Shortcut for /list tables")?;
+    writeln!(writer, "  /dv                    Shortcut for /list views")?;
+    // ... rest of help ...
+}
+```
+
+#### Usage Examples
+
+**Basic usage:**
+```sql
+tq> /show indexes employees
+
+Indexes for table 'employees':
+
++-------------+--------------------+--------------+----------------+-------------+
+| IndexNumber | IndexType          | ColumnName   | ColumnPosition | Uniqueness  |
++-------------+--------------------+--------------+----------------+-------------+
+|           1 | Primary Index      | employee_id  |              1 | Not Unique  |
+|           2 | Secondary Index    | last_name    |              1 | Not Unique  |
+|           2 | Secondary Index    | first_name   |              2 | Not Unique  |
+|           3 | Primary Key        | employee_id  |              1 | Unique      |
++-------------+--------------------+--------------+----------------+-------------+
+(4 rows)
+```
+
+**Qualified table name:**
+```sql
+tq> /show indexes hr.employees
+
+Indexes for table 'hr.employees':
+[same output format]
+```
+
+**Short alias:**
+```sql
+tq> \di employees
+[same output as /show indexes]
+```
+
+**Table not found:**
+```sql
+tq> /show indexes nonexistent
+
+Table 'nonexistent' not found or has no indexes.
+
+Suggestions:
+  - Check the table name spelling
+  - Use qualified name: database.table
+  - Use /list tables to see available tables
+```
+
+**Permission denied:**
+```sql
+tq> /show indexes restricted_table
+
+Permission denied accessing table 'restricted_table'.
+
+You may not have SELECT access to this table or DBC.IndicesV.
+Contact your database administrator for access.
+```
+
+#### Code Linkage
+
+| Component | File Path | Key Functions |
+|-----------|-----------|---------------|
+| Command handler | `src/commands/repl/metacommands.rs` | `execute_show_indexes()` |
+| SQL utilities | `src/sql/identifiers.rs` | `escape_sql_string()` |
+| Tab completion | `src/commands/repl/metadata_completer.rs` | METACOMMANDS list |
+| Help text | `src/commands/repl/metacommands.rs` | `print_help_extended()` |
+| Output formatting | `src/output/table.rs` | `TableFormatter` |
+
+#### Error Handling
+
+1. **Table not found**: Show helpful message with suggestions
+2. **Permission denied**: Clear message explaining access requirements
+3. **Invalid table name**: Caught by SQL execution error
+4. **Connection lost**: Standard database error handling
+5. **System view unavailable**: Error message with alternative suggestion
+
+#### Design Decisions
+
+**Why DBC.IndicesV instead of DBC.Indices?**
+- `IndicesV` is a view that provides a more user-friendly interface
+- Consistent with `/describe` which uses `DBC.ColumnsV`
+- Both views handle qualified names and permissions consistently
+
+**Why separate `/show` parent command?**
+- Extensible pattern for future schema commands (`/show constraints`, `/show stats`, etc.)
+- Consistent with PostgreSQL's `\d+` pattern
+- Clean namespace organization
+
+**Why include ColumnPosition?**
+- Multi-column indexes require positional information to understand key structure
+- Helps users understand composite index column order (important for query optimization)
+
+**Why translate IndexType codes?**
+- Raw codes (P, Q, S, K, U, etc.) are cryptic for users
+- Human-readable descriptions improve usability
+- Follows pattern established by other database tools (pgcli, mycli)
+
+---
+
 ## Future Enhancements
 
 - Query history search (Ctrl-R) - already supported by reedline
@@ -3920,3 +4491,5 @@ pub fn execute_sample(...) -> Result<()> {
 - Fuzzy matching for completion (like pgcli)
 - Second TAB accepts selection (requires reedline enhancement)
 - Session filtering for `/sessions` (by user, state, etc.)
+- External editor integration (`/edit` command) - requires more design work
+- Additional `/show` subcommands (constraints, statistics, partitions)

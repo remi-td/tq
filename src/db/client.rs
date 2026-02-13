@@ -21,6 +21,27 @@ pub struct DatabaseClient {
 }
 
 impl DatabaseClient {
+    /// Create a mock database client for unit testing
+    ///
+    /// This client has valid config but will not be able to connect to any database.
+    /// Used by unit tests that need a DatabaseClient reference without database access.
+    #[cfg(test)]
+    pub fn mock() -> Self {
+        let config = ConnectionConfig {
+            host: "mock".to_string(),
+            port: 1025,
+            user: "mock".to_string(),
+            password: None,
+            database: "mock".to_string(),
+            logmech: crate::cli::LogonMechanism::Td2,
+            timeout: std::time::Duration::from_secs(30),
+        };
+        Self {
+            config,
+            driver_lib_dir: ".".to_string(),
+        }
+    }
+
     /// Create a new database client
     ///
     /// # Arguments

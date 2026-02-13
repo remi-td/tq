@@ -21,6 +21,7 @@
 //! Sprint 34 refactoring:
 //! - Use shared sql::escape_sql_string and sql::quote_qualified_name utilities
 
+use super::executor::execute_sql_with_state;
 use super::metadata_completer::CompletionState;
 use super::state::ReplState;
 use crate::cli::LogonMechanism;
@@ -160,6 +161,36 @@ pub fn handle_metacommand<W: Write>(
                     }
                 }
             }
+        }
+
+        // Sprint 36: Repeat last query (basic handler - no client available)
+        "repeat" | "r" => {
+            match state.last_sql() {
+                Some(sql) => {
+                    writeln!(writer, "Repeating: {}", sql)?;
+                    writeln!(
+                        writer,
+                        "Note: /repeat requires full REPL mode for execution."
+                    )?;
+                }
+                None => {
+                    writeln!(writer, "No previous query to repeat.")?;
+                }
+            }
+        }
+
+        // Sprint 36: Show indexes (basic handler - no client available for query)
+        "show" => {
+            writeln!(
+                writer,
+                "The /show command requires full REPL mode with database connection."
+            )?;
+        }
+        "di" => {
+            writeln!(
+                writer,
+                "The /di command requires full REPL mode with database connection."
+            )?;
         }
 
         // Unknown command
@@ -384,6 +415,64 @@ pub fn handle_metacommand_with_state<W: Write>(
             execute_peek(completion_state, &args_str, writer)?;
         }
 
+        // Sprint 36: Repeat last query
+        "repeat" | "r" => {
+            execute_repeat(state, completion_state, writer)?;
+        }
+
+        // Sprint 36: Show indexes command
+        "show" => {
+            if args.is_empty() {
+                writeln!(writer)?;
+                writeln!(writer, "Usage: /show <subcommand> [options]")?;
+                writeln!(writer)?;
+                writeln!(writer, "Subcommands:")?;
+                writeln!(
+                    writer,
+                    "  indexes <table>    Show index information for a table"
+                )?;
+                writeln!(writer)?;
+                writeln!(writer, "Examples:")?;
+                writeln!(writer, "  /show indexes employees")?;
+                writeln!(writer, "  /show indexes prod.orders")?;
+                writeln!(writer)?;
+            } else {
+                let subcommand = args[0].to_lowercase();
+                match subcommand.as_str() {
+                    "indexes" | "index" => {
+                        if args.len() < 2 {
+                            writeln!(writer, "Usage: /show indexes <table_name>")?;
+                            writeln!(
+                                writer,
+                                "       /show indexes <database>.<table_name>"
+                            )?;
+                        } else {
+                            execute_show_indexes(
+                                completion_state,
+                                args[1],
+                                writer,
+                            )?;
+                        }
+                    }
+                    _ => {
+                        writeln!(writer)?;
+                        writeln!(writer, "Unknown show subcommand: {}", subcommand)?;
+                        writeln!(writer, "Available: indexes")?;
+                        writeln!(writer)?;
+                    }
+                }
+            }
+        }
+        // Sprint 36: Direct alias for /show indexes
+        "di" => {
+            if args.is_empty() {
+                writeln!(writer, "Usage: /di <table_name>")?;
+                writeln!(writer, "       /di <database>.<table_name>")?;
+            } else {
+                execute_show_indexes(completion_state, args[0], writer)?;
+            }
+        }
+
         // Unknown command
         _ => {
             writeln!(writer, "Unknown command: /{}", command)?;
@@ -400,6 +489,10 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "tq REPL Commands:")?;
     writeln!(writer, "  /help, /?              Show this help message")?;
     writeln!(writer, "  /quit, /q              Exit the REPL")?;
+    writeln!(
+        writer,
+        "  /repeat, /r            Re-execute last query"
+    )?;
     writeln!(
         writer,
         "  /session               Show current session information"
@@ -433,8 +526,13 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
         "  /list tables [pattern] List tables (optional glob pattern)"
     )?;
     writeln!(writer, "  /list views            List views in current database")?;
+    writeln!(
+        writer,
+        "  /show indexes <table>  Show index information"
+    )?;
     writeln!(writer, "  /dt                    Shortcut for /list tables")?;
     writeln!(writer, "  /dv                    Shortcut for /list views")?;
+    writeln!(writer, "  /di <table>            Shortcut for /show indexes")?;
     writeln!(writer)?;
     writeln!(writer, "Data Exploration:")?;
     writeln!(
@@ -455,6 +553,7 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "SQL Execution:")?;
     writeln!(writer, "  Enter SQL statements ending with semicolon (;)")?;
     writeln!(writer, "  Multi-line statements are supported")?;
+    writeln!(writer, "  /repeat re-executes the last SQL statement")?;
     writeln!(writer)?;
     writeln!(writer, "Tab Completion:")?;
     writeln!(writer, "  Tab after /            Complete metacommands")?;
@@ -959,10 +1058,18 @@ fn print_help<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "  /quit, /q              Exit the REPL")?;
     writeln!(
         writer,
+        "  /repeat, /r            Re-execute last query"
+    )?;
+    writeln!(
+        writer,
         "  /session               Show current session information"
     )?;
     writeln!(writer, "  /ping                  Test database connection")?;
     writeln!(writer, "  /describe <table>, /d  Show table structure")?;
+    writeln!(
+        writer,
+        "  /show indexes <table>  Show index information"
+    )?;
     writeln!(
         writer,
         "  /export <fmt> [file|clipboard]  Export result (csv, json, table, sql)"
@@ -979,6 +1086,7 @@ fn print_help<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "SQL Execution:")?;
     writeln!(writer, "  Enter SQL statements ending with semicolon (;)")?;
     writeln!(writer, "  Multi-line statements are supported")?;
+    writeln!(writer, "  /repeat re-executes the last SQL statement")?;
     writeln!(writer)?;
     writeln!(writer, "Keyboard Shortcuts:")?;
     writeln!(writer, "  Up/Down        Navigate command history")?;
@@ -2085,6 +2193,233 @@ fn execute_peek<W: Write>(
     Ok(())
 }
 
+// =============================================================================
+// Sprint 36: /repeat Command
+// =============================================================================
+
+/// Execute the /repeat metacommand (Sprint 36)
+///
+/// Re-executes the last SQL statement. Uses the same execution path as normal
+/// SQL execution, including default row limiting for SELECT queries.
+fn execute_repeat<W: Write>(
+    state: &mut ReplState,
+    completion_state: &mut CompletionState,
+    writer: &mut W,
+) -> Result<()> {
+    let last_sql = match state.last_sql() {
+        Some(sql) => sql.to_string(),
+        None => {
+            writeln!(writer, "No previous query to repeat.")?;
+            return Ok(());
+        }
+    };
+
+    writeln!(writer)?;
+    writeln!(writer, "Repeating: {}", &last_sql)?;
+
+    let default_limit = state.default_limit();
+    let client = completion_state.client();
+
+    // Re-execute through the same path as normal SQL execution
+    match execute_sql_with_state(client, state, &last_sql, writer, default_limit) {
+        Ok(row_count) => {
+            state.record_query(row_count);
+        }
+        Err(e) => {
+            writeln!(writer, "\nError: {}", e)?;
+        }
+    }
+
+    writeln!(writer)?;
+    Ok(())
+}
+
+// =============================================================================
+// Sprint 36: /show indexes Command
+// =============================================================================
+
+/// Build the SQL query for fetching index information from DBC.IndicesV
+///
+/// Returns the SQL query string for the given database and table.
+/// Uses `escape_sql_string()` for safe string interpolation.
+fn build_show_indexes_sql(database: Option<&str>, table: &str) -> String {
+    if let Some(db) = database {
+        format!(
+            r#"SELECT TRIM(IndexName) AS IndexName,
+                   CASE IndexType
+                       WHEN 'P' THEN 'Primary'
+                       WHEN 'S' THEN 'Secondary'
+                       WHEN 'Q' THEN 'PPI'
+                       WHEN 'J' THEN 'Join'
+                       WHEN 'K' THEN 'Primary Key'
+                       WHEN 'U' THEN 'Unique'
+                       WHEN 'V' THEN 'Value-Ordered'
+                       WHEN 'H' THEN 'Hash'
+                       ELSE IndexType
+                   END AS IndexType,
+                   TRIM(ColumnName) AS ColumnName,
+                   ColumnPosition
+            FROM DBC.IndicesV
+            WHERE DatabaseName = '{}'
+              AND TableName = '{}'
+            ORDER BY IndexNumber, ColumnPosition"#,
+            escape_sql_string(db),
+            escape_sql_string(table)
+        )
+    } else {
+        format!(
+            r#"SELECT TRIM(IndexName) AS IndexName,
+                   CASE IndexType
+                       WHEN 'P' THEN 'Primary'
+                       WHEN 'S' THEN 'Secondary'
+                       WHEN 'Q' THEN 'PPI'
+                       WHEN 'J' THEN 'Join'
+                       WHEN 'K' THEN 'Primary Key'
+                       WHEN 'U' THEN 'Unique'
+                       WHEN 'V' THEN 'Value-Ordered'
+                       WHEN 'H' THEN 'Hash'
+                       ELSE IndexType
+                   END AS IndexType,
+                   TRIM(ColumnName) AS ColumnName,
+                   ColumnPosition
+            FROM DBC.IndicesV
+            WHERE TableName = '{}'
+              AND DatabaseName = DATABASE
+            ORDER BY IndexNumber, ColumnPosition"#,
+            escape_sql_string(table)
+        )
+    }
+}
+
+/// Execute the /show indexes metacommand (Sprint 36)
+///
+/// Displays index information for a table from DBC.IndicesV.
+/// Shows IndexName, IndexType, ColumnName, and ColumnPosition.
+fn execute_show_indexes<W: Write>(
+    completion_state: &mut CompletionState,
+    table_name: &str,
+    writer: &mut W,
+) -> Result<()> {
+    writeln!(writer)?;
+
+    // Parse table name - may be qualified (database.table) or unqualified
+    let (database, table) = parse_qualified_name(table_name);
+
+    // Build the query
+    let sql = build_show_indexes_sql(database, table);
+
+    // Execute the query
+    let client = completion_state.client();
+    match client.execute(&sql) {
+        Ok(result) => {
+            if result.row_count == 0 {
+                writeln!(
+                    writer,
+                    "No indexes found for table '{}'.",
+                    table_name
+                )?;
+                writeln!(writer)?;
+                writeln!(writer, "Suggestions:")?;
+                writeln!(writer, "  - Check the table name spelling")?;
+                writeln!(
+                    writer,
+                    "  - Try using qualified name: /show indexes database.table"
+                )?;
+                writeln!(
+                    writer,
+                    "  - Verify you have SELECT permission on DBC.IndicesV"
+                )?;
+            } else {
+                // Display header
+                let qualified_name = if let Some(db) = database {
+                    format!("{}.{}", db, table)
+                } else {
+                    table.to_string()
+                };
+                writeln!(writer, "Indexes on {}:", qualified_name)?;
+                writeln!(writer)?;
+
+                // Display column headers
+                writeln!(
+                    writer,
+                    "{:<30} {:<15} {:<25} {:<10}",
+                    "IndexName", "IndexType", "ColumnName", "Position"
+                )?;
+                writeln!(writer, "{}", "-".repeat(80))?;
+
+                // Display each row
+                for row in &result.rows {
+                    let index_name = row
+                        .first()
+                        .map(|v| {
+                            let s = v.display();
+                            if s == "[NULL]" {
+                                "(unnamed)".to_string()
+                            } else {
+                                s
+                            }
+                        })
+                        .unwrap_or_default();
+                    let index_type = row.get(1).map(|v| v.display()).unwrap_or_default();
+                    let column_name = row.get(2).map(|v| v.display()).unwrap_or_default();
+                    let position = row.get(3).map(|v| v.display()).unwrap_or_default();
+
+                    writeln!(
+                        writer,
+                        "{:<30} {:<15} {:<25} {:<10}",
+                        truncate_string(&index_name, 29),
+                        truncate_string(&index_type, 14),
+                        truncate_string(&column_name, 24),
+                        position
+                    )?;
+                }
+
+                writeln!(writer)?;
+                writeln!(writer, "{} index column(s)", result.row_count)?;
+            }
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+            let error_upper = error_msg.to_uppercase();
+
+            if error_upper.contains("3807")
+                || (error_upper.contains("OBJECT") && error_upper.contains("NOT EXIST"))
+            {
+                writeln!(writer, "Error: Table '{}' not found.", table_name)?;
+                writeln!(writer)?;
+                writeln!(writer, "Suggestions:")?;
+                writeln!(writer, "  - Check the table name spelling")?;
+                writeln!(writer, "  - Use /list tables to see available tables")?;
+                writeln!(
+                    writer,
+                    "  - Try using qualified name: /show indexes database.{}",
+                    table_name
+                        .split('.')
+                        .next_back()
+                        .unwrap_or(table_name)
+                )?;
+            } else if error_upper.contains("3523") || error_upper.contains("PRIVILEGE") {
+                writeln!(
+                    writer,
+                    "Error: Permission denied on table '{}'.",
+                    table_name
+                )?;
+                writeln!(writer)?;
+                writeln!(
+                    writer,
+                    "You need SELECT privilege on DBC.IndicesV to view index information."
+                )?;
+                writeln!(writer, "Contact your DBA for access.")?;
+            } else {
+                writeln!(writer, "Error: {}", error_msg)?;
+            }
+        }
+    }
+
+    writeln!(writer)?;
+    Ok(())
+}
+
 /// Resolve a table name to fully qualified form (database.table)
 ///
 /// If the table name already contains a dot, it's returned as-is.
@@ -2528,5 +2863,207 @@ mod tests {
         assert!(output_str.contains("g/G"));
         assert!(output_str.contains("q or Esc"));
         assert!(output_str.contains("Column indicators"));
+    }
+
+    // =========================================================================
+    // Sprint 36: /repeat command tests
+    // =========================================================================
+
+    #[test]
+    fn test_repeat_no_previous_query() {
+        let config = create_test_config();
+        let state = ReplState::new(config);
+
+        // With no last SQL, repeat should print message
+        assert!(state.last_sql().is_none());
+    }
+
+    #[test]
+    fn test_repeat_has_previous_query() {
+        let config = create_test_config();
+        let mut state = ReplState::new(config);
+
+        state.set_last_query("SELECT * FROM employees".to_string(), false);
+        assert_eq!(state.last_sql(), Some("SELECT * FROM employees"));
+    }
+
+    #[test]
+    fn test_repeat_via_basic_handler_no_query() {
+        let config = create_test_config();
+        let mut state = ReplState::new(config);
+        let client = DatabaseClient::mock();
+
+        let mut output = Vec::new();
+        let result = handle_metacommand("/repeat", &mut state, &client, &mut output);
+        assert!(result.is_ok());
+        assert!(result.unwrap()); // Should continue REPL
+
+        let output_str = String::from_utf8(output).unwrap();
+        assert!(output_str.contains("No previous query to repeat"));
+    }
+
+    #[test]
+    fn test_repeat_alias_r_via_basic_handler() {
+        let config = create_test_config();
+        let mut state = ReplState::new(config);
+        let client = DatabaseClient::mock();
+
+        let mut output = Vec::new();
+        let result = handle_metacommand("/r", &mut state, &client, &mut output);
+        assert!(result.is_ok());
+        assert!(result.unwrap()); // Should continue REPL
+
+        let output_str = String::from_utf8(output).unwrap();
+        assert!(output_str.contains("No previous query to repeat"));
+    }
+
+    #[test]
+    fn test_repeat_backslash_alias() {
+        let config = create_test_config();
+        let mut state = ReplState::new(config);
+        let client = DatabaseClient::mock();
+
+        let mut output = Vec::new();
+        let result = handle_metacommand("\\r", &mut state, &client, &mut output);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+
+        let output_str = String::from_utf8(output).unwrap();
+        assert!(output_str.contains("No previous query to repeat"));
+    }
+
+    #[test]
+    fn test_help_includes_repeat_command() {
+        let mut output = Vec::new();
+        print_help(&mut output).unwrap();
+        let output_str = String::from_utf8(output).unwrap();
+
+        assert!(output_str.contains("/repeat"));
+        assert!(output_str.contains("/r"));
+        assert!(output_str.contains("Re-execute last query"));
+    }
+
+    #[test]
+    fn test_help_extended_includes_repeat_command() {
+        let mut output = Vec::new();
+        print_help_extended(&mut output).unwrap();
+        let output_str = String::from_utf8(output).unwrap();
+
+        assert!(output_str.contains("/repeat"));
+        assert!(output_str.contains("/r"));
+        assert!(output_str.contains("Re-execute last query"));
+    }
+
+    #[test]
+    fn test_default_limit_stored_in_state() {
+        let config = create_test_config();
+        let mut state = ReplState::new(config);
+
+        // Default should be 0 (no limit)
+        assert_eq!(state.default_limit(), 0);
+
+        state.set_default_limit(500);
+        assert_eq!(state.default_limit(), 500);
+    }
+
+    // =========================================================================
+    // Sprint 36: /show indexes command tests
+    // =========================================================================
+
+    #[test]
+    fn test_build_show_indexes_sql_unqualified() {
+        let sql = build_show_indexes_sql(None, "employees");
+        assert!(sql.contains("FROM DBC.IndicesV"));
+        assert!(sql.contains("TableName = 'employees'"));
+        assert!(sql.contains("DatabaseName = DATABASE"));
+        assert!(sql.contains("ORDER BY IndexNumber, ColumnPosition"));
+    }
+
+    #[test]
+    fn test_build_show_indexes_sql_qualified() {
+        let sql = build_show_indexes_sql(Some("prod"), "orders");
+        assert!(sql.contains("FROM DBC.IndicesV"));
+        assert!(sql.contains("DatabaseName = 'prod'"));
+        assert!(sql.contains("TableName = 'orders'"));
+        assert!(sql.contains("ORDER BY IndexNumber, ColumnPosition"));
+    }
+
+    #[test]
+    fn test_build_show_indexes_sql_escapes_quotes() {
+        let sql = build_show_indexes_sql(Some("my'db"), "my'table");
+        assert!(sql.contains("DatabaseName = 'my''db'"));
+        assert!(sql.contains("TableName = 'my''table'"));
+    }
+
+    #[test]
+    fn test_build_show_indexes_sql_contains_index_type_mapping() {
+        let sql = build_show_indexes_sql(None, "test");
+        assert!(sql.contains("'P' THEN 'Primary'"));
+        assert!(sql.contains("'S' THEN 'Secondary'"));
+        assert!(sql.contains("'U' THEN 'Unique'"));
+        assert!(sql.contains("'K' THEN 'Primary Key'"));
+    }
+
+    #[test]
+    fn test_parse_qualified_name_simple() {
+        let (db, table) = parse_qualified_name("employees");
+        assert!(db.is_none());
+        assert_eq!(table, "employees");
+    }
+
+    #[test]
+    fn test_parse_qualified_name_with_database() {
+        let (db, table) = parse_qualified_name("prod.orders");
+        assert_eq!(db, Some("prod"));
+        assert_eq!(table, "orders");
+    }
+
+    #[test]
+    fn test_help_includes_show_indexes() {
+        let mut output = Vec::new();
+        print_help(&mut output).unwrap();
+        let output_str = String::from_utf8(output).unwrap();
+
+        assert!(output_str.contains("/show indexes"));
+    }
+
+    #[test]
+    fn test_help_extended_includes_show_indexes() {
+        let mut output = Vec::new();
+        print_help_extended(&mut output).unwrap();
+        let output_str = String::from_utf8(output).unwrap();
+
+        assert!(output_str.contains("/show indexes"));
+        assert!(output_str.contains("/di"));
+    }
+
+    #[test]
+    fn test_show_via_basic_handler() {
+        let config = create_test_config();
+        let mut state = ReplState::new(config);
+        let client = DatabaseClient::mock();
+
+        let mut output = Vec::new();
+        let result = handle_metacommand("/show", &mut state, &client, &mut output);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+
+        let output_str = String::from_utf8(output).unwrap();
+        assert!(output_str.contains("full REPL mode"));
+    }
+
+    #[test]
+    fn test_di_via_basic_handler() {
+        let config = create_test_config();
+        let mut state = ReplState::new(config);
+        let client = DatabaseClient::mock();
+
+        let mut output = Vec::new();
+        let result = handle_metacommand("/di", &mut state, &client, &mut output);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+
+        let output_str = String::from_utf8(output).unwrap();
+        assert!(output_str.contains("full REPL mode"));
     }
 }

@@ -485,9 +485,237 @@ The implementation includes 12 unit tests:
 11. `test_load_project_only_returns_none_when_no_config` - No config case
 12. Unicode identifier quoting test (in `sql/identifiers.rs`)
 
+## Error Handling and Graceful Degradation
+
+### Invalid Project Config
+
+When project config exists but contains invalid TOML syntax, the tool should warn the user but continue operation using user config and other sources.
+
+**Design Principles:**
+- **Non-blocking**: Invalid project config should not prevent tool usage
+- **Visible warning**: User should be notified of the problem via stderr
+- **Graceful fallback**: Continue with user config, environment variables, and CLI args
+- **Clear guidance**: Error message should explain the problem and how to fix it
+
+#### Current Behavior
+
+The current implementation fails hard on invalid project config:
+
+```rust
+// src/config.rs - Config::load()
+
+let config: Config = figment
+    .extract()
+    .map_err(|e| TqError::ConfigParseError(e.to_string()))?;
+    // ^ This exits with error if project config is invalid
+```
+
+#### Proposed Behavior
+
+Wrap project config loading in error handling:
+
+```rust
+// src/config.rs - Config::load()
+
+pub fn load() -> Result<Self> {
+    // Find project config by walking up the directory tree
+    let project_config_path = find_project_config();
+
+    let mut figment = Figment::new()
+        .merge(Serialized::defaults(Config::default()))
+        .merge(Toml::file("/etc/tq/config.toml"))
+        .merge(Toml::file(Self::user_config_path()));
+
+    // Project config: try to load, warn on error but continue
+    if let Some(ref path) = project_config_path {
+        log::debug!("Found project config: {}", path.display());
+
+        // Try to load project config
+        let project_figment = figment.clone().merge(Toml::file(path));
+
+        // Test if it's valid by attempting extraction
+        match project_figment.extract::<Config>() {
+            Ok(_) => {
+                // Valid project config, use it
+                figment = project_figment;
+            }
+            Err(e) => {
+                // Invalid project config - warn but continue
+                eprintln!("Warning: Invalid project config at {}", path.display());
+                eprintln!("  Error: {}", e);
+                eprintln!("  Continuing without project config.");
+                eprintln!();
+                // figment remains unchanged (no project config merged)
+            }
+        }
+    }
+
+    // Environment variables (TQ_HOST, TQ_PORT, etc.)
+    figment = figment.merge(Env::prefixed("TQ_").split("_").lowercase(false));
+
+    let config: Config = figment
+        .extract()
+        .map_err(|e| TqError::ConfigParseError(e.to_string()))?;
+
+    Ok(config)
+}
+```
+
+#### Warning Format
+
+The stderr warning should include:
+1. File path (absolute)
+2. Parse error details (line number, column, error message)
+3. Guidance on how to proceed
+
+**Example warning output:**
+
+```
+Warning: Invalid project config at /Users/alice/projects/analytics/.tq.toml
+  Error: TOML parse error at line 8, column 15
+  expected '=', found ':'
+
+  [profiles.dev]
+  host: "dev.company.com"
+       ^
+
+  Continuing without project config.
+```
+
+#### Alternative Approach: Hard Fail
+
+An alternative design is to fail hard on invalid project config, requiring the user to fix it before proceeding.
+
+**Rationale for Graceful Degradation:**
+- **Non-blocking**: User can still use the tool with personal config
+- **Team scenarios**: One team member's invalid project config shouldn't block others
+- **Discoverability**: Warning is more user-friendly than hard failure
+- **Consistency**: Mirrors behavior of missing project config (no error, just absent)
+
+**When Hard Fail is Better:**
+- **User config**: Personal config should fail hard (high confidence it's intentional)
+- **CLI-specified config**: `--config file.toml` should fail hard (explicit intent)
+- **Environment variables**: Bad env var values should fail hard (often scripted)
+
+#### Help Text Updates
+
+The `tq help config` text should mention project config warnings:
+
+```
+PROJECT CONFIGURATION
+    tq looks for a project configuration file at:
+      .tq.toml (in current directory or parents)
+
+    Project config enables team-shared profiles and settings.
+
+    If .tq.toml contains invalid TOML syntax, tq will:
+      - Display a warning to stderr with error details
+      - Continue operation using user config and other sources
+      - Suggest fixing the syntax error
+
+    To validate project config:
+      cat .tq.toml | toml validate    # If toml CLI tool is installed
+```
+
+#### UX Improvements for `tq profiles`
+
+When displaying profiles, show project config path (if found) in the header:
+
+**Current behavior:**
+```
+Available profiles:
+
+From user config (~/.tq/config.toml):
+  personal
+    Host:     my-home-server.local
+    ...
+```
+
+**Proposed behavior:**
+```
+User config: /Users/alice/.tq/config.toml
+Project config: /Users/alice/projects/analytics/.tq.toml
+
+Available profiles:
+
+From user config:
+  personal
+    Host:     my-home-server.local
+    ...
+```
+
+**When project config is invalid:**
+```
+User config: /Users/alice/.tq/config.toml
+Project config: /Users/alice/projects/analytics/.tq.toml (invalid - not loaded)
+
+Available profiles:
+
+From user config:
+  personal
+    Host:     my-home-server.local
+    ...
+```
+
+#### Empty State Improvement
+
+When no profiles are defined, mention project config as an option:
+
+**Current behavior:**
+```
+No profiles defined.
+
+To create a profile, add to ~/.tq/config.toml:
+
+  [profiles.myprofile]
+  host = "myhost.example.com"
+  ...
+```
+
+**Proposed behavior:**
+```
+No profiles defined.
+
+To create a profile, add to ~/.tq/config.toml:
+
+  [profiles.myprofile]
+  host = "myhost.example.com"
+  port = 1025
+  database = "mydb"
+  user = "myuser"
+  password_file = "~/.tq/passwords/myprofile"
+
+Tip: Create .tq.toml in your project root for team-shared profiles
+```
+
+#### Code Changes Summary
+
+**Files to modify:**
+1. `src/config.rs` - `Config::load()` function (graceful degradation logic)
+2. `src/main.rs` - `handle_profiles()` function (show project config path and status)
+3. `src/help/config.txt` - Add project config warning section
+
+**Testing strategy:**
+1. Unit test: Invalid project config produces warning (capture stderr)
+2. Unit test: Invalid project config still loads user config successfully
+3. Integration test: `tq profiles` shows project config status
+4. Manual test: Create invalid `.tq.toml` and verify warning message
+
+#### Code Linkage
+
+| Component | File Path | Key Functions |
+|-----------|-----------|---------------|
+| Config loading | `src/config.rs` | `Config::load()` |
+| Warning output | `src/config.rs` | `eprintln!` for stderr |
+| Profiles display | `src/main.rs` | `handle_profiles()` |
+| Help text | `src/help/config.txt` | Project config section |
+
+---
+
 ## Future Enhancements
 
 - **Config validation command**: `tq config validate` to check syntax
 - **Config initialization**: `tq init` to create `.tq.toml` interactively
 - **Profile editing**: `tq profile add/edit/delete` commands
 - **Config location override**: `--config` flag for explicit config file
+- **Watch mode**: Reload config when files change (useful for long-running processes)

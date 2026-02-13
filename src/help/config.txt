@@ -7,6 +7,30 @@ CONFIGURATION FILE
 
     The configuration file is optional. If not present, built-in defaults are used.
 
+PROJECT CONFIGURATION
+    tq supports project-level configuration via a `.tq.toml` file.
+
+    When tq starts, it searches for `.tq.toml` in the current directory and
+    walks up the directory tree until one is found or the filesystem root is
+    reached. This enables team-shared connection profiles and settings.
+
+    Project config is ideal for:
+      - Team-shared connection profiles (dev, staging, prod)
+      - Project-specific database defaults
+      - Consistent settings across team members
+
+    Getting started:
+      Copy .tq.toml.example to .tq.toml in your project root and edit it,
+      or create one manually:
+
+        [profiles.dev]
+        host = "dev.company.com"
+        database = "development"
+        user = "shared_dev_user"
+
+    Note: Never store passwords in project config files that are committed
+    to version control. Use password_file or environment variables instead.
+
 FILE FORMAT (TOML)
     [defaults]
     format = "table"              # Output format: table, json, csv
@@ -27,8 +51,9 @@ PRECEDENCE ORDER
     Configuration is loaded in this order (later overrides earlier):
       1. Built-in defaults
       2. User config file (~/.tq/config.toml)
-      3. Environment variables (TQ_*)
-      4. Command-line arguments
+      3. Project config file (.tq.toml)
+      4. Environment variables (TQ_*)
+      5. Command-line arguments
 
 PROFILE FIELDS
     Required:
@@ -57,5 +82,6 @@ SECURITY BEST PRACTICES
     - Always use password_file field pointing to 0600 file
     - Config file permissions: 0600 recommended (0644 acceptable)
     - Password file permissions: 0600 required (enforced)
+    - Never commit .tq.toml with passwords to version control
 
 See 'tq help credentials' for password management

@@ -46,21 +46,34 @@ Settings are loaded in this order (later overrides earlier):
 
 1. **Built-in defaults** - Hardcoded sensible defaults
 2. **User config** - `~/.tq/config.toml` (your personal settings)
-3. **Project config** - `.tq.toml` (team-shared settings)
+3. **Project config** - `.tq.toml` in project root (team-shared settings)
 4. **Environment variables** - `TQ_*` variables
-5. **Command-line arguments** - Highest priority
+5. **Command-line arguments** - Highest priority (final override)
 
 ### Precedence Example
 
 ```bash
-# Built-in default: format = "table"
-# User config:     format = "json"
-# Project config:  format = "csv"
-# Environment:     TQ_FORMAT=yaml
-# CLI flag:        --format json
+# Level 1 (Built-in):   format = "table"
+# Level 2 (User):       format = "json"
+# Level 3 (Project):    format = "csv"
+# Level 4 (Env var):    TQ_FORMAT=yaml
+# Level 5 (CLI flag):   --format json
 
 tq --format json query "SELECT 1"
 # Result uses: json (CLI flag wins)
+```
+
+**How it works:**
+
+Each level overrides the previous one. If a setting isn't specified at a higher level, the value from a lower level is used.
+
+**Example with partial overrides:**
+
+```bash
+# Built-in:  format = "table", timing = false
+# User:      format = "json"  (timing not specified, inherits false)
+# Project:   timing = true    (format not specified, inherits "json")
+# Result:    format = "json", timing = true
 ```
 
 ## User Configuration
@@ -426,6 +439,10 @@ The `tq profiles` command shows profiles from both user and project config:
 ```bash
 $ tq profiles
 
+Configuration paths:
+  User config: /home/alice/.tq/config.toml
+  Project config: /home/alice/projects/analytics/.tq.toml
+
 Available profiles:
 
 From user config (~/.tq/config.toml):
@@ -446,10 +463,32 @@ From both (merged):
     User:     alice                     [user]
 ```
 
+**Header information:**
+
+The command shows which configuration files are being used:
+- **User config**: Always shown if the file exists
+- **Project config**: Shown only when `.tq.toml` is found in the project tree
+- If no project config exists, this line is omitted
+
 **Indicators:**
 
 - **[project]** - Value from project config
 - **[user]** - Value from user config
+
+**When no profiles exist:**
+
+If you have no profiles defined, you'll see a helpful tip:
+
+```bash
+$ tq profiles
+
+Configuration paths:
+  User config: /home/alice/.tq/config.toml
+
+No profiles defined.
+
+Tip: Create .tq.toml in your project root for team-shared profiles
+```
 
 ### Security Considerations
 
@@ -742,6 +781,98 @@ Fix: chmod 0600 ~/.tq/passwords/dev
 
 **Solution:** Run the suggested `chmod` command.
 
+### Invalid Project Config
+
+If your project's `.tq.toml` file has invalid TOML syntax, you'll see a warning:
+
+```
+Warning: Invalid project config at /home/alice/projects/analytics/.tq.toml: expected value at line 15
+
+tq continues using user config only
+```
+
+**What this means:**
+
+- Your `.tq.toml` file has a syntax error
+- `tq` shows the warning to stderr but continues operating
+- Only user config and environment variables are used
+- Command-line arguments still work normally
+
+**How to fix:**
+
+1. Open the `.tq.toml` file mentioned in the warning
+2. Check the line number indicated in the error
+3. Fix the TOML syntax error (common issues: missing quotes, unclosed brackets, typos)
+4. Test with `tq profiles` to verify it loads correctly
+
+**Common TOML errors:**
+
+```toml
+# Bad: Missing closing quote
+[profiles.dev]
+host = "myhost.com
+
+# Good: Properly quoted
+[profiles.dev]
+host = "myhost.com"
+
+# Bad: Invalid value
+[defaults]
+timing = yes
+
+# Good: Boolean value
+[defaults]
+timing = true
+```
+
+**Why it's a warning, not an error:**
+
+`tq` continues operating when project config is invalid to prevent blocking your work. You can still use `tq` with:
+- User config profiles
+- Environment variables
+- Command-line arguments
+
+Once you fix the syntax error, `tq` will automatically use the project config on the next invocation.
+
+### No Profiles Defined
+
+If `tq profiles` shows no profiles, you have several options:
+
+```bash
+$ tq profiles
+
+No profiles defined.
+
+Tip: Create .tq.toml in your project root for team-shared profiles
+```
+
+**Solutions:**
+
+1. **Use command-line arguments** (no config needed):
+   ```bash
+   tq -l "user@host:1025/db" query "SELECT 1"
+   ```
+
+2. **Create user config** (`~/.tq/config.toml`):
+   ```bash
+   mkdir -p ~/.tq
+   cat > ~/.tq/config.toml <<EOF
+   [profiles.dev]
+   host = "myhost.com"
+   database = "mydb"
+   user = "alice"
+   EOF
+   ```
+
+3. **Create project config** (`.tq.toml` in project root) - ideal for teams:
+   ```bash
+   cat > .tq.toml <<EOF
+   [profiles.dev]
+   host = "dev.company.com"
+   database = "dev_analytics"
+   EOF
+   ```
+
 ### Project Config Not Found
 
 If `tq` doesn't find `.tq.toml`, it will use only user config. Check:
@@ -749,6 +880,20 @@ If `tq` doesn't find `.tq.toml`, it will use only user config. Check:
 1. Is `.tq.toml` in the project root?
 2. Are you running `tq` from within the project directory tree?
 3. Did you check for typos in the filename?
+
+**Verify project config discovery:**
+
+Use `tq profiles` to see which config files are detected:
+
+```bash
+$ tq profiles
+
+Configuration paths:
+  User config: /home/alice/.tq/config.toml
+  Project config: /home/alice/projects/analytics/.tq.toml  # Found!
+```
+
+If "Project config" line is missing, `tq` didn't find `.tq.toml` in the directory tree.
 
 ### Unexpected Configuration Values
 

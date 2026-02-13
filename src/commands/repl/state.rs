@@ -48,6 +48,9 @@ pub struct ReplState {
 
     /// Original connection string for reconnection (Sprint 7)
     connection_string: Option<String>,
+
+    /// Default row limit for SELECT queries in REPL (Sprint 36: for /repeat)
+    default_limit: usize,
 }
 
 impl ReplState {
@@ -67,6 +70,7 @@ impl ReplState {
             colors_enabled: atty::is(atty::Stream::Stdout), // Enable colors for TTY
             metadata_cache: MetadataCache::new(database),
             connection_string: None,
+            default_limit: 0,
         }
     }
 
@@ -221,6 +225,16 @@ impl ReplState {
     /// Get stored connection string
     pub fn connection_string(&self) -> Option<&str> {
         self.connection_string.as_deref()
+    }
+
+    /// Set the default row limit for SELECT queries (Sprint 36: for /repeat)
+    pub fn set_default_limit(&mut self, limit: usize) {
+        self.default_limit = limit;
+    }
+
+    /// Get the default row limit for SELECT queries (Sprint 36: for /repeat)
+    pub fn default_limit(&self) -> usize {
+        self.default_limit
     }
 
     /// Update connection info (for /logon command)

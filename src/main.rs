@@ -157,10 +157,13 @@ fn handle_help(args: &tq::HelpArgs) -> Result<()> {
 ///
 /// Displays profiles from both user config and project config, with source indicators.
 /// Shows profiles grouped by source (user-only, project-only, or merged from both).
+///
+/// Sprint 36: Shows config file paths header and project config tip in empty state.
 fn handle_profiles(config: &Config) -> Result<()> {
     // Load configs separately to track profile sources
     let user_config = Config::load_user_only();
     let project_config = Config::load_project_only();
+    let project_config_path = Config::project_config_path();
 
     let user_profile_names: std::collections::HashSet<_> =
         user_config.profiles.keys().cloned().collect();
@@ -187,8 +190,17 @@ fn handle_profiles(config: &Config) -> Result<()> {
         println!("  database = \"mydb\"");
         println!("  user = \"myuser\"");
         println!("  password_file = \"~/.tq/passwords/myprofile\"");
+        println!();
+        println!("Tip: Create .tq.toml in your project root for team-shared profiles");
         return Ok(());
     }
+
+    // Show config file paths header
+    println!("User config: {}", Config::user_config_path().display());
+    if let Some(ref path) = project_config_path {
+        println!("Project config: {}", path.display());
+    }
+    println!();
 
     println!("Available profiles:\n");
 
