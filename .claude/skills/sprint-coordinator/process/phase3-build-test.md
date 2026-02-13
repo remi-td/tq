@@ -36,11 +36,30 @@ Wait for both agents to complete. Expect:
 
 Calidate that the strategy defined for the sprint in `tests/strategy/` addresses the features in this sprint. If not provide feedback to the `quality-validator` and request adjustments. Repeat this process until the strategy is correct.
 
-### Step 4: Execute tests
+### Step 4: Execute Tests
 
-We need to execute all tests and address bug fixes, for this, we will run the `quality-validator` and `rust-teradata-architect` in a loop.
+We need to execute all tests and address bug fixes. Use the **two-iteration strategy** for comprehensive validation.
 
-Untill all test cases are passed, run a tet round (I denotates the round number, starting 1):
+#### Two-Iteration Test Strategy
+
+**Iteration 1: Core Logic (Unit Tests)**
+- Run unit tests first: `cargo test --lib`
+- Validates: Functions, modules, internal logic
+- Gate: Must pass before Iteration 2
+
+**Iteration 2: CLI Integration**
+- Run integration tests: `cargo test --test '*'`
+- Run interactive tests: `cargo test -- --ignored` (if database available)
+- Validates: End-to-end behavior, CLI parsing, error handling
+
+**Benefits:**
+- Early detection of logic errors
+- Clear separation of failure causes
+- Progressive confidence building
+
+#### Test Loop
+
+Until all test cases pass, run a test round (I denotes the round number, starting 1):
 1. Run **`quality-validator`**:
    - Instruction: "Execute the test cases for Sprint N, iteration I as per the strategy you defined in `tests/strategy/` and executing the test cases in `tests/cases`. Produce a test evidence `tests/results/sprint-N/test-evidence-I.md` and write or update the test report in `tests/results/sprint-N/`
 2. Validate test evidence: if all tests are passed, end loop.

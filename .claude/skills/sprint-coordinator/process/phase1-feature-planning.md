@@ -63,6 +63,27 @@ Ensure objectives are:
 - **Specific**: Clear, measurable outcomes.
 - **Achievable**: Can be completed in one sprint.
 - **Relevant**: Aligned with project goals.
+- **Session-bounded**: Can complete ALL phases (0-5) in a single session.
+
+#### Session Budget Rule (CRITICAL)
+
+**A smaller single-session sprint is MORE efficient than a larger multi-session sprint.**
+
+Cost analysis from Sprints 30-36:
+- Single-session sprints: $10-20 (Sprints 32, 34, 35)
+- Multi-session sprints: $36-62 (Sprints 30, 36)
+
+**Before finalizing scope, verify:**
+- Can design phase complete quickly? (Usually <20 min)
+- Can implementation complete? (Estimate based on complexity)
+- Can testing complete? (Usually 20-40 min)
+- Buffer for Phase 4-5? (Usually 15-20 min)
+
+**If scope exceeds session budget:**
+- Move P2 items to backlog
+- Reduce P1 items to essentials
+- If still too large, defer P1 items
+- NEVER split a sprint across sessions
 
 ### Step 3: Update Planning Document
 

@@ -78,6 +78,27 @@
 - ✅ **PASS**: All documentation matches delivered features
 - ❌ **FAIL**: Documentation mismatches found → Fix docs before commit
 
+### Step 1.6: Minor Task Completion Check
+
+**PURPOSE:** Prevent deferred minor tasks that waste tokens in follow-up sprints.
+
+**CRITICAL**: Tasks estimated at <30 minutes MUST be completed NOW, not deferred.
+
+**Check for Minor Gaps:**
+- [ ] Any emoji badges or visual polish missing? Fix now (5-10 min)
+- [ ] Any help text updates needed? Fix now (10-15 min)
+- [ ] Any spec/implementation verification pending? Do now (10-15 min)
+- [ ] Any warning message format issues? Fix now (15 min)
+
+**Cost Calculation:**
+- Deferring a 15-min task creates: task tracking overhead + context reload + execution = ~30 min equivalent
+- Complete minor tasks NOW to avoid double-handling
+
+**Rule:**
+- Tasks <30 min → Complete in this sprint
+- Tasks 30-60 min → Complete if time permits
+- Tasks >60 min → Document for next sprint (acceptable deferral)
+
 ### Step 2: Decision
 
 **CRITICAL CHECKS:**

@@ -40,6 +40,15 @@ Create `docs/sprints/sprint-N-planning.md` with objectives and acceptance criter
 Use `.claude/skills/sprint-coordinator/references/sprint-planning-template.md` as template.
 **Integrate with GitHub Issues:** Use `/github-issues` skill to fetch sprint-ready issues and update selected issues.
 
+#### Session Management Rule (CRITICAL)
+
+**Complete all sprint phases (0-5) within a SINGLE session.**
+- If approaching session limit, reduce sprint scope rather than splitting sessions
+- Session transitions waste 10-20K tokens in context rebuild (~$8-15)
+- A smaller single-session sprint is MORE efficient than a larger multi-session sprint
+- Before starting Phase 3, verify: "Can implementation + testing complete in remaining session?"
+- If NO: Scale back scope to what CAN complete in this session
+
 **If Maintenance Sprint (Crisis Detected):**
 > **Read:** `.claude/skills/sprint-coordinator/process/phase1-maintainance-planning.md`
 

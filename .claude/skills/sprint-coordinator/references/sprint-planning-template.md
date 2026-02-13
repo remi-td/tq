@@ -200,6 +200,36 @@ Clear assignment of responsibilities to specialized agents:
 
 ---
 
+## Files Involved
+
+For each objective, list the primary files expected to be modified. This reduces exploration overhead.
+
+### Objective 1: [Feature Name]
+**Source Files:**
+- `src/commands/[module].rs` - [Purpose]
+- `src/[other].rs` - [Purpose]
+
+**Test Files:**
+- `tests/integration_[feature].rs` - Integration tests
+- Unit tests in source file `#[cfg(test)]` module
+
+**Documentation:**
+- `docs/specifications/[area].md` - Specification updates
+- `docs/design/[area].md` - Design updates
+- `docs/user/[guide].md` - User documentation
+
+### Objective 2: [Feature Name]
+**Source Files:**
+- [List expected files]
+
+**Test Files:**
+- [List expected test files]
+
+**Documentation:**
+- [List expected doc files]
+
+---
+
 ### quality-validator (Sonnet)
 **Responsibilities:**
 - Design comprehensive test cases for Features: [List features]
