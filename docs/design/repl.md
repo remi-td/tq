@@ -4104,6 +4104,450 @@ tq>
 
 ---
 
+### `/edit` Command (Sprint 37)
+
+The `/edit` metacommand opens the last executed SQL query in an external editor, allowing users to modify and re-execute it. This is the natural companion to `/repeat`, completing the query editing feature set.
+
+**Related Specification**: `docs/specifications/repl.md` (Query Editing section, line 3175)
+
+#### Design Approach
+
+The `/edit` command follows a five-step workflow:
+
+1. **Retrieve** the last SQL query from `ReplState.last_sql`
+2. **Create** a temporary file with `.sql` extension
+3. **Launch** the user's preferred editor (resolved from environment)
+4. **Read** the edited content after editor exits
+5. **Execute** the modified query (if changed and non-empty)
+
+This design leverages the same state management infrastructure as `/repeat` and follows established patterns for temporary file handling and external process management.
+
+#### Implementation Details
+
+**Editor Resolution Chain:**
+
+The command resolves the editor in the following priority order:
+
+```rust
+// src/commands/repl/metacommands.rs
+
+/// Resolve the editor to use for /edit command
+///
+/// Priority: $VISUAL → $EDITOR → vi (fallback)
+fn resolve_editor() -> Result<String> {
+    if let Ok(visual) = std::env::var("VISUAL") {
+        if !visual.trim().is_empty() {
+            return Ok(visual);
+        }
+    }
+
+    if let Ok(editor) = std::env::var("EDITOR") {
+        if !editor.trim().is_empty() {
+            return Ok(editor);
+        }
+    }
+
+    // Fallback to vi (available on all UNIX-like systems)
+    Ok("vi".to_string())
+}
+```
+
+**Temporary File Management:**
+
+Uses the `tempfile` crate (already a project dependency) to create a secure temporary file with proper cleanup semantics:
+
+```rust
+use tempfile::Builder;
+
+/// Create temporary file with .sql extension for editor
+///
+/// The file is created with a descriptive prefix and .sql extension
+/// for proper syntax highlighting in editors.
+fn create_temp_sql_file(content: &str) -> Result<(tempfile::NamedTempFile, PathBuf)> {
+    let temp_file = Builder::new()
+        .prefix("tq_edit_")
+        .suffix(".sql")
+        .tempfile()
+        .map_err(|e| Error::from(format!("Failed to create temp file: {}", e)))?;
+
+    // Write last SQL to temp file
+    let path = temp_file.path().to_path_buf();
+    std::fs::write(&path, content)
+        .map_err(|e| Error::from(format!("Failed to write temp file: {}", e)))?;
+
+    Ok((temp_file, path))
+}
+```
+
+**Editor Launch and Exit Code Handling:**
+
+```rust
+use std::process::Command;
+
+/// Launch editor and wait for exit
+///
+/// Returns Ok(()) if editor exits successfully (exit code 0),
+/// Err otherwise.
+fn launch_editor(editor: &str, file_path: &Path) -> Result<()> {
+    let status = Command::new(editor)
+        .arg(file_path)
+        .status()
+        .map_err(|e| Error::from(format!("Failed to launch editor '{}': {}", editor, e)))?;
+
+    if !status.success() {
+        return Err(Error::from(format!(
+            "Editor '{}' exited with non-zero status: {}",
+            editor,
+            status.code().unwrap_or(-1)
+        )));
+    }
+
+    Ok(())
+}
+```
+
+**Change Detection:**
+
+```rust
+/// Check if edited content differs from original
+fn content_changed(original: &str, edited: &str) -> bool {
+    original.trim() != edited.trim()
+}
+```
+
+**Command Handler:**
+
+```rust
+// src/commands/repl/metacommands.rs
+
+pub fn handle_metacommand_with_state<W: Write>(
+    input: &str,
+    state: &mut ReplState,
+    completion_state: &mut CompletionState,
+    writer: &mut W,
+) -> Result<bool> {
+    // ... existing command parsing ...
+
+    match command.as_str() {
+        // ... other commands ...
+
+        "edit" | "e" => {
+            execute_edit(state, completion_state, writer)?;
+        }
+
+        // ... remaining commands ...
+    }
+
+    Ok(true)
+}
+
+/// Execute the /edit metacommand (Sprint 37)
+///
+/// Opens the last SQL query in an external editor, then executes
+/// the modified query if changes were made.
+fn execute_edit<W: Write>(
+    state: &mut ReplState,
+    completion_state: &mut CompletionState,
+    writer: &mut W,
+) -> Result<()> {
+    // 1. Check if there's a previous query
+    let original_sql = match state.last_sql() {
+        Some(s) => s.to_string(),
+        None => {
+            writeln!(writer, "No previous query to edit.")?;
+            return Ok(());
+        }
+    };
+
+    // 2. Resolve editor
+    let editor = match resolve_editor() {
+        Ok(e) => e,
+        Err(e) => {
+            writeln!(writer, "Error: {}", e)?;
+            writeln!(writer, "Set $EDITOR or $VISUAL environment variable.")?;
+            return Ok(());
+        }
+    };
+
+    // 3. Create temp file with original SQL
+    let (_temp_file, temp_path) = create_temp_sql_file(&original_sql)?;
+
+    // 4. Launch editor
+    writeln!(writer, "Opening editor: {}", editor)?;
+    if let Err(e) = launch_editor(&editor, &temp_path) {
+        writeln!(writer, "Error: {}", e)?;
+        return Ok(());
+    }
+
+    // 5. Read edited content
+    let edited_sql = std::fs::read_to_string(&temp_path)
+        .map_err(|e| Error::from(format!("Failed to read edited file: {}", e)))?;
+
+    // 6. Check if content changed
+    if !content_changed(&original_sql, &edited_sql) {
+        writeln!(writer, "No changes made.")?;
+        return Ok(());
+    }
+
+    // 7. Check if result is empty
+    let trimmed = edited_sql.trim();
+    if trimmed.is_empty() {
+        writeln!(writer, "Edited query is empty. No execution.")?;
+        return Ok(());
+    }
+
+    // 8. Execute the edited query
+    writeln!(writer)?;
+    writeln!(writer, "Executing edited query:")?;
+    writeln!(writer, "{}", trimmed)?;
+    writeln!(writer)?;
+
+    let default_limit = state.default_limit();
+    let client = completion_state.client();
+
+    match execute_sql_with_state(client, state, trimmed, writer, default_limit) {
+        Ok(row_count) => {
+            // Store edited query as new last_sql (enables /repeat after /edit)
+            state.set_last_query(trimmed.to_string(), default_limit > 0);
+            state.record_query(row_count);
+        }
+        Err(e) => {
+            writeln!(writer, "\nError: {}", e)?;
+        }
+    }
+
+    writeln!(writer)?;
+    Ok(())
+}
+```
+
+#### Tab Completion
+
+The `/edit` command is added to the metacommand completion list with its alias:
+
+```rust
+// src/commands/repl/metadata_completer.rs
+
+const METACOMMANDS: &[MetacommandDef] = &[
+    // ... existing metacommands ...
+    MetacommandDef {
+        name: "edit",
+        aliases: &["e"],
+        description: "Edit last query in $EDITOR",
+    },
+    // ... remaining metacommands ...
+];
+```
+
+The alias `\e` is supported through the command parser:
+```rust
+match command.as_str() {
+    "edit" | "e" => { /* ... */ }
+}
+```
+
+#### Help Text
+
+Updated help output to include `/edit`:
+
+```rust
+fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
+    writeln!(writer)?;
+    writeln!(writer, "Query Editing:")?;
+    writeln!(writer, "  /edit, /e              Edit last query in $EDITOR")?;
+    writeln!(writer, "  /repeat, /r            Re-execute last query")?;
+    // ... rest of help ...
+}
+```
+
+#### Usage Examples
+
+**Normal workflow:**
+```sql
+tq> SELECT COUNT(*) FROM employees WHERE status = 'active';
++-------+
+| count |
++-------+
+|   142 |
++-------+
+(1 row)
+
+tq> /edit
+Opening editor: vim
+[vim opens with: SELECT COUNT(*) FROM employees WHERE status = 'active']
+[user edits to: SELECT COUNT(*) FROM employees WHERE status = 'inactive']
+[user saves and exits]
+
+Executing edited query:
+SELECT COUNT(*) FROM employees WHERE status = 'inactive'
+
++-------+
+| count |
++-------+
+|    18 |
++-------+
+(1 row)
+
+tq> /repeat
+Repeating: SELECT COUNT(*) FROM employees WHERE status = 'inactive'
+[executes the edited version]
+```
+
+**Short alias:**
+```sql
+tq> SELECT * FROM customers LIMIT 5;
+[results...]
+
+tq> \e
+Opening editor: nano
+[nano opens with query]
+```
+
+**No previous query:**
+```sql
+tq> /edit
+No previous query to edit.
+tq>
+```
+
+**No changes made:**
+```sql
+tq> SELECT 1;
++---+
+| 1 |
++---+
+| 1 |
++---+
+
+tq> /edit
+Opening editor: vi
+[user exits without making changes]
+No changes made.
+tq>
+```
+
+**Empty after edit:**
+```sql
+tq> SELECT * FROM test;
+[results...]
+
+tq> /edit
+Opening editor: emacs
+[user deletes all content and saves]
+Edited query is empty. No execution.
+tq>
+```
+
+**Editor not found:**
+```sql
+tq> /edit
+Error: Failed to launch editor 'nonexistent': No such file or directory
+Set $EDITOR or $VISUAL environment variable.
+tq>
+```
+
+#### Code Linkage
+
+| Component | File Path | Key Functions |
+|-----------|-----------|---------------|
+| State tracking | `src/commands/repl/state.rs` | `last_sql()`, `set_last_query()` |
+| Command handler | `src/commands/repl/metacommands.rs` | `execute_edit()`, `resolve_editor()`, `create_temp_sql_file()`, `launch_editor()` |
+| Tab completion | `src/commands/repl/metadata_completer.rs` | METACOMMANDS list |
+| Help text | `src/commands/repl/metacommands.rs` | `print_help_extended()` |
+| SQL execution | `src/commands/repl/executor.rs` | `execute_sql_with_state()` |
+
+#### Error Handling
+
+1. **No previous query**: Show clear message "No previous query to edit."
+2. **Editor not found**: Show error with suggestion to set $EDITOR or $VISUAL
+3. **Editor exits with error**: Show exit status, don't execute query
+4. **Temp file creation fails**: Show descriptive error (disk full, permissions)
+5. **Temp file read fails**: Show descriptive error
+6. **Empty result**: Show message, don't execute
+7. **No changes**: Show message, don't execute
+8. **Query execution fails**: Standard error handling (same as regular query execution)
+
+#### Integration with `/repeat`
+
+The edited query is stored as `last_sql`, enabling seamless workflow:
+
+```sql
+tq> SELECT * FROM orders WHERE date = '2024-01-01';
+[results for Jan 1]
+
+tq> /edit
+[edit date to '2024-01-02']
+[results for Jan 2]
+
+tq> /repeat
+[results for Jan 2 again]
+
+tq> /edit
+[edit date to '2024-01-03']
+[results for Jan 3]
+```
+
+Each `/edit` updates `last_sql`, so `/repeat` always executes the most recent query (whether originally typed or edited).
+
+#### Cross-Platform Considerations
+
+**Editor Fallback:**
+- On UNIX-like systems (Linux, macOS): fallback to `vi` (universally available)
+- On Windows: the fallback to `vi` may fail if not installed; user must set $EDITOR
+
+**Path Handling:**
+- Use `PathBuf` and `Path` for cross-platform path manipulation
+- `tempfile` crate handles platform-specific temp directory resolution
+
+**Process Spawning:**
+- `std::process::Command` is cross-platform
+- Exit code checking works consistently across platforms
+
+#### Testing Strategy
+
+**Unit Tests:**
+```rust
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_resolve_editor_visual() {
+        // Set VISUAL and verify it takes priority
+    }
+
+    #[test]
+    fn test_resolve_editor_editor() {
+        // Clear VISUAL, set EDITOR, verify fallback
+    }
+
+    #[test]
+    fn test_resolve_editor_fallback() {
+        // Clear both, verify vi fallback
+    }
+
+    #[test]
+    fn test_content_changed() {
+        // Verify change detection (trim whitespace differences)
+    }
+
+    #[test]
+    fn test_edit_no_previous_query() {
+        // Verify error message when last_sql is None
+    }
+
+    #[test]
+    fn test_help_includes_edit_command() {
+        // Verify /edit appears in help text
+    }
+}
+```
+
+**Integration Tests:**
+- Mock editor using shell script that modifies the file
+- Test full workflow: create query → edit → verify execution
+- Test edge cases: empty file, no changes, invalid SQL
+
+---
+
 ## Schema Inspection Commands
 
 ### `/show indexes` Command

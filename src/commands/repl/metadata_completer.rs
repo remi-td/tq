@@ -306,12 +306,39 @@ const METACOMMANDS: &[MetacommandDef] = &[
         aliases: &["r"],
         description: "Re-execute last query",
     },
+    // Sprint 37: Edit command
+    MetacommandDef {
+        name: "edit",
+        aliases: &["e"],
+        description: "Edit last query in $EDITOR",
+    },
     MetacommandDef {
         name: "show indexes",
         aliases: &["di"],
         description: "Show index information for a table",
     },
 ];
+
+/// Test helper: returns metacommand names matching a prefix
+///
+/// Used by unit tests in metacommands.rs to verify the METACOMMANDS array
+/// without needing to construct reedline Suggestion objects.
+#[cfg(test)]
+pub fn complete_metacommands_for_test(prefix: &str) -> Vec<String> {
+    let prefix_lower = prefix.to_lowercase();
+    let mut results = Vec::new();
+    for cmd in METACOMMANDS {
+        if cmd.name.to_lowercase().starts_with(&prefix_lower)
+            || cmd
+                .aliases
+                .iter()
+                .any(|a| a.to_lowercase().starts_with(&prefix_lower))
+        {
+            results.push(cmd.name.to_string());
+        }
+    }
+    results
+}
 
 /// Complete metacommands based on user input prefix
 ///

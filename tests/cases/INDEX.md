@@ -346,6 +346,60 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 - **Track 3 Focus**: Documentation - synchronize specs with implementation
 - **Acceptance**: All automated tests pass + code review clean + documentation aligned + zero regressions
 
+### Sprint 37: External Editor Integration
+
+**Sprint 37 Context:** Implement `/edit` command to open last SQL query in external editor ($EDITOR/$VISUAL), completing query editing feature set alongside `/repeat` (Sprint 36). Also add optional live-DB test for `/show indexes` from Sprint 36.
+
+**Sprint 37 Test Cases (7 test documents covering 15 acceptance criteria):**
+
+#### Feature 1: `/edit` Command - External Editor Integration (P0) - 6 test documents
+- **TC-037-001**: Editor Resolution and Temp File Creation (AC-1, AC-4, AC-9)
+  - Unit tests for editor resolution logic ($VISUAL → $EDITOR → vi)
+  - Unit tests for temp file creation with `.sql` extension
+  - Command parsing tests for `/edit` and `\e` alias (8 unit tests)
+
+- **TC-037-002**: Edit Modified Content Execution (AC-2, AC-10)
+  - Integration tests with mock editor (modified content auto-executes)
+  - Interactive tests validating `/repeat` after `/edit` (2 integration + 2 interactive)
+
+- **TC-037-003**: Edit Without Changes Skips Execution (AC-3)
+  - Unit tests for content comparison logic
+  - Integration tests with mock editor (no changes = no execution)
+  - Interactive tests for empty file handling (4 unit + 2 integration + 2 interactive)
+
+- **TC-037-004**: Edit Tab Completion and Help Text (AC-5, AC-6)
+  - Interactive tests for tab completion (includes `/edit` and `\e`)
+  - Help text validation (`/help` includes `/edit` description) (9 interactive)
+
+- **TC-037-005**: Edit Error Handling (AC-7, AC-8)
+  - Unit tests for error messages (no previous query, no editor available)
+  - Interactive tests for graceful error handling (3 unit + 5 interactive)
+
+- **TC-037-006**: Edit Full REPL Mode Only (AC-11)
+  - Integration tests for mode detection (works in full REPL, not quick REPL)
+  - Interactive tests validating consistency with `/repeat` (3 integration + 3 interactive)
+
+#### Feature 2: `/show indexes` Live-DB Test (P1) - 1 test document
+- **TC-037-007**: Show Indexes Live Database Test (AC-14, AC-15)
+  - Integration tests with real Teradata connection (#[ignore])
+  - Output format validation (IndexName, IndexType, ColumnName, ColumnPosition) (4 integration #[ignore])
+
+#### Test Summary
+- **TC-037-SUMMARY**: Sprint 37 test execution plan and coverage matrix
+
+**Sprint 37 Test Strategy:**
+- **Test Count**: 7 test case documents + 1 summary document
+- **Estimated Test Functions**: 47 new automated tests + 674 regression tests = 721 total
+- **Type**: Feature Sprint (External Editor Integration)
+- **Database Required**: Yes (for interactive tests - 21/47 tests)
+- **Test Types**: Unit (15 tests) + Integration (11 tests, 7 mock + 4 live-DB #[ignore]) + Interactive (21 tests)
+- **Mock Editor Approach**: 4 bash scripts in `tests/fixtures/mock_editors/` enable automated testing without real editor interaction
+- **Critical Success**: 100% test pass rate (721/721) + zero regressions + all 15 ACs satisfied
+- **Feature 1 Focus**: `/edit` command - external editor workflow, error handling, REPL integration
+- **Feature 2 Focus**: Optional live-DB validation for Sprint 36's `/show indexes`
+- **Manual Validation**: Real editor compatibility checklist (vim, nano, VS Code) recommended but not required
+- **Acceptance**: All automated tests pass + mock editors functional + manual validation documented + zero regressions
+
 ### Security
 - **TC022**: Security - No Password Exposure
 - **TC-SECURITY-001**: Password File Permission Enforcement - 0644 Rejected (Sprint 17)

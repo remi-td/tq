@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-02-13
-**Current Version:** 1.17.0
-**Latest Sprint:** Sprint 36 Complete (Help Text Update + REPL Enhancements)
+**Current Version:** 1.18.0
+**Latest Sprint:** Sprint 37 Complete (External Editor Integration)
 
 ---
 
@@ -288,18 +288,18 @@ All core features are complete and tested.
 | Feature | Status | Spec Reference | Since |
 |---------|--------|----------------|-------|
 | `/repeat` command | ✅ | [REPL Mode](../specifications/repl.md#query-editing) | v1.17.0 (Sprint 36) |
-| `/edit` command | 📋 | [REPL Mode](../specifications/repl.md#query-editing) | Future |
+| `/edit` command | ✅ | [REPL Mode](../specifications/repl.md#query-editing) | v1.18.0 (Sprint 37) |
 
 ---
 
 ## Summary Statistics
 
 - **Total Features**: 75
-- **Implemented**: 70 (93%)
-- **Planned**: 5 (7%)
-- **Test Pass Rate**: 100% (674/674 executed, 57 ignored database-dependent)
+- **Implemented**: 71 (95%)
+- **Planned**: 4 (5%)
+- **Test Pass Rate**: 100% (691/691 executed, 57 ignored database-dependent)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 36 - Help Text Update + REPL Enhancements
+- **Latest Sprint**: Sprint 37 - External Editor Integration
 
 ---
 

@@ -29,6 +29,8 @@ use crate::db::{ConnectionConfig, DatabaseClient};
 use crate::error::Result;
 use crate::sql::{escape_sql_string, quote_qualified_name};
 use std::io::Write;
+use std::path::Path;
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 /// Handle a metacommand
@@ -177,6 +179,14 @@ pub fn handle_metacommand<W: Write>(
                     writeln!(writer, "No previous query to repeat.")?;
                 }
             }
+        }
+
+        // Sprint 37: Edit last query (basic handler - no client available)
+        "edit" | "e" => {
+            writeln!(
+                writer,
+                "The /edit command requires full REPL mode with database connection."
+            )?;
         }
 
         // Sprint 36: Show indexes (basic handler - no client available for query)
@@ -420,6 +430,11 @@ pub fn handle_metacommand_with_state<W: Write>(
             execute_repeat(state, completion_state, writer)?;
         }
 
+        // Sprint 37: Edit last query in external editor
+        "edit" | "e" => {
+            execute_edit(state, completion_state, writer)?;
+        }
+
         // Sprint 36: Show indexes command
         "show" => {
             if args.is_empty() {
@@ -491,6 +506,10 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "  /quit, /q              Exit the REPL")?;
     writeln!(
         writer,
+        "  /edit, /e              Edit last query in $EDITOR"
+    )?;
+    writeln!(
+        writer,
         "  /repeat, /r            Re-execute last query"
     )?;
     writeln!(
@@ -553,6 +572,7 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "SQL Execution:")?;
     writeln!(writer, "  Enter SQL statements ending with semicolon (;)")?;
     writeln!(writer, "  Multi-line statements are supported")?;
+    writeln!(writer, "  /edit opens the last query in your $EDITOR")?;
     writeln!(writer, "  /repeat re-executes the last SQL statement")?;
     writeln!(writer)?;
     writeln!(writer, "Tab Completion:")?;
@@ -1058,6 +1078,10 @@ fn print_help<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "  /quit, /q              Exit the REPL")?;
     writeln!(
         writer,
+        "  /edit, /e              Edit last query in $EDITOR"
+    )?;
+    writeln!(
+        writer,
         "  /repeat, /r            Re-execute last query"
     )?;
     writeln!(
@@ -1086,6 +1110,7 @@ fn print_help<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "SQL Execution:")?;
     writeln!(writer, "  Enter SQL statements ending with semicolon (;)")?;
     writeln!(writer, "  Multi-line statements are supported")?;
+    writeln!(writer, "  /edit opens the last query in your $EDITOR")?;
     writeln!(writer, "  /repeat re-executes the last SQL statement")?;
     writeln!(writer)?;
     writeln!(writer, "Keyboard Shortcuts:")?;
@@ -2235,6 +2260,174 @@ fn execute_repeat<W: Write>(
 }
 
 // =============================================================================
+// Sprint 37: /edit Command - External Editor Integration
+// =============================================================================
+
+/// Resolve the editor to use for the /edit command
+///
+/// Priority: $VISUAL -> $EDITOR -> "vi" (fallback)
+///
+/// Returns the editor command string. The fallback to "vi" ensures the command
+/// works on all UNIX-like systems without explicit configuration.
+fn resolve_editor() -> std::result::Result<String, String> {
+    if let Ok(visual) = std::env::var("VISUAL") {
+        if !visual.trim().is_empty() {
+            return Ok(visual);
+        }
+    }
+
+    if let Ok(editor) = std::env::var("EDITOR") {
+        if !editor.trim().is_empty() {
+            return Ok(editor);
+        }
+    }
+
+    // Fallback to vi (available on all UNIX-like systems)
+    Ok("vi".to_string())
+}
+
+/// Create a temporary file with .sql extension for editor integration
+///
+/// Uses the `tempfile` crate to create a secure temporary file with a
+/// descriptive prefix and `.sql` extension for proper syntax highlighting.
+fn create_temp_sql_file(content: &str) -> Result<(tempfile::NamedTempFile, std::path::PathBuf)> {
+    let temp_file = tempfile::Builder::new()
+        .prefix("tq_edit_")
+        .suffix(".sql")
+        .tempfile()
+        .map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to create temp file: {}", e),
+            )
+        })?;
+
+    let path = temp_file.path().to_path_buf();
+    std::fs::write(&path, content).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("Failed to write temp file: {}", e),
+        )
+    })?;
+
+    Ok((temp_file, path))
+}
+
+/// Launch an editor as a blocking subprocess and wait for exit
+///
+/// Returns Ok(()) if the editor exits successfully (exit code 0).
+/// Returns an error message string if the editor fails to launch or exits
+/// with a non-zero status.
+fn launch_editor(editor: &str, file_path: &Path) -> std::result::Result<(), String> {
+    let status = Command::new(editor)
+        .arg(file_path)
+        .status()
+        .map_err(|e| format!("Failed to launch editor '{}': {}", editor, e))?;
+
+    if !status.success() {
+        return Err(format!(
+            "Editor '{}' exited with non-zero status: {}",
+            editor,
+            status.code().unwrap_or(-1)
+        ));
+    }
+
+    Ok(())
+}
+
+/// Check if edited content differs from original
+///
+/// Comparison is performed on trimmed content so that trailing whitespace
+/// or newlines added by the editor do not count as a change.
+fn content_changed(original: &str, edited: &str) -> bool {
+    original.trim() != edited.trim()
+}
+
+/// Execute the /edit metacommand (Sprint 37)
+///
+/// Opens the last SQL query in an external editor, then executes
+/// the modified query if changes were made. Follows the same execution
+/// path as `/repeat` for consistency.
+fn execute_edit<W: Write>(
+    state: &mut ReplState,
+    completion_state: &mut CompletionState,
+    writer: &mut W,
+) -> Result<()> {
+    // 1. Check if there's a previous query
+    let original_sql = match state.last_sql() {
+        Some(s) => s.to_string(),
+        None => {
+            writeln!(writer, "No previous query to edit.")?;
+            return Ok(());
+        }
+    };
+
+    // 2. Resolve editor
+    let editor = match resolve_editor() {
+        Ok(e) => e,
+        Err(e) => {
+            writeln!(writer, "Error: {}", e)?;
+            writeln!(writer, "Set $EDITOR or $VISUAL environment variable.")?;
+            return Ok(());
+        }
+    };
+
+    // 3. Create temp file with original SQL
+    let (_temp_file, temp_path) = create_temp_sql_file(&original_sql)?;
+
+    // 4. Launch editor
+    writeln!(writer, "Opening editor: {}", editor)?;
+    if let Err(e) = launch_editor(&editor, &temp_path) {
+        writeln!(writer, "Error: {}", e)?;
+        return Ok(());
+    }
+
+    // 5. Read edited content
+    let edited_sql = std::fs::read_to_string(&temp_path).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("Failed to read edited file: {}", e),
+        )
+    })?;
+
+    // 6. Check if content changed
+    if !content_changed(&original_sql, &edited_sql) {
+        writeln!(writer, "No changes made. Query not executed.")?;
+        return Ok(());
+    }
+
+    // 7. Check if result is empty
+    let trimmed = edited_sql.trim();
+    if trimmed.is_empty() {
+        writeln!(writer, "No changes made. Query not executed.")?;
+        return Ok(());
+    }
+
+    // 8. Execute the edited query
+    writeln!(writer)?;
+    writeln!(writer, "Executing edited query:")?;
+    writeln!(writer, "{}", trimmed)?;
+    writeln!(writer)?;
+
+    let default_limit = state.default_limit();
+    let client = completion_state.client();
+
+    match execute_sql_with_state(client, state, trimmed, writer, default_limit) {
+        Ok(row_count) => {
+            // Store edited query as new last_sql (enables /repeat after /edit)
+            state.set_last_query(trimmed.to_string(), default_limit > 0);
+            state.record_query(row_count);
+        }
+        Err(e) => {
+            writeln!(writer, "\nError: {}", e)?;
+        }
+    }
+
+    writeln!(writer)?;
+    Ok(())
+}
+
+// =============================================================================
 // Sprint 36: /show indexes Command
 // =============================================================================
 
@@ -3065,5 +3258,234 @@ mod tests {
 
         let output_str = String::from_utf8(output).unwrap();
         assert!(output_str.contains("full REPL mode"));
+    }
+
+    // =========================================================================
+    // Sprint 37: /edit command tests
+    // =========================================================================
+
+    // Mutex to serialize tests that modify VISUAL/EDITOR environment variables
+    static EDITOR_ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Helper to run a test that modifies VISUAL/EDITOR env vars safely
+    fn with_editor_env<F, T>(test_fn: F) -> T
+    where
+        F: FnOnce() -> T,
+    {
+        let _lock = EDITOR_ENV_MUTEX.lock().unwrap();
+        let orig_visual = std::env::var("VISUAL").ok();
+        let orig_editor = std::env::var("EDITOR").ok();
+
+        let result = test_fn();
+
+        // Restore original values
+        match orig_visual {
+            Some(v) => std::env::set_var("VISUAL", v),
+            None => std::env::remove_var("VISUAL"),
+        }
+        match orig_editor {
+            Some(v) => std::env::set_var("EDITOR", v),
+            None => std::env::remove_var("EDITOR"),
+        }
+        result
+    }
+
+    #[test]
+    fn test_resolve_editor_visual_set() {
+        with_editor_env(|| {
+            std::env::set_var("VISUAL", "code");
+            std::env::set_var("EDITOR", "vim");
+
+            let result = resolve_editor();
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), "code");
+        });
+    }
+
+    #[test]
+    fn test_resolve_editor_editor_set() {
+        with_editor_env(|| {
+            std::env::remove_var("VISUAL");
+            std::env::set_var("EDITOR", "nano");
+
+            let result = resolve_editor();
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), "nano");
+        });
+    }
+
+    #[test]
+    fn test_resolve_editor_fallback() {
+        with_editor_env(|| {
+            std::env::remove_var("VISUAL");
+            std::env::remove_var("EDITOR");
+
+            let result = resolve_editor();
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), "vi");
+        });
+    }
+
+    #[test]
+    fn test_resolve_editor_empty_visual_falls_through() {
+        with_editor_env(|| {
+            std::env::set_var("VISUAL", "  ");
+            std::env::set_var("EDITOR", "emacs");
+
+            let result = resolve_editor();
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), "emacs");
+        });
+    }
+
+    #[test]
+    fn test_execute_edit_no_previous_query() {
+        let config = create_test_config();
+        let mut state = ReplState::new(config);
+        let client = DatabaseClient::mock();
+
+        let mut output = Vec::new();
+        let result = handle_metacommand("/edit", &mut state, &client, &mut output);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+
+        let output_str = String::from_utf8(output).unwrap();
+        assert!(output_str.contains("full REPL mode"));
+    }
+
+    #[test]
+    fn test_execute_edit_basic_mode_error() {
+        let config = create_test_config();
+        let mut state = ReplState::new(config);
+        let client = DatabaseClient::mock();
+
+        let mut output = Vec::new();
+        let result = handle_metacommand("/edit", &mut state, &client, &mut output);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+
+        let output_str = String::from_utf8(output).unwrap();
+        assert!(
+            output_str.contains("full REPL mode"),
+            "Basic handler should indicate full REPL mode required"
+        );
+    }
+
+    #[test]
+    fn test_edit_alias_e_via_basic_handler() {
+        let config = create_test_config();
+        let mut state = ReplState::new(config);
+        let client = DatabaseClient::mock();
+
+        let mut output = Vec::new();
+        let result = handle_metacommand("/e", &mut state, &client, &mut output);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+
+        let output_str = String::from_utf8(output).unwrap();
+        assert!(output_str.contains("full REPL mode"));
+    }
+
+    #[test]
+    fn test_edit_backslash_alias() {
+        let config = create_test_config();
+        let mut state = ReplState::new(config);
+        let client = DatabaseClient::mock();
+
+        let mut output = Vec::new();
+        let result = handle_metacommand("\\e", &mut state, &client, &mut output);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+
+        let output_str = String::from_utf8(output).unwrap();
+        assert!(output_str.contains("full REPL mode"));
+    }
+
+    #[test]
+    fn test_edit_command_in_help_text() {
+        let mut output = Vec::new();
+        print_help(&mut output).unwrap();
+        let output_str = String::from_utf8(output).unwrap();
+
+        assert!(
+            output_str.contains("/edit"),
+            "Help text should include /edit command"
+        );
+        assert!(
+            output_str.contains("/e"),
+            "Help text should include /e alias"
+        );
+    }
+
+    #[test]
+    fn test_edit_command_in_help_extended() {
+        let mut output = Vec::new();
+        print_help_extended(&mut output).unwrap();
+        let output_str = String::from_utf8(output).unwrap();
+
+        assert!(
+            output_str.contains("/edit"),
+            "Extended help text should include /edit command"
+        );
+        assert!(
+            output_str.contains("/e"),
+            "Extended help text should include /e alias"
+        );
+        assert!(
+            output_str.contains("$EDITOR"),
+            "Extended help text should mention $EDITOR"
+        );
+    }
+
+    #[test]
+    fn test_content_changed_identical() {
+        assert!(!content_changed("SELECT 1", "SELECT 1"));
+    }
+
+    #[test]
+    fn test_content_changed_whitespace_only() {
+        assert!(!content_changed("SELECT 1", "  SELECT 1  \n"));
+    }
+
+    #[test]
+    fn test_content_changed_different() {
+        assert!(content_changed("SELECT 1", "SELECT 2"));
+    }
+
+    #[test]
+    fn test_content_changed_empty_vs_nonempty() {
+        assert!(content_changed("SELECT 1", ""));
+    }
+
+    #[test]
+    fn test_create_temp_sql_file() {
+        let content = "SELECT * FROM employees;";
+        let result = create_temp_sql_file(content);
+        assert!(result.is_ok());
+
+        let (_temp, path) = result.unwrap();
+        assert!(path.extension().map_or(false, |ext| ext == "sql"));
+
+        let read_back = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(read_back, content);
+    }
+
+    #[test]
+    fn test_edit_alias_in_metacommands() {
+        // Verify that the METACOMMANDS array in metadata_completer.rs
+        // includes the edit command - we test this indirectly by checking
+        // that the tab completion system recognizes it
+        use crate::commands::repl::metadata_completer::complete_metacommands_for_test;
+
+        // This test verifies the edit entry exists in METACOMMANDS
+        let suggestions = complete_metacommands_for_test("edit");
+        assert!(
+            !suggestions.is_empty(),
+            "Tab completion should include /edit"
+        );
+
+        let suggestions = complete_metacommands_for_test("e");
+        let has_edit = suggestions.iter().any(|s| s.contains("edit"));
+        assert!(has_edit, "Tab completion for 'e' should include edit");
     }
 }

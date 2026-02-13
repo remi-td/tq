@@ -3173,7 +3173,346 @@ Session Information:
 | `/clear` | `\clear` | Clear screen | `/clear` |
 | `/history` | - | Show command history | `/history` |
 | `/edit` | `\e` | Edit last query in $EDITOR | `/edit` |
+| `/repeat` | `\r` | Re-execute last query | `/repeat` |
 | `/quit` | `\q` | Exit REPL | `/quit` |
+
+---
+
+**`/edit` Metacommand**
+
+**Requirement:** Open the last executed SQL query in an external text editor for modification, then execute the edited query upon save and exit.
+
+**Syntax:**
+```
+/edit
+\e                  -- Short alias
+```
+
+**Behavior Requirements:**
+
+**REQ-EDIT-001: Command Availability and Aliases**
+
+The `/edit` command SHALL be available as a metacommand in full REPL mode with the following characteristics:
+
+1. **REQ-EDIT-001.1** - Primary command: `/edit`
+2. **REQ-EDIT-001.2** - Short alias: `\e`
+3. **REQ-EDIT-001.3** - Both forms SHALL execute identically
+4. **REQ-EDIT-001.4** - Command SHALL execute immediately (no arguments required)
+5. **REQ-EDIT-001.5** - Command SHALL be case-insensitive (`/Edit`, `/EDIT`, `\e`, `\E` all valid)
+6. **REQ-EDIT-001.6** - Command SHALL be available in full REPL mode only (not in quick REPL mode)
+
+**Rationale:** Follows established metacommand patterns. Quick REPL mode exclusion matches `/repeat` behavior since both commands operate on stored query state.
+
+---
+
+**REQ-EDIT-002: Editor Resolution**
+
+The command SHALL resolve the external editor using the following priority order:
+
+1. **REQ-EDIT-002.1** - First priority: `$VISUAL` environment variable
+2. **REQ-EDIT-002.2** - Second priority: `$EDITOR` environment variable
+3. **REQ-EDIT-002.3** - Third priority: `vi` as fallback
+4. **REQ-EDIT-002.4** - If no editor found (fallback `vi` not available), display clear error message
+5. **REQ-EDIT-002.5** - Environment variable values SHALL be trimmed of whitespace
+6. **REQ-EDIT-002.6** - Empty environment variables SHALL be ignored (treated as unset)
+7. **REQ-EDIT-002.7** - Editor command MAY include arguments (e.g., `$EDITOR="code --wait"`)
+
+**Rationale:** Standard UNIX convention prioritizes `$VISUAL` over `$EDITOR`. Fallback to `vi` ensures availability on most UNIX-like systems.
+
+**Example Editor Resolution:**
+```bash
+# User has VISUAL set
+export VISUAL="emacs"
+tq> /edit
+[Opens emacs]
+
+# User has only EDITOR set
+export EDITOR="nano"
+tq> /edit
+[Opens nano]
+
+# No environment variables set
+tq> /edit
+[Opens vi]
+```
+
+---
+
+**REQ-EDIT-003: Temporary File Handling**
+
+The command SHALL create a temporary file containing the last query:
+
+1. **REQ-EDIT-003.1** - Temp file SHALL use `.sql` extension for syntax highlighting
+2. **REQ-EDIT-003.2** - Temp file SHALL be created in system temp directory
+3. **REQ-EDIT-003.3** - Temp file name format: `tq_edit_<random>.sql` where `<random>` is cryptographically secure random string
+4. **REQ-EDIT-003.4** - Temp file SHALL be populated with last SQL query before editor opens
+5. **REQ-EDIT-003.5** - Temp file SHALL preserve original query formatting (whitespace, line breaks, indentation)
+6. **REQ-EDIT-003.6** - Temp file SHALL be automatically deleted after editor closes
+7. **REQ-EDIT-003.7** - Temp file deletion SHALL occur even if editor exits with error
+8. **REQ-EDIT-003.8** - File permissions SHALL be user-only (0600) for security
+
+**Rationale:** `.sql` extension enables syntax highlighting in most editors. Secure random naming prevents conflicts and information disclosure. Automatic cleanup prevents temp file accumulation.
+
+---
+
+**REQ-EDIT-004: Editor Execution and Process Management**
+
+The command SHALL launch the editor as a child process:
+
+1. **REQ-EDIT-004.1** - Editor process SHALL inherit current terminal
+2. **REQ-EDIT-004.2** - REPL SHALL block and wait for editor to exit
+3. **REQ-EDIT-004.3** - Editor exit status SHALL be captured
+4. **REQ-EDIT-004.4** - Non-zero exit status SHALL trigger error (query not executed)
+5. **REQ-EDIT-004.5** - Zero exit status SHALL proceed to query execution
+6. **REQ-EDIT-004.6** - Editor process SHALL receive proper signal handling (SIGINT, SIGTERM)
+7. **REQ-EDIT-004.7** - If editor cannot be spawned, display clear error with editor path
+
+**Rationale:** Blocking ensures user completes editing before REPL resumes. Exit status validation prevents execution of potentially corrupted edits.
+
+**Error Case - Editor Launch Failure:**
+```sql
+tq> /edit
+
+Error: Unable to launch editor 'nano'
+Reason: Command not found
+
+Suggestions:
+  - Install nano: apt install nano (Debian/Ubuntu) or brew install nano (macOS)
+  - Set different editor: export EDITOR=vi
+  - Check PATH includes editor location
+```
+
+---
+
+**REQ-EDIT-005: Query Execution After Edit**
+
+The command SHALL execute the edited query based on file contents and editor exit status:
+
+1. **REQ-EDIT-005.1** - On successful editor exit (code 0), read edited file contents
+2. **REQ-EDIT-005.2** - If file is empty, display message and do not execute (return to REPL prompt)
+3. **REQ-EDIT-005.3** - If file contains only whitespace, treat as empty (no execution)
+4. **REQ-EDIT-005.4** - If file unchanged from original query, display message and do not execute
+5. **REQ-EDIT-005.5** - If file changed and non-empty, execute edited SQL query
+6. **REQ-EDIT-005.6** - Edited query SHALL be stored as `last_sql` (enabling `/repeat` afterward)
+7. **REQ-EDIT-005.7** - Query execution SHALL use normal REPL execution path (same error handling, output formatting)
+8. **REQ-EDIT-005.8** - Query execution errors SHALL be displayed normally (do not suppress)
+
+**Rationale:** Empty file or no changes indicates user intent to cancel. Storing edited query as `last_sql` maintains consistency with normal query execution.
+
+**Example Interaction - Successful Edit:**
+```sql
+tq> SELECT * FROM employees WHERE dept = 'IT';
+[Shows results: 42 rows]
+
+tq> /edit
+[Opens editor with query]
+[User changes query to: SELECT * FROM employees WHERE dept = 'Sales';]
+[User saves and exits]
+
+Executing edited query...
+
+[Shows results: 28 rows from Sales department]
+
+tq> /repeat
+[Re-executes the edited query about Sales department]
+```
+
+**Example Interaction - Empty File (Cancel):**
+```sql
+tq> SELECT * FROM employees;
+
+tq> /edit
+[Opens editor with query]
+[User deletes all content, saves and exits]
+
+Edit cancelled (empty query)
+
+tq> _
+```
+
+**Example Interaction - No Changes:**
+```sql
+tq> SELECT COUNT(*) FROM orders;
+
+tq> /edit
+[Opens editor with query]
+[User exits without making changes]
+
+No changes made
+
+tq> _
+```
+
+---
+
+**REQ-EDIT-006: Error Handling - No Previous Query**
+
+The command SHALL handle the case where no previous query exists:
+
+1. **REQ-EDIT-006.1** - If no previous SQL query executed in session, display error message
+2. **REQ-EDIT-006.2** - Error message SHALL be clear and actionable
+3. **REQ-EDIT-006.3** - Error SHALL return to REPL prompt (non-fatal)
+4. **REQ-EDIT-006.4** - Metacommands (e.g., `/describe`, `/list`) SHALL NOT be considered as "last query"
+5. **REQ-EDIT-006.5** - Only user-entered SQL queries SHALL be editable
+
+**Rationale:** Users may invoke `/edit` immediately after starting REPL. Clear guidance prevents confusion.
+
+**Error Case:**
+```sql
+tq> /edit
+
+Error: No previous query to edit
+
+You haven't executed any SQL queries yet in this session.
+Run a query first, then use /edit to modify and re-execute it.
+
+Example:
+  tq> SELECT * FROM employees;
+  tq> /edit
+```
+
+---
+
+**REQ-EDIT-007: Error Handling - Editor Exit with Error**
+
+The command SHALL handle abnormal editor termination:
+
+1. **REQ-EDIT-007.1** - If editor exits with non-zero status, display error message
+2. **REQ-EDIT-007.2** - Error message SHALL include exit code
+3. **REQ-EDIT-007.3** - Query SHALL NOT be executed after editor error
+4. **REQ-EDIT-007.4** - Original query SHALL remain as `last_sql` (unchanged)
+5. **REQ-EDIT-007.5** - Temp file SHALL still be cleaned up
+
+**Rationale:** Non-zero exit status may indicate editor crash or user cancellation (Ctrl-C in vim). Preventing execution avoids potential data corruption.
+
+**Error Case:**
+```sql
+tq> /edit
+[Editor opens, user presses Ctrl-C in vim without saving]
+
+Error: Editor exited with error (exit code: 1)
+Query not executed
+
+Your original query is unchanged. Use /repeat to execute it, or /edit to try again.
+```
+
+---
+
+**REQ-EDIT-008: Integration with REPL State**
+
+The command SHALL integrate properly with REPL query history:
+
+1. **REQ-EDIT-008.1** - Edited query (if executed) SHALL be added to command history
+2. **REQ-EDIT-008.2** - Edited query SHALL be retrievable with Up arrow key
+3. **REQ-EDIT-008.3** - Edited query SHALL replace `last_sql` state (used by `/repeat`)
+4. **REQ-EDIT-008.4** - Multi-line edited queries SHALL be stored as single history entry
+5. **REQ-EDIT-008.5** - Original query SHALL remain in history (not deleted)
+
+**Rationale:** Natural workflow allows users to further refine queries using history navigation or `/repeat` command.
+
+---
+
+**REQ-EDIT-009: Tab Completion**
+
+The command SHALL be discoverable through tab completion:
+
+1. **REQ-EDIT-009.1** - `/edit` SHALL appear in metacommand completion menu
+2. **REQ-EDIT-009.2** - `\e` SHALL appear in metacommand completion menu
+3. **REQ-EDIT-009.3** - Typing `/e<TAB>` SHALL show `/edit` as completion option
+4. **REQ-EDIT-009.4** - Completion description: "Edit last query in $EDITOR"
+
+---
+
+**REQ-EDIT-010: Help Text**
+
+The command SHALL be documented in REPL help:
+
+1. **REQ-EDIT-010.1** - `/help` SHALL list `/edit` command
+2. **REQ-EDIT-010.2** - `/help edit` SHALL show detailed command help
+3. **REQ-EDIT-010.3** - Help SHALL explain editor resolution order ($VISUAL → $EDITOR → vi)
+4. **REQ-EDIT-010.4** - Help SHALL mention `\e` short alias
+
+**Example Help Output:**
+```sql
+tq> /help edit
+
+/edit - Edit last query in external editor
+
+Opens your last SQL query in an external text editor. After you save and exit,
+the edited query is automatically executed.
+
+Editor Resolution:
+  1. $VISUAL environment variable
+  2. $EDITOR environment variable
+  3. vi (fallback)
+
+Usage:
+  /edit           Open last query in editor
+  \e              Short alias
+
+Workflow:
+  1. Run a query: SELECT * FROM employees;
+  2. Edit it: /edit
+  3. Modify query in your editor, save and exit
+  4. Modified query executes automatically
+
+Notes:
+  - Exiting editor without changes cancels execution
+  - Edited query becomes new "last query" for /repeat
+  - Only works with SQL queries (not metacommands)
+
+See also: /repeat
+```
+
+---
+
+**Example Complete Workflow:**
+
+```sql
+# Initial query
+tq> SELECT employee_id, first_name, last_name
+    FROM employees
+    WHERE department = 'IT';
+
+┌─────────────┬────────────┬───────────┐
+│ employee_id │ first_name │ last_name │
+├─────────────┼────────────┼───────────┤
+│ 101         │ Alice      │ Anderson  │
+│ 102         │ Bob        │ Brown     │
+│ 103         │ Carol      │ Chen      │
+└─────────────┴────────────┴───────────┘
+
+3 rows in set (0.045s)
+
+# Open in editor
+tq> /edit
+[Editor opens with query]
+
+# User changes 'IT' to 'Sales' and adds ORDER BY
+# Query now reads:
+#   SELECT employee_id, first_name, last_name
+#   FROM employees
+#   WHERE department = 'Sales'
+#   ORDER BY last_name;
+
+[User saves and exits editor]
+
+Executing edited query...
+
+┌─────────────┬────────────┬───────────┐
+│ employee_id │ first_name │ last_name │
+├─────────────┼────────────┼───────────┤
+│ 205         │ David      │ Adams     │
+│ 211         │ Emma       │ Clark     │
+│ 198         │ Frank      │ Foster    │
+└─────────────┴────────────┴───────────┘
+
+3 rows in set (0.038s)
+
+# Can re-execute edited query
+tq> /repeat
+[Re-executes the Sales query with ORDER BY]
+```
 
 ## Special Features
 

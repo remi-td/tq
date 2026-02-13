@@ -1,7 +1,7 @@
 # Feature Backlog
 
 **Last Updated:** 2026-02-13
-**Next Sprint:** Sprint 37
+**Next Sprint:** Sprint 38
 
 ---
 
@@ -84,12 +84,6 @@ No P0 features currently in backlog. All critical features have been implemented
 - Spec: [Configuration - Validation](../specifications/configuration.md#validation)
 
 ### REPL Enhancements
-
-**Query Editing**
-- `/edit` - Open last query in $EDITOR
-- External editor integration
-- Spec: [REPL Mode - Query Editing](../specifications/repl.md#query-editing)
-- Note: `/repeat` completed in Sprint 36 (v1.17.0)
 
 **Search in Pager**
 - `/pattern` - Search forward in paged results

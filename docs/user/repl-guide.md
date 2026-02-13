@@ -332,7 +332,11 @@ tq> SELECT
 
 The query executes when you end it with a semicolon (`;`).
 
-### Repeating Queries
+### Query Editing Commands
+
+REPL provides two powerful commands for working with your query history: `/repeat` to re-execute queries and `/edit` to modify them in your preferred editor.
+
+#### Re-execute Last Query
 
 Re-execute your last query without retyping:
 
@@ -376,6 +380,187 @@ No previous query to repeat
 ```
 
 **Note:** Only SQL queries are repeated. Metacommands (like `/describe` or `/list`) are not stored as repeatable queries.
+
+#### Edit Last Query in External Editor
+
+Open your last SQL query in your preferred text editor, modify it, and automatically execute the edited version:
+
+```sql
+tq> SELECT * FROM employees WHERE department = 'IT';
+
+[Shows results: 42 rows]
+
+tq> /edit
+[Opens your editor with the query]
+[You change 'IT' to 'Sales' and save]
+
+Executing edited query...
+
+[Shows results: 28 rows from Sales department]
+```
+
+**Short alias:** `\e`
+
+```sql
+tq> \e
+[Opens editor with last query]
+```
+
+**How it works:**
+
+1. **Editor Selection**: tq uses your preferred editor in this order:
+   - `$VISUAL` environment variable (highest priority)
+   - `$EDITOR` environment variable
+   - `vi` as fallback
+
+2. **Temporary File**: Your query is written to a temporary `.sql` file with proper syntax highlighting
+
+3. **Edit and Save**: Make your changes in the editor, then save and exit
+
+4. **Automatic Execution**: The edited query runs automatically when you exit the editor
+
+**Setting your editor:**
+
+```bash
+# Use Visual Studio Code
+export VISUAL="code --wait"
+
+# Use nano
+export EDITOR="nano"
+
+# Use vim
+export EDITOR="vim"
+```
+
+**Example workflow - Refining a query:**
+
+```sql
+# Start with a basic query
+tq> SELECT employee_id, first_name, last_name
+    FROM employees
+    WHERE department = 'IT';
+
+┌─────────────┬────────────┬───────────┐
+│ employee_id │ first_name │ last_name │
+├─────────────┼────────────┼───────────┤
+│ 101         │ Alice      │ Anderson  │
+│ 102         │ Bob        │ Brown     │
+│ 103         │ Carol      │ Chen      │
+└─────────────┴────────────┴───────────┘
+
+3 rows in set (0.045s)
+
+# Open in editor to refine
+tq> /edit
+
+[Editor opens with your query. You modify it to:]
+SELECT employee_id, first_name, last_name, hire_date, salary
+FROM employees
+WHERE department = 'IT'
+  AND hire_date > '2020-01-01'
+ORDER BY salary DESC;
+
+[Save and exit editor]
+
+Executing edited query...
+
+┌─────────────┬────────────┬───────────┬────────────┬───────────┐
+│ employee_id │ first_name │ last_name │ hire_date  │ salary    │
+├─────────────┼────────────┼───────────┼────────────┼───────────┤
+│ 103         │ Carol      │ Chen      │ 2021-07-01 │ 95000.00  │
+│ 101         │ Alice      │ Anderson  │ 2020-01-15 │ 75000.00  │
+└─────────────┴────────────┴───────────┴────────────┴───────────┘
+
+2 rows in set (0.038s)
+
+# The edited query is now your "last query"
+tq> /repeat
+[Re-executes the refined query]
+```
+
+**Canceling an edit:**
+
+If you exit the editor without making changes, or delete all content:
+
+```sql
+tq> /edit
+[Opens editor]
+[Exit without changes]
+
+No changes made
+
+tq> _
+```
+
+If you delete all content and save:
+
+```sql
+tq> /edit
+[Opens editor]
+[Delete all text and save]
+
+Edit cancelled (empty query)
+
+tq> _
+```
+
+**When to use:**
+
+- **Complex modifications**: Add JOINs, subqueries, or additional columns
+- **Multi-line formatting**: Properly format a long query for readability
+- **Iterative refinement**: Start with a simple query, progressively add filters and sorting
+- **Learning SQL**: Experiment with query variations using your editor's undo/redo
+- **Copy/paste from examples**: Paste query templates from documentation
+
+**Error handling:**
+
+If you haven't run a query yet:
+
+```sql
+tq> /edit
+
+Error: No previous query to edit
+
+You haven't executed any SQL queries yet in this session.
+Run a query first, then use /edit to modify and re-execute it.
+```
+
+If your editor isn't found:
+
+```sql
+tq> /edit
+
+Error: Unable to launch editor 'nano'
+Reason: Command not found
+
+Suggestions:
+  - Install nano: apt install nano (Debian/Ubuntu)
+  - Set different editor: export EDITOR=vi
+```
+
+**Integration with /repeat:**
+
+After editing a query, you can re-run it with `/repeat`:
+
+```sql
+tq> SELECT * FROM orders WHERE status = 'pending';
+[Shows 15 rows]
+
+tq> /edit
+[Change 'pending' to 'completed']
+[Shows 342 rows]
+
+tq> /repeat
+[Re-executes the query with status = 'completed']
+```
+
+**Tips:**
+
+1. **Use complex editors**: Set `VISUAL="code --wait"` or `VISUAL="emacs"` for full editor features
+2. **Multi-line queries**: The editor preserves your formatting, making it easy to work with complex queries
+3. **Query templates**: Keep a library of query templates and paste them when editing
+4. **Incremental refinement**: Start simple, use `/edit` to add complexity step-by-step
+5. **Editor features**: Use your editor's syntax highlighting, autocomplete, and linting for SQL
 
 ### Query History
 
@@ -852,13 +1037,15 @@ tq> /quit
 2. **Use `/list` commands** - They're faster than writing SQL for schema exploration
 3. **Use patterns** - Filter tables with `/list tables pattern` instead of viewing all tables
 4. **Watch for loading indicators** - They tell you when tq is fetching data
-5. **Use short aliases** - Commands like `\l`, `\dt`, `\d` save typing
+5. **Use short aliases** - Commands like `\l`, `\dt`, `\d`, `\e`, `\r` save typing
 6. **Write readable multi-line queries** - They're stored as single history entries, so formatting makes them easier to recall and edit
-7. **Sample before selecting** - Use `/sample` to inspect data before writing complex queries
-8. **Peek for quick exploration** - `/peek` shows structure and data together, perfect for unfamiliar tables. Use `/peek table 10` to see more rows
-9. **Start with small samples** - When exploring large tables, use `/sample table 10` to avoid overwhelming output
-10. **Combine sampling with patterns** - First use `/list tables pattern%` to find tables, then `/sample` to inspect them
-11. **The pager is experimental** - By default, wide results show with truncation. You can try `/pager on` to test interactive navigation
+7. **Use `/edit` for complex changes** - When you need to refine a query with JOINs, filters, or formatting, use `/edit` to open it in your editor
+8. **Sample before selecting** - Use `/sample` to inspect data before writing complex queries
+9. **Peek for quick exploration** - `/peek` shows structure and data together, perfect for unfamiliar tables. Use `/peek table 10` to see more rows
+10. **Start with small samples** - When exploring large tables, use `/sample table 10` to avoid overwhelming output
+11. **Combine sampling with patterns** - First use `/list tables pattern%` to find tables, then `/sample` to inspect them
+12. **Iterative query development** - Start simple, run it, then use `/edit` to add complexity step by step
+13. **The pager is experimental** - By default, wide results show with truncation. You can try `/pager on` to test interactive navigation
 
 ## Keyboard Shortcuts Reference
 
