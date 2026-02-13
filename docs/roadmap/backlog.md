@@ -1,7 +1,7 @@
 # Feature Backlog
 
 **Last Updated:** 2026-02-13
-**Next Sprint:** Sprint 36
+**Next Sprint:** Sprint 37
 
 ---
 
@@ -36,11 +36,6 @@ No P0 features currently in backlog. All critical features have been implemented
 - Awaiting upstream reedline fix or contribution opportunity
 - Spec: [REPL Mode - Tab Completion Behavior](../specifications/repl.md#tab-completion-behavior)
 - Deferred from Sprint 21 due to technical limitation
-
-**Additional Schema Commands**
-- `/show indexes <table>` - Show table indexes
-- Spec: [REPL Mode - Schema Inspection](../specifications/repl.md#schema-inspection)
-- Note: `/list databases`, `/list tables`, `/list views` completed in Sprint 22 (v1.9.0)
 
 ---
 
@@ -92,9 +87,9 @@ No P0 features currently in backlog. All critical features have been implemented
 
 **Query Editing**
 - `/edit` - Open last query in $EDITOR
-- `/repeat` - Re-execute last query
 - External editor integration
 - Spec: [REPL Mode - Query Editing](../specifications/repl.md#query-editing)
+- Note: `/repeat` completed in Sprint 36 (v1.17.0)
 
 **Search in Pager**
 - `/pattern` - Search forward in paged results

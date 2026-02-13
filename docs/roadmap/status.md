@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-02-13
-**Current Version:** 1.16.0
-**Latest Sprint:** Sprint 35 Complete (Project Configuration + Quick Wins)
+**Current Version:** 1.17.0
+**Latest Sprint:** Sprint 36 Complete (Help Text Update + REPL Enhancements)
 
 ---
 
@@ -176,6 +176,14 @@ All core features are complete and tested.
 - Documentation updates: Specifications, design, user guides
 - Sprint 31 lessons applied: Type 4 classification, manual validation protocol
 
+**Sprint 36 Enhancements (v1.17.0):**
+- **Config help text polish**: Project configuration section in `tq help config`, 5-level precedence hierarchy
+- **Config UX improvements**: Project config path shown in `tq profiles`, empty state tip, invalid TOML warning to stderr
+- **`/repeat` command**: Re-execute last SQL query (alias `\r`), follows psql convention
+- **`/show indexes <table>`**: Display table indexes from DBC.IndicesV (alias `\di`), qualified name support
+- **Tab completion**: New commands in metacommand completion menu
+- 40 new tests (674 total, 100% pass rate), zero clippy warnings
+
 **Sprint 33 Features (v1.15.0):**
 - **Pager bug fix** (Issue #14): Fixed Unicode width mismatch causing garbled output
 - **Pager disabled by default**: User protection from rendering issues (opt-in with `/pager on`)
@@ -263,14 +271,35 @@ All core features are complete and tested.
 
 ---
 
+## Schema Inspection
+
+| Feature | Status | Spec Reference | Since |
+|---------|--------|----------------|-------|
+| `/describe <table>` | ✅ | [REPL Mode](../specifications/repl.md#schema-inspection) | v1.3.0 |
+| `/list databases` | ✅ | [REPL Mode](../specifications/repl.md#schema-inspection) | v1.9.0 (Sprint 22) |
+| `/list tables [pattern]` | ✅ | [REPL Mode](../specifications/repl.md#schema-inspection) | v1.9.0 (Sprint 22) |
+| `/list views` | ✅ | [REPL Mode](../specifications/repl.md#schema-inspection) | v1.9.0 (Sprint 22) |
+| `/show indexes <table>` | ✅ | [REPL Mode](../specifications/repl.md#schema-inspection) | v1.17.0 (Sprint 36) |
+
+---
+
+## Query Editing
+
+| Feature | Status | Spec Reference | Since |
+|---------|--------|----------------|-------|
+| `/repeat` command | ✅ | [REPL Mode](../specifications/repl.md#query-editing) | v1.17.0 (Sprint 36) |
+| `/edit` command | 📋 | [REPL Mode](../specifications/repl.md#query-editing) | Future |
+
+---
+
 ## Summary Statistics
 
-- **Total Features**: 71
-- **Implemented**: 67 (94%)
-- **Planned**: 4 (6%)
-- **Test Pass Rate**: 100% (634/634 executed, 56 ignored database-dependent)
+- **Total Features**: 75
+- **Implemented**: 70 (93%)
+- **Planned**: 5 (7%)
+- **Test Pass Rate**: 100% (674/674 executed, 57 ignored database-dependent)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 35 - Project Configuration + Quick Wins
+- **Latest Sprint**: Sprint 36 - Help Text Update + REPL Enhancements
 
 ---
 
