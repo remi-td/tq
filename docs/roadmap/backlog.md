@@ -1,7 +1,7 @@
 # Feature Backlog
 
-**Last Updated:** 2026-02-03
-**Next Sprint:** Sprint 34
+**Last Updated:** 2026-02-13
+**Next Sprint:** Sprint 36
 
 ---
 
@@ -20,12 +20,6 @@ No P0 features currently in backlog. All critical features have been implemented
 ## P1 - High Priority (Should Have)
 
 ### Configuration Management
-
-**Project Config File**
-- `.tq.toml` in project directory
-- Project-specific connection profiles
-- Team-shared configuration
-- Spec: [Configuration - Project Config](../specifications/configuration.md#project-config)
 
 **Profile Editing Commands**
 - `tq profile add <name>` - Add new profile interactively

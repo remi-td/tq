@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
-**Last Updated:** 2026-02-03
-**Current Version:** 1.15.0
-**Latest Sprint:** Sprint 34 Complete (Technical Debt Cleanup - Code Quality + Security + Documentation)
+**Last Updated:** 2026-02-13
+**Current Version:** 1.16.0
+**Latest Sprint:** Sprint 35 Complete (Project Configuration + Quick Wins)
 
 ---
 
@@ -219,7 +219,7 @@ All core features are complete and tested.
 | `tq profiles` command | ✅ | [CLI Interface](../specifications/cli-interface.md#profiles-command) | v1.7.0 |
 | Password file permission enforcement | ✅ | [Security](../specifications/security.md#file-permissions) | v1.7.0 |
 | Security check ordering fix | ✅ | [Security](../specifications/security.md) | v1.7.0 |
-| Project config file (`.tq.toml`) | 📋 | [Configuration](../specifications/configuration.md#project-config) | Future |
+| Project config file (`.tq.toml`) | ✅ | [Configuration](../specifications/configuration.md#project-config) | v1.16.0 (Sprint 35) |
 | Profile editing commands | 📋 | [Configuration](../specifications/configuration.md#profile-management) | Future |
 | Keyring integration | 📋 | [Security](../specifications/security.md#keyring) | Future |
 | Config validation command | 📋 | [Configuration](../specifications/configuration.md#validation) | Future |
@@ -266,11 +266,11 @@ All core features are complete and tested.
 ## Summary Statistics
 
 - **Total Features**: 71
-- **Implemented**: 66 (93%)
-- **Planned**: 5 (7%)
-- **Test Pass Rate**: 100% (649/649 tests: 443 unit, 206 integration)
+- **Implemented**: 67 (94%)
+- **Planned**: 4 (6%)
+- **Test Pass Rate**: 100% (634/634 executed, 56 ignored database-dependent)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 34 - Technical Debt Cleanup (Code Quality + Security + Documentation)
+- **Latest Sprint**: Sprint 35 - Project Configuration + Quick Wins
 
 ---
 
