@@ -168,19 +168,37 @@ EOF
 
 ### Using Configuration
 
-Create `~/.config/tq/config.toml`:
+tq supports multiple configuration methods:
+
+**User configuration** (`~/.tq/config.toml`):
 
 ```toml
-[connection]
+[defaults]
+format = "table"
+timing = true
+
+[profiles.prod]
 host = "prod-td.company.com"
 port = 1025
 database = "sales_db"
 user = "analyst"
-
-[output]
-format = "table"
-color = "auto"
+password_file = "~/.tq/passwords/prod"
 ```
+
+**Project configuration** (`.tq.toml` in project root):
+
+```toml
+# Team-shared connection profiles (safe to commit to git)
+[profiles.dev]
+host = "dev-td.company.com"
+database = "dev_db"
+
+[profiles.prod]
+host = "prod-td.company.com"
+database = "prod_db"
+```
+
+See the [Configuration Guide](docs/user/configuration-guide.md) for complete documentation.
 
 Or use environment variables:
 
@@ -231,6 +249,7 @@ Or use environment variables:
 
 ## Documentation
 
+- **[Configuration Guide](docs/user/configuration-guide.md)** - Configuration files and profiles
 - **[REPL User Guide](docs/user/repl-guide.md)** - Interactive mode documentation
 - **[Feature Specifications](docs/specifications/)** - Detailed feature specs
 - **[Roadmap](docs/roadmap/status.md)** - Current implementation status

@@ -700,8 +700,8 @@ fn test_list_databases_query() {
         let result = client.execute(sql).unwrap();
 
         // Verify that we got database results
-        assert!(result.columns.len() > 0, "Should have at least one column");
-        assert!(result.rows.len() > 0, "Should have at least one database");
+        assert!(!result.columns.is_empty(), "Should have at least one column");
+        assert!(!result.rows.is_empty(), "Should have at least one database");
 
         // DBC database should always be present
         let dbc_found = result.rows.iter().any(|row| {
@@ -755,7 +755,7 @@ fn test_list_tables_query() {
             2,
             "Should have 2 columns (name and kind)"
         );
-        assert!(result.rows.len() > 0, "DBC should have tables");
+        assert!(!result.rows.is_empty(), "DBC should have tables");
 
         // Verify columns are properly named
         assert_eq!(result.columns[0].name.to_lowercase(), "table_name");
@@ -861,7 +861,7 @@ fn test_list_views_query() {
 
         // Verify that we got view results
         assert_eq!(result.columns.len(), 1, "Should have 1 column (view_name)");
-        assert!(result.rows.len() > 0, "DBC should have views");
+        assert!(!result.rows.is_empty(), "DBC should have views");
 
         // Verify column is properly named
         assert_eq!(result.columns[0].name.to_lowercase(), "view_name");
@@ -911,7 +911,7 @@ fn test_glob_matching_integration() {
         "#;
 
         let result = client.execute(sql).unwrap();
-        assert!(result.rows.len() > 0, "Should get some tables/views from DBC");
+        assert!(!result.rows.is_empty(), "Should get some tables/views from DBC");
 
         // Test various glob patterns
         let test_cases = vec![

@@ -913,7 +913,7 @@ Notice the column range (4-7) stays the same while the row range changed. You ca
 
 ### About the Interactive Pager
 
-**Status: Experimental (Disabled by Default)**
+**Status: 🧪 Experimental (Disabled by Default)**
 
 The interactive pager is currently experimental and disabled by default. When query results are too wide for your terminal, they will be displayed with truncated columns rather than entering pager mode.
 

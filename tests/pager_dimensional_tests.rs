@@ -452,7 +452,7 @@ fn test_fixtures_have_data() {
 
     for (name, result) in fixtures {
         assert!(
-            result.columns.len() > 0,
+            !result.columns.is_empty(),
             "Fixture '{}' should have columns",
             name
         );

@@ -154,8 +154,28 @@ fn handle_help(args: &tq::HelpArgs) -> Result<()> {
 }
 
 /// Handle the profiles command
+///
+/// Displays profiles from both user config and project config, with source indicators.
+/// Shows profiles grouped by source (user-only, project-only, or merged from both).
 fn handle_profiles(config: &Config) -> Result<()> {
-    if config.profiles.is_empty() {
+    // Load configs separately to track profile sources
+    let user_config = Config::load_user_only();
+    let project_config = Config::load_project_only();
+
+    let user_profile_names: std::collections::HashSet<_> =
+        user_config.profiles.keys().cloned().collect();
+    let project_profile_names: std::collections::HashSet<_> = project_config
+        .as_ref()
+        .map(|c| c.profiles.keys().cloned().collect())
+        .unwrap_or_default();
+
+    // Collect all profile names
+    let all_profile_names: std::collections::HashSet<_> = user_profile_names
+        .union(&project_profile_names)
+        .cloned()
+        .collect();
+
+    if all_profile_names.is_empty() {
         println!("No profiles defined.\n");
         println!(
             "To create a profile, add to {}:\n",
@@ -172,32 +192,145 @@ fn handle_profiles(config: &Config) -> Result<()> {
 
     println!("Available profiles:\n");
 
-    // Sort profiles alphabetically for consistent output
-    let mut profile_names: Vec<_> = config.profiles.keys().collect();
-    profile_names.sort();
+    // Categorize profiles by source
+    let mut user_only: Vec<_> = user_profile_names
+        .difference(&project_profile_names)
+        .cloned()
+        .collect();
+    let mut project_only: Vec<_> = project_profile_names
+        .difference(&user_profile_names)
+        .cloned()
+        .collect();
+    let mut merged: Vec<_> = user_profile_names
+        .intersection(&project_profile_names)
+        .cloned()
+        .collect();
 
-    for name in profile_names {
-        let profile = config.profiles.get(name).unwrap();
-        let host = profile.host.as_deref().unwrap_or("<not set>");
-        let database = profile.database.as_deref().unwrap_or("<not set>");
-        let user = profile.user.as_deref().unwrap_or("<not set>");
+    user_only.sort();
+    project_only.sort();
+    merged.sort();
 
-        println!("  {}", name);
-        println!("    Host:     {}", host);
-        println!("    Database: {}", database);
-        println!("    User:     {}", user);
-
-        // Show logmech if not default
-        if let Some(ref logmech) = profile.logmech {
-            if logmech.to_uppercase() != "TD2" {
-                println!("    Logmech:  {}", logmech);
+    // Show user-only profiles
+    if !user_only.is_empty() {
+        println!(
+            "From user config ({}):",
+            Config::user_config_path().display()
+        );
+        for name in &user_only {
+            if let Some(profile) = config.profiles.get(name) {
+                print_profile(name, profile, None);
             }
         }
-        println!();
+    }
+
+    // Show project-only profiles
+    if !project_only.is_empty() {
+        if let Some(path) = Config::project_config_path() {
+            println!("From project config ({}):", path.display());
+            for name in &project_only {
+                if let Some(profile) = config.profiles.get(name) {
+                    print_profile(name, profile, None);
+                }
+            }
+        }
+    }
+
+    // Show merged profiles (exist in both)
+    if !merged.is_empty() {
+        println!("From both (merged - project overrides user):");
+        for name in &merged {
+            if let Some(profile) = config.profiles.get(name) {
+                // Get user and project profiles for field-level source indication
+                let user_profile = user_config.profiles.get(name);
+                let project_profile = project_config.as_ref().and_then(|c| c.profiles.get(name));
+                print_merged_profile(name, profile, user_profile, project_profile);
+            }
+        }
     }
 
     println!("Use: tq --profile <name> <command>");
     Ok(())
+}
+
+/// Print a single profile (not merged)
+fn print_profile(
+    name: &str,
+    profile: &tq::config::ConnectionSettings,
+    source_tag: Option<&str>,
+) {
+    let host = profile.host.as_deref().unwrap_or("<not set>");
+    let database = profile.database.as_deref().unwrap_or("<not set>");
+    let user = profile.user.as_deref().unwrap_or("<not set>");
+
+    let tag = source_tag.map(|t| format!(" {}", t)).unwrap_or_default();
+
+    println!("  {}", name);
+    println!("    Host:     {}{}", host, tag);
+    println!("    Database: {}{}", database, tag);
+    println!("    User:     {}{}", user, tag);
+
+    // Show logmech if not default
+    if let Some(ref logmech) = profile.logmech {
+        if logmech.to_uppercase() != "TD2" {
+            println!("    Logmech:  {}{}", logmech, tag);
+        }
+    }
+    println!();
+}
+
+/// Print a merged profile with source indicators for each field
+fn print_merged_profile(
+    name: &str,
+    merged: &tq::config::ConnectionSettings,
+    user_profile: Option<&tq::config::ConnectionSettings>,
+    project_profile: Option<&tq::config::ConnectionSettings>,
+) {
+    println!("  {}", name);
+
+    // Host
+    let host = merged.host.as_deref().unwrap_or("<not set>");
+    let host_source = field_source(
+        project_profile.and_then(|p| p.host.as_ref()),
+        user_profile.and_then(|p| p.host.as_ref()),
+    );
+    println!("    Host:     {}  {}", host, host_source);
+
+    // Database
+    let database = merged.database.as_deref().unwrap_or("<not set>");
+    let db_source = field_source(
+        project_profile.and_then(|p| p.database.as_ref()),
+        user_profile.and_then(|p| p.database.as_ref()),
+    );
+    println!("    Database: {}  {}", database, db_source);
+
+    // User
+    let user = merged.user.as_deref().unwrap_or("<not set>");
+    let user_source = field_source(
+        project_profile.and_then(|p| p.user.as_ref()),
+        user_profile.and_then(|p| p.user.as_ref()),
+    );
+    println!("    User:     {}  {}", user, user_source);
+
+    // Show logmech if not default
+    if let Some(ref logmech) = merged.logmech {
+        if logmech.to_uppercase() != "TD2" {
+            let logmech_source = field_source(
+                project_profile.and_then(|p| p.logmech.as_ref()),
+                user_profile.and_then(|p| p.logmech.as_ref()),
+            );
+            println!("    Logmech:  {}  {}", logmech, logmech_source);
+        }
+    }
+    println!();
+}
+
+/// Determine source indicator for a merged field
+fn field_source<T>(project_value: Option<T>, user_value: Option<T>) -> &'static str {
+    match (project_value.is_some(), user_value.is_some()) {
+        (true, _) => "[project]",
+        (false, true) => "[user]",
+        (false, false) => "[default]",
+    }
 }
 
 /// Read password from file if --password-file is specified

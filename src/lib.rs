@@ -78,7 +78,7 @@ pub use cli::{
     Cli, Command, GlobalOpts, HelpArgs, HelpTopic, LogonMechanism, OutputFormat, PeekArgs,
     PingArgs, QueryArgs, ReplArgs, SampleArgs,
 };
-pub use config::Config;
+pub use config::{Config, ConnectionSettings};
 pub use db::{
     Alignment, ColumnMetadata, ConnectionConfig, DatabaseClient, QueryResult, Row, TeradataType,
     Value,

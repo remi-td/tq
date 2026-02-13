@@ -1016,7 +1016,7 @@ active | false
 
 ### Large Result Handling & Result Paging
 
-**Status:** EXPERIMENTAL - Interactive pager is disabled by default. Enable with `/pager on`.
+🧪 **EXPERIMENTAL** - Interactive pager is disabled by default. Enable with `/pager on`.
 
 Result paging uses a three-layer strategy:
 1. **Column Windowing** - Limit visible columns to maintain readability

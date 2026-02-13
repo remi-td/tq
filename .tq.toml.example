@@ -1,0 +1,105 @@
+# .tq.toml - Project Configuration Example
+#
+# This file provides team-shared configuration for tq.
+# Place it in your project root (or any parent directory).
+# tq will find it by walking up the directory tree from the current directory.
+#
+# IMPORTANT: This file is intended to be committed to version control.
+# DO NOT include passwords or password_file paths in this file.
+# Individual credentials belong in user config (~/.tq/config.toml).
+#
+# Configuration Precedence (later overrides earlier):
+#   1. Built-in defaults
+#   2. User config (~/.tq/config.toml)
+#   3. Project config (.tq.toml) <- This file
+#   4. Environment variables (TQ_*)
+#   5. Command-line arguments
+
+# =============================================================================
+# Default Preferences
+# =============================================================================
+# These settings apply to all team members using this project.
+# Individual users can override via CLI flags.
+
+[defaults]
+format = "table"              # Default output format: table, json, csv
+timing = true                 # Show query execution time by default
+
+# =============================================================================
+# Shared Connection Profiles
+# =============================================================================
+# Define team-shared connection profiles for different environments.
+# These profiles specify WHERE to connect (host, database).
+# Individual users provide WHO they are (user, password) in their personal config.
+#
+# Usage:
+#   tq --profile dev query "SELECT 1"
+#   tq --profile staging query "SELECT COUNT(*) FROM users"
+
+[profiles.dev]
+# Development environment - for daily development work
+host = "dev-teradata.company.com"
+port = 1025
+database = "development"
+logmech = "LDAP"
+# Note: Do NOT include user or password_file here
+# Each team member adds their credentials in ~/.tq/config.toml:
+#
+#   [profiles.dev]
+#   user = "alice"
+#   password_file = "~/.tq/passwords/dev"
+
+[profiles.staging]
+# Staging environment - for pre-production testing
+host = "staging-teradata.company.com"
+port = 1025
+database = "staging"
+logmech = "LDAP"
+
+[profiles.prod]
+# Production environment - read-only access for analysis
+host = "prod-teradata.company.com"
+port = 1025
+database = "production"
+logmech = "LDAP"
+timeout = "60s"               # Longer timeout for production queries
+
+# =============================================================================
+# Example: User Config (~/.tq/config.toml) to Complement This File
+# =============================================================================
+# Each team member creates their own ~/.tq/config.toml with credentials:
+#
+#   # ~/.tq/config.toml - Personal config (NOT committed to git)
+#
+#   [profiles.dev]
+#   user = "alice"
+#   password_file = "~/.tq/passwords/dev"
+#
+#   [profiles.staging]
+#   user = "alice"
+#   password_file = "~/.tq/passwords/staging"
+#
+#   [profiles.prod]
+#   user = "alice_readonly"
+#   password_file = "~/.tq/passwords/prod"
+#
+#   # Personal profile (not in project config)
+#   [profiles.local]
+#   host = "localhost"
+#   database = "sandbox"
+#   user = "dbc"
+#   password_file = "~/.tq/passwords/local"
+
+# =============================================================================
+# How Profile Merging Works
+# =============================================================================
+# When using --profile dev:
+#
+# 1. Project config provides: host, port, database, logmech
+# 2. User config provides: user, password_file
+# 3. Result: Complete connection with team settings + personal credentials
+#
+# To see merged profiles:
+#   tq profiles
+#
+# This command shows all profiles with source indicators ([user] or [project]).

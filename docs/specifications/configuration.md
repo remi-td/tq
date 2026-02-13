@@ -18,29 +18,32 @@ Configuration values are loaded in this order (later overrides earlier):
 
 1. **Built-in defaults** - Hardcoded sensible defaults
 2. **User config file** - `~/.tq/config.toml` (if exists)
-3. **Environment variables** - `TQ_*` variables
-4. **Command-line arguments** - Flags and options
+3. **Project config file** - `.tq.toml` (if exists in current directory or parent directories)
+4. **Environment variables** - `TQ_*` variables
+5. **Command-line arguments** - Flags and options
 
 ### Precedence Examples
 
 **Example: Format preference**
 ```bash
 # Built-in default: table
-# Config file: format = "json"
-# Environment: TQ_FORMAT=csv
+# User config: format = "json"
+# Project config: format = "csv"
+# Environment: TQ_FORMAT=yaml
 # CLI flag: --format json
 
 # Result: json (CLI flag wins)
 ```
 
-**Example: Connection details**
+**Example: Connection details with project config**
 ```bash
-# Config file profile 'dev': host = "dev.company.com", database = "devdb"
+# User config profile 'dev': host = "dev.company.com", database = "devdb"
+# Project config profile 'dev': database = "project_db"
 # Environment: TQ_DATABASE=testdb
 # CLI flag: --profile dev
 
 # Result: host = "dev.company.com", database = "testdb"
-# (Profile provides host, env var overrides database)
+# (User profile provides host, project config overrides database, env var overrides both)
 ```
 
 ### Profile Selection Precedence
@@ -148,6 +151,440 @@ Recommendation: chmod 0600 ~/.tq/config.toml
 Config file permissions issue a **warning** (not an error) because config files should not contain passwords (use `password_file` instead).
 
 For password files, permissions are **strictly enforced**.
+
+## Project Configuration File
+
+### Overview
+
+The project configuration file (`.tq.toml`) enables **team-shared configuration** and project-specific settings. It complements the user configuration file (`~/.tq/config.toml`) by providing configuration that applies to all team members working on a project.
+
+**Key Use Cases:**
+- Team-shared connection profiles (dev, staging, prod environments)
+- Project-specific default settings (format preferences, database defaults)
+- Standardized configurations across the team
+- Version-controlled connection metadata (without credentials)
+
+**Design Principles:**
+- **Project config overrides user config** - Team settings take precedence over personal settings
+- **User config provides credentials** - Individual users store passwords in their personal config
+- **Project config is version-controlled** - `.tq.toml` can be safely committed to git (never contains passwords)
+
+### File Location and Discovery
+
+**REQ-PROJ-001: File Location**
+
+The project configuration file SHALL be named `.tq.toml` and located in the project directory.
+
+**REQ-PROJ-002: Directory Walking**
+
+When `tq` starts, it SHALL search for `.tq.toml` using directory walking:
+
+1. **REQ-PROJ-002.1** - Start in current working directory
+2. **REQ-PROJ-002.2** - Check if `.tq.toml` exists in current directory
+3. **REQ-PROJ-002.3** - If not found, move up one directory level (parent directory)
+4. **REQ-PROJ-002.4** - Repeat until `.tq.toml` is found OR filesystem root is reached
+5. **REQ-PROJ-002.5** - If filesystem root is reached without finding `.tq.toml`, no project config is loaded
+6. **REQ-PROJ-002.6** - The first `.tq.toml` found stops the search (do not continue to parent directories)
+
+**Rationale:** Directory walking enables project config to be placed at repository root while allowing `tq` to be invoked from any subdirectory within the project.
+
+**Example Directory Structure:**
+```
+/home/alice/projects/analytics/          <- .tq.toml located here
+├── .tq.toml
+├── scripts/
+│   └── queries/
+│       └── daily_report.sql         <- tq invoked from here
+└── data/
+```
+
+When invoking `tq` from `/home/alice/projects/analytics/scripts/queries/`, the tool will walk up and find `.tq.toml` in `/home/alice/projects/analytics/`.
+
+**REQ-PROJ-003: Search Path Caching**
+
+Once `.tq.toml` is found, the resolved path SHALL be cached for the duration of the tool's execution.
+
+**REQ-PROJ-004: Symlink Handling**
+
+When walking directories, `tq` SHALL resolve symlinks to their real paths to prevent infinite loops.
+
+### File Format
+
+**REQ-PROJ-005: TOML Structure**
+
+The `.tq.toml` file SHALL use the same TOML structure as `~/.tq/config.toml`:
+
+```toml
+# .tq.toml - Project configuration
+
+# Project defaults (apply to all team members)
+[defaults]
+format = "table"
+timing = true
+
+# Shared connection profiles
+[profiles.dev]
+host = "dev.company.com"
+port = 1025
+database = "development"
+# Note: No password_file here - users provide their own credentials
+
+[profiles.staging]
+host = "staging.company.com"
+database = "staging"
+
+[profiles.prod]
+host = "prod.company.com"
+database = "production"
+logmech = "LDAP"
+```
+
+**REQ-PROJ-006: Supported Sections**
+
+The `.tq.toml` file SHALL support the same sections as user config:
+- `[defaults]` - Project-wide preference defaults
+- `[profiles.<name>]` - Team-shared connection profiles
+
+### Configuration Merging
+
+**REQ-PROJ-007: Precedence Rules**
+
+When both user config and project config are present, values are merged with project config taking precedence:
+
+1. **REQ-PROJ-007.1** - Load user config (`~/.tq/config.toml`) first
+2. **REQ-PROJ-007.2** - Load project config (`.tq.toml`) second
+3. **REQ-PROJ-007.3** - For `[defaults]` section: Project values override user values
+4. **REQ-PROJ-007.4** - For `[profiles]` section: Project profiles override user profiles with same name
+5. **REQ-PROJ-007.5** - User-only profiles remain available (not removed by project config)
+
+**Example Merging Behavior:**
+
+**User config (`~/.tq/config.toml`):**
+```toml
+[defaults]
+format = "json"
+timing = false
+
+[profiles.dev]
+host = "localhost"
+database = "my_local_dev"
+user = "alice"
+password_file = "~/.tq/passwords/local"
+
+[profiles.personal]
+host = "my-home-server.local"
+database = "sandbox"
+user = "alice"
+```
+
+**Project config (`.tq.toml`):**
+```toml
+[defaults]
+format = "table"
+timing = true
+
+[profiles.dev]
+host = "dev.company.com"
+database = "shared_dev"
+```
+
+**Resulting merged configuration:**
+```toml
+[defaults]
+format = "table"        # Project config wins
+timing = true           # Project config wins
+
+[profiles.dev]
+host = "dev.company.com"    # Project config overrides user config
+database = "shared_dev"     # Project config overrides user config
+user = "alice"              # From user config (not specified in project config)
+password_file = "~/.tq/passwords/local"  # From user config
+
+[profiles.personal]
+# Remains available (user-only profile)
+host = "my-home-server.local"
+database = "sandbox"
+user = "alice"
+```
+
+**REQ-PROJ-008: Profile Field Merging**
+
+When a profile exists in both user and project config with the same name, fields are merged at the field level:
+
+1. **REQ-PROJ-008.1** - Fields specified in project config override user config fields
+2. **REQ-PROJ-008.2** - Fields NOT specified in project config are inherited from user config
+3. **REQ-PROJ-008.3** - This enables project config to specify connection metadata (host, database) while user config provides credentials (user, password_file)
+
+**Rationale:** Field-level merging enables separation of concerns: project config defines "where to connect", user config defines "who I am and my credentials".
+
+### Profile Resolution
+
+**REQ-PROJ-009: Combined Profile Listing**
+
+The `tq profiles` command SHALL display both user and project profiles:
+
+```bash
+$ tq profiles
+
+Available profiles:
+
+From user config (~/.tq/config.toml):
+  personal
+    Host:     my-home-server.local
+    Database: sandbox
+    User:     alice
+
+From project config (.tq.toml):
+  dev
+    Host:     dev.company.com:1025
+    Database: shared_dev
+
+  staging
+    Host:     staging.company.com:1025
+    Database: staging
+
+From both (merged):
+  dev
+    Host:     dev.company.com:1025      [project]
+    Database: shared_dev                [project]
+    User:     alice                     [user]
+```
+
+**REQ-PROJ-009.1** - User-only profiles shall be listed under "From user config"
+**REQ-PROJ-009.2** - Project-only profiles shall be listed under "From project config"
+**REQ-PROJ-009.3** - Profiles present in both shall be listed under "From both (merged)" with source indicators
+**REQ-PROJ-009.4** - Source indicators `[user]` and `[project]` shall show which config provided each field
+
+**REQ-PROJ-010: Profile Selection**
+
+When using `--profile <name>`, the tool SHALL:
+
+1. **REQ-PROJ-010.1** - Check project config for profile named `<name>`
+2. **REQ-PROJ-010.2** - Check user config for profile named `<name>`
+3. **REQ-PROJ-010.3** - If found in both, merge fields (project overrides user)
+4. **REQ-PROJ-010.4** - If found in only one, use that profile
+5. **REQ-PROJ-010.5** - If not found in either, produce error message listing available profiles
+
+### Error Handling
+
+**REQ-PROJ-011: Invalid TOML**
+
+If `.tq.toml` contains invalid TOML syntax, the tool SHALL:
+
+1. **REQ-PROJ-011.1** - Display clear error message with file path and line number
+2. **REQ-PROJ-011.2** - Show the TOML parse error details
+3. **REQ-PROJ-011.3** - Exit with non-zero status code
+4. **REQ-PROJ-011.4** - Do NOT fall back to user config only (invalid project config is an error condition)
+
+**Example Error:**
+```
+Error: Failed to parse project configuration file
+File: /home/alice/projects/analytics/.tq.toml
+Line: 8, Column: 15
+
+TOML parse error: expected '=', found ':'
+
+[profiles.dev]
+host: "dev.company.com"
+     ^
+
+Fix: Use '=' instead of ':' in TOML files
+```
+
+**REQ-PROJ-012: File Permission Errors**
+
+If `.tq.toml` exists but cannot be read due to permissions, the tool SHALL:
+
+1. **REQ-PROJ-012.1** - Display clear error message indicating permission denied
+2. **REQ-PROJ-012.2** - Show the file path and current permissions
+3. **REQ-PROJ-012.3** - Suggest fix (chmod command)
+4. **REQ-PROJ-012.4** - Exit with non-zero status code
+
+**Example Error:**
+```
+Error: Cannot read project configuration file
+File: /home/alice/projects/analytics/.tq.toml
+Permission denied
+
+Current permissions: 0000 (no access)
+Required: File must be readable
+
+Fix: chmod 0644 /home/alice/projects/analytics/.tq.toml
+```
+
+**REQ-PROJ-013: Conflicting Configuration Values**
+
+When project config and user config provide conflicting values, the tool SHALL:
+
+1. **REQ-PROJ-013.1** - Use project config value (no error, no warning)
+2. **REQ-PROJ-013.2** - If `--verbose` flag is present, log which config source won for each setting
+
+**Rationale:** Project config intentionally overrides user config - this is not an error condition. Verbose logging helps users understand config resolution.
+
+### Security Considerations
+
+**REQ-PROJ-014: Password Prohibition**
+
+Project configuration files SHOULD NOT contain passwords or password files:
+
+**Rationale:** Project config is intended to be version-controlled and shared among team members. Passwords are individual credentials.
+
+**Best Practice:**
+- **Project config (`.tq.toml`)**: Connection metadata only (host, port, database, logmech)
+- **User config (`~/.tq/config.toml`)**: Individual credentials (user, password_file)
+
+**Example Safe Project Config:**
+```toml
+# .tq.toml - Safe to commit to git
+[profiles.dev]
+host = "dev.company.com"
+database = "development"
+logmech = "LDAP"
+# No user, no password_file - each team member provides their own
+```
+
+**Example User Config:**
+```toml
+# ~/.tq/config.toml - Personal, not committed
+[profiles.dev]
+user = "alice"
+password_file = "~/.tq/passwords/dev"
+```
+
+**REQ-PROJ-015: File Permission Recommendations**
+
+Project config file permissions SHOULD follow these guidelines:
+
+- **Recommended for git-committed files**: `0644` (readable by all)
+- **Accepted**: Any permissions (project config typically doesn't contain secrets)
+- **Warning NOT issued**: Unlike user config, no permission warnings for project config
+
+**Rationale:** Project config is designed to be version-controlled and shared, so restrictive permissions are not required.
+
+### Integration with Existing Commands
+
+**REQ-PROJ-016: `tq profiles` Integration**
+
+The `tq profiles` command SHALL be updated to show profiles from both sources (see REQ-PROJ-009).
+
+**REQ-PROJ-017: `--profile` Flag Behavior**
+
+The `--profile <name>` flag SHALL work transparently with both user and project profiles (see REQ-PROJ-010).
+
+**REQ-PROJ-018: Help Text Updates**
+
+The tool's help text and documentation SHALL be updated to mention project config:
+
+**Example `tq --help` excerpt:**
+```
+CONFIGURATION:
+  Configuration is loaded from multiple sources in this order:
+    1. Built-in defaults
+    2. User config (~/.tq/config.toml)
+    3. Project config (.tq.toml in current directory or parents)
+    4. Environment variables (TQ_*)
+    5. Command-line arguments
+
+  Project config enables team-shared profiles and settings.
+  See 'tq help config' for details.
+```
+
+### Common Use Cases
+
+**Use Case 1: Team-Shared Connection Profiles**
+
+A development team wants all members to use consistent connection settings for dev/staging/prod environments.
+
+**Project config (`.tq.toml` - committed to git):**
+```toml
+[profiles.dev]
+host = "dev-teradata.company.com"
+database = "dev_analytics"
+logmech = "LDAP"
+
+[profiles.staging]
+host = "staging-teradata.company.com"
+database = "staging_analytics"
+logmech = "LDAP"
+
+[profiles.prod]
+host = "prod-teradata.company.com"
+database = "prod_analytics"
+logmech = "LDAP"
+```
+
+**User config (`~/.tq/config.toml` - personal, not committed):**
+```toml
+[profiles.dev]
+user = "alice"
+password_file = "~/.tq/passwords/dev"
+
+[profiles.staging]
+user = "alice"
+password_file = "~/.tq/passwords/staging"
+
+[profiles.prod]
+user = "alice"
+password_file = "~/.tq/passwords/prod"
+```
+
+**Usage:**
+```bash
+# Works for all team members, uses team-shared host + individual credentials
+tq --profile dev query "SELECT COUNT(*) FROM users"
+```
+
+**Use Case 2: Project-Specific Defaults**
+
+A project wants consistent output formatting and timing for all queries.
+
+**Project config (`.tq.toml`):**
+```toml
+[defaults]
+format = "csv"
+timing = true
+```
+
+**Effect:**
+- All team members get CSV output by default
+- Query timing is enabled for performance awareness
+- Individual users can still override with `--format json` flag
+
+**Use Case 3: User Override**
+
+A user wants to use their local development database instead of the team's shared dev environment.
+
+**Project config (`.tq.toml`):**
+```toml
+[profiles.dev]
+host = "dev-teradata.company.com"
+database = "dev_analytics"
+```
+
+**User config (`~/.tq/config.toml`):**
+```toml
+[profiles.dev]
+host = "localhost"
+database = "my_local_dev"
+user = "dbc"
+password_file = "~/.tq/passwords/local"
+```
+
+**Note:** This does NOT work as intended - project config wins!
+
+**Solution:** Create a separate user-only profile:
+```toml
+[profiles.local]
+host = "localhost"
+database = "my_local_dev"
+user = "dbc"
+password_file = "~/.tq/passwords/local"
+```
+
+**Usage:**
+```bash
+tq --profile local query "SELECT 1"  # Uses personal local database
+```
 
 ## Connection Profiles
 

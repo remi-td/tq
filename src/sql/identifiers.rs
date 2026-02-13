@@ -215,6 +215,46 @@ mod tests {
     }
 
     #[test]
+    fn test_quote_identifier_unicode_actual() {
+        // Test Chinese characters
+        assert_eq!(quote_identifier("表名"), "\"表名\"");
+        assert_eq!(quote_identifier("用户数据"), "\"用户数据\"");
+
+        // Test Arabic characters
+        assert_eq!(quote_identifier("جدول"), "\"جدول\"");
+
+        // Test Japanese characters (Hiragana, Katakana, Kanji)
+        assert_eq!(quote_identifier("テーブル"), "\"テーブル\"");
+        assert_eq!(quote_identifier("顧客名簿"), "\"顧客名簿\"");
+
+        // Test Cyrillic characters
+        assert_eq!(quote_identifier("таблица"), "\"таблица\"");
+
+        // Test emoji
+        assert_eq!(quote_identifier("data_📊"), "\"data_📊\"");
+        assert_eq!(quote_identifier("users_👤"), "\"users_👤\"");
+
+        // Test Unicode with embedded double quotes (must be escaped)
+        assert_eq!(quote_identifier("表\"名"), "\"表\"\"名\"");
+        assert_eq!(quote_identifier("данные\"база"), "\"данные\"\"база\"");
+
+        // Test mixed ASCII and Unicode
+        assert_eq!(quote_identifier("user_数据_table"), "\"user_数据_table\"");
+        assert_eq!(quote_identifier("col1_表_col2"), "\"col1_表_col2\"");
+
+        // Test accented Latin characters
+        assert_eq!(quote_identifier("café"), "\"café\"");
+        assert_eq!(quote_identifier("naïve"), "\"naïve\"");
+        assert_eq!(quote_identifier("résumé"), "\"résumé\"");
+
+        // Test Greek characters
+        assert_eq!(quote_identifier("πίνακας"), "\"πίνακας\"");
+
+        // Test Hebrew characters
+        assert_eq!(quote_identifier("טבלה"), "\"טבלה\"");
+    }
+
+    #[test]
     fn test_quote_identifier_tab_and_newline() {
         // These are unusual but should be handled
         assert_eq!(quote_identifier("col\ttab"), "\"col\ttab\"");
