@@ -110,6 +110,7 @@ pub fn execute<W: Write>(
             "No queries found for session {}.",
             args.session_id
         )?;
+        writeln!(writer, "The session may be idle, or DBQL logging may not be enabled.")?;
         return Ok(());
     }
 
@@ -145,6 +146,7 @@ pub fn execute_for_repl<W: Write>(
 
             if queries.is_empty() {
                 writeln!(writer, "No queries found for session {}.", session_id)?;
+                writeln!(writer, "The session may be idle, or DBQL logging may not be enabled.")?;
                 writeln!(writer)?;
                 writeln!(
                     writer,

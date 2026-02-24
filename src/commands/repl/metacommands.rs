@@ -533,6 +533,8 @@ pub fn handle_metacommand_with_state<W: Write>(
                 writeln!(writer, "Examples:")?;
                 writeln!(writer, "  /query 1234")?;
                 writeln!(writer, "  /qi 1234")?;
+                writeln!(writer)?;
+                writeln!(writer, "Use /sessions to list active session IDs.")?;
             } else {
                 match args[0].parse::<i64>() {
                     Ok(session_id) => {
@@ -635,7 +637,7 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     )?;
     writeln!(
         writer,
-        "  /sysconfig, /sc        Display system topology (version, nodes, AMPs, PEs)"
+        "  /sysconfig, /sc        Display system configuration (version and AMP count)"
     )?;
     writeln!(
         writer,

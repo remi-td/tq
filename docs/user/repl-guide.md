@@ -1248,24 +1248,27 @@ GRANT SELECT ON DBC.LockInfoV TO <your_username>;
 
 ### Inspect a Session's Current Query
 
-When you see a session in `/sessions` that is consuming significant resources, use `/query` to see the SQL it is currently running:
+When you see a session in `/sessions` that is consuming significant resources, use `/query` to see the recent SQL queries it has been running:
 
 ```sql
 tq> /query 1023
 
-Query for session 1023:
-┌────────────┬──────────────────────────────────────────────────────────────┐
-│ Property   │ Value                                                        │
-├────────────┼──────────────────────────────────────────────────────────────┤
-│ Session    │ 1023                                                         │
-│ User       │ etl_user                                                     │
-│ Query Text │ UPDATE PRODUCTION.orders SET status = 'shipped' WHERE ...   │
-└────────────┴──────────────────────────────────────────────────────────────┘
+Recent Queries for Session 1023:
 
-(Query time: 0.123s)
+┌──────────────┬─────────────────────────────────────────────────────────────┐
+│ Property     │ Value                                                       │
+├──────────────┼─────────────────────────────────────────────────────────────┤
+│ Query #      │ 1                                                           │
+│ Start Time   │ 2026-02-24 10:30:00                                         │
+│ Elapsed Time │ 00:00:05.123                                                │
+│ Status       │ Complete                                                    │
+│ SQL          │ UPDATE PRODUCTION.orders SET status = 'shipped' WHERE ...  │
+└──────────────┴─────────────────────────────────────────────────────────────┘
+
+1 recent query(ies) for session 1023 (Query time: 0.123s)
 ```
 
-**Short alias:** `/q`
+**Short alias:** `/qi`
 
 ```sql
 tq> /qi 1023
@@ -1273,9 +1276,13 @@ tq> /qi 1023
 
 **What you see:**
 
-- **Session** - The session ID you queried
-- **User** - The user account running that session
-- **Query Text** - The most recent SQL text logged for that session (truncated at 200 characters; see below for full text)
+Up to 5 most recent queries for the session, each showing:
+
+- **Query #** - Sequential number (1 = most recent)
+- **Start Time** - When the query started
+- **Elapsed Time** - How long the query ran
+- **Status** - Query status (Complete, Active, Aborted, Error)
+- **SQL** - The SQL text (truncated at 200 characters in table view)
 
 **Viewing the full SQL text:**
 
@@ -1285,17 +1292,21 @@ Long queries are truncated to 200 characters in the table view. To see the compl
 # JSON output - full untruncated query text
 tq> /set format json
 tq> /query 1023
-{
-  "Session": 1023,
-  "User": "etl_user",
-  "Query Text": "UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_date < '2026-01-01' AND status = 'pending' AND warehouse_id IN (SELECT id FROM warehouses WHERE region = 'WEST')"
-}
+[
+  {
+    "SessionID": 1023,
+    "StartTime": "2026-02-24 10:30:00",
+    "ElapsedTime": "00:00:05.123",
+    "Status": "Complete",
+    "QueryText": "UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_date < '2026-01-01' AND status = 'pending' AND warehouse_id IN (SELECT id FROM warehouses WHERE region = 'WEST')"
+  }
+]
 
 # CSV output - also returns full untruncated query text
 tq> /set format csv
 tq> /query 1023
-Session,User,Query Text
-1023,etl_user,"UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_date < '2026-01-01' AND status = 'pending'"
+SessionID,StartTime,ElapsedTime,Status,QueryText
+1023,2026-02-24 10:30:00,00:00:05.123,Complete,"UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_date < '2026-01-01' AND status = 'pending'"
 ```
 
 **Typical workflow - drill down from sessions:**
@@ -1315,16 +1326,19 @@ Session Information:
 # Step 2: Inspect the SQL for the heavy session
 tq> /query 1023
 
-Query for session 1023:
-┌────────────┬──────────────────────────────────────────────────────────────┐
-│ Property   │ Value                                                        │
-├────────────┼──────────────────────────────────────────────────────────────┤
-│ Session    │ 1023                                                         │
-│ User       │ etl_user                                                     │
-│ Query Text │ UPDATE PRODUCTION.orders SET status = 'shipped' WHERE ...   │
-└────────────┴──────────────────────────────────────────────────────────────┘
+Recent Queries for Session 1023:
 
-(Query time: 0.123s)
+┌──────────────┬─────────────────────────────────────────────────────────────┐
+│ Property     │ Value                                                       │
+├──────────────┼─────────────────────────────────────────────────────────────┤
+│ Query #      │ 1                                                           │
+│ Start Time   │ 2026-02-24 10:30:00                                         │
+│ Elapsed Time │ 00:00:05.123                                                │
+│ Status       │ Active                                                      │
+│ SQL          │ UPDATE PRODUCTION.orders SET status = 'shipped' WHERE ...  │
+└──────────────┴─────────────────────────────────────────────────────────────┘
+
+1 recent query(ies) for session 1023 (Query time: 0.123s)
 
 # Step 3: If blocking is involved, correlate with /locks
 tq> /locks
@@ -1341,9 +1355,13 @@ When no session ID is provided:
 tq> /query
 
 Usage: /query <session_id>
+       /qi <session_id>
 
-Provide the session ID of the session to inspect.
-Example: /query 1023
+Show recent SQL queries for a given session.
+
+Examples:
+  /query 1234
+  /qi 1234
 
 Use /sessions to list active session IDs.
 ```
@@ -1353,9 +1371,7 @@ When a non-integer session ID is given:
 ```sql
 tq> /query abc
 
-Error: Invalid session ID 'abc'
-Session ID must be an integer.
-Example: /query 1023
+Error: 'abc' is not a valid session ID. Expected a number.
 ```
 
 When the session is not found (disconnected or no DBQL record):
@@ -1363,21 +1379,18 @@ When the session is not found (disconnected or no DBQL record):
 ```sql
 tq> /query 9999
 
-No query information found for session 9999.
-
-The session may have already disconnected, or DBQL logging may not be
-enabled for this user. Contact your DBA to enable DBQL logging.
+No queries found for session 9999.
+The session may be idle, or DBQL logging may not be enabled.
 ```
 
-When DBQL logging is not enabled on the system:
+When DBQL logging is not available on the system:
 
 ```sql
 tq> /query 1023
 
-No query information found for session 1023.
+Error: DBQL query log not available.
 
-DBQL (Database Query Log) logging may not be enabled on this system.
-Query text is only available when DBQL logging is active.
+DBC.QryLogV requires DBQL (Database Query Log) to be enabled.
 Contact your DBA to enable DBQL logging.
 ```
 
@@ -1410,7 +1423,7 @@ tq query-inspect 1023
 tq query-inspect 1023 --format json
 
 # Extract query text in a monitoring script
-tq query-inspect 1023 --format json | jq -r '.["Query Text"]'
+tq query-inspect 1023 --format json | jq -r '.[0].QueryText'
 
 # CSV export for reporting
 tq query-inspect 1023 --format csv
