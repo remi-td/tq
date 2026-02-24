@@ -8,6 +8,7 @@
 use crate::cli::{OutputFormat, LocksArgs};
 use crate::db::{DatabaseClient, Value};
 use crate::error::Result;
+use super::monitoring_utils::{escape_csv, extract_integer, extract_trimmed_string};
 use std::collections::HashMap;
 use std::io::Write;
 
@@ -69,9 +70,9 @@ impl LockInfo {
             return None;
         }
 
-        let locked_object = extract_trimmed_string(&row[0]);
-        let lock_type = extract_trimmed_string(&row[1]);
-        let lock_mode = extract_trimmed_string(&row[2]);
+        let locked_object = extract_trimmed_string(&row[0], "[NULL]");
+        let lock_type = extract_trimmed_string(&row[1], "[NULL]");
+        let lock_mode = extract_trimmed_string(&row[2], "[NULL]");
 
         let grantor_session = extract_integer(&row[3])?;
         let locking_session = extract_integer(&row[4])?;
@@ -201,25 +202,6 @@ pub fn identify_blocking_chains(display_rows: &[LockDisplayRow]) -> Vec<Blocking
 
     chains.sort_by_key(|c| c.blocker_session);
     chains
-}
-
-/// Extract a trimmed string from a Value
-fn extract_trimmed_string(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.trim().to_string(),
-        Value::Null => "[NULL]".to_string(),
-        other => other.display().trim().to_string(),
-    }
-}
-
-/// Extract integer value from a Value
-fn extract_integer(value: &Value) -> Option<i64> {
-    match value {
-        Value::Integer(v) => Some(*v),
-        Value::Decimal(v) => Some(*v as i64),
-        Value::Null => None,
-        _ => None,
-    }
 }
 
 /// Format a list of waiting sessions for display
@@ -460,6 +442,21 @@ fn display_table<W: Write>(
     Ok(())
 }
 
+/// Format waiting sessions for CSV output
+///
+/// Returns empty string for no waiters (not "(none)") per CSV conventions.
+fn format_waiting_sessions_csv(sessions: &[i64]) -> String {
+    if sessions.is_empty() {
+        String::new()
+    } else {
+        sessions
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
 /// Display locks in CSV format
 fn display_csv<W: Write>(rows: &[LockDisplayRow], writer: &mut W) -> Result<()> {
     writeln!(
@@ -468,7 +465,7 @@ fn display_csv<W: Write>(rows: &[LockDisplayRow], writer: &mut W) -> Result<()> 
     )?;
 
     for row in rows {
-        let waiting = format_waiting_sessions(&row.waiting_sessions);
+        let waiting = format_waiting_sessions_csv(&row.waiting_sessions);
         writeln!(
             writer,
             "{},{},{},{},{}",
@@ -481,15 +478,6 @@ fn display_csv<W: Write>(rows: &[LockDisplayRow], writer: &mut W) -> Result<()> 
     }
 
     Ok(())
-}
-
-/// Escape a string for CSV output
-fn escape_csv(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
-    }
 }
 
 /// Display locks in JSON format
@@ -855,7 +843,7 @@ mod tests {
 
         assert!(output_str.contains("Locked Object,Lock Type,Lock Mode,Locking Sess,Waiting Sess"));
         assert!(output_str.contains("PROD.orders,Table,WRITE,1023,\"1045, 1067\""));
-        assert!(output_str.contains("PROD.employees,Row Hash,READ,1078,(none)"));
+        assert!(output_str.contains("PROD.employees,Row Hash,READ,1078,"));
     }
 
     #[test]
@@ -917,13 +905,13 @@ mod tests {
     #[test]
     fn test_extract_trimmed_string_from_string() {
         let value = Value::String("  PROD.orders  ".to_string());
-        assert_eq!(extract_trimmed_string(&value), "PROD.orders");
+        assert_eq!(extract_trimmed_string(&value, "[NULL]"), "PROD.orders");
     }
 
     #[test]
     fn test_extract_trimmed_string_from_null() {
         let value = Value::Null;
-        assert_eq!(extract_trimmed_string(&value), "[NULL]");
+        assert_eq!(extract_trimmed_string(&value, "[NULL]"), "[NULL]");
     }
 
     #[test]
@@ -1000,5 +988,173 @@ mod tests {
         let rows = build_display_rows(&locks);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].waiting_sessions, vec![1045]);
+    }
+
+    // =========================================================================
+    // Error handling tests (Sprint 39)
+    // =========================================================================
+
+    /// Helper: simulate the error classification logic from execute_for_repl
+    fn classify_error(error_msg: &str) -> &'static str {
+        let error_str = error_msg.to_lowercase();
+        if error_str.contains("privilege")
+            || error_str.contains("access")
+            || error_str.contains("permission")
+            || error_str.contains("3523")
+        {
+            "permission_denied"
+        } else if error_str.contains("lockinfov")
+            && (error_str.contains("not found") || error_str.contains("does not exist"))
+        {
+            "view_not_available"
+        } else {
+            "generic_error"
+        }
+    }
+
+    #[test]
+    fn test_error_classification_privilege() {
+        assert_eq!(
+            classify_error("[Error 3523] The user does not have SELECT access to DBC.LockInfoV"),
+            "permission_denied"
+        );
+    }
+
+    #[test]
+    fn test_error_classification_access_denied() {
+        assert_eq!(
+            classify_error("Access denied to DBC.LockInfoV"),
+            "permission_denied"
+        );
+    }
+
+    #[test]
+    fn test_error_classification_permission_error() {
+        assert_eq!(
+            classify_error("Permission denied for lock view query"),
+            "permission_denied"
+        );
+    }
+
+    #[test]
+    fn test_error_classification_view_not_found() {
+        assert_eq!(
+            classify_error("Object 'DBC.LockInfoV' not found"),
+            "view_not_available"
+        );
+    }
+
+    #[test]
+    fn test_error_classification_view_does_not_exist() {
+        assert_eq!(
+            classify_error("DBC.LockInfoV does not exist on this system"),
+            "view_not_available"
+        );
+    }
+
+    #[test]
+    fn test_error_classification_generic() {
+        assert_eq!(
+            classify_error("Connection timeout during lock query"),
+            "generic_error"
+        );
+    }
+
+    #[test]
+    fn test_lock_info_from_row_malformed_data_all_nulls() {
+        // Test with all NULL values - should return None since session IDs are required
+        let row = vec![
+            Value::Null,
+            Value::Null,
+            Value::Null,
+            Value::Null,
+            Value::Null,
+            Value::Null,
+        ];
+
+        let lock = LockInfo::from_row(&row);
+        // grantor_session is NULL -> extract_integer returns None -> from_row returns None
+        assert!(lock.is_none());
+    }
+
+    #[test]
+    fn test_lock_info_from_row_malformed_session_types() {
+        // Test with String session IDs (wrong type) - extract_integer returns None for strings
+        let row = vec![
+            Value::String("PROD.orders".to_string()),
+            Value::String("Table".to_string()),
+            Value::String("WRITE".to_string()),
+            Value::String("not_a_number".to_string()),
+            Value::Integer(1023),
+            Value::Null,
+        ];
+
+        let lock = LockInfo::from_row(&row);
+        // String value for grantor_session -> extract_integer returns None -> from_row returns None
+        assert!(lock.is_none());
+    }
+
+    #[test]
+    fn test_build_display_rows_handles_empty_input() {
+        let locks: Vec<LockInfo> = Vec::new();
+        let rows = build_display_rows(&locks);
+        assert!(rows.is_empty());
+
+        let chains = identify_blocking_chains(&rows);
+        assert!(chains.is_empty());
+    }
+
+    #[test]
+    fn test_display_table_empty_locks() {
+        let rows: Vec<LockDisplayRow> = Vec::new();
+        let chains: Vec<BlockingChain> = Vec::new();
+
+        let mut output = Vec::new();
+        display_table(&rows, &chains, &mut output).unwrap();
+        let output_str = String::from_utf8(output).unwrap();
+
+        assert!(output_str.contains("No locks currently held."));
+    }
+
+    #[test]
+    fn test_display_csv_empty_locks() {
+        let rows: Vec<LockDisplayRow> = Vec::new();
+
+        let mut output = Vec::new();
+        display_csv(&rows, &mut output).unwrap();
+        let output_str = String::from_utf8(output).unwrap();
+
+        // CSV output should still have the header even with no data
+        assert!(output_str.contains("Locked Object,Lock Type,Lock Mode,Locking Sess,Waiting Sess"));
+        // But only header line (plus newline)
+        let lines: Vec<&str> = output_str.trim().lines().collect();
+        assert_eq!(lines.len(), 1);
+    }
+
+    #[test]
+    fn test_display_json_empty_locks() {
+        let rows: Vec<LockDisplayRow> = Vec::new();
+
+        let mut output = Vec::new();
+        display_json(&rows, &mut output).unwrap();
+        let output_str = String::from_utf8(output).unwrap();
+
+        let json: Vec<serde_json::Value> = serde_json::from_str(&output_str).unwrap();
+        assert!(json.is_empty());
+    }
+
+    #[test]
+    fn test_format_waiting_sessions_csv_empty() {
+        assert_eq!(format_waiting_sessions_csv(&[]), "");
+    }
+
+    #[test]
+    fn test_format_waiting_sessions_csv_single() {
+        assert_eq!(format_waiting_sessions_csv(&[1045]), "1045");
+    }
+
+    #[test]
+    fn test_format_waiting_sessions_csv_multiple() {
+        assert_eq!(format_waiting_sessions_csv(&[1045, 1067]), "1045, 1067");
     }
 }

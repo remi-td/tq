@@ -5337,13 +5337,13 @@ mod tests {
 
 ---
 
-## Session Blocking and Lock Information Command (/locks)
+## Lock Information Command (/locks)
 
 This section documents the technical design for the `/locks` metacommand, which displays current lock contention and blocking chains to help DBAs diagnose session blocking issues.
 
 ### Overview
 
-The `/locks` command queries the Teradata `MonitorSession` table function to identify sessions that are currently blocked, the sessions that are blocking them, and the lock relationships between them. This provides DBAs with immediate visibility into lock contention without needing to run multiple manual queries or use Teradata Viewpoint.
+The `/locks` command queries the `DBC.LockInfoV` view to display current lock information including locked objects, lock types, lock modes, and waiting sessions. It consolidates raw lock rows into a display-friendly format and identifies blocking chains to help DBAs diagnose contention.
 
 **User Stories:** US-3.2, US-3.3, US-3.5, US-3.6 (Session and Lock Information)
 
@@ -5356,341 +5356,242 @@ Locks Command Flow:
         |
         v
 Execute SQL query:
-  MonitorSession(-1, '*', 0) with blocking columns
+  DBC.LockInfoV with CASE expressions for human-readable names
         |
         v
-Filter for sessions where AMPState='BLOCKED' or PEState='BLOCKED'
+Parse into LockInfo structs (one per raw lock row)
         |
         v
-Parse into LockInfo structs
+Build display rows (aggregate waiters per lock holder)
         |
         v
-Build blocking chains (blocker -> blocked relationships)
+Identify blocking chains (sessions with waiters)
         |
         v
 Format output:
-  REPL: Table with blocking chain annotations
+  REPL: Table + blocking chain annotations + summary footer
   Batch: table/csv/json per --format flag
 ```
 
 ### Module Structure
 
-New file: `src/commands/locks.rs`
+**File**: `src/commands/locks.rs`
 
-Following the established `sessions.rs` pattern:
-- SQL constant for the lock query
-- Parsed data struct (`LockInfo`)
-- Blocking chain builder
+Following the established monitoring command pattern:
+- SQL constant (`LOCKS_SQL`) for the DBC.LockInfoV query
+- `LockInfo` struct for raw parsed rows
+- `LockDisplayRow` struct for consolidated display rows
+- `BlockingChain` struct for blocker-to-blocked relationships
+- `build_display_rows()` aggregation function
+- `identify_blocking_chains()` analysis function
 - `execute()` for batch mode
 - `execute_for_repl()` for REPL mode
 - `display_table()`, `display_csv()`, `display_json()` formatters
 
 ### SQL Query Design
 
-The primary query uses `MonitorSession` to detect blocking relationships:
+The query uses `DBC.LockInfoV` with CASE expressions to translate codes into human-readable names:
 
 ```sql
 SELECT
-    SessionNo,
-    UserName,
-    PEState,
-    AMPState,
-    Blk1SessNo,
-    Blk1UserId
-FROM TABLE (MonitorSession(-1, '*', 0)) AS t1
-ORDER BY SessionNo
+    TRIM(DatabaseName) || '.' || TRIM(TableName) AS LockedObject,
+    CASE LockType
+        WHEN 'T' THEN 'Table'
+        WHEN 'R' THEN 'Row Hash'
+        WHEN 'D' THEN 'Database'
+        WHEN 'V' THEN 'View'
+        ELSE TRIM(LockType)
+    END AS LockTypeName,
+    CASE ModeGranted
+        WHEN 'A' THEN 'ACCESS'
+        WHEN 'R' THEN 'READ'
+        WHEN 'W' THEN 'WRITE'
+        WHEN 'E' THEN 'EXCLUSIVE'
+        ELSE TRIM(ModeGranted)
+    END AS LockModeName,
+    GrantorSessionId,
+    LockerSessionId,
+    CASE ModeWanting
+        WHEN ' ' THEN NULL
+        WHEN '' THEN NULL
+        ELSE ModeWanting
+    END AS ModeWanting
+FROM DBC.LockInfoV
+ORDER BY LockerSessionId, LockedObject
 ```
 
-**Key columns for lock detection:**
-- `PEState` / `AMPState` - When either is `'BLOCKED'`, the session is waiting for a lock
-- `Blk1SessNo` - Session number of the session holding the blocking lock
-- `Blk1UserId` - User ID of the blocking user (numeric; requires `IDENTIFYUSER()` for name resolution)
+**Key columns:**
+- `LockedObject` - The database.table name that is locked
+- `LockTypeName` - Lock granularity (Table, Row Hash, Database, View)
+- `LockModeName` - Lock mode (ACCESS, READ, WRITE, EXCLUSIVE)
+- `GrantorSessionId` - Session that holds/granted the lock
+- `LockerSessionId` - Session that holds or is requesting the lock
+- `ModeWanting` - Non-NULL when the session is waiting for a lock (distinguishes holders from waiters)
 
-**User name resolution for blockers:**
+**Design Decision: DBC.LockInfoV over MonitorSession**
 
-The blocking user ID (`Blk1UserId`) is a numeric value. To resolve it to a user name, we use the `IDENTIFYUSER()` function:
-
-```sql
-SELECT
-    t1.SessionNo,
-    t1.UserName,
-    t1.PEState,
-    t1.AMPState,
-    t1.Blk1SessNo,
-    CASE WHEN t1.Blk1SessNo > 0
-         THEN IDENTIFYUSER(t1.Blk1UserId)
-         ELSE ''
-    END AS Blk1UserName
-FROM TABLE (MonitorSession(-1, '*', 0)) AS t1
-ORDER BY SessionNo
-```
-
-The `CASE` prevents calling `IDENTIFYUSER()` on zero values (which indicates no blocking).
-
-**Design Note on DBC.LockInfoV:**
-
-The `DBC.LockInfoV` view would provide more detailed lock information (lock type, lock level, locked object name) but is not available on all Teradata systems and requires additional privileges. The `MonitorSession`-based approach is preferred because:
-1. It uses the same function already proven by the `/sessions` command
-2. It is available on Teradata 14.10+ (same requirement as `/sessions`)
-3. It identifies blocking relationships directly
-4. It requires the same EXECUTE FUNCTION privilege already needed for `/sessions`
-
-If future needs require detailed lock type information, a secondary query to `DBC.LockInfoV` can be added as an enhancement.
+The implementation uses `DBC.LockInfoV` rather than `MonitorSession` because:
+1. It provides detailed lock information (object name, lock type, lock level) that MonitorSession does not
+2. It directly shows which object is locked and at what level
+3. It distinguishes lock holders from waiters via the `ModeWanting` column
+4. It requires only SELECT privilege on DBC.LockInfoV (standard DBC view access)
 
 ### Data Model
 
 ```rust
-/// Lock/blocking information for a session
+// src/commands/locks.rs
+
+/// Lock information extracted from DBC.LockInfoV
 #[derive(Debug, Clone)]
 pub struct LockInfo {
-    /// Session number of the blocked session
-    pub session_no: i64,
-    /// User name of the blocked session
-    pub user_name: String,
-    /// Parsing Engine state (BLOCKED, IDLE, etc.)
-    pub pe_state: String,
-    /// AMP state (BLOCKED, ACTIVE, IDLE, etc.)
-    pub amp_state: String,
-    /// Session number of the blocking session (0 if not blocked)
-    pub blocking_session: i64,
-    /// User name of the blocking session (empty if not blocked)
-    pub blocking_user: String,
+    /// Locked object name (database.table)
+    pub locked_object: String,
+    /// Lock type (Table, Row Hash, Database, View)
+    pub lock_type: String,
+    /// Lock mode (ACCESS, READ, WRITE, EXCLUSIVE)
+    pub lock_mode: String,
+    /// Session ID that holds the lock
+    pub locking_session: i64,
+    /// Session ID of the grantor
+    pub grantor_session: i64,
+    /// Whether this row represents a waiting session
+    pub is_waiting: bool,
 }
 
 impl LockInfo {
-    /// Create LockInfo from a MonitorSession query result row
+    /// Create LockInfo from a DBC.LockInfoV query result row
     ///
-    /// Expected columns: SessionNo, UserName, PEState, AMPState,
-    /// Blk1SessNo, Blk1UserName
+    /// Expected columns: LockedObject, LockTypeName, LockModeName,
+    /// GrantorSessionId, LockerSessionId, ModeWanting
     pub fn from_row(row: &[Value]) -> Option<Self> {
         if row.len() < 6 { return None; }
-        // ... extraction logic following SessionInfo pattern
-    }
-
-    /// Whether this session is currently blocked
-    pub fn is_blocked(&self) -> bool {
-        self.pe_state.to_uppercase() == "BLOCKED"
-            || self.amp_state.to_uppercase() == "BLOCKED"
+        // ModeWanting non-NULL indicates a waiting session
+        let is_waiting = !matches!(&row[5], Value::Null);
+        // ... extraction logic
     }
 }
 ```
+
+### Display Row Aggregation
+
+Raw `LockInfo` rows are consolidated into display rows where each row represents one lock with all its waiting sessions:
+
+```rust
+/// A consolidated lock display row for output
+#[derive(Debug, Clone)]
+pub struct LockDisplayRow {
+    pub locked_object: String,
+    pub lock_type: String,
+    pub lock_mode: String,
+    pub locking_session: i64,
+    pub waiting_sessions: Vec<i64>,
+}
+```
+
+The `build_display_rows()` function performs a two-pass aggregation:
+1. **First pass**: Collect lock holders (rows where `is_waiting` is false)
+2. **Second pass**: Attach waiters to their corresponding holders using the `grantor_session` as the join key
 
 ### Blocking Chain Logic
 
-Blocking chains are built by analyzing the blocker-blocked relationships across all sessions:
-
 ```rust
-/// A blocking chain showing which sessions block which
+/// Blocking chain information
 #[derive(Debug, Clone)]
 pub struct BlockingChain {
-    /// The root blocker session (the session holding the lock)
     pub blocker_session: i64,
-    /// The root blocker user name
-    pub blocker_user: String,
-    /// Sessions directly or transitively blocked by this session
-    pub blocked_sessions: Vec<BlockedSession>,
-}
-
-/// A session that is blocked, with its depth in the chain
-#[derive(Debug, Clone)]
-pub struct BlockedSession {
-    /// The blocked session number
-    pub session_no: i64,
-    /// The blocked session user name
-    pub user_name: String,
-    /// Depth in the blocking chain (1 = directly blocked by root)
-    pub depth: usize,
-}
-
-/// Build blocking chains from a list of lock info entries
-///
-/// Algorithm:
-/// 1. Collect all sessions into a map by session_no
-/// 2. For each blocked session, trace back to the root blocker
-/// 3. Group blocked sessions by their root blocker
-/// 4. Sort chains by blocker session number
-fn build_blocking_chains(sessions: &[LockInfo]) -> Vec<BlockingChain> {
-    use std::collections::HashMap;
-
-    let session_map: HashMap<i64, &LockInfo> = sessions
-        .iter()
-        .map(|s| (s.session_no, s))
-        .collect();
-
-    let mut chains: HashMap<i64, Vec<BlockedSession>> = HashMap::new();
-
-    for session in sessions {
-        if !session.is_blocked() || session.blocking_session == 0 {
-            continue;
-        }
-
-        // Trace back to root blocker
-        let mut current = session.blocking_session;
-        let mut depth = 1;
-        let mut visited = std::collections::HashSet::new();
-
-        while let Some(blocker) = session_map.get(&current) {
-            if !blocker.is_blocked() || blocker.blocking_session == 0 {
-                break; // Found the root blocker
-            }
-            if !visited.insert(current) {
-                break; // Cycle detection
-            }
-            current = blocker.blocking_session;
-            depth += 1;
-        }
-
-        chains.entry(current).or_default().push(BlockedSession {
-            session_no: session.session_no,
-            user_name: session.user_name.clone(),
-            depth,
-        });
-    }
-
-    // Convert to sorted Vec<BlockingChain>
-    let mut result: Vec<BlockingChain> = chains
-        .into_iter()
-        .map(|(blocker_id, blocked)| {
-            let blocker_user = session_map
-                .get(&blocker_id)
-                .map(|s| s.user_name.clone())
-                .unwrap_or_else(|| format!("[Session {}]", blocker_id));
-            BlockingChain {
-                blocker_session: blocker_id,
-                blocker_user,
-                blocked_sessions: blocked,
-            }
-        })
-        .collect();
-
-    result.sort_by_key(|c| c.blocker_session);
-    result
+    pub blocked_sessions: Vec<i64>,
 }
 ```
 
-**Cycle detection:** The chain-building algorithm includes a visited set to handle circular blocking scenarios (which are rare but possible in deadlock situations). If a cycle is detected, the chain is terminated at the cycle point.
+The `identify_blocking_chains()` function aggregates all waiting sessions per blocking session across all display rows. A session that holds multiple locks may block different sessions on each lock; the chain groups all blocked sessions under one blocker entry.
 
 ### REPL Display Format
 
-The REPL display shows two sections: a summary table and blocking chain annotations:
-
 ```
-Lock Contention:
-+-----------+----------+---------+----------+-------------------+------------------+
-| SessionNo | UserName | PEState | AMPState | BlockingSession   | BlockingUser     |
-+-----------+----------+---------+----------+-------------------+------------------+
-|      1078 | DBC      | BLOCKED | BLOCKED  |              1076 | ADMIN            |
-|      1080 | ETL_USER | BLOCKED | BLOCKED  |              1076 | ADMIN            |
-|      1082 | ANALYST  | BLOCKED | BLOCKED  |              1078 | DBC              |
-+-----------+----------+---------+----------+-------------------+------------------+
+Lock Information:
++----------------+-----------+-----------+--------------+--------------+
+| Locked Object  | Lock Type | Lock Mode | Locking Sess | Waiting Sess |
++----------------+-----------+-----------+--------------+--------------+
+| PROD.orders    | Table     | WRITE     |         1023 | 1045, 1067   |
+| PROD.customers | Table     | READ      |         1078 | (none)       |
++----------------+-----------+-----------+--------------+--------------+
 
-Blocking Chains:
-  Session 1076 (ADMIN) blocks 3 session(s):
-    -> Session 1078 (DBC)
-    -> Session 1080 (ETL_USER)
-    -> -> Session 1082 (ANALYST) [via 1078]
+2 lock(s) found - 1 blocking chain(s) detected (Query time: 0.156s)
 
-3 blocked session(s), 1 blocking chain(s) (Query time: 0.156s)
+Blocking Chain:
+  Session 1023 blocks sessions: 1045, 1067
 ```
 
-When no locks are detected:
+When no locks exist:
 
 ```
-Lock Contention:
-(no blocked sessions found)
+Lock Information:
+No locks currently held.
 
-0 blocked session(s) (Query time: 0.089s)
+(Query time: 0.089s)
 ```
 
 ### Batch Mode Display
 
-**Table format:** Same as REPL table but without the blocking chain annotations.
+**Table format:** Same as REPL table with summary footer.
 
 **CSV format:**
 ```
-SessionNo,UserName,PEState,AMPState,BlockingSession,BlockingUser
-1078,DBC,BLOCKED,BLOCKED,1076,ADMIN
-1080,ETL_USER,BLOCKED,BLOCKED,1076,ADMIN
-1082,ANALYST,BLOCKED,BLOCKED,1078,DBC
+Locked Object,Lock Type,Lock Mode,Locking Sess,Waiting Sess
+PROD.orders,Table,WRITE,1023,"1045, 1067"
+PROD.customers,Table,READ,1078,
 ```
+
+**Note:** The CSV format uses empty string for locks with no waiters, which is the standard convention for machine-parseable CSV. The table display format uses "(none)" for human readability. This distinction is handled by `format_waiting_sessions()` (table) vs `format_waiting_sessions_csv()` (CSV).
 
 **JSON format:**
 ```json
-{
-  "blocked_sessions": [
-    {
-      "SessionNo": 1078,
-      "UserName": "DBC",
-      "PEState": "BLOCKED",
-      "AMPState": "BLOCKED",
-      "BlockingSession": 1076,
-      "BlockingUser": "ADMIN"
-    }
-  ],
-  "blocking_chains": [
-    {
-      "blocker_session": 1076,
-      "blocker_user": "ADMIN",
-      "blocked_count": 3,
-      "blocked": [
-        {"session": 1078, "user": "DBC", "depth": 1},
-        {"session": 1080, "user": "ETL_USER", "depth": 1},
-        {"session": 1082, "user": "ANALYST", "depth": 2}
-      ]
-    }
-  ]
-}
+[
+  {
+    "Locked Object": "PROD.orders",
+    "Lock Type": "Table",
+    "Lock Mode": "WRITE",
+    "Locking Sess": 1023,
+    "Waiting Sess": [1045, 1067]
+  }
+]
 ```
 
 ### Error Handling
 
-```rust
-fn handle_locks_error<W: Write>(e: &crate::error::TqError, writer: &mut W) -> Result<()> {
-    let error_str = e.to_string().to_lowercase();
+The error handling follows the standard monitoring command pattern, detecting privilege and availability errors:
 
-    if error_str.contains("privilege") || error_str.contains("access")
-        || error_str.contains("permission") || error_str.contains("3523")
-    {
-        writeln!(writer, "Error: Insufficient privileges to query lock information.")?;
-        writeln!(writer)?;
-        writeln!(writer, "Required: EXECUTE FUNCTION privilege on SYSLIB.MonitorSession")?;
-        writeln!(writer)?;
-        writeln!(writer, "To grant access, a DBA can run:")?;
-        writeln!(writer, "  GRANT EXECUTE FUNCTION ON SYSLIB.MonitorSession TO <username>;")?;
-    } else if error_str.contains("monitorsession")
-        && (error_str.contains("syntax") || error_str.contains("not found"))
-    {
-        writeln!(writer, "Error: MonitorSession function not available.")?;
-        writeln!(writer)?;
-        writeln!(writer, "This feature requires Teradata 14.10 or later.")?;
-        writeln!(writer, "Your system may be running an earlier version.")?;
-    } else {
-        writeln!(writer, "Error querying lock information: {}", e)?;
-    }
-    Ok(())
-}
+```rust
+// Privilege error -> suggest GRANT SELECT ON DBC.LockInfoV
+// View not found -> inform that DBC.LockInfoV is not accessible
+// Generic error -> display error message
+```
+
+The specific privilege guidance references `DBC.LockInfoV` (not MonitorSession):
+```
+Error: Unable to retrieve lock information.
+
+This command requires SELECT access to DBC lock views.
+
+To grant access, a DBA can run:
+  GRANT SELECT ON DBC.LockInfoV TO <your_username>;
 ```
 
 ### CLI Integration
 
 ```rust
 // In src/cli.rs - Command enum
-/// Display lock contention and blocking sessions
+/// Display current lock contention and blocking chains
 ///
-/// Shows which sessions are blocked and the blocking chains.
-/// Requires EXECUTE FUNCTION privilege on SYSLIB.MonitorSession.
+/// Shows locked objects, lock types, locking sessions, and waiting sessions.
+/// Requires SELECT privilege on DBC.LockInfoV.
 Locks(LocksArgs),
 
 /// Arguments for the locks command
 #[derive(Parser, Debug)]
 pub struct LocksArgs {
     /// Output format
-    #[arg(
-        short, long,
-        env = "TQ_FORMAT",
-        default_value = "table",
-        value_name = "FORMAT"
-    )]
+    #[arg(short, long, env = "TQ_FORMAT", default_value = "table", value_name = "FORMAT")]
     pub format: OutputFormat,
 
     /// Write output to file instead of stdout
@@ -5701,7 +5602,7 @@ pub struct LocksArgs {
 
 ### Tab Completion Integration
 
-Add to the `METACOMMANDS` array in `metadata_completer.rs`:
+In the `METACOMMANDS` array in `metadata_completer.rs`:
 
 ```rust
 MetacommandDef {
@@ -5716,132 +5617,23 @@ MetacommandDef {
 In `metacommands.rs`, both `handle_metacommand` and `handle_metacommand_with_state`:
 
 ```rust
-// Lock contention command
 "locks" | "lk" => {
     crate::commands::locks::execute_for_repl(completion_state.client(), writer)?;
 }
 ```
 
-### Help Text Integration
-
-Add to the "System Monitoring" section in `print_help_extended()`:
-
-```rust
-writeln!(writer, "System Monitoring:")?;
-writeln!(writer, "  /sessions              List active sessions with performance metrics")?;
-writeln!(writer, "  /sysconfig, /sc        Show system configuration and topology")?;
-writeln!(writer, "  /locks, /lk            Show lock contention and blocking sessions")?;
-```
-
-### Unit Tests
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_lock_info_from_row_blocked() {
-        // Test parsing of a blocked session row
-    }
-
-    #[test]
-    fn test_lock_info_from_row_not_blocked() {
-        // Test that non-blocked sessions are parsed but is_blocked() returns false
-    }
-
-    #[test]
-    fn test_lock_info_from_row_insufficient_columns() {
-        // Test graceful handling of rows with too few columns
-    }
-
-    #[test]
-    fn test_lock_info_from_row_with_nulls() {
-        // Test NULL value handling
-    }
-
-    #[test]
-    fn test_lock_info_is_blocked() {
-        // Test blocked state detection for PE and AMP states
-    }
-
-    #[test]
-    fn test_build_blocking_chains_simple() {
-        // Test: A blocks B -> 1 chain with 1 entry
-    }
-
-    #[test]
-    fn test_build_blocking_chains_multi_level() {
-        // Test: A blocks B, B blocks C -> chain with depth 1 and 2
-    }
-
-    #[test]
-    fn test_build_blocking_chains_fan_out() {
-        // Test: A blocks B, A blocks C -> 1 chain with 2 entries at depth 1
-    }
-
-    #[test]
-    fn test_build_blocking_chains_no_blocks() {
-        // Test: No blocked sessions -> empty chains
-    }
-
-    #[test]
-    fn test_build_blocking_chains_cycle_detection() {
-        // Test: A blocks B, B blocks A -> terminates without infinite loop
-    }
-
-    #[test]
-    fn test_display_table_format() {
-        // Test table output format
-    }
-
-    #[test]
-    fn test_display_csv_format() {
-        // Test CSV output format
-    }
-
-    #[test]
-    fn test_display_json_format() {
-        // Test JSON output format with blocking chains
-    }
-
-    #[test]
-    fn test_repl_display_no_locks() {
-        // Test REPL output when no blocked sessions exist
-    }
-
-    #[test]
-    fn test_repl_display_with_locks() {
-        // Test REPL output with blocked sessions and chains
-    }
-}
-```
-
 ### Design Decisions
 
-**Why use MonitorSession instead of DBC.LockInfoV?**
-- `MonitorSession` is already proven to work by the `/sessions` command
-- Same EXECUTE FUNCTION privilege is reused (no new grants needed)
-- `DBC.LockInfoV` is not available on all Teradata installations
-- `MonitorSession` provides direct blocker-to-blocked relationship data
-- Single privilege grant enables both `/sessions` and `/locks`
+**Why DBC.LockInfoV?**
+- Provides object-level detail (which table is locked, lock type, lock level)
+- Standard DBC view available on modern Teradata installations
+- Clear waiter detection via `ModeWanting` column
+- Requires only SELECT privilege (standard DBC access)
 
-**Why include blocking chain analysis?**
-- Raw lock data (who blocks whom) is less useful than chain analysis
-- DBAs need to find the root cause (root blocker) to resolve contention
-- Chain depth helps prioritize intervention (deeper chains = more impact)
-- This matches the output of tools like Teradata Viewpoint's Lock Viewer
-
-**Why filter for BLOCKED sessions only?**
-- Showing all sessions with lock information would duplicate `/sessions` output
-- The `/locks` command focuses specifically on contention situations
-- DBAs invoking `/locks` are troubleshooting blocking, not general monitoring
-- Non-blocked sessions have `Blk1SessNo = 0` which provides no useful lock data
-
-**Why include the blocker session in the output even if it is not blocked itself?**
-- The root blocker is the actionable item (the session to investigate/abort)
-- Including it in the blocking chain view gives DBAs the full picture
-- The blocker's user name helps identify who to contact
+**Why aggregate into display rows?**
+- Raw LockInfoV rows have one row per lock participant (holder + each waiter)
+- Users need a consolidated view: one row per lock with all waiters listed
+- Aggregation simplifies blocking chain identification
 
 **Why the /lk short alias?**
 - `/l` is already taken by `/list`
@@ -5852,7 +5644,7 @@ mod tests {
 
 ## Monitoring Commands: Shared Patterns
 
-This section documents common patterns shared across the monitoring command family (`/sessions`, `/sysconfig`, `/locks`).
+This section documents common patterns shared across the monitoring command family (`/sessions`, `/sysconfig`, `/locks`, `/query`).
 
 ### Module Pattern
 
@@ -5868,7 +5660,7 @@ src/commands/<command>.rs
   - display_table() using comfy_table
   - display_csv() using writeln!
   - display_json() using serde_json
-  - handle_<command>_error() for privilege errors
+  - Privilege error handling (inline or via shared pattern)
   - #[cfg(test)] mod tests
 ```
 
@@ -5890,7 +5682,7 @@ All monitoring commands follow the same privilege error handling pattern:
 1. Detect privilege/access errors via string matching on error message
 2. Display clear error message identifying the required privilege
 3. Provide the exact GRANT statement needed to fix the issue
-4. Handle version compatibility errors separately
+4. Handle version/availability errors separately
 5. Fall back to generic error display for unexpected errors
 
 ### Output Format Pattern
@@ -5907,6 +5699,490 @@ The format is controlled by:
 
 ---
 
+## Monitoring Utilities Module
+
+This section documents the shared utilities module that eliminates code duplication across monitoring commands.
+
+### Problem
+
+The monitoring commands (`sessions.rs`, `sysconfig.rs`, `locks.rs`, `sample.rs`) each contain duplicated utility functions for value extraction and CSV escaping. This creates maintenance burden and risks inconsistent behavior across commands.
+
+**Duplicated functions identified:**
+
+| Function | sessions.rs | sysconfig.rs | locks.rs | sample.rs |
+|----------|:-----------:|:------------:|:--------:|:---------:|
+| `extract_integer()` | Yes | Yes | Yes | No |
+| `extract_decimal()` | Yes | No | No | No |
+| `extract_trimmed_string()` | No | Yes | Yes | No |
+| `escape_csv()` | Yes | Yes | Yes | Yes |
+
+### Module Design
+
+**File**: `src/commands/monitoring_utils.rs`
+
+This module provides shared utility functions used by monitoring command implementations.
+
+```rust
+// src/commands/monitoring_utils.rs
+
+use crate::db::Value;
+
+/// Extract integer value from a Value, returning None for NULL
+///
+/// Handles Value::Integer and Value::Decimal (truncated to i64).
+/// Returns None for NULL or non-numeric types.
+pub fn extract_integer(value: &Value) -> Option<i64> {
+    match value {
+        Value::Integer(v) => Some(*v),
+        Value::Decimal(v) => Some(*v as i64),
+        Value::Null => None,
+        _ => None,
+    }
+}
+
+/// Extract decimal value from a Value, returning None for NULL
+///
+/// Handles Value::Decimal and Value::Integer (promoted to f64).
+/// Returns None for NULL or non-numeric types.
+pub fn extract_decimal(value: &Value) -> Option<f64> {
+    match value {
+        Value::Decimal(v) => Some(*v),
+        Value::Integer(v) => Some(*v as f64),
+        Value::Null => None,
+        _ => None,
+    }
+}
+
+/// Extract a trimmed string from a Value
+///
+/// Returns the specified `null_display` string for NULL values.
+/// For non-string types, calls `Value::display()` and trims.
+///
+/// # Arguments
+/// * `value` - The database value to extract
+/// * `null_display` - String to return for NULL values (e.g., "[NULL]" or "[unavailable]")
+pub fn extract_trimmed_string(value: &Value, null_display: &str) -> String {
+    match value {
+        Value::String(s) => s.trim().to_string(),
+        Value::Null => null_display.to_string(),
+        other => other.display().trim().to_string(),
+    }
+}
+
+/// Escape a string for CSV output
+///
+/// Wraps the string in double quotes and escapes internal quotes
+/// if the string contains commas, double quotes, or newlines.
+pub fn escape_csv(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+```
+
+### Design Decisions
+
+**`extract_trimmed_string` parameterization:**
+
+The sysconfig and locks modules use different NULL display strings (`"[unavailable]"` vs `"[NULL]"`). Rather than creating two separate functions, the shared version accepts a `null_display` parameter. Each caller specifies the appropriate string for its context.
+
+**`extract_decimal` consolidation:**
+
+Although only `sessions.rs` currently uses `extract_decimal()`, it is included in the shared module because:
+1. It follows the same pattern as `extract_integer`
+2. Future monitoring commands (e.g., `/query`) may need it for metrics
+3. Having all extraction helpers in one place improves discoverability
+
+### Refactoring Strategy
+
+The refactoring is mechanical and low-risk:
+
+1. Create `src/commands/monitoring_utils.rs` with the shared functions
+2. Register the module in `src/commands/mod.rs` (`pub mod monitoring_utils;`)
+3. For each consumer module:
+   - Add `use super::monitoring_utils::{...};` (or `use crate::commands::monitoring_utils::{...};`)
+   - Remove the local function definitions
+   - For `extract_trimmed_string` callers, add the `null_display` argument to each call site
+4. Run `cargo test --lib` after each module to verify no regressions
+
+**Call site changes for `extract_trimmed_string`:**
+
+```rust
+// sysconfig.rs - before:
+let key = extract_trimmed_string(&row[0]);
+// sysconfig.rs - after:
+let key = extract_trimmed_string(&row[0], "[unavailable]");
+
+// locks.rs - before:
+let locked_object = extract_trimmed_string(&row[0]);
+// locks.rs - after:
+let locked_object = extract_trimmed_string(&row[0], "[NULL]");
+```
+
+### Integration with Module Registry
+
+```rust
+// src/commands/mod.rs
+pub mod locks;
+pub mod monitoring_utils;  // NEW: shared monitoring utilities
+pub mod ping;
+pub mod query;
+pub mod repl;
+pub mod sample;
+pub mod sessions;
+pub mod sysconfig;
+```
+
+### Unit Tests
+
+The shared module carries its own unit tests:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // extract_integer tests
+    fn test_extract_integer_from_integer();
+    fn test_extract_integer_from_decimal();
+    fn test_extract_integer_from_null();
+    fn test_extract_integer_from_string();
+
+    // extract_decimal tests
+    fn test_extract_decimal_from_decimal();
+    fn test_extract_decimal_from_integer();
+    fn test_extract_decimal_from_null();
+
+    // extract_trimmed_string tests
+    fn test_extract_trimmed_string_from_string();
+    fn test_extract_trimmed_string_from_null_custom_display();
+    fn test_extract_trimmed_string_from_other_type();
+    fn test_extract_trimmed_string_trims_whitespace();
+
+    // escape_csv tests
+    fn test_escape_csv_simple();
+    fn test_escape_csv_with_comma();
+    fn test_escape_csv_with_quotes();
+    fn test_escape_csv_with_newline();
+    fn test_escape_csv_empty_string();
+}
+```
+
+Existing tests in each consumer module continue to work because they test behavior through the public API (e.g., `from_row()`, `display_csv()`), not the utility functions directly. The utility function tests that currently exist in consumer modules can be removed since the shared module's tests cover them.
+
+---
+
+## Query Inspection Command (/query)
+
+This section documents the technical design for the `/query` metacommand, which displays the SQL text and execution metadata of a session's most recent query.
+
+### Overview
+
+The `/query <session_id>` command queries `DBC.QryLogV` (and optionally `DBC.DBQLSqlTbl` for full SQL text) to show what SQL a given session is or was recently executing. This is the natural next step in the PMON workflow: see sessions -> see locks -> inspect the SQL.
+
+**User Stories:** US-9.1, US-9.3 (Query Drill-Down and Analysis)
+
+### Architecture
+
+```
+Query Inspection Command Flow:
+
+/query <session_id> (REPL) or tq query-session <session_id> (batch)
+        |
+        v
+Validate session_id is a positive integer
+        |
+        v
+Execute SQL query:
+  DBC.QryLogV WHERE SessionID = <session_id>
+  ORDER BY StartTime DESC
+        |
+        v
+Parse into QueryLogInfo struct(s)
+        |
+        v
+If QueryText is truncated (200 char default), optionally
+fetch full text from DBC.DBQLSqlTbl via ProcID + QueryID join
+        |
+        v
+Format output:
+  REPL: Key-value summary with SQL text
+  Batch: table/csv/json per --format flag
+```
+
+### Module Structure
+
+**File**: `src/commands/query_inspect.rs`
+
+**Note on naming**: The existing `src/commands/query.rs` handles the general `tq query "SELECT ..."` command. The query inspection command is a different feature -- it inspects a session's queries. The module is named `query_inspect.rs` to avoid collision. The REPL metacommand is `/query <session_id>` (alias `/qi`) and the batch command is `tq query-inspect <session_id>`.
+
+Following the established monitoring command pattern:
+- `build_query_sql()` function for the DBC.QryLogV query (parameterized by session_id)
+- `QueryInfo` struct for parsed result
+- `execute()` for batch mode
+- `execute_for_repl()` for REPL mode
+- `display_table()`, `display_csv()`, `display_json()` formatters
+- Uses shared `monitoring_utils` functions (extract_integer, extract_trimmed_string, escape_csv)
+
+### SQL Query Design
+
+**Primary query** - Fetch the most recent queries for a session:
+
+```sql
+SELECT TOP 5
+    SessionID,
+    CAST(QueryText AS VARCHAR(10000)) AS QueryText,
+    CAST(StartTime AS VARCHAR(30)) AS StartTime,
+    CAST(TotalElapsedTime AS VARCHAR(30)) AS TotalElapsedTime,
+    CASE
+        WHEN AbortFlag = 'Y' THEN 'Aborted'
+        WHEN ErrorCode <> 0 THEN 'Error'
+        ELSE 'Complete'
+    END AS QueryStatus
+FROM DBC.QryLogV
+WHERE SessionID = <session_id>
+  AND CollectTimeStamp >= CURRENT_TIMESTAMP - INTERVAL '1' DAY
+ORDER BY CollectTimeStamp DESC
+```
+
+**Key columns:**
+- `SessionID` - Session that ran the query
+- `QueryText` - SQL text (cast to VARCHAR(10000) for extended text beyond default 200 chars)
+- `StartTime` - When the query started
+- `TotalElapsedTime` - Total elapsed execution time
+- `QueryStatus` - Derived status: 'Complete', 'Aborted', or 'Error' based on AbortFlag and ErrorCode
+
+**Why TOP 5?**
+- Shows recent query history for the session, not just the latest
+- Helps DBAs see the pattern of activity (e.g., repeated failing queries)
+- Keeps output manageable in REPL mode
+
+**Why filter by last 1 day?**
+- DBQL can accumulate large volumes of data
+- Most monitoring use cases involve recent queries
+- Reduces query execution time on systems with extensive DBQL history
+
+**Design Decision: CAST to VARCHAR(10000)**
+
+The default `QueryText` column in `DBC.QryLogV` is limited to 200 characters. By casting to `VARCHAR(10000)`, we retrieve significantly more text without needing a secondary query to `DBQLSqlTbl` in most cases. The CAST approach is simpler and avoids the join complexity.
+
+### Data Model
+
+```rust
+// src/commands/query_inspect.rs
+
+/// Query information extracted from DBC.QryLogV
+#[derive(Debug, Clone)]
+pub struct QueryInfo {
+    /// Session ID that ran the query
+    pub session_id: i64,
+    /// SQL text of the query
+    pub query_text: String,
+    /// Query start time (formatted)
+    pub start_time: String,
+    /// Total elapsed time (formatted)
+    pub total_elapsed: String,
+    /// Query status (Complete, Aborted, Error)
+    pub status: String,
+}
+
+impl QueryInfo {
+    pub fn from_row(row: &[Value]) -> Option<Self> {
+        if row.len() < 5 { return None; }
+        let session_id = extract_integer(&row[0])?;
+        let query_text = extract_trimmed_string(&row[1], "");
+        let start_time = extract_trimmed_string(&row[2], "[unknown]");
+        let total_elapsed = extract_trimmed_string(&row[3], "[unknown]");
+        let status = extract_trimmed_string(&row[4], "Unknown");
+        Some(Self { session_id, query_text, start_time, total_elapsed, status })
+    }
+}
+```
+
+### REPL Display Format
+
+The REPL display shows each recent query as a key-value property table:
+
+```
+Recent Queries for Session 1078:
+
++----------+-------------------------------------------+
+| Property | Value                                     |
++----------+-------------------------------------------+
+| Query #  | 1                                         |
+| Start Time | 2026-01-27 15:33:26                     |
+| Elapsed Time | 00:00:02.456                          |
+| Status   | Complete                                  |
+| SQL      | SELECT o.order_id, c.customer_name...     |
++----------+-------------------------------------------+
+
+2 recent query(ies) for session 1078 (Query time: 0.089s)
+```
+
+SQL text is truncated at 200 characters in table display; CSV and JSON formats include full text.
+
+When no queries found:
+
+```
+No queries found for session 9999.
+
+(Query time: 0.045s)
+```
+
+### Long SQL Text Handling
+
+SQL text can be very long (thousands of characters). The display strategy:
+
+1. **Table format (REPL and batch)**: Truncate SQL at 200 characters with "..." suffix. Whitespace is normalized (newlines/tabs replaced with spaces).
+2. **CSV format**: Include complete SQL text (no truncation). Properly escaped per RFC 4180.
+3. **JSON format**: Include complete SQL text (no truncation).
+
+### Batch Mode
+
+**CLI definition:**
+
+```rust
+// In src/cli.rs
+/// Inspect recent SQL queries for a session
+#[command(name = "query-inspect")]
+QueryInspect(QueryInspectArgs),
+
+/// Arguments for the query-inspect command
+#[derive(Parser, Debug)]
+pub struct QueryInspectArgs {
+    /// Session ID to inspect
+    pub session_id: i64,
+
+    /// Output format
+    #[arg(short, long, env = "TQ_FORMAT", default_value = "table", value_name = "FORMAT")]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+```
+
+**Batch CSV format:**
+```
+SessionID,StartTime,ElapsedTime,Status,QueryText
+1234,2026-01-27 15:33:26,00:00:02.456,Complete,"SELECT o.order_id, c.customer_name..."
+```
+
+**Batch JSON format:**
+```json
+[
+  {
+    "SessionID": 1234,
+    "StartTime": "2026-01-27 15:33:26",
+    "ElapsedTime": "00:00:02.456",
+    "Status": "Complete",
+    "QueryText": "SELECT o.order_id, c.customer_name..."
+  }
+]
+```
+
+### Tab Completion Integration
+
+```rust
+MetacommandDef {
+    name: "query",
+    aliases: &["qi"],
+    description: "Show recent SQL queries for a session",
+},
+```
+
+### Metacommand Handler Integration
+
+The `/query` metacommand requires an argument (session_id), so the handler includes argument parsing:
+
+```rust
+"query" | "qi" => {
+    if args.is_empty() {
+        writeln!(writer, "Usage: /query <session_id>")?;
+        writeln!(writer, "       /qi <session_id>")?;
+        writeln!(writer)?;
+        writeln!(writer, "Shows recent SQL queries for the specified session.")?;
+        writeln!(writer, "Use /sessions to find session IDs.")?;
+    } else {
+        match args[0].parse::<i64>() {
+            Ok(session_id) if session_id > 0 => {
+                crate::commands::query_inspect::execute_for_repl(
+                    completion_state.client(),
+                    session_id,
+                    writer,
+                )?;
+            }
+            _ => {
+                writeln!(writer, "Error: Invalid session ID '{}'. Must be a positive integer.", args[0])?;
+            }
+        }
+    }
+}
+```
+
+### Error Handling
+
+```rust
+// DBC.QryLogV privilege error
+"Error: Unable to retrieve query information.
+
+This command requires SELECT access to DBC query log views.
+
+To grant access, a DBA can run:
+  GRANT SELECT ON DBC.QryLogV TO <your_username>;"
+
+// DBQL not enabled
+"Error: No query log data available.
+
+DBQL (Database Query Logging) may not be enabled.
+Contact your DBA to enable query logging:
+  BEGIN QUERY LOGGING ON ALL;"
+
+// Session not found (no rows returned, not an error)
+"No queries found in DBQL for session <id>.
+
+This may mean:
+  - The session ID does not exist
+  - DBQL logging is not enabled for this user
+  - The query log has been purged"
+```
+
+### Design Decisions
+
+**Why DBC.QryLogV?**
+- Standard DBQL view available on all Teradata systems with DBQL enabled
+- Contains query text, timing, and execution metrics in a single view
+- SessionID column provides direct filtering without joins
+- CAST to VARCHAR(10000) retrieves extended SQL text without secondary queries
+
+**Why not use MonitorSession for current query text?**
+- MonitorSession does not expose SQL text
+- QryLogV provides historical queries, not just the current one
+- QryLogV includes execution metrics (IO, rows) that MonitorSession does not
+
+**Why CAST QueryText to VARCHAR(10000)?**
+- Default QueryText in QryLogV is limited to 200 characters
+- CAST extends the retrieved text to cover most real-world queries
+- Avoids the complexity of joining to DBQLSqlTbl for routine use
+- The --full-sql flag provides a fallback for extremely long queries
+
+**Why TOP 5 instead of TOP 1?**
+- DBAs troubleshooting a session often need context beyond the current query
+- Seeing the last 5 queries reveals patterns (repeated failures, query sequence)
+- The count is configurable via `--count` flag in batch mode
+- REPL mode always shows up to 5 for quick diagnosis
+
+**Why query_inspect.rs instead of extending query.rs?**
+- The existing `query.rs` handles `tq query "SELECT ..."` (executing user SQL)
+- Query inspection is a completely different feature (inspecting DBQL)
+- Separate modules maintain single responsibility
+- The REPL metacommand `/query` routes to query_inspect, not the general query command
+
+---
+
 ## Future Enhancements
 
 - Query history search (Ctrl-R) - already supported by reedline
@@ -5920,7 +6196,9 @@ The format is controlled by:
 - Second TAB accepts selection (requires reedline enhancement)
 - Session filtering for `/sessions` (by user, state, etc.)
 - Additional `/show` subcommands (constraints, statistics, partitions)
-- Lock type information via `DBC.LockInfoV` (when available) for `/locks` enhancement
 - Performance resource monitoring (`/perf`) using ResUsage views
 - Session history tracking (`/history`) using DBQL data
 - Real-time auto-refresh for monitoring commands
+- Explain plan inspection (`/explain <session_id>`) using DBQL step data
+- AMP skew analysis (`/skew <session_id>`) using DBQL step-level metrics
+- Full SQL text retrieval from DBQLSqlTbl (`--full-sql` flag for `/query`)

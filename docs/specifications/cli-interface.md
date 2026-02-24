@@ -13,6 +13,7 @@
    - [sessions - List Active Sessions](#sessions---list-active-sessions)
    - [sysconfig - System Configuration Summary](#sysconfig---system-configuration-summary)
    - [locks - Lock and Blocking Information](#locks---lock-and-blocking-information)
+   - [query-inspect - Inspect Session Query Text](#query-inspect---inspect-session-query-text)
    - [profiles - List Connection Profiles](#profiles---list-connection-profiles)
 5. [Input/Output Behavior](#inputoutput-behavior)
 6. [Flag Design Guidelines](#flag-design-guidelines)
@@ -42,8 +43,9 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 - `query` - Execute SQL queries
 - `repl` - Start interactive mode
 - `sessions` - List active Teradata sessions
-- `sysconfig` - Display system topology (version, nodes, AMPs, PEs)
+- `sysconfig` - Display system configuration (version and AMP count)
 - `locks` - Display current lock contention and blocking chains
+- `query-inspect` - Show SQL text for a specific session
 - `profiles` - List connection profiles
 
 ## Global Options
@@ -490,7 +492,7 @@ The flag form (`--sessions`) provides compatibility with single-purpose invocati
 
 ### sysconfig - System Configuration Summary
 
-**Purpose**: Display a compact summary of system topology including Teradata version, node count, AMP count, and PE count
+**Purpose**: Display a compact summary of system configuration including Teradata version and AMP count
 
 **Usage**:
 ```bash
@@ -524,18 +526,14 @@ tq sysconfig --format json | jq '.["AMP Count"]'
 
 **Output (Table Format)**:
 ```
-System Configuration - prod-td01.company.com:
-┌──────────────────────┬─────────────────────────────────────┐
-│ Property             │ Value                               │
-├──────────────────────┼─────────────────────────────────────┤
-│ Teradata Version     │ 17.20.00.17                         │
-│ Release              │ 17.20.00.17 (Released: 2024-01-15)  │
-│ Node Count           │ 4                                   │
-│ AMP Count            │ 128                                 │
-│ PE Count             │ 16                                  │
-└──────────────────────┴─────────────────────────────────────┘
-
-(Query time: 0.045s)
+System Configuration:
+┌──────────────────┬─────────────────────────────────────┐
+│ Property         │ Value                               │
+├──────────────────┼─────────────────────────────────────┤
+│ Teradata Version │ 17.20.00.17                         │
+│ Release          │ 17.20.00.17 (Released: 2024-01-15)  │
+│ AMP Count        │ 128                                 │
+└──────────────────┴─────────────────────────────────────┘
 ```
 
 **Output (CSV Format)**:
@@ -543,9 +541,7 @@ System Configuration - prod-td01.company.com:
 Property,Value
 Teradata Version,17.20.00.17
 Release,"17.20.00.17 (Released: 2024-01-15)"
-Node Count,4
 AMP Count,128
-PE Count,16
 ```
 
 **Output (JSON Format)**:
@@ -553,22 +549,18 @@ PE Count,16
 {
   "Teradata Version": "17.20.00.17",
   "Release": "17.20.00.17 (Released: 2024-01-15)",
-  "Node Count": 4,
-  "AMP Count": 128,
-  "PE Count": 16
+  "AMP Count": 128
 }
 ```
 
 **Behavior Requirements**:
 
 1. **Standalone Operation**: Does NOT require a SQL file argument (unlike `query` command)
-2. **Data Source**: Queries `DBC.DBCInfoV` for version and release; derives AMP count via `HASHAMP()+1`; derives node and PE counts from DBC system views
+2. **Data Source**: Queries `DBC.DBCInfoV` for version and release; derives AMP count via `HASHAMP()+1`
 3. **Properties Displayed** (in this order):
    - Teradata Version (software version string)
    - Release (full release string with build date)
-   - Node Count (total number of nodes)
    - AMP Count (total number of Access Module Processors)
-   - PE Count (total number of Parsing Engines)
 4. **Format Compatibility**: Works with `--format table`, `--format csv`, `--format json`
 5. **Output Destination**: Respects `--output` flag for file output, otherwise stdout
 6. **Unavailable Properties**: If a specific property cannot be retrieved, display `[unavailable]` for that value rather than failing the entire command
@@ -625,9 +617,9 @@ fi
 ```
 
 **Acceptance Test**:
-- Execute `tq sysconfig` and verify table output with all five properties
-- Execute `tq sysconfig --format csv` and verify CSV output with Property,Value headers
-- Execute `tq sysconfig --format json` and verify valid JSON object output
+- Execute `tq sysconfig` and verify table output with all three properties: Teradata Version, Release, AMP Count
+- Execute `tq sysconfig --format csv` and verify CSV output with Property,Value headers and three data rows
+- Execute `tq sysconfig --format json` and verify valid JSON object output with three keys
 - Execute `tq sysconfig --output sysconfig.txt` and verify file creation
 - Trigger privilege error and verify helpful error message with GRANT example
 - Verify exit code 0 on success, 1 on privilege/connection errors
@@ -670,24 +662,24 @@ tq --profile prod locks
 
 **Output (Table Format - Locks Present)**:
 ```
-Lock Information on prod-td01.company.com:
-┌──────────────────────┬───────────┬────────────┬──────────────┬──────────────┬────────────────────────┐
-│ Locked Object        │ Lock Type │ Lock Mode  │ Locking Sess │ Waiting Sess │ Blocked Since          │
-├──────────────────────┼───────────┼────────────┼──────────────┼──────────────┼────────────────────────┤
-│ PRODUCTION.orders    │ Table     │ WRITE      │ 1023         │ 1045, 1067   │ 2026/01/27 14:32:15.00 │
-│ PRODUCTION.customers │ Table     │ EXCLUSIVE  │ 1023         │ 1051         │ 2026/01/27 14:32:15.00 │
-│ PRODUCTION.employees │ Row Hash  │ READ       │ 1078         │ (none)       │ 2026/01/27 14:45:00.00 │
-└──────────────────────┴───────────┴────────────┴──────────────┴──────────────┴────────────────────────┘
+Lock Information:
+┌──────────────────────┬───────────┬────────────┬──────────────┬──────────────┐
+│ Locked Object        │ Lock Type │ Lock Mode  │ Locking Sess │ Waiting Sess │
+├──────────────────────┼───────────┼────────────┼──────────────┼──────────────┤
+│ PRODUCTION.orders    │ Table     │ WRITE      │ 1023         │ 1045, 1067   │
+│ PRODUCTION.customers │ Table     │ EXCLUSIVE  │ 1023         │ 1051         │
+│ PRODUCTION.employees │ Row Hash  │ READ       │ 1078         │ (none)       │
+└──────────────────────┴───────────┴────────────┴──────────────┴──────────────┘
 
-3 locks found - 1 blocking chain detected (Query time: 0.089s)
+3 lock(s) found - 1 blocking chain(s) detected (Query time: 0.089s)
 
 Blocking Chain:
-  Session 1023 (etl_user) blocks sessions: 1045, 1051, 1067
+  Session 1023 blocks sessions: 1045, 1051, 1067
 ```
 
 **Output (Table Format - No Locks)**:
 ```
-Lock Information on prod-td01.company.com:
+Lock Information:
 No locks currently held.
 
 (Query time: 0.023s)
@@ -695,10 +687,10 @@ No locks currently held.
 
 **Output (CSV Format)**:
 ```csv
-Locked Object,Lock Type,Lock Mode,Locking Sess,Waiting Sess,Blocked Since
-PRODUCTION.orders,Table,WRITE,1023,"1045, 1067",2026/01/27 14:32:15.00
-PRODUCTION.customers,Table,EXCLUSIVE,1023,1051,2026/01/27 14:32:15.00
-PRODUCTION.employees,Row Hash,READ,1078,,2026/01/27 14:45:00.00
+Locked Object,Lock Type,Lock Mode,Locking Sess,Waiting Sess
+PRODUCTION.orders,Table,WRITE,1023,"1045, 1067"
+PRODUCTION.customers,Table,EXCLUSIVE,1023,1051
+PRODUCTION.employees,Row Hash,READ,1078,
 ```
 
 **Output (JSON Format)**:
@@ -709,24 +701,21 @@ PRODUCTION.employees,Row Hash,READ,1078,,2026/01/27 14:45:00.00
     "Lock Type": "Table",
     "Lock Mode": "WRITE",
     "Locking Sess": 1023,
-    "Waiting Sess": [1045, 1067],
-    "Blocked Since": "2026/01/27 14:32:15.00"
+    "Waiting Sess": [1045, 1067]
   },
   {
     "Locked Object": "PRODUCTION.customers",
     "Lock Type": "Table",
     "Lock Mode": "EXCLUSIVE",
     "Locking Sess": 1023,
-    "Waiting Sess": [1051],
-    "Blocked Since": "2026/01/27 14:32:15.00"
+    "Waiting Sess": [1051]
   },
   {
     "Locked Object": "PRODUCTION.employees",
     "Lock Type": "Row Hash",
     "Lock Mode": "READ",
     "Locking Sess": 1078,
-    "Waiting Sess": [],
-    "Blocked Since": "2026/01/27 14:45:00.00"
+    "Waiting Sess": []
   }
 ]
 ```
@@ -735,13 +724,12 @@ PRODUCTION.employees,Row Hash,READ,1078,,2026/01/27 14:45:00.00
 
 1. **Standalone Operation**: Does NOT require a SQL file argument (unlike `query` command)
 2. **Data Source**: Queries `DBC.LockInfoV` (or platform-equivalent view) for current lock information
-3. **Column Display**: 6 columns in this order:
+3. **Column Display**: 5 columns in this order:
    - Locked Object (fully qualified database.table name)
    - Lock Type (granularity: Table, Row Hash, Database)
    - Lock Mode (severity: READ, WRITE, EXCLUSIVE, ACCESS)
    - Locking Sess (session ID holding the lock)
    - Waiting Sess (comma-separated IDs of waiting sessions, or empty)
-   - Blocked Since (timestamp when lock was acquired)
 4. **Waiting Sessions Handling**:
    - Table format: Display comma-separated list of session IDs, or `(none)` when no waiters
    - CSV format: Comma-separated session IDs (quoted if multiple), or empty string when no waiters
@@ -829,14 +817,173 @@ fi
 
 **Acceptance Test**:
 - Execute `tq locks` with no active locks and verify "No locks currently held." output
-- Execute `tq locks` with active locks and verify table output with all 6 columns
+- Execute `tq locks` with active locks and verify table output with all 5 columns: Locked Object, Lock Type, Lock Mode, Locking Sess, Waiting Sess
 - Verify blocking chains section appears in table format when sessions are waiting
 - Verify blocking chains section does NOT appear in table format when no waiters
-- Execute `tq locks --format csv` and verify CSV output with correct headers
+- Execute `tq locks --format csv` and verify CSV output with correct 5-column headers
 - Execute `tq locks --format json` and verify valid JSON array output with Waiting Sess as array
 - Execute `tq locks --output locks.txt` and verify file creation
 - Trigger privilege error and verify helpful error message with GRANT example
 - Verify exit code 0 on success (including no-locks case), 1 on privilege/connection errors
+
+---
+
+### query-inspect - Inspect Session Query Text
+
+**Purpose**: Display the SQL text of the most recent query executed by a specific session, enabling drill-down from session activity into the SQL causing resource consumption or blocking
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] query-inspect [OPTIONS] <SESSION_ID>
+```
+
+**Arguments**:
+- `<SESSION_ID>`: Required. An integer session ID as shown in `tq sessions` or `tq locks` output.
+
+**Options**:
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv` |
+| `--output` | `-o` | path | stdout | Write output to file |
+
+**Examples**:
+```bash
+# Show query text for session 1023
+tq query-inspect 1023
+
+# Full query text via JSON (no truncation)
+tq query-inspect --format json 1023
+
+# CSV output for scripting
+tq query-inspect --format csv 1023
+
+# Using connection profile
+tq --profile prod query-inspect 1023
+
+# Extract just the query text
+tq query-inspect --format json 1023 | jq -r '.["Query Text"]'
+```
+
+**Output (Table Format - Query Found)**:
+```
+Query for session 1023:
+┌────────────┬──────────────────────────────────────────────────────────────────┐
+│ Property   │ Value                                                            │
+├────────────┼──────────────────────────────────────────────────────────────────┤
+│ Session    │ 1023                                                             │
+│ User       │ etl_user                                                         │
+│ Query Text │ UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_... │
+└────────────┴──────────────────────────────────────────────────────────────────┘
+
+(Query time: 0.123s)
+```
+
+**Output (Table Format - Session Not Found)**:
+```
+No query information found for session 9999.
+
+The session may have already disconnected, or DBQL logging may not be
+enabled for this user. Contact your DBA to enable DBQL logging.
+```
+
+**Output (CSV Format)**:
+```csv
+Session,User,Query Text
+1023,etl_user,"UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_date < '2026-01-01'"
+```
+
+**Output (JSON Format)**:
+```json
+{
+  "Session": 1023,
+  "User": "etl_user",
+  "Query Text": "UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_date < '2026-01-01'"
+}
+```
+
+**Behavior Requirements**:
+
+1. **Standalone Operation**: Requires a session ID argument
+2. **Data Source**: Queries `DBC.QryLogV` for the most recent query log entry for the specified session ID
+3. **Properties Displayed** (in this order):
+   - Session (the queried session ID)
+   - User (database user account for that session)
+   - Query Text (SQL text of the most recent logged query)
+4. **Query Text Length**:
+   - Table format: Truncated at 200 characters with `...` to indicate truncation
+   - CSV and JSON formats: Full untruncated query text
+5. **Session Not Found**: When no DBQL record exists for the given session ID, display informative message and exit with code 0 (not an error)
+6. **Format Compatibility**: Works with `--format table`, `--format csv`, `--format json`
+7. **Output Destination**: Respects `--output` flag for file output, otherwise stdout
+
+**Error Handling**:
+
+**Insufficient Privileges**:
+```
+Error: Unable to retrieve query information
+Reason: SELECT permission denied on DBC.QryLogV
+
+This command requires SELECT access to DBC.QryLogV.
+Contact your DBA to request access or use the GRANT statement:
+  GRANT SELECT ON DBC.QryLogV TO <your_username>;
+
+Exit code: 1
+```
+
+**Missing Argument**:
+```
+Error: Missing required argument <session_id>
+Usage: tq query-inspect <session_id>
+
+Example: tq query-inspect 1023
+
+Exit code: 2
+```
+
+**Invalid Argument**:
+```
+Error: Invalid session ID 'abc'
+Session ID must be a positive integer.
+
+Example: tq query-inspect 1023
+
+Exit code: 2
+```
+
+**Exit Codes**:
+- `0`: Query information displayed (including the case of session not found)
+- `1`: Query error (privilege denied, connection failed, view not available)
+- `2`: Usage error (missing or invalid session ID argument, invalid format)
+
+**Integration with Scripting**:
+
+```bash
+# Full PMON workflow: sessions -> query-inspect
+tq sessions --format json | \
+  jq '.[] | select(.AMPCPUSec > 1000) | .SessionNo' | \
+  while read session; do
+    echo "=== Session $session ==="
+    tq query-inspect --format json "$session" | jq -r '.["Query Text"]'
+  done
+
+# Find and inspect all blocking sessions
+tq locks --format json | \
+  jq '.[].["Locking Sess"]' | sort -u | \
+  while read session; do
+    echo "Blocking session $session is running:"
+    tq query-inspect "$session" --format csv | tail -1 | cut -d, -f3
+  done
+```
+
+**Acceptance Test**:
+- Execute `tq query-inspect <active_session_id>` and verify table output with Session, User, Query Text
+- Execute `tq query-inspect <inactive_session_id>` and verify informative not-found message (exit code 0)
+- Execute `tq query-inspect --format csv <session_id>` and verify CSV output with full query text
+- Execute `tq query-inspect --format json <session_id>` and verify JSON object output with full query text
+- Execute without session ID and verify usage error (exit code 2)
+- Execute with non-integer session ID and verify invalid argument error (exit code 2)
+- Trigger privilege error and verify helpful error message with GRANT example (exit code 1)
+- Verify query text is truncated in table format but full in CSV/JSON
 
 ---
 

@@ -6,8 +6,9 @@
 //! Sprint 38: Initial implementation
 
 use crate::cli::{OutputFormat, SysconfigArgs};
-use crate::db::{DatabaseClient, Value};
+use crate::db::DatabaseClient;
 use crate::error::Result;
+use super::monitoring_utils::{escape_csv, extract_integer, extract_trimmed_string};
 use std::io::Write;
 
 /// SQL query to retrieve system version and release from DBC.DBCInfoV
@@ -48,8 +49,8 @@ impl SysconfigInfo {
         let info_result = client.execute(DBCINFO_SQL)?;
         for row in &info_result.rows {
             if row.len() >= 2 {
-                let key = extract_trimmed_string(&row[0]);
-                let value = extract_trimmed_string(&row[1]);
+                let key = extract_trimmed_string(&row[0], "[unavailable]");
+                let value = extract_trimmed_string(&row[1], "[unavailable]");
                 match key.to_uppercase().as_str() {
                     "VERSION" => version = value,
                     "RELEASE" => release = value,
@@ -80,25 +81,6 @@ impl SysconfigInfo {
             ("Release", self.release.clone()),
             ("AMP Count", self.amp_count.to_string()),
         ]
-    }
-}
-
-/// Extract a trimmed string from a Value, returning "[unavailable]" for NULL
-fn extract_trimmed_string(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.trim().to_string(),
-        Value::Null => "[unavailable]".to_string(),
-        other => other.display().trim().to_string(),
-    }
-}
-
-/// Extract integer value from a Value
-fn extract_integer(value: &Value) -> Option<i64> {
-    match value {
-        Value::Integer(v) => Some(*v),
-        Value::Decimal(v) => Some(*v as i64),
-        Value::Null => None,
-        _ => None,
     }
 }
 
@@ -225,15 +207,6 @@ fn display_csv<W: Write>(info: &SysconfigInfo, writer: &mut W) -> Result<()> {
     Ok(())
 }
 
-/// Escape a string for CSV output
-fn escape_csv(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
-    }
-}
-
 /// Display sysconfig in JSON format
 fn display_json<W: Write>(info: &SysconfigInfo, writer: &mut W) -> Result<()> {
     let json = serde_json::json!({
@@ -251,6 +224,7 @@ fn display_json<W: Write>(info: &SysconfigInfo, writer: &mut W) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::Value;
 
     #[test]
     fn test_sysconfig_info_as_properties() {
@@ -290,19 +264,22 @@ mod tests {
     #[test]
     fn test_extract_trimmed_string_from_string() {
         let value = Value::String("  hello  ".to_string());
-        assert_eq!(extract_trimmed_string(&value), "hello");
+        assert_eq!(extract_trimmed_string(&value, "[unavailable]"), "hello");
     }
 
     #[test]
     fn test_extract_trimmed_string_from_null() {
         let value = Value::Null;
-        assert_eq!(extract_trimmed_string(&value), "[unavailable]");
+        assert_eq!(
+            extract_trimmed_string(&value, "[unavailable]"),
+            "[unavailable]"
+        );
     }
 
     #[test]
     fn test_extract_trimmed_string_from_integer() {
         let value = Value::Integer(42);
-        assert_eq!(extract_trimmed_string(&value), "42");
+        assert_eq!(extract_trimmed_string(&value, "[unavailable]"), "42");
     }
 
     #[test]
@@ -433,5 +410,137 @@ mod tests {
             escape_csv(val),
             "\"17.20.00.17 (Released: January 15, 2024)\""
         );
+    }
+
+    // =========================================================================
+    // Error handling tests (Sprint 39)
+    // =========================================================================
+
+    /// Helper: simulate the error classification logic from execute_for_repl
+    fn classify_error(error_msg: &str) -> &'static str {
+        let error_str = error_msg.to_lowercase();
+        if error_str.contains("privilege")
+            || error_str.contains("access")
+            || error_str.contains("permission")
+            || error_str.contains("3523")
+        {
+            "permission_denied"
+        } else if error_str.contains("dbcinfov")
+            && (error_str.contains("not found") || error_str.contains("does not exist"))
+        {
+            "view_not_available"
+        } else {
+            "generic_error"
+        }
+    }
+
+    #[test]
+    fn test_error_classification_privilege() {
+        assert_eq!(
+            classify_error("[Error 3523] The user does not have SELECT access to DBC.DBCInfoV"),
+            "permission_denied"
+        );
+    }
+
+    #[test]
+    fn test_error_classification_access_denied() {
+        assert_eq!(
+            classify_error("Access denied to object DBC.DBCInfoV"),
+            "permission_denied"
+        );
+    }
+
+    #[test]
+    fn test_error_classification_permission_error() {
+        assert_eq!(
+            classify_error("Permission denied on database view"),
+            "permission_denied"
+        );
+    }
+
+    #[test]
+    fn test_error_classification_error_code_3523() {
+        assert_eq!(
+            classify_error("Error 3523: insufficient privileges"),
+            "permission_denied"
+        );
+    }
+
+    #[test]
+    fn test_error_classification_view_not_found() {
+        assert_eq!(
+            classify_error("Object 'DBC.DBCInfoV' not found"),
+            "view_not_available"
+        );
+    }
+
+    #[test]
+    fn test_error_classification_view_does_not_exist() {
+        assert_eq!(
+            classify_error("DBC.DBCInfoV does not exist on this system"),
+            "view_not_available"
+        );
+    }
+
+    #[test]
+    fn test_error_classification_generic() {
+        assert_eq!(
+            classify_error("Network timeout connecting to database"),
+            "generic_error"
+        );
+    }
+
+    #[test]
+    fn test_error_classification_empty_message() {
+        assert_eq!(classify_error(""), "generic_error");
+    }
+
+    #[test]
+    fn test_sysconfig_info_defaults_on_empty_data() {
+        // Test that SysconfigInfo handles unavailable fields gracefully
+        let info = SysconfigInfo {
+            version: "[unavailable]".to_string(),
+            release: "[unavailable]".to_string(),
+            amp_count: 0,
+        };
+
+        // Verify table display doesn't panic with default values
+        let mut output = Vec::new();
+        display_table(&info, &mut output).unwrap();
+        let output_str = String::from_utf8(output).unwrap();
+        assert!(output_str.contains("[unavailable]"));
+        assert!(output_str.contains("0"));
+    }
+
+    #[test]
+    fn test_sysconfig_csv_with_unavailable() {
+        let info = SysconfigInfo {
+            version: "[unavailable]".to_string(),
+            release: "[unavailable]".to_string(),
+            amp_count: 0,
+        };
+
+        let mut output = Vec::new();
+        display_csv(&info, &mut output).unwrap();
+        let output_str = String::from_utf8(output).unwrap();
+        assert!(output_str.contains("Teradata Version,[unavailable]"));
+        assert!(output_str.contains("AMP Count,0"));
+    }
+
+    #[test]
+    fn test_sysconfig_json_with_unavailable() {
+        let info = SysconfigInfo {
+            version: "[unavailable]".to_string(),
+            release: "[unavailable]".to_string(),
+            amp_count: 0,
+        };
+
+        let mut output = Vec::new();
+        display_json(&info, &mut output).unwrap();
+        let output_str = String::from_utf8(output).unwrap();
+
+        let json: serde_json::Value = serde_json::from_str(&output_str).unwrap();
+        assert_eq!(json["Teradata Version"], "[unavailable]");
+        assert_eq!(json["AMP Count"], 0);
     }
 }

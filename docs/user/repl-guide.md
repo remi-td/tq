@@ -45,6 +45,7 @@ Available metacommands:
     /pager       Enable/disable result paging
     /peek        Show first rows and column info (optional row count)
     /ping        Test connection
+    /query       Show current SQL query for a session
     /quit        Exit REPL
     /reconnect   Reconnect to database
     /repeat      Re-execute last query
@@ -53,7 +54,7 @@ Available metacommands:
     /sessions    List active Teradata sessions with performance metrics
     /set         Set configuration options
     /show        Show schema information (indexes)
-    /sysconfig   Display system topology (version, nodes, AMPs, PEs)
+    /sysconfig   Display system configuration (version and AMP count)
     /timing      Enable/disable query timing
 ```
 
@@ -1009,23 +1010,19 @@ The `/sessions` command displays ALL active sessions on the Teradata system, reg
 
 ### Display System Configuration
 
-Check system topology - Teradata version, number of nodes, AMPs, and PEs - at a glance:
+Check the Teradata version and AMP count at a glance:
 
 ```sql
 tq> /sysconfig
 
-System Configuration - prod-td01.company.com:
-┌──────────────────────┬─────────────────────────────────────┐
-│ Property             │ Value                               │
-├──────────────────────┼─────────────────────────────────────┤
-│ Teradata Version     │ 17.20.00.17                         │
-│ Release              │ 17.20.00.17 (Released: 2024-01-15)  │
-│ Node Count           │ 4                                   │
-│ AMP Count            │ 128                                 │
-│ PE Count             │ 16                                  │
-└──────────────────────┴─────────────────────────────────────┘
-
-(Query time: 0.045s)
+System Configuration:
+┌──────────────────┬─────────────────────────────────────┐
+│ Property         │ Value                               │
+├──────────────────┼─────────────────────────────────────┤
+│ Teradata Version │ 17.20.00.17                         │
+│ Release          │ 17.20.00.17 (Released: 2024-01-15)  │
+│ AMP Count        │ 128                                 │
+└──────────────────┴─────────────────────────────────────┘
 ```
 
 **Short alias:** `/sc`
@@ -1038,14 +1035,12 @@ tq> /sc
 
 - **Teradata Version** - The installed software version retrieved from `DBC.DBCInfoV`
 - **Release** - Full release string including build date
-- **Node Count** - Total number of nodes in the system
 - **AMP Count** - Total number of Access Module Processors (computed via `HASHAMP()+1`)
-- **PE Count** - Total number of Parsing Engines
 
 **Use cases:**
 
 - Confirm the Teradata version before running version-specific SQL features
-- Verify system topology during capacity planning
+- Verify AMP count during capacity planning
 - Document configuration snapshots as part of change management
 - Quickly orient yourself when connecting to an unfamiliar system
 
@@ -1060,9 +1055,7 @@ tq> /sysconfig
 Property,Value
 Teradata Version,17.20.00.17
 Release,"17.20.00.17 (Released: 2024-01-15)"
-Node Count,4
 AMP Count,128
-PE Count,16
 
 # JSON output - useful for scripting
 tq> /set format json
@@ -1070,9 +1063,7 @@ tq> /sysconfig
 {
   "Teradata Version": "17.20.00.17",
   "Release": "17.20.00.17 (Released: 2024-01-15)",
-  "Node Count": 4,
-  "AMP Count": 128,
-  "PE Count": 16
+  "AMP Count": 128
 }
 ```
 
@@ -1110,6 +1101,8 @@ GRANT SELECT ON DBC.DBCInfoV TO <your_username>;
 
 ---
 
+---
+
 ### Display Lock Information
 
 Inspect current lock contention on the system. This shows which objects are locked, what type of lock is held, which session holds it, and which sessions are waiting:
@@ -1117,19 +1110,19 @@ Inspect current lock contention on the system. This shows which objects are lock
 ```sql
 tq> /locks
 
-Lock Information on prod-td01.company.com:
-┌──────────────────────┬───────────┬────────────┬──────────────┬──────────────┬────────────────────────┐
-│ Locked Object        │ Lock Type │ Lock Mode  │ Locking Sess │ Waiting Sess │ Blocked Since          │
-├──────────────────────┼───────────┼────────────┼──────────────┼──────────────┼────────────────────────┤
-│ PRODUCTION.orders    │ Table     │ WRITE      │ 1023         │ 1045, 1067   │ 2026/01/27 14:32:15.00 │
-│ PRODUCTION.customers │ Table     │ EXCLUSIVE  │ 1023         │ 1051         │ 2026/01/27 14:32:15.00 │
-│ PRODUCTION.employees │ Row Hash  │ READ       │ 1078         │ (none)       │ 2026/01/27 14:45:00.00 │
-└──────────────────────┴───────────┴────────────┴──────────────┴──────────────┴────────────────────────┘
+Lock Information:
+┌──────────────────────┬───────────┬────────────┬──────────────┬──────────────┐
+│ Locked Object        │ Lock Type │ Lock Mode  │ Locking Sess │ Waiting Sess │
+├──────────────────────┼───────────┼────────────┼──────────────┼──────────────┤
+│ PRODUCTION.orders    │ Table     │ WRITE      │ 1023         │ 1045, 1067   │
+│ PRODUCTION.customers │ Table     │ EXCLUSIVE  │ 1023         │ 1051         │
+│ PRODUCTION.employees │ Row Hash  │ READ       │ 1078         │ (none)       │
+└──────────────────────┴───────────┴────────────┴──────────────┴──────────────┘
 
-3 locks found - 1 blocking chain detected (Query time: 0.089s)
+3 lock(s) found - 1 blocking chain(s) detected (Query time: 0.089s)
 
 Blocking Chain:
-  Session 1023 (etl_user) blocks sessions: 1045, 1051, 1067
+  Session 1023 blocks sessions: 1045, 1051, 1067
 ```
 
 When no locks are active, you'll see a clean confirmation instead of an empty table:
@@ -1137,7 +1130,7 @@ When no locks are active, you'll see a clean confirmation instead of an empty ta
 ```sql
 tq> /locks
 
-Lock Information on prod-td01.company.com:
+Lock Information:
 No locks currently held.
 
 (Query time: 0.023s)
@@ -1156,7 +1149,6 @@ tq> /lk
 - **Lock Mode** - Severity of the lock (see lock mode table below)
 - **Locking Sess** - Session ID that currently holds the lock
 - **Waiting Sess** - Comma-separated list of session IDs waiting for this lock, or `(none)` if none are waiting
-- **Blocked Since** - Timestamp when the lock was first acquired
 
 **Lock mode reference:**
 
@@ -1173,8 +1165,8 @@ When one or more sessions are waiting for a lock, tq automatically identifies th
 
 ```
 Blocking Chain:
-  Session 1023 (etl_user) blocks sessions: 1045, 1051, 1067
-  Session 1089 (batch_proc) blocks sessions: 1092
+  Session 1023 blocks sessions: 1045, 1051, 1067
+  Session 1089 blocks sessions: 1092
 ```
 
 This makes it immediately clear which session to investigate or ask to commit/rollback.
@@ -1198,16 +1190,14 @@ tq> /locks
     "Lock Type": "Table",
     "Lock Mode": "WRITE",
     "Locking Sess": 1023,
-    "Waiting Sess": [1045, 1067],
-    "Blocked Since": "2026/01/27 14:32:15.00"
+    "Waiting Sess": [1045, 1067]
   },
   {
     "Locked Object": "PRODUCTION.employees",
     "Lock Type": "Row Hash",
     "Lock Mode": "READ",
     "Locking Sess": 1078,
-    "Waiting Sess": [],
-    "Blocked Since": "2026/01/27 14:45:00.00"
+    "Waiting Sess": []
   }
 ]
 ```
@@ -1254,6 +1244,185 @@ tq locks --format csv --output locks_$(date +%Y%m%d_%H%M%S).csv
 GRANT SELECT ON DBC.LockInfoV TO <your_username>;
 ```
 
+---
+
+### Inspect a Session's Current Query
+
+When you see a session in `/sessions` that is consuming significant resources, use `/query` to see the SQL it is currently running:
+
+```sql
+tq> /query 1023
+
+Query for session 1023:
+┌────────────┬──────────────────────────────────────────────────────────────┐
+│ Property   │ Value                                                        │
+├────────────┼──────────────────────────────────────────────────────────────┤
+│ Session    │ 1023                                                         │
+│ User       │ etl_user                                                     │
+│ Query Text │ UPDATE PRODUCTION.orders SET status = 'shipped' WHERE ...   │
+└────────────┴──────────────────────────────────────────────────────────────┘
+
+(Query time: 0.123s)
+```
+
+**Short alias:** `/q`
+
+```sql
+tq> /qi 1023
+```
+
+**What you see:**
+
+- **Session** - The session ID you queried
+- **User** - The user account running that session
+- **Query Text** - The most recent SQL text logged for that session (truncated at 200 characters; see below for full text)
+
+**Viewing the full SQL text:**
+
+Long queries are truncated to 200 characters in the table view. To see the complete SQL, switch to CSV or JSON output:
+
+```sql
+# JSON output - full untruncated query text
+tq> /set format json
+tq> /query 1023
+{
+  "Session": 1023,
+  "User": "etl_user",
+  "Query Text": "UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_date < '2026-01-01' AND status = 'pending' AND warehouse_id IN (SELECT id FROM warehouses WHERE region = 'WEST')"
+}
+
+# CSV output - also returns full untruncated query text
+tq> /set format csv
+tq> /query 1023
+Session,User,Query Text
+1023,etl_user,"UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_date < '2026-01-01' AND status = 'pending'"
+```
+
+**Typical workflow - drill down from sessions:**
+
+```sql
+# Step 1: Find resource-heavy sessions
+tq> /sessions
+
+Session Information:
+┌───────────┬──────────┬──────────┬─────────────┬────────────┬──────────────┬─────────────┐
+│ SessionNo │ UserName │ PEState  │ AMPCPUTime  │ SpoolUsage │ AmpCPUSkew%  │ SpoolSkew%  │
+├───────────┼──────────┼──────────┼─────────────┼────────────┼──────────────┼─────────────┤
+│ 1023      │ etl_user │ Active   │ 847.3       │ 12.4 GB    │ 23%          │ 31%         │
+│ 1045      │ bi_user  │ Blocked  │ 0.0         │ 0 B        │ 0%           │ 0%          │
+└───────────┴──────────┴──────────┴─────────────┴────────────┴──────────────┴─────────────┘
+
+# Step 2: Inspect the SQL for the heavy session
+tq> /query 1023
+
+Query for session 1023:
+┌────────────┬──────────────────────────────────────────────────────────────┐
+│ Property   │ Value                                                        │
+├────────────┼──────────────────────────────────────────────────────────────┤
+│ Session    │ 1023                                                         │
+│ User       │ etl_user                                                     │
+│ Query Text │ UPDATE PRODUCTION.orders SET status = 'shipped' WHERE ...   │
+└────────────┴──────────────────────────────────────────────────────────────┘
+
+(Query time: 0.123s)
+
+# Step 3: If blocking is involved, correlate with /locks
+tq> /locks
+
+Blocking Chain:
+  Session 1023 blocks sessions: 1045
+```
+
+**Error scenarios:**
+
+When no session ID is provided:
+
+```sql
+tq> /query
+
+Usage: /query <session_id>
+
+Provide the session ID of the session to inspect.
+Example: /query 1023
+
+Use /sessions to list active session IDs.
+```
+
+When a non-integer session ID is given:
+
+```sql
+tq> /query abc
+
+Error: Invalid session ID 'abc'
+Session ID must be an integer.
+Example: /query 1023
+```
+
+When the session is not found (disconnected or no DBQL record):
+
+```sql
+tq> /query 9999
+
+No query information found for session 9999.
+
+The session may have already disconnected, or DBQL logging may not be
+enabled for this user. Contact your DBA to enable DBQL logging.
+```
+
+When DBQL logging is not enabled on the system:
+
+```sql
+tq> /query 1023
+
+No query information found for session 1023.
+
+DBQL (Database Query Log) logging may not be enabled on this system.
+Query text is only available when DBQL logging is active.
+Contact your DBA to enable DBQL logging.
+```
+
+**Use cases:**
+
+- Identify the SQL being run by a resource-heavy session found via `/sessions`
+- Correlate a blocking session (from `/locks`) with the query causing the block
+- Audit what a specific session has been running
+
+**Tab completion:**
+
+```sql
+tq> /q<TAB>
+
+Matching metacommands:
+    /query   Show the current SQL query for a session
+    /quit    Exit REPL
+
+tq> /query <TAB>
+[Accepts session ID argument]
+```
+
+**Batch mode equivalent:**
+
+```bash
+# Show query for session 1023
+tq query-inspect 1023
+
+# JSON output for scripting
+tq query-inspect 1023 --format json
+
+# Extract query text in a monitoring script
+tq query-inspect 1023 --format json | jq -r '.["Query Text"]'
+
+# CSV export for reporting
+tq query-inspect 1023 --format csv
+```
+
+**Note:** This command requires SELECT privilege on `DBC.QryLogV`. Query text is only available when DBQL (Database Query Log) logging is enabled on the system. If you see a permission error, contact your DBA and request access with:
+```sql
+GRANT SELECT ON DBC.QryLogV TO <your_username>;
+```
+
+---
+
 ### Clear Screen
 
 Clear the terminal:
@@ -1298,9 +1467,10 @@ tq> /quit
 11. **Combine sampling with patterns** - First use `/list tables pattern%` to find tables, then `/sample` to inspect them
 12. **Iterative query development** - Start simple, run it, then use `/edit` to add complexity step by step
 13. **The pager is experimental** - By default, wide results show with truncation. You can try `/pager on` to test interactive navigation
-14. **Orient yourself on new systems** - Run `/sysconfig` as soon as you connect to an unfamiliar Teradata instance to understand its topology
+14. **Orient yourself on new systems** - Run `/sysconfig` as soon as you connect to an unfamiliar Teradata instance to check the version and AMP count
 15. **Use `/locks` before maintenance** - Always check for active locks before running DDL or bulk operations to avoid unexpected blocking
 16. **Diagnose hangs with `/locks` + `/sessions`** - If a query is hanging, use `/locks` to see if it is blocked, then cross-reference with `/sessions` to identify the blocking session's workload
+17. **Drill into heavy sessions with `/query`** - When `/sessions` shows a session with high CPU or spool, use `/query <session_id>` to see what SQL it is executing
 
 ## Keyboard Shortcuts Reference
 

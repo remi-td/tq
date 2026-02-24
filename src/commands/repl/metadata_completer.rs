@@ -328,6 +328,12 @@ const METACOMMANDS: &[MetacommandDef] = &[
         aliases: &["lk"],
         description: "Display current lock contention and blocking chains",
     },
+    // Sprint 39: Query inspection command
+    MetacommandDef {
+        name: "query",
+        aliases: &["qi"],
+        description: "Show recent SQL queries for a session",
+    },
 ];
 
 /// Test helper: returns metacommand names matching a prefix

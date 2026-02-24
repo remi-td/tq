@@ -402,12 +402,13 @@ tq> SELECT COUNT(*) FROM employees WHERE dept = 'IT';
 - `/disconnect` - Disconnect current connection
 - `/reconnect` - Reconnect to database
 - `/ping` - Test connection
+- `/query` - Show current SQL query for a session
 - `/sample` - Show random sample
 - `/peek` - Show first rows and column info
 - `/export` - Export results
 - `/session` - Show session info
 - `/sessions` - List active Teradata sessions
-- `/sysconfig` - Display system topology
+- `/sysconfig` - Display system configuration (version and AMP count)
 - `/timing` - Enable/disable query timing
 - `/set` - Set configuration
 - `/pager` - Enable/disable result paging
@@ -440,6 +441,7 @@ Available metacommands:
     /pager       Enable/disable result paging
     /peek        Show first rows and column info
     /ping        Test connection
+    /query       Show current SQL query for a session
     /quit        Exit REPL
     /reconnect   Reconnect to database
     /repeat      Re-execute last query
@@ -1761,8 +1763,9 @@ Suggestions:
 | Command | Alias | Description | Example |
 |---------|-------|-------------|---------|
 | `/sessions` | `/s` | List active Teradata sessions with performance metrics | `/sessions` |
-| `/sysconfig` | `/sc` | Display system topology: version, nodes, AMPs, PEs | `/sysconfig` |
+| `/sysconfig` | `/sc` | Display system configuration: version and AMP count | `/sysconfig` |
 | `/locks` | `/lk` | Display current lock contention and blocking chains | `/locks` |
+| `/query <session_id>` | `/qi` | Show the SQL text of a session's most recent query | `/query 1023` |
 
 **`/list databases` Metacommand**
 
@@ -2341,7 +2344,7 @@ SessionNo,UserName,LogonTime,PEstate,AMPState,AMPCPUSec,AMPIO,ReqSpool,Amp CPU S
 
 **`/sysconfig` Metacommand**
 
-**Requirement:** Display a compact system configuration summary showing Teradata version, node count, AMP count, and PE count so DBAs can verify topology at a glance.
+**Requirement:** Display a compact system configuration summary showing Teradata version and AMP count so DBAs can quickly verify software version and system scale.
 
 **Syntax:**
 ```
@@ -2353,29 +2356,23 @@ SessionNo,UserName,LogonTime,PEstate,AMPState,AMPCPUSec,AMPIO,ReqSpool,Amp CPU S
 ```
 tq> /sysconfig
 
-System Configuration - prod-td01.company.com:
-┌──────────────────────┬─────────────────────────────────────┐
-│ Property             │ Value                               │
-├──────────────────────┼─────────────────────────────────────┤
-│ Teradata Version     │ 17.20.00.17                         │
-│ Release              │ 17.20.00.17 (Released: 2024-01-15)  │
-│ Node Count           │ 4                                   │
-│ AMP Count            │ 128                                 │
-│ PE Count             │ 16                                  │
-└──────────────────────┴─────────────────────────────────────┘
-
-(Query time: 0.045s)
+System Configuration:
+┌──────────────────┬─────────────────────────────────────┐
+│ Property         │ Value                               │
+├──────────────────┼─────────────────────────────────────┤
+│ Teradata Version │ 17.20.00.17                         │
+│ Release          │ 17.20.00.17 (Released: 2024-01-15)  │
+│ AMP Count        │ 128                                 │
+└──────────────────┴─────────────────────────────────────┘
 ```
 
-**Column Descriptions:**
+**Property Descriptions:**
 
 | Property | Description |
 |----------|-------------|
 | Teradata Version | Installed software version from DBC.DBCInfoV |
 | Release | Full release string including build date |
-| Node Count | Total number of nodes in the system |
 | AMP Count | Total number of Access Module Processors (via HASHAMP()+1) |
-| PE Count | Total number of Parsing Engines |
 
 **Behavior Requirements:**
 
@@ -2395,10 +2392,8 @@ The command SHALL retrieve system configuration from Teradata system views:
 
 1. **REQ-SYSCONFIG-002.1** - Teradata version and release: Query `DBC.DBCInfoV` (InfoKey IN ('RELEASE','VERSION'))
 2. **REQ-SYSCONFIG-002.2** - AMP count: Compute via `HASHAMP() + 1`
-3. **REQ-SYSCONFIG-002.3** - Node count: Derive from DBC system views (e.g., `DBC.ResUsageSpma` or equivalent)
-4. **REQ-SYSCONFIG-002.4** - PE count: Derive from DBC system views
-5. **REQ-SYSCONFIG-002.5** - Query execution time SHALL be displayed in summary footer
-6. **REQ-SYSCONFIG-002.6** - Queries SHALL be read-only (no side effects)
+3. **REQ-SYSCONFIG-002.3** - Query execution time SHALL be displayed in summary footer
+4. **REQ-SYSCONFIG-002.4** - Queries SHALL be read-only (no side effects)
 
 **REQ-SYSCONFIG-003: Output Formatting and Display**
 
@@ -2406,10 +2401,9 @@ The command SHALL format output as a two-column key-value table:
 
 1. **REQ-SYSCONFIG-003.1** - Default output format: Two-column key-value table (box-drawing characters)
 2. **REQ-SYSCONFIG-003.2** - Column 1 header: `Property`; Column 2 header: `Value`
-3. **REQ-SYSCONFIG-003.3** - Properties displayed in a logical order (version info first, then resource counts)
-4. **REQ-SYSCONFIG-003.4** - Header line: `System Configuration - <hostname>:` above the table
-5. **REQ-SYSCONFIG-003.5** - Footer: `(Query time: X.XXXs)` below the table
-6. **REQ-SYSCONFIG-003.6** - Column widths SHALL auto-adjust to content
+3. **REQ-SYSCONFIG-003.3** - Properties displayed in order: Teradata Version, Release, AMP Count
+4. **REQ-SYSCONFIG-003.4** - Header line: `System Configuration:` above the table
+5. **REQ-SYSCONFIG-003.5** - Column widths SHALL auto-adjust to content
 
 **REQ-SYSCONFIG-004: Output Format Compatibility**
 
@@ -2421,18 +2415,14 @@ The command SHALL work with all output format modes:
    Property,Value
    Teradata Version,17.20.00.17
    Release,"17.20.00.17 (Released: 2024-01-15)"
-   Node Count,4
    AMP Count,128
-   PE Count,16
    ```
 3. **REQ-SYSCONFIG-004.3** - JSON format: Single object with property names as keys
    ```json
    {
      "Teradata Version": "17.20.00.17",
      "Release": "17.20.00.17 (Released: 2024-01-15)",
-     "Node Count": 4,
-     "AMP Count": 128,
-     "PE Count": 16
+     "AMP Count": 128
    }
    ```
 4. **REQ-SYSCONFIG-004.4** - Format selection: Command SHALL respect current output format setting (`/set format <fmt>`)
@@ -2475,7 +2465,7 @@ The command SHALL be discoverable through standard REPL features:
 1. **REQ-SYSCONFIG-006.1** - Tab completion: Typing `/sc<TAB>` SHALL auto-complete to `/sysconfig`
 2. **REQ-SYSCONFIG-006.2** - Tab completion: Typing `/sys<TAB>` SHALL auto-complete to `/sysconfig`
 3. **REQ-SYSCONFIG-006.3** - Help text: `/help` SHALL list `/sysconfig` command with description
-4. **REQ-SYSCONFIG-006.4** - Help text description: "Display system topology (version, nodes, AMPs, PEs)"
+4. **REQ-SYSCONFIG-006.4** - Help text description: "Display system configuration (version and AMP count)"
 5. **REQ-SYSCONFIG-006.5** - Detailed help: `/help sysconfig` SHALL display extended help including property descriptions
 6. **REQ-SYSCONFIG-006.6** - Command SHALL appear in metacommand list when typing `/<TAB>`
 
@@ -2490,11 +2480,11 @@ SYNTAX:
   /sc                        Short alias
 
 DESCRIPTION:
-  Display a compact summary of the Teradata system topology including
-  software version, node count, AMP count, and PE count. Useful for
-  verifying system configuration during DBA operations.
+  Display a compact summary of the Teradata system configuration including
+  software version and AMP count. Useful for verifying system version and
+  scale at a glance.
 
-  Data is retrieved from DBC.DBCInfoV and Teradata system functions.
+  Data is retrieved from DBC.DBCInfoV and HASHAMP()+1.
   Requires SELECT privilege on DBC system views.
 
 EXAMPLES:
@@ -2504,6 +2494,7 @@ EXAMPLES:
 RELATED COMMANDS:
   /sessions                  List active sessions
   /locks                     Display lock contention
+  /query                     Show current SQL for a session
 
 For more information, see documentation at: docs/user/metacommands.md
 ```
@@ -2521,18 +2512,14 @@ For more information, see documentation at: docs/user/metacommands.md
 ```sql
 tq> /sysconfig
 
-System Configuration - prod-td01.company.com:
-┌──────────────────────┬─────────────────────────────────────┐
-│ Property             │ Value                               │
-├──────────────────────┼─────────────────────────────────────┤
-│ Teradata Version     │ 17.20.00.17                         │
-│ Release              │ 17.20.00.17 (Released: 2024-01-15)  │
-│ Node Count           │ 4                                   │
-│ AMP Count            │ 128                                 │
-│ PE Count             │ 16                                  │
-└──────────────────────┴─────────────────────────────────────┘
-
-(Query time: 0.045s)
+System Configuration:
+┌──────────────────┬─────────────────────────────────────┐
+│ Property         │ Value                               │
+├──────────────────┼─────────────────────────────────────┤
+│ Teradata Version │ 17.20.00.17                         │
+│ Release          │ 17.20.00.17 (Released: 2024-01-15)  │
+│ AMP Count        │ 128                                 │
+└──────────────────┴─────────────────────────────────────┘
 
 tq> /sc
 [Same output using short alias]
@@ -2547,9 +2534,7 @@ tq> /sysconfig
 {
   "Teradata Version": "17.20.00.17",
   "Release": "17.20.00.17 (Released: 2024-01-15)",
-  "Node Count": 4,
-  "AMP Count": 128,
-  "PE Count": 16
+  "AMP Count": 128
 }
 ```
 
@@ -2565,11 +2550,10 @@ tq> /sysconfig_
 ```
 
 **Acceptance Test:**
-- Execute `/sysconfig` and verify all five properties are displayed
+- Execute `/sysconfig` and verify all three properties are displayed: Teradata Version, Release, AMP Count
 - Execute `/sc` (alias) and verify identical behavior
-- Verify output includes Teradata Version, Release, Node Count, AMP Count, PE Count
-- Execute with `/set format csv` and verify CSV output with Property,Value headers
-- Execute with `/set format json` and verify JSON object output
+- Execute with `/set format csv` and verify CSV output with Property,Value headers and three data rows
+- Execute with `/set format json` and verify JSON object output with three keys
 - Trigger privilege error and verify helpful error message with GRANT example
 - Type `/sc<TAB>` and verify tab completion resolves to `/sysconfig`
 - Execute `/help sysconfig` and verify extended help is displayed
@@ -2592,26 +2576,26 @@ tq> /sysconfig_
 ```
 tq> /locks
 
-Lock Information on prod-td01.company.com:
-┌──────────────────────┬───────────┬────────────┬──────────────┬──────────────┬────────────────────────┐
-│ Locked Object        │ Lock Type │ Lock Mode  │ Locking Sess │ Waiting Sess │ Blocked Since          │
-├──────────────────────┼───────────┼────────────┼──────────────┼──────────────┼────────────────────────┤
-│ PRODUCTION.orders    │ Table     │ WRITE      │ 1023         │ 1045, 1067   │ 2026/01/27 14:32:15.00 │
-│ PRODUCTION.customers │ Table     │ EXCLUSIVE  │ 1023         │ 1051         │ 2026/01/27 14:32:15.00 │
-│ PRODUCTION.employees │ Row Hash  │ READ       │ 1078         │ (none)       │ 2026/01/27 14:45:00.00 │
-└──────────────────────┴───────────┴────────────┴──────────────┴──────────────┴────────────────────────┘
+Lock Information:
+┌──────────────────────┬───────────┬────────────┬──────────────┬──────────────┐
+│ Locked Object        │ Lock Type │ Lock Mode  │ Locking Sess │ Waiting Sess │
+├──────────────────────┼───────────┼────────────┼──────────────┼──────────────┤
+│ PRODUCTION.orders    │ Table     │ WRITE      │ 1023         │ 1045, 1067   │
+│ PRODUCTION.customers │ Table     │ EXCLUSIVE  │ 1023         │ 1051         │
+│ PRODUCTION.employees │ Row Hash  │ READ       │ 1078         │ (none)       │
+└──────────────────────┴───────────┴────────────┴──────────────┴──────────────┘
 
-3 locks found - 1 blocking chain detected (Query time: 0.089s)
+3 lock(s) found - 1 blocking chain(s) detected (Query time: 0.089s)
 
 Blocking Chain:
-  Session 1023 (etl_user) blocks sessions: 1045, 1051, 1067
+  Session 1023 blocks sessions: 1045, 1051, 1067
 ```
 
 **When no locks exist:**
 ```
 tq> /locks
 
-Lock Information on prod-td01.company.com:
+Lock Information:
 No locks currently held.
 
 (Query time: 0.023s)
@@ -2625,8 +2609,7 @@ No locks currently held.
 | Lock Type | VARCHAR | Granularity of the lock: Table, Row Hash, Database |
 | Lock Mode | VARCHAR | Lock severity: READ, WRITE, EXCLUSIVE, ACCESS |
 | Locking Sess | INTEGER | Session ID that holds the lock |
-| Waiting Sess | VARCHAR | Comma-separated list of session IDs waiting for this lock, or `(none)` |
-| Blocked Since | TIMESTAMP | When the lock was first acquired (YYYY/MM/DD HH:MM:SS.ss format) |
+| Waiting Sess | VARCHAR | Comma-separated list of session IDs waiting for this lock, or `(none)` when no waiters |
 
 **Lock Mode Definitions:**
 
@@ -2666,12 +2649,11 @@ The command SHALL format lock information as a table:
 
 1. **REQ-LOCKS-003.1** - Default output format: Table (box-drawing characters)
 2. **REQ-LOCKS-003.2** - Column headers SHALL match column names exactly as specified above
-3. **REQ-LOCKS-003.3** - Timestamp format: `YYYY/MM/DD HH:MM:SS.ss` (Teradata default timestamp format)
-4. **REQ-LOCKS-003.4** - Waiting sessions: Comma-separated session IDs or `(none)` when no waiters
-5. **REQ-LOCKS-003.5** - Header line: `Lock Information on <hostname>:` above the table
-6. **REQ-LOCKS-003.6** - Summary footer format: `N locks found - M blocking chain(s) detected (Query time: X.XXXs)`
-7. **REQ-LOCKS-003.7** - When no locks exist, display `No locks currently held.` instead of an empty table
-8. **REQ-LOCKS-003.8** - Column widths SHALL auto-adjust to content (minimum width: header width)
+3. **REQ-LOCKS-003.3** - Waiting sessions: Comma-separated session IDs or `(none)` when no waiters
+4. **REQ-LOCKS-003.4** - Header line: `Lock Information:` above the table
+5. **REQ-LOCKS-003.5** - Summary footer format: `N lock(s) found - M blocking chain(s) detected (Query time: X.XXXs)`
+6. **REQ-LOCKS-003.6** - When no locks exist, display `No locks currently held.` instead of an empty table
+7. **REQ-LOCKS-003.7** - Column widths SHALL auto-adjust to content (minimum width: header width)
 
 **REQ-LOCKS-004: Blocking Chain Identification**
 
@@ -2679,7 +2661,7 @@ The command SHALL identify and display blocking chains:
 
 1. **REQ-LOCKS-004.1** - A blocking chain exists when one or more sessions are waiting for a lock held by another session
 2. **REQ-LOCKS-004.2** - After the main lock table, display a "Blocking Chain:" section if any chains exist
-3. **REQ-LOCKS-004.3** - Each chain entry format: `Session <N> (<username>) blocks sessions: <id1>, <id2>, ...`
+3. **REQ-LOCKS-004.3** - Each chain entry format: `Session <N> blocks sessions: <id1>, <id2>, ...`
 4. **REQ-LOCKS-004.4** - Multiple independent blocking chains SHALL each be listed on a separate line
 5. **REQ-LOCKS-004.5** - If no blocking chains exist, the "Blocking Chain:" section SHALL NOT be shown
 6. **REQ-LOCKS-004.6** - Chain detection SHALL be based on the Waiting Sess column data
@@ -2687,8 +2669,8 @@ The command SHALL identify and display blocking chains:
 **Blocking chain example with multiple chains:**
 ```
 Blocking Chain:
-  Session 1023 (etl_user) blocks sessions: 1045, 1051, 1067
-  Session 1089 (batch_proc) blocks sessions: 1092
+  Session 1023 blocks sessions: 1045, 1051, 1067
+  Session 1089 blocks sessions: 1092
 ```
 
 **REQ-LOCKS-005: Output Format Compatibility**
@@ -2696,14 +2678,14 @@ Blocking Chain:
 The command SHALL work with all output format modes:
 
 1. **REQ-LOCKS-005.1** - Table format (default): Box-drawing table as shown above
-2. **REQ-LOCKS-005.2** - CSV format: Standard CSV with headers, waiting sessions as quoted comma-separated string
+2. **REQ-LOCKS-005.2** - CSV format: Standard CSV with headers, waiting sessions as quoted comma-separated string or empty string when no waiters
    ```csv
-   Locked Object,Lock Type,Lock Mode,Locking Sess,Waiting Sess,Blocked Since
-   PRODUCTION.orders,Table,WRITE,1023,"1045, 1067",2026/01/27 14:32:15.00
-   PRODUCTION.customers,Table,EXCLUSIVE,1023,1051,2026/01/27 14:32:15.00
-   PRODUCTION.employees,Row Hash,READ,1078,,2026/01/27 14:45:00.00
+   Locked Object,Lock Type,Lock Mode,Locking Sess,Waiting Sess
+   PRODUCTION.orders,Table,WRITE,1023,"1045, 1067"
+   PRODUCTION.customers,Table,EXCLUSIVE,1023,1051
+   PRODUCTION.employees,Row Hash,READ,1078,
    ```
-3. **REQ-LOCKS-005.3** - JSON format: Array of lock objects, waiting sessions as JSON array
+3. **REQ-LOCKS-005.3** - JSON format: Array of lock objects, waiting sessions as JSON array of integers
    ```json
    [
      {
@@ -2711,24 +2693,21 @@ The command SHALL work with all output format modes:
        "Lock Type": "Table",
        "Lock Mode": "WRITE",
        "Locking Sess": 1023,
-       "Waiting Sess": [1045, 1067],
-       "Blocked Since": "2026/01/27 14:32:15.00"
+       "Waiting Sess": [1045, 1067]
      },
      {
        "Locked Object": "PRODUCTION.customers",
        "Lock Type": "Table",
        "Lock Mode": "EXCLUSIVE",
        "Locking Sess": 1023,
-       "Waiting Sess": [1051],
-       "Blocked Since": "2026/01/27 14:32:15.00"
+       "Waiting Sess": [1051]
      },
      {
        "Locked Object": "PRODUCTION.employees",
        "Lock Type": "Row Hash",
        "Lock Mode": "READ",
        "Locking Sess": 1078,
-       "Waiting Sess": [],
-       "Blocked Since": "2026/01/27 14:45:00.00"
+       "Waiting Sess": []
      }
    ]
    ```
@@ -2820,7 +2799,8 @@ EXAMPLES:
 
 RELATED COMMANDS:
   /sessions                  List active sessions
-  /sysconfig                 Display system topology
+  /sysconfig                 Display system configuration
+  /query                     Show current SQL for a session
 
 For more information, see documentation at: docs/user/metacommands.md
 ```
@@ -2839,7 +2819,7 @@ For more information, see documentation at: docs/user/metacommands.md
 ```sql
 tq> /locks
 
-Lock Information on prod-td01.company.com:
+Lock Information:
 No locks currently held.
 
 (Query time: 0.023s)
@@ -2849,18 +2829,18 @@ No locks currently held.
 ```sql
 tq> /locks
 
-Lock Information on prod-td01.company.com:
-┌──────────────────────┬───────────┬────────────┬──────────────┬──────────────┬────────────────────────┐
-│ Locked Object        │ Lock Type │ Lock Mode  │ Locking Sess │ Waiting Sess │ Blocked Since          │
-├──────────────────────┼───────────┼────────────┼──────────────┼──────────────┼────────────────────────┤
-│ PRODUCTION.orders    │ Table     │ WRITE      │ 1023         │ 1045, 1067   │ 2026/01/27 14:32:15.00 │
-│ PRODUCTION.customers │ Table     │ EXCLUSIVE  │ 1023         │ 1051         │ 2026/01/27 14:32:15.00 │
-└──────────────────────┴───────────┴────────────┴──────────────┴──────────────┴────────────────────────┘
+Lock Information:
+┌──────────────────────┬───────────┬────────────┬──────────────┬──────────────┐
+│ Locked Object        │ Lock Type │ Lock Mode  │ Locking Sess │ Waiting Sess │
+├──────────────────────┼───────────┼────────────┼──────────────┼──────────────┤
+│ PRODUCTION.orders    │ Table     │ WRITE      │ 1023         │ 1045, 1067   │
+│ PRODUCTION.customers │ Table     │ EXCLUSIVE  │ 1023         │ 1051         │
+└──────────────────────┴───────────┴────────────┴──────────────┴──────────────┘
 
-2 locks found - 1 blocking chain detected (Query time: 0.089s)
+2 lock(s) found - 1 blocking chain(s) detected (Query time: 0.089s)
 
 Blocking Chain:
-  Session 1023 (etl_user) blocks sessions: 1045, 1051, 1067
+  Session 1023 blocks sessions: 1045, 1051, 1067
 ```
 
 **With JSON output:**
@@ -2875,8 +2855,7 @@ tq> /locks
     "Lock Type": "Table",
     "Lock Mode": "WRITE",
     "Locking Sess": 1023,
-    "Waiting Sess": [1045, 1067],
-    "Blocked Since": "2026/01/27 14:32:15.00"
+    "Waiting Sess": [1045, 1067]
   }
 ]
 ```
@@ -2896,7 +2875,7 @@ Matching metacommands:
 
 **Acceptance Test:**
 - Execute `/locks` with no active locks and verify "No locks currently held." message
-- Execute `/locks` with active locks and verify all lock rows are displayed with correct columns
+- Execute `/locks` with active locks and verify all five columns are displayed: Locked Object, Lock Type, Lock Mode, Locking Sess, Waiting Sess
 - Execute `/lk` (alias) and verify identical behavior
 - Verify blocking chains section appears when sessions are waiting
 - Verify blocking chains section does NOT appear when no waiters exist
@@ -2905,6 +2884,266 @@ Matching metacommands:
 - Trigger privilege error and verify helpful error message with GRANT example
 - Type `/lk<TAB>` and verify tab completion resolves to `/locks`
 - Execute `/help locks` and verify extended help with lock mode definitions is displayed
+
+---
+
+**`/query` Metacommand**
+
+**Requirement:** Display the SQL text of the most recent query executed by a given session, enabling DBAs to drill down from session activity data into the specific SQL causing resource consumption or blocking.
+
+**Syntax:**
+```
+/query <session_id>
+/qi <session_id>        -- Short alias
+```
+
+**Arguments:**
+- `<session_id>`: Required. An integer session ID as shown in `/sessions` or `/locks` output.
+
+**Output Format:**
+
+**When query text is found:**
+```
+tq> /query 1023
+
+Query for session 1023:
+┌────────────┬──────────────────────────────────────────────────────────────────┐
+│ Property   │ Value                                                            │
+├────────────┼──────────────────────────────────────────────────────────────────┤
+│ Session    │ 1023                                                             │
+│ User       │ etl_user                                                         │
+│ Query Text │ UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_... │
+└────────────┴──────────────────────────────────────────────────────────────────┘
+
+(Query time: 0.123s)
+```
+
+**When no query information is found:**
+```
+tq> /query 9999
+
+No query information found for session 9999.
+
+The session may have already disconnected, or DBQL logging may not be
+enabled for this user. Contact your DBA to enable DBQL logging.
+```
+
+**Property Descriptions:**
+
+| Property | Description |
+|----------|-------------|
+| Session | The session ID that was queried |
+| User | The database user account running that session |
+| Query Text | The most recent SQL text logged for the session (truncated in table view) |
+
+**Behavior Requirements:**
+
+**REQ-QUERY-001: Query Text Display**
+
+The command SHALL display SQL text for a given session ID:
+
+1. **REQ-QUERY-001.1** - Retrieve query text from `DBC.QryLogV` for the specified session ID
+2. **REQ-QUERY-001.2** - Return the most recent (latest `CollectTimeStamp`) query log entry for the session
+3. **REQ-QUERY-001.3** - Display output as a two-column key-value table with properties: Session, User, Query Text
+4. **REQ-QUERY-001.4** - Header line: `Query for session <N>:` above the table
+5. **REQ-QUERY-001.5** - Footer: `(Query time: X.XXXs)` below the table
+6. **REQ-QUERY-001.6** - SQL query template:
+   ```sql
+   SELECT TOP 1
+       LogonName,
+       QueryText
+   FROM DBC.QryLogV
+   WHERE LogDate >= DATE - 1
+     AND SessionNo = <session_id>
+   ORDER BY CollectTimeStamp DESC
+   ```
+
+**REQ-QUERY-002: Batch Mode Support**
+
+The command SHALL be available as a batch mode subcommand:
+
+1. **REQ-QUERY-002.1** - Batch mode syntax: `tq query-inspect <session_id> [OPTIONS]`
+2. **REQ-QUERY-002.2** - Batch options SHALL include `--format` (table/csv/json) and `--output`
+3. **REQ-QUERY-002.3** - Batch mode behavior SHALL be identical to REPL mode for equivalent inputs
+4. **REQ-QUERY-002.4** - Exit code 0 on success (including session-not-found), exit code 1 on errors
+
+**REQ-QUERY-003: Output Format Compatibility**
+
+The command SHALL work with all output format modes:
+
+1. **REQ-QUERY-003.1** - Table format (default): Two-column key-value table as shown above, with Query Text truncated to 200 characters with `...`
+2. **REQ-QUERY-003.2** - CSV format: Three columns (`Session,User,Query Text`) with full untruncated query text
+   ```csv
+   Session,User,Query Text
+   1023,etl_user,"UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_date < '2026-01-01'"
+   ```
+3. **REQ-QUERY-003.3** - JSON format: Single object with full untruncated query text
+   ```json
+   {
+     "Session": 1023,
+     "User": "etl_user",
+     "Query Text": "UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_date < '2026-01-01'"
+   }
+   ```
+4. **REQ-QUERY-003.4** - Format selection: Command SHALL respect current output format setting (`/set format <fmt>`)
+5. **REQ-QUERY-003.5** - Full query text is always available in CSV and JSON formats regardless of length
+
+**REQ-QUERY-004: Tab Completion and Aliases**
+
+The command SHALL be discoverable and accessible via short forms:
+
+1. **REQ-QUERY-004.1** - Primary command: `/query`
+2. **REQ-QUERY-004.2** - Short alias: `/qi`
+3. **REQ-QUERY-004.3** - Both forms SHALL execute identically
+4. **REQ-QUERY-004.4** - Tab completion: Typing `/qi<TAB>` SHALL auto-complete to `/qi ` (with space, awaiting session ID argument)
+5. **REQ-QUERY-004.5** - Tab completion: Typing `/query<TAB>` SHALL auto-complete to `/query ` (with space, awaiting session ID argument)
+6. **REQ-QUERY-004.6** - Command SHALL appear in metacommand list when typing `/<TAB>`
+7. **REQ-QUERY-004.7** - Help text: `/help` SHALL list `/query` command with description "Show current SQL query for a session"
+
+**REQ-QUERY-005: Error Handling**
+
+The command SHALL handle all error conditions gracefully:
+
+**Missing argument:**
+```
+tq> /query
+
+Usage: /query <session_id>
+
+Provide the session ID of the session to inspect.
+Example: /query 1023
+
+Use /sessions to list active session IDs.
+```
+
+**Invalid argument (non-integer):**
+```
+tq> /query abc
+
+Error: Invalid session ID 'abc'
+Session ID must be an integer.
+Example: /query 1023
+```
+
+**Session not found (no DBQL record):**
+```
+tq> /query 9999
+
+No query information found for session 9999.
+
+The session may have already disconnected, or DBQL logging may not be
+enabled for this user. Contact your DBA to enable DBQL logging.
+```
+
+**DBQL not enabled (view not accessible):**
+```
+tq> /query 1023
+
+No query information found for session 1023.
+
+DBQL (Database Query Log) logging may not be enabled on this system.
+Query text is only available when DBQL logging is active.
+Contact your DBA to enable DBQL logging.
+```
+
+**Insufficient privileges:**
+```
+tq> /query 1023
+
+Error: Unable to retrieve query information.
+
+This command requires SELECT access to DBC.QryLogV.
+Contact your DBA to request access:
+  GRANT SELECT ON DBC.QryLogV TO <your_username>;
+```
+
+**Connection lost:**
+```
+tq> /query 1023
+
+Error: Cannot retrieve query information - connection lost.
+Use /reconnect to establish a new connection.
+```
+
+**Specific Requirements:**
+
+1. **REQ-QUERY-005.1** - Missing argument SHALL display usage hint with example
+2. **REQ-QUERY-005.2** - Non-integer argument SHALL display type error with example
+3. **REQ-QUERY-005.3** - Session not found (no row in DBC.QryLogV) SHALL display informative message, not an error
+4. **REQ-QUERY-005.4** - Privilege errors SHALL include GRANT statement example
+5. **REQ-QUERY-005.5** - All errors SHALL return to REPL prompt (non-fatal)
+6. **REQ-QUERY-005.6** - Session-not-found condition SHALL exit with code 0 in batch mode (not an error state)
+
+**REQ-QUERY-006: Long SQL Text Handling**
+
+The command SHALL handle SQL text of arbitrary length:
+
+1. **REQ-QUERY-006.1** - Table format: Truncate query text at 200 characters, appending `...` to indicate truncation
+2. **REQ-QUERY-006.2** - CSV and JSON formats: Always output full, untruncated query text
+3. **REQ-QUERY-006.3** - When query text is truncated in table view, no additional message is required (use of CSV/JSON format is the documented path to full text)
+4. **REQ-QUERY-006.4** - Empty query text (empty string from DBQL): Treat as "no query information found" and display the not-found message
+
+**Example Interaction:**
+
+**Drill-down workflow: sessions -> query:**
+```sql
+tq> /sessions
+[Shows session 1023 with high AMPCPUSec and ReqSpool]
+
+tq> /query 1023
+
+Query for session 1023:
+┌────────────┬────────────────────────────────────────────────────────────────────┐
+│ Property   │ Value                                                              │
+├────────────┼────────────────────────────────────────────────────────────────────┤
+│ Session    │ 1023                                                               │
+│ User       │ etl_user                                                           │
+│ Query Text │ UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_da... │
+└────────────┴────────────────────────────────────────────────────────────────────┘
+
+(Query time: 0.123s)
+```
+
+**Full text via JSON:**
+```sql
+tq> /set format json
+Output format set to: json
+
+tq> /query 1023
+{
+  "Session": 1023,
+  "User": "etl_user",
+  "Query Text": "UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_date < '2026-01-01' AND status = 'pending'"
+}
+```
+
+**Drill-down workflow: locks -> query:**
+```sql
+tq> /locks
+[Shows session 1023 blocking sessions 1045 and 1067]
+
+tq> /qi 1023
+[Shows the SQL that session 1023 is running that holds the lock]
+```
+
+**Tab completion:**
+```sql
+tq> /qi<TAB>
+tq> /qi _
+[Awaiting session ID]
+```
+
+**Acceptance Test:**
+- Execute `/query <valid_session_id>` and verify output shows Session, User, and Query Text properties
+- Execute `/qi <session_id>` (alias) and verify identical behavior
+- Execute `/query <inactive_session_id>` and verify informative not-found message (not an error)
+- Execute without argument and verify usage message with example
+- Execute `/query abc` and verify invalid-argument error
+- Execute with `/set format csv` and verify CSV output with full (untruncated) query text
+- Execute with `/set format json` and verify JSON object output with full query text
+- Trigger privilege error by revoking access and verify helpful error with GRANT example
+- Type `/q<TAB>` and verify completion suggests `/query` and `/quit`
+- Execute `/help query` and verify extended help is displayed
 
 ---
 

@@ -243,6 +243,17 @@ pub enum Command {
     ///
     /// Requires SELECT privilege on DBC.LockInfoV.
     Locks(LocksArgs),
+
+    /// Inspect recent SQL queries for a session
+    ///
+    /// Shows the most recent queries executed by a given session,
+    /// including SQL text, timing, and status information.
+    ///
+    /// Requires SELECT privilege on DBC.QryLogV (DBQL must be enabled).
+    ///
+    /// Example: tq query-inspect 1234
+    #[command(name = "query-inspect")]
+    QueryInspect(QueryInspectArgs),
 }
 
 /// Arguments for the help command
@@ -405,6 +416,36 @@ pub struct LocksArgs {
     ///
     /// table: Human-readable ASCII table (default)
     /// json: JSON array of lock objects
+    /// csv: Comma-separated values
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    ///
+    /// If the file exists, it will be overwritten.
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for the query-inspect command (Sprint 39)
+#[derive(Parser, Debug)]
+pub struct QueryInspectArgs {
+    /// Session ID to inspect
+    ///
+    /// The Teradata session number whose recent queries should be displayed.
+    #[arg(value_name = "SESSION_ID")]
+    pub session_id: i64,
+
+    /// Output format
+    ///
+    /// table: Key-value pairs for each query (default)
+    /// json: JSON array of query objects
     /// csv: Comma-separated values
     #[arg(
         short,
@@ -1178,5 +1219,81 @@ mod tests {
         let cli = Cli::try_parse_from(args).unwrap();
         assert_eq!(cli.global.profile, Some("prod".to_string()));
         assert!(matches!(cli.command, Command::Locks(_)));
+    }
+
+    // Sprint 39: Tests for query-inspect command
+    #[test]
+    fn test_cli_query_inspect_default() {
+        let args = vec!["tq", "query-inspect", "1234"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::QueryInspect(args) = cli.command {
+            assert_eq!(args.session_id, 1234);
+            assert_eq!(args.format, OutputFormat::Table);
+            assert!(args.output.is_none());
+        } else {
+            panic!("Expected QueryInspect command");
+        }
+    }
+
+    #[test]
+    fn test_cli_query_inspect_with_format() {
+        let args = vec!["tq", "query-inspect", "--format", "json", "5678"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::QueryInspect(args) = cli.command {
+            assert_eq!(args.session_id, 5678);
+            assert_eq!(args.format, OutputFormat::Json);
+        } else {
+            panic!("Expected QueryInspect command");
+        }
+    }
+
+    #[test]
+    fn test_cli_query_inspect_with_csv_format() {
+        let args = vec!["tq", "query-inspect", "-f", "csv", "1234"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::QueryInspect(args) = cli.command {
+            assert_eq!(args.format, OutputFormat::Csv);
+        } else {
+            panic!("Expected QueryInspect command");
+        }
+    }
+
+    #[test]
+    fn test_cli_query_inspect_with_output() {
+        let args = vec!["tq", "query-inspect", "--output", "queries.csv", "1234"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::QueryInspect(args) = cli.command {
+            assert_eq!(args.output, Some(PathBuf::from("queries.csv")));
+        } else {
+            panic!("Expected QueryInspect command");
+        }
+    }
+
+    #[test]
+    fn test_cli_query_inspect_missing_session_id() {
+        let args = vec!["tq", "query-inspect"];
+        let result = Cli::try_parse_from(args);
+        // Should fail because session_id is required
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cli_query_inspect_invalid_session_id() {
+        let args = vec!["tq", "query-inspect", "not_a_number"];
+        let result = Cli::try_parse_from(args);
+        // Should fail because session_id must be an integer
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cli_query_inspect_with_profile() {
+        let args = vec!["tq", "--profile", "prod", "query-inspect", "1234"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert_eq!(cli.global.profile, Some("prod".to_string()));
+        if let Command::QueryInspect(args) = cli.command {
+            assert_eq!(args.session_id, 1234);
+        } else {
+            panic!("Expected QueryInspect command");
+        }
     }
 }

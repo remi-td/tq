@@ -216,6 +216,13 @@ pub fn handle_metacommand<W: Write>(
                 "The /locks command requires full REPL mode with database connection."
             )?;
         }
+        // Sprint 39: Query inspection (basic handler - no client available)
+        "query" | "qi" => {
+            writeln!(
+                writer,
+                "The /query command requires full REPL mode with database connection."
+            )?;
+        }
 
         // Unknown command
         _ => {
@@ -512,6 +519,40 @@ pub fn handle_metacommand_with_state<W: Write>(
             crate::commands::locks::execute_for_repl(completion_state.client(), writer)?;
         }
 
+        // Sprint 39: Query inspection command
+        "query" | "qi" => {
+            if args.is_empty() {
+                writeln!(writer, "Usage: /query <session_id>")?;
+                writeln!(writer, "       /qi <session_id>")?;
+                writeln!(writer)?;
+                writeln!(
+                    writer,
+                    "Show recent SQL queries for a given session."
+                )?;
+                writeln!(writer)?;
+                writeln!(writer, "Examples:")?;
+                writeln!(writer, "  /query 1234")?;
+                writeln!(writer, "  /qi 1234")?;
+            } else {
+                match args[0].parse::<i64>() {
+                    Ok(session_id) => {
+                        crate::commands::query_inspect::execute_for_repl(
+                            completion_state.client(),
+                            session_id,
+                            writer,
+                        )?;
+                    }
+                    Err(_) => {
+                        writeln!(
+                            writer,
+                            "Error: '{}' is not a valid session ID. Expected a number.",
+                            args[0]
+                        )?;
+                    }
+                }
+            }
+        }
+
         // Unknown command
         _ => {
             writeln!(writer, "Unknown command: /{}", command)?;
@@ -599,6 +640,10 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(
         writer,
         "  /locks, /lk            Display current lock contention and blocking chains"
+    )?;
+    writeln!(
+        writer,
+        "  /query <id>, /qi <id>  Show recent SQL queries for a session"
     )?;
     writeln!(writer)?;
     writeln!(writer, "SQL Execution:")?;

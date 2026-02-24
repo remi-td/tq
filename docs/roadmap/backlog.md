@@ -1,7 +1,7 @@
 # Feature Backlog
 
 **Last Updated:** 2026-02-24
-**Next Sprint:** Sprint 39
+**Next Sprint:** Sprint 40
 
 ---
 
@@ -110,8 +110,8 @@ No P0 features currently in backlog. All critical features have been implemented
 - Safety confirmations for destructive operations
 - Spec: [Admin User Stories](../specifications/admin-user-stories.md) Section 5
 
-**Query Drill-Down and Analysis** (Issue #24)
-- View SQL text for running sessions
+**Query Drill-Down and Analysis** (Issue #24) - PARTIALLY COMPLETE
+- ~~View SQL text for running sessions~~ ✅ `/query` command (Sprint 39)
 - Explain plan step analysis
 - AMP skew identification
 - Spec: [Admin User Stories](../specifications/admin-user-stories.md) Section 9

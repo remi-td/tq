@@ -8,6 +8,7 @@
 use crate::cli::{OutputFormat, SessionsArgs};
 use crate::db::{DatabaseClient, QueryResult, Value};
 use crate::error::Result;
+use super::monitoring_utils::{extract_decimal, extract_integer, escape_csv};
 use std::io::Write;
 
 /// SQL query to retrieve session information from MonitorSession table function
@@ -126,26 +127,6 @@ impl SessionInfo {
             cpu_skew,
             io_skew,
         })
-    }
-}
-
-/// Extract integer value from a Value, returning None for NULL
-fn extract_integer(value: &Value) -> Option<i64> {
-    match value {
-        Value::Integer(v) => Some(*v),
-        Value::Decimal(v) => Some(*v as i64),
-        Value::Null => None,
-        _ => None,
-    }
-}
-
-/// Extract decimal value from a Value, returning None for NULL
-fn extract_decimal(value: &Value) -> Option<f64> {
-    match value {
-        Value::Decimal(v) => Some(*v),
-        Value::Integer(v) => Some(*v as f64),
-        Value::Null => None,
-        _ => None,
     }
 }
 
@@ -416,15 +397,6 @@ fn display_csv<W: Write>(result: &QueryResult, writer: &mut W) -> Result<()> {
     }
 
     Ok(())
-}
-
-/// Escape a string for CSV output
-fn escape_csv(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
-    }
 }
 
 /// Display sessions in JSON format

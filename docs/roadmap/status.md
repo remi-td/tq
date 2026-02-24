@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-02-24
-**Current Version:** 1.19.0
-**Latest Sprint:** Sprint 38 Complete (PMON Foundation - System Config & Lock Monitoring)
+**Current Version:** 1.20.0
+**Latest Sprint:** Sprint 39 Complete (PMON Hardening & Query Inspection)
 
 ---
 
@@ -258,6 +258,9 @@ All core features are complete and tested.
 | `/locks` command (REPL) | ✅ | [REPL Mode](../specifications/repl.md#lock-monitoring) | v1.19.0 (Sprint 38) |
 | `tq locks` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#locks-command) | v1.19.0 (Sprint 38) |
 | Blocking chain identification | ✅ | [REPL Mode](../specifications/repl.md#lock-monitoring) | v1.19.0 (Sprint 38) |
+| `/query` command (REPL) | ✅ | [REPL Mode](../specifications/repl.md#query-inspection) | v1.20.0 (Sprint 39) |
+| `tq query-inspect` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#query-inspect) | v1.20.0 (Sprint 39) |
+| Shared monitoring utilities | ✅ | Internal refactor | v1.20.0 (Sprint 39) |
 
 ---
 
@@ -307,16 +310,26 @@ All core features are complete and tested.
 - Pre-existing clippy warnings fixed in interactive tests
 - 748 total tests (100% pass rate), zero clippy warnings
 
+**Sprint 39 Enhancements (v1.20.0):**
+- **Monitoring utilities extraction**: Shared `monitoring_utils.rs` module eliminates 4x code duplication across sessions.rs, sysconfig.rs, locks.rs, sample.rs
+- **Sprint 38 bug fix**: CSV output for locks with no waiters now uses empty string (was "(none)")
+- **Sprint 38 doc alignment**: Design docs synced with DBC.LockInfoV implementation, user guide matches actual features
+- **Error handling tests**: Added for sysconfig.rs and locks.rs
+- **`/query` command**: Inspect recent SQL queries for a session via DBC.QryLogV (alias `/qi`)
+- **`tq query-inspect`**: Batch mode with table/CSV/JSON output
+- **Tab completion**: `/query` and `/qi` in metacommand completion menu
+- 830 total tests (100% pass rate), zero clippy warnings
+
 ---
 
 ## Summary Statistics
 
-- **Total Features**: 80
-- **Implemented**: 76 (95%)
-- **Planned**: 4 (5%)
-- **Test Pass Rate**: 100% (748/748 executed, 57 ignored database-dependent)
+- **Total Features**: 82
+- **Implemented**: 79 (96%)
+- **Planned**: 3 (4%)
+- **Test Pass Rate**: 100% (830/830 executed, 57 ignored database-dependent)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 38 - PMON Foundation (System Config & Lock Monitoring)
+- **Latest Sprint**: Sprint 39 - PMON Hardening & Query Inspection
 
 ---
 

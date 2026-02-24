@@ -11,6 +11,7 @@ use crate::cli::{OutputFormat, PeekArgs, SampleArgs};
 use crate::db::{ColumnInfo, DatabaseClient, QueryResult};
 use crate::error::{Result, TqError};
 use crate::sql::{escape_sql_string, format_column_type, quote_qualified_name};
+use super::monitoring_utils::escape_csv;
 use std::io::Write;
 
 /// Default sample size when not specified
@@ -454,15 +455,6 @@ fn display_peek_json<W: Write>(
     writeln!(writer, "{}", json_output)?;
 
     Ok(())
-}
-
-/// Escape a string for CSV output
-fn escape_csv(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
-    }
 }
 
 #[cfg(test)]

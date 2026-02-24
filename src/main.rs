@@ -156,6 +156,17 @@ fn run(cli: Cli) -> Result<()> {
                 commands::locks(&client, &args, &mut stdout, use_color)?;
             }
         }
+        // Sprint 39: Query inspection for session drill-down
+        Command::QueryInspect(args) => {
+            if args.output.is_some() {
+                let file = std::fs::File::create(args.output.as_ref().unwrap())?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::query_inspect(&client, &args, &mut writer, use_color)?;
+            } else {
+                let mut stdout = io::stdout();
+                commands::query_inspect(&client, &args, &mut stdout, use_color)?;
+            }
+        }
         // Help and Profiles already handled above
         Command::Help(_) | Command::Profiles => unreachable!(),
     }
