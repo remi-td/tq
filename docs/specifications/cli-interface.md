@@ -10,6 +10,9 @@
    - [ping - Test Connectivity](#ping---test-connectivity)
    - [query - Execute SQL](#query---execute-sql)
    - [repl - Interactive Mode](#repl---interactive-mode)
+   - [sessions - List Active Sessions](#sessions---list-active-sessions)
+   - [sysconfig - System Configuration Summary](#sysconfig---system-configuration-summary)
+   - [locks - Lock and Blocking Information](#locks---lock-and-blocking-information)
    - [profiles - List Connection Profiles](#profiles---list-connection-profiles)
 5. [Input/Output Behavior](#inputoutput-behavior)
 6. [Flag Design Guidelines](#flag-design-guidelines)
@@ -39,6 +42,8 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 - `query` - Execute SQL queries
 - `repl` - Start interactive mode
 - `sessions` - List active Teradata sessions
+- `sysconfig` - Display system topology (version, nodes, AMPs, PEs)
+- `locks` - Display current lock contention and blocking chains
 - `profiles` - List connection profiles
 
 ## Global Options
@@ -483,6 +488,358 @@ The flag form (`--sessions`) provides compatibility with single-purpose invocati
 
 ---
 
+### sysconfig - System Configuration Summary
+
+**Purpose**: Display a compact summary of system topology including Teradata version, node count, AMP count, and PE count
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] sysconfig [OPTIONS]
+```
+
+**Options**:
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv` |
+| `--output` | `-o` | path | stdout | Write output to file |
+
+**Examples**:
+```bash
+# Display system configuration with table output
+tq sysconfig
+
+# JSON output for scripting
+tq sysconfig --format json
+
+# CSV export to file
+tq sysconfig --format csv --output sysconfig.csv
+tq sysconfig -f csv -o sysconfig.csv
+
+# Using connection profile
+tq --profile prod sysconfig
+
+# Pipe to processing tool
+tq sysconfig --format json | jq '.["AMP Count"]'
+```
+
+**Output (Table Format)**:
+```
+System Configuration - prod-td01.company.com:
+┌──────────────────────┬─────────────────────────────────────┐
+│ Property             │ Value                               │
+├──────────────────────┼─────────────────────────────────────┤
+│ Teradata Version     │ 17.20.00.17                         │
+│ Release              │ 17.20.00.17 (Released: 2024-01-15)  │
+│ Node Count           │ 4                                   │
+│ AMP Count            │ 128                                 │
+│ PE Count             │ 16                                  │
+└──────────────────────┴─────────────────────────────────────┘
+
+(Query time: 0.045s)
+```
+
+**Output (CSV Format)**:
+```csv
+Property,Value
+Teradata Version,17.20.00.17
+Release,"17.20.00.17 (Released: 2024-01-15)"
+Node Count,4
+AMP Count,128
+PE Count,16
+```
+
+**Output (JSON Format)**:
+```json
+{
+  "Teradata Version": "17.20.00.17",
+  "Release": "17.20.00.17 (Released: 2024-01-15)",
+  "Node Count": 4,
+  "AMP Count": 128,
+  "PE Count": 16
+}
+```
+
+**Behavior Requirements**:
+
+1. **Standalone Operation**: Does NOT require a SQL file argument (unlike `query` command)
+2. **Data Source**: Queries `DBC.DBCInfoV` for version and release; derives AMP count via `HASHAMP()+1`; derives node and PE counts from DBC system views
+3. **Properties Displayed** (in this order):
+   - Teradata Version (software version string)
+   - Release (full release string with build date)
+   - Node Count (total number of nodes)
+   - AMP Count (total number of Access Module Processors)
+   - PE Count (total number of Parsing Engines)
+4. **Format Compatibility**: Works with `--format table`, `--format csv`, `--format json`
+5. **Output Destination**: Respects `--output` flag for file output, otherwise stdout
+6. **Unavailable Properties**: If a specific property cannot be retrieved, display `[unavailable]` for that value rather than failing the entire command
+
+**Error Handling**:
+
+**Insufficient Privileges**:
+```
+Error: Unable to retrieve system configuration
+Reason: SELECT permission denied on DBC.DBCInfoV
+
+This command requires SELECT access to DBC system views.
+Contact your DBA to request access or use the GRANT statement:
+  GRANT SELECT ON DBC.DBCInfoV TO <your_username>;
+
+Exit code: 1
+```
+
+**Connection Failed**:
+```
+Error: Failed to connect to prod-td01.company.com:1025
+Reason: Connection refused
+
+Troubleshooting:
+  - Check that the hostname and port are correct
+  - Verify the database is running
+  - Check firewall settings
+
+Exit code: 1
+```
+
+**Exit Codes**:
+- `0`: System configuration displayed successfully
+- `1`: Query error (privilege denied, connection failed, view not available)
+- `2`: Usage error (invalid format, invalid output path)
+
+**Integration with Scripting**:
+
+The `sysconfig` command is designed for both interactive use and automation:
+
+```bash
+# Capture AMP count for capacity planning
+AMP_COUNT=$(tq sysconfig --format json | jq '.["AMP Count"]')
+echo "System has ${AMP_COUNT} AMPs"
+
+# Export configuration snapshot
+tq sysconfig --format csv --output "/var/log/td-config/$(date +%Y%m%d).csv"
+
+# Verify system version in deployment script
+VERSION=$(tq sysconfig --format json | jq -r '.["Teradata Version"]')
+if [[ "$VERSION" != "17.20"* ]]; then
+  echo "Warning: Unexpected Teradata version: $VERSION"
+fi
+```
+
+**Acceptance Test**:
+- Execute `tq sysconfig` and verify table output with all five properties
+- Execute `tq sysconfig --format csv` and verify CSV output with Property,Value headers
+- Execute `tq sysconfig --format json` and verify valid JSON object output
+- Execute `tq sysconfig --output sysconfig.txt` and verify file creation
+- Trigger privilege error and verify helpful error message with GRANT example
+- Verify exit code 0 on success, 1 on privilege/connection errors
+
+---
+
+### locks - Lock and Blocking Information
+
+**Purpose**: Display current lock contention showing locked objects, lock types, locking sessions, and blocking chains to help DBAs diagnose contention issues
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] locks [OPTIONS]
+```
+
+**Options**:
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv` |
+| `--output` | `-o` | path | stdout | Write output to file |
+
+**Examples**:
+```bash
+# Basic lock list with table output
+tq locks
+
+# JSON output for scripting
+tq locks --format json
+
+# CSV export to file
+tq locks --format csv --output locks.csv
+tq locks -f csv -o locks.csv
+
+# Pipe to processing tool
+tq locks --format json | jq '.[] | select(.["Lock Mode"] == "EXCLUSIVE")'
+
+# Using connection profile
+tq --profile prod locks
+```
+
+**Output (Table Format - Locks Present)**:
+```
+Lock Information on prod-td01.company.com:
+┌──────────────────────┬───────────┬────────────┬──────────────┬──────────────┬────────────────────────┐
+│ Locked Object        │ Lock Type │ Lock Mode  │ Locking Sess │ Waiting Sess │ Blocked Since          │
+├──────────────────────┼───────────┼────────────┼──────────────┼──────────────┼────────────────────────┤
+│ PRODUCTION.orders    │ Table     │ WRITE      │ 1023         │ 1045, 1067   │ 2026/01/27 14:32:15.00 │
+│ PRODUCTION.customers │ Table     │ EXCLUSIVE  │ 1023         │ 1051         │ 2026/01/27 14:32:15.00 │
+│ PRODUCTION.employees │ Row Hash  │ READ       │ 1078         │ (none)       │ 2026/01/27 14:45:00.00 │
+└──────────────────────┴───────────┴────────────┴──────────────┴──────────────┴────────────────────────┘
+
+3 locks found - 1 blocking chain detected (Query time: 0.089s)
+
+Blocking Chain:
+  Session 1023 (etl_user) blocks sessions: 1045, 1051, 1067
+```
+
+**Output (Table Format - No Locks)**:
+```
+Lock Information on prod-td01.company.com:
+No locks currently held.
+
+(Query time: 0.023s)
+```
+
+**Output (CSV Format)**:
+```csv
+Locked Object,Lock Type,Lock Mode,Locking Sess,Waiting Sess,Blocked Since
+PRODUCTION.orders,Table,WRITE,1023,"1045, 1067",2026/01/27 14:32:15.00
+PRODUCTION.customers,Table,EXCLUSIVE,1023,1051,2026/01/27 14:32:15.00
+PRODUCTION.employees,Row Hash,READ,1078,,2026/01/27 14:45:00.00
+```
+
+**Output (JSON Format)**:
+```json
+[
+  {
+    "Locked Object": "PRODUCTION.orders",
+    "Lock Type": "Table",
+    "Lock Mode": "WRITE",
+    "Locking Sess": 1023,
+    "Waiting Sess": [1045, 1067],
+    "Blocked Since": "2026/01/27 14:32:15.00"
+  },
+  {
+    "Locked Object": "PRODUCTION.customers",
+    "Lock Type": "Table",
+    "Lock Mode": "EXCLUSIVE",
+    "Locking Sess": 1023,
+    "Waiting Sess": [1051],
+    "Blocked Since": "2026/01/27 14:32:15.00"
+  },
+  {
+    "Locked Object": "PRODUCTION.employees",
+    "Lock Type": "Row Hash",
+    "Lock Mode": "READ",
+    "Locking Sess": 1078,
+    "Waiting Sess": [],
+    "Blocked Since": "2026/01/27 14:45:00.00"
+  }
+]
+```
+
+**Behavior Requirements**:
+
+1. **Standalone Operation**: Does NOT require a SQL file argument (unlike `query` command)
+2. **Data Source**: Queries `DBC.LockInfoV` (or platform-equivalent view) for current lock information
+3. **Column Display**: 6 columns in this order:
+   - Locked Object (fully qualified database.table name)
+   - Lock Type (granularity: Table, Row Hash, Database)
+   - Lock Mode (severity: READ, WRITE, EXCLUSIVE, ACCESS)
+   - Locking Sess (session ID holding the lock)
+   - Waiting Sess (comma-separated IDs of waiting sessions, or empty)
+   - Blocked Since (timestamp when lock was acquired)
+4. **Waiting Sessions Handling**:
+   - Table format: Display comma-separated list of session IDs, or `(none)` when no waiters
+   - CSV format: Comma-separated session IDs (quoted if multiple), or empty string when no waiters
+   - JSON format: Array of session ID integers, or empty array `[]` when no waiters
+5. **Blocking Chain Section**: In table format, display "Blocking Chain:" summary after the table when any sessions are waiting. Omit this section in CSV and JSON formats.
+6. **No Locks**: Display "No locks currently held." message when query returns no rows
+7. **Format Compatibility**: Works with `--format table`, `--format csv`, `--format json`
+8. **Output Destination**: Respects `--output` flag for file output, otherwise stdout
+
+**Lock Mode Reference**:
+
+| Lock Mode | Blocks | Description |
+|-----------|--------|-------------|
+| ACCESS | EXCLUSIVE only | Weakest lock. Allows concurrent reads and writes. |
+| READ | WRITE, EXCLUSIVE | Shared lock. Allows concurrent reads. |
+| WRITE | WRITE, EXCLUSIVE | Exclusive writes. Allows concurrent reads. |
+| EXCLUSIVE | All modes | Strongest lock. Blocks all other lock modes. |
+
+**Error Handling**:
+
+**Insufficient Privileges**:
+```
+Error: Unable to retrieve lock information
+Reason: SELECT permission denied on DBC.LockInfoV
+
+This command requires SELECT access to DBC lock views.
+Contact your DBA to request access or use the GRANT statement:
+  GRANT SELECT ON DBC.LockInfoV TO <your_username>;
+
+Exit code: 1
+```
+
+**Lock View Not Available**:
+```
+Error: Lock information view not available
+DBC.LockInfoV is not accessible on this system.
+
+This may indicate a Teradata version compatibility issue or a
+configuration restriction. Contact your DBA for assistance.
+
+Exit code: 1
+```
+
+**Connection Failed**:
+```
+Error: Failed to connect to prod-td01.company.com:1025
+Reason: Connection refused
+
+Troubleshooting:
+  - Check that the hostname and port are correct
+  - Verify the database is running
+  - Check firewall settings
+
+Exit code: 1
+```
+
+**Exit Codes**:
+- `0`: Lock information displayed successfully (including the case of no active locks)
+- `1`: Query error (privilege denied, connection failed, view not available)
+- `2`: Usage error (invalid format, invalid output path)
+
+**Integration with Scripting**:
+
+The `locks` command is designed for both interactive use and automation:
+
+```bash
+# Check for exclusive locks in monitoring script
+tq locks --format json | \
+  jq '.[] | select(.["Lock Mode"] == "EXCLUSIVE")' | \
+  mail -s "Exclusive lock alert" dba@company.com
+
+# Export lock snapshot for incident analysis
+tq locks --format csv --output "/var/log/td-locks/$(date +%Y%m%d_%H%M%S).csv"
+
+# Count locks by mode
+tq locks --format json | \
+  jq 'group_by(.["Lock Mode"]) | map({mode: .[0]["Lock Mode"], count: length})'
+
+# Check if any sessions are blocked
+BLOCKED=$(tq locks --format json | jq '[.[] | select(.["Waiting Sess"] | length > 0)] | length')
+if [[ "$BLOCKED" -gt 0 ]]; then
+  echo "WARNING: $BLOCKED blocking lock(s) detected"
+fi
+```
+
+**Acceptance Test**:
+- Execute `tq locks` with no active locks and verify "No locks currently held." output
+- Execute `tq locks` with active locks and verify table output with all 6 columns
+- Verify blocking chains section appears in table format when sessions are waiting
+- Verify blocking chains section does NOT appear in table format when no waiters
+- Execute `tq locks --format csv` and verify CSV output with correct headers
+- Execute `tq locks --format json` and verify valid JSON array output with Waiting Sess as array
+- Execute `tq locks --output locks.txt` and verify file creation
+- Trigger privilege error and verify helpful error message with GRANT example
+- Verify exit code 0 on success (including no-locks case), 1 on privilege/connection errors
+
+---
+
 ### profiles - List Connection Profiles
 
 **Purpose**: Display all available connection profiles from the configuration file
@@ -664,6 +1021,8 @@ Commands:
   query     Execute a SQL query
   repl      Start interactive mode
   sessions  List active Teradata sessions with performance metrics
+  sysconfig Display system topology (version, nodes, AMPs, PEs)
+  locks     Display current lock contention and blocking chains
   profiles  List available connection profiles
   help      Print help information or help for a topic
 
@@ -713,6 +1072,15 @@ Examples:
 
   # Export session metrics to CSV
   tq sessions --format csv --output sessions.csv
+
+  # Display system topology
+  tq sysconfig
+
+  # Check for lock contention
+  tq locks
+
+  # Export lock snapshot for incident analysis
+  tq locks --format json | jq '.[] | select(.["Lock Mode"] == "EXCLUSIVE")'
 
   # Secure password handling
   echo "password" > ~/.tq_pass && chmod 0600 ~/.tq_pass

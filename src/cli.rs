@@ -227,6 +227,22 @@ pub enum Command {
     ///
     /// Example: tq peek employees
     Peek(PeekArgs),
+
+    /// Display system topology (version, nodes, AMPs, PEs)
+    ///
+    /// Shows a compact summary of Teradata system configuration including
+    /// version, release, and AMP count.
+    ///
+    /// Requires SELECT privilege on DBC.DBCInfoV.
+    Sysconfig(SysconfigArgs),
+
+    /// Display current lock contention and blocking chains
+    ///
+    /// Shows locked objects, lock types, locking sessions, and waiting
+    /// sessions. Automatically identifies blocking chains.
+    ///
+    /// Requires SELECT privilege on DBC.LockInfoV.
+    Locks(LocksArgs),
 }
 
 /// Arguments for the help command
@@ -341,6 +357,54 @@ pub struct SessionsArgs {
     ///
     /// table: Human-readable ASCII table (default)
     /// json: JSON array of session objects
+    /// csv: Comma-separated values
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    ///
+    /// If the file exists, it will be overwritten.
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for the sysconfig command (Sprint 38)
+#[derive(Parser, Debug)]
+pub struct SysconfigArgs {
+    /// Output format
+    ///
+    /// table: Two-column key-value table (default)
+    /// json: JSON object with property keys
+    /// csv: Comma-separated Property,Value pairs
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    ///
+    /// If the file exists, it will be overwritten.
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for the locks command (Sprint 38)
+#[derive(Parser, Debug)]
+pub struct LocksArgs {
+    /// Output format
+    ///
+    /// table: Human-readable ASCII table (default)
+    /// json: JSON array of lock objects
     /// csv: Comma-separated values
     #[arg(
         short,
@@ -1004,5 +1068,115 @@ mod tests {
         } else {
             panic!("Expected Peek command");
         }
+    }
+
+    // Sprint 38: Tests for sysconfig command
+    #[test]
+    fn test_cli_sysconfig_default() {
+        let args = vec!["tq", "sysconfig"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Sysconfig(args) = cli.command {
+            assert_eq!(args.format, OutputFormat::Table);
+            assert!(args.output.is_none());
+        } else {
+            panic!("Expected Sysconfig command");
+        }
+    }
+
+    #[test]
+    fn test_cli_sysconfig_with_format() {
+        let args = vec!["tq", "sysconfig", "--format", "json"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Sysconfig(args) = cli.command {
+            assert_eq!(args.format, OutputFormat::Json);
+        } else {
+            panic!("Expected Sysconfig command");
+        }
+    }
+
+    #[test]
+    fn test_cli_sysconfig_with_output() {
+        let args = vec!["tq", "sysconfig", "--output", "config.csv"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Sysconfig(args) = cli.command {
+            assert_eq!(args.output, Some(PathBuf::from("config.csv")));
+        } else {
+            panic!("Expected Sysconfig command");
+        }
+    }
+
+    #[test]
+    fn test_cli_sysconfig_with_csv_format_and_output() {
+        let args = vec!["tq", "sysconfig", "-f", "csv", "-o", "sysconfig.csv"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Sysconfig(args) = cli.command {
+            assert_eq!(args.format, OutputFormat::Csv);
+            assert_eq!(args.output, Some(PathBuf::from("sysconfig.csv")));
+        } else {
+            panic!("Expected Sysconfig command");
+        }
+    }
+
+    // Sprint 38: Tests for locks command
+    #[test]
+    fn test_cli_locks_default() {
+        let args = vec!["tq", "locks"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Locks(args) = cli.command {
+            assert_eq!(args.format, OutputFormat::Table);
+            assert!(args.output.is_none());
+        } else {
+            panic!("Expected Locks command");
+        }
+    }
+
+    #[test]
+    fn test_cli_locks_with_format() {
+        let args = vec!["tq", "locks", "--format", "json"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Locks(args) = cli.command {
+            assert_eq!(args.format, OutputFormat::Json);
+        } else {
+            panic!("Expected Locks command");
+        }
+    }
+
+    #[test]
+    fn test_cli_locks_with_output() {
+        let args = vec!["tq", "locks", "--output", "locks.csv"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Locks(args) = cli.command {
+            assert_eq!(args.output, Some(PathBuf::from("locks.csv")));
+        } else {
+            panic!("Expected Locks command");
+        }
+    }
+
+    #[test]
+    fn test_cli_locks_with_csv_format_and_output() {
+        let args = vec!["tq", "locks", "-f", "csv", "-o", "locks.csv"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Locks(args) = cli.command {
+            assert_eq!(args.format, OutputFormat::Csv);
+            assert_eq!(args.output, Some(PathBuf::from("locks.csv")));
+        } else {
+            panic!("Expected Locks command");
+        }
+    }
+
+    #[test]
+    fn test_cli_sysconfig_with_profile() {
+        let args = vec!["tq", "--profile", "prod", "sysconfig"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert_eq!(cli.global.profile, Some("prod".to_string()));
+        assert!(matches!(cli.command, Command::Sysconfig(_)));
+    }
+
+    #[test]
+    fn test_cli_locks_with_profile() {
+        let args = vec!["tq", "--profile", "prod", "locks"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert_eq!(cli.global.profile, Some("prod".to_string()));
+        assert!(matches!(cli.command, Command::Locks(_)));
     }
 }

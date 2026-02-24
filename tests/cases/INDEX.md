@@ -346,6 +346,77 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 - **Track 3 Focus**: Documentation - synchronize specs with implementation
 - **Acceptance**: All automated tests pass + code review clean + documentation aligned + zero regressions
 
+### Sprint 38: PMON Foundation - System Config & Lock Monitoring
+
+**Sprint 38 Context:** First two PMON (Performance Monitor) commands for DBA observability: `/sysconfig` displays system topology (version, AMP count, nodes) and `/locks` displays current lock contention. Both follow the established `sessions.rs` pattern.
+
+**Sprint 38 Test Cases (10 test documents covering 18 acceptance criteria):**
+
+#### Feature 1: `/sysconfig` Command - System Configuration Summary (P0) - 5 test documents
+- **TC-038-001**: SysconfigInfo SQL Constants, Struct Parsing, and Formatting Unit Tests (AC-1, AC-2, AC-3, AC-8, AC-9)
+  - SQL validates DBC.DBCInfoV and HASHAMP()+1
+  - Struct parsing from mock rows (valid, insufficient columns, NULLs)
+  - Table/CSV/JSON formatter tests
+  - Privilege error message validation
+  - REPL summary content (AMP count, version) (12 unit tests)
+
+- **TC-038-002**: Sysconfig Batch Mode CLI Integration Tests (AC-4)
+  - CLI wiring validation (3 no-DB tests)
+  - Live-DB format flag tests - table/csv/json (2 `#[ignore]` tests)
+
+- **TC-038-003**: Sysconfig REPL Tab Completion and Help Text (AC-5, AC-6)
+  - Tab completion includes `/sysconfig` (3 `#[ignore]` interactive tests)
+
+- **TC-038-004**: Sysconfig REPL Command Execution and Alias (AC-1, AC-2, AC-3, AC-9)
+  - `/sysconfig` executes and shows AMP count + version
+  - `/sc` alias works (3 `#[ignore]` interactive tests)
+
+- **TC-038-005**: Sysconfig Error Handling (AC-7)
+  - Privilege error detection and message generation
+  - Actionable guidance in error messages (4 unit + 1 `#[ignore]` interactive)
+
+#### Feature 2: `/locks` Command - Session Blocking & Lock Information (P0) - 5 test documents
+- **TC-038-006**: LockInfo SQL, Parsing, Lock Type Mapping Unit Tests (AC-1, AC-2, AC-3, AC-8, AC-9)
+  - SQL validates DBC.LockInfoV
+  - Struct parsing for all lock types (READ, WRITE, EXCLUSIVE, SHARE)
+  - Lock type mapping: RD→READ, WR→WRITE, EX→EXCLUSIVE, SR→SHARE
+  - Empty lock list message
+  - Table/CSV/JSON formatter tests
+  - `/lk` alias validation (15 unit tests)
+
+- **TC-038-007**: Locks Batch Mode CLI Integration Tests (AC-4)
+  - CLI wiring validation (3 no-DB tests)
+  - Live-DB tests handle both empty locks and data (2 `#[ignore]` tests)
+
+- **TC-038-008**: Locks REPL Tab Completion and Help Text (AC-5, AC-6)
+  - Tab completion includes `/locks` and `/lk` (3 `#[ignore]` interactive tests)
+
+- **TC-038-009**: Locks REPL Command Execution and Alias (AC-1, AC-2, AC-3, AC-9)
+  - `/locks` executes without hang (no-locks case expected in CI)
+  - `/lk` alias works (3 `#[ignore]` interactive tests)
+
+- **TC-038-010**: Locks Error Handling (AC-7)
+  - Privilege error detection, message generation
+  - View-not-found error handling (DBC.LockInfoV availability)
+  - Actionable guidance (5 unit + 1 `#[ignore]` interactive)
+
+#### Test Summary
+- **TC-038-SUMMARY**: Sprint 38 test execution plan and coverage matrix
+
+**Sprint 38 Test Strategy:**
+- **Test Count**: 10 test case documents + 1 summary document
+- **Estimated Test Functions**: 60 new automated tests + ~721 regression tests = ~781 total
+- **Type**: Feature Sprint (PMON Foundation - DBA Monitoring)
+- **Database Required**: Yes (for interactive tests - 14/60 tests, and live-DB integration - 4/60 tests)
+- **Test Types**: Unit (36 tests) + Integration CLI (6 no-DB + 4 live-DB) + Interactive (14 tests)
+- **Critical Success**: 100% test pass rate (~781/~781) + zero regressions + all 18 ACs satisfied
+- **Feature 1 Focus**: `/sysconfig` - AMP count, version, topology display; follows sessions.rs pattern
+- **Feature 2 Focus**: `/locks` - Lock type mapping (RD/WR/EX/SR), empty lock state handling, blocking chain
+- **No New Infrastructure**: All testing tools already available (expectrl, Value::*, DatabaseClient::mock())
+- **Acceptance**: All automated tests pass + all 18 ACs covered + zero regressions
+
+---
+
 ### Sprint 37: External Editor Integration
 
 **Sprint 37 Context:** Implement `/edit` command to open last SQL query in external editor ($EDITOR/$VISUAL), completing query editing feature set alongside `/repeat` (Sprint 36). Also add optional live-DB test for `/show indexes` from Sprint 36.

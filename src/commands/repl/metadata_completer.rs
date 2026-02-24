@@ -317,6 +317,17 @@ const METACOMMANDS: &[MetacommandDef] = &[
         aliases: &["di"],
         description: "Show index information for a table",
     },
+    // Sprint 38: PMON monitoring commands
+    MetacommandDef {
+        name: "sysconfig",
+        aliases: &["sc"],
+        description: "Display system topology (version, nodes, AMPs, PEs)",
+    },
+    MetacommandDef {
+        name: "locks",
+        aliases: &["lk"],
+        description: "Display current lock contention and blocking chains",
+    },
 ];
 
 /// Test helper: returns metacommand names matching a prefix

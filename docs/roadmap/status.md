@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
-**Last Updated:** 2026-02-13
-**Current Version:** 1.18.0
-**Latest Sprint:** Sprint 37 Complete (External Editor Integration)
+**Last Updated:** 2026-02-24
+**Current Version:** 1.19.0
+**Latest Sprint:** Sprint 38 Complete (PMON Foundation - System Config & Lock Monitoring)
 
 ---
 
@@ -253,6 +253,11 @@ All core features are complete and tested.
 | `tq sessions` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#sessions-command) | v1.12.0 (Sprint 26) |
 | Session performance metrics | ✅ | [REPL Mode](../specifications/repl.md#session-monitoring) | v1.12.0 (Sprint 26) |
 | CPU/IO skew calculation | ✅ | [REPL Mode](../specifications/repl.md#session-monitoring) | v1.12.0 (Sprint 26) |
+| `/sysconfig` command (REPL) | ✅ | [REPL Mode](../specifications/repl.md#system-configuration) | v1.19.0 (Sprint 38) |
+| `tq sysconfig` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#sysconfig-command) | v1.19.0 (Sprint 38) |
+| `/locks` command (REPL) | ✅ | [REPL Mode](../specifications/repl.md#lock-monitoring) | v1.19.0 (Sprint 38) |
+| `tq locks` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#locks-command) | v1.19.0 (Sprint 38) |
+| Blocking chain identification | ✅ | [REPL Mode](../specifications/repl.md#lock-monitoring) | v1.19.0 (Sprint 38) |
 
 ---
 
@@ -292,14 +297,26 @@ All core features are complete and tested.
 
 ---
 
+**Sprint 38 Enhancements (v1.19.0):**
+- **`/sysconfig` command**: Display Teradata system topology (version, AMP count) via DBC.DBCInfoV
+- **`tq sysconfig`**: Batch mode with table/CSV/JSON output
+- **`/locks` command**: Display current lock contention from DBC.LockInfoV with blocking chain identification
+- **`tq locks`**: Batch mode with table/CSV/JSON output
+- **Blocking chain analysis**: Automatic identification of which sessions block which
+- **Tab completion**: Both commands in metacommand completion menu
+- Pre-existing clippy warnings fixed in interactive tests
+- 748 total tests (100% pass rate), zero clippy warnings
+
+---
+
 ## Summary Statistics
 
-- **Total Features**: 75
-- **Implemented**: 71 (95%)
+- **Total Features**: 80
+- **Implemented**: 76 (95%)
 - **Planned**: 4 (5%)
-- **Test Pass Rate**: 100% (691/691 executed, 57 ignored database-dependent)
+- **Test Pass Rate**: 100% (748/748 executed, 57 ignored database-dependent)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 37 - External Editor Integration
+- **Latest Sprint**: Sprint 38 - PMON Foundation (System Config & Lock Monitoring)
 
 ---
 

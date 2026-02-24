@@ -1,7 +1,7 @@
 # Feature Backlog
 
-**Last Updated:** 2026-02-13
-**Next Sprint:** Sprint 38
+**Last Updated:** 2026-02-24
+**Next Sprint:** Sprint 39
 
 ---
 
@@ -91,6 +91,37 @@ No P0 features currently in backlog. All critical features have been implemented
 - `N` - Previous match
 - Spec: [REPL Mode - Pager Search](../specifications/repl.md#pager-search)
 
+### PMON - Performance Monitor Features
+
+**Performance Summary and Resource Usage** (Issue #17)
+- CPU, memory, I/O metrics per node and VPROC
+- Physical vs virtual resource monitoring
+- Requires ResUsage collection to be enabled
+- Spec: [Admin User Stories](../specifications/admin-user-stories.md) Section 2
+
+**Session History** (Issue #19)
+- Historical session activity analysis
+- Session count trends over time
+- Peak usage period identification
+- Spec: [Admin User Stories](../specifications/admin-user-stories.md) Section 4
+
+**Session Control Functions** (Issue #20)
+- Abort sessions, release locks, change priority
+- Safety confirmations for destructive operations
+- Spec: [Admin User Stories](../specifications/admin-user-stories.md) Section 5
+
+**Query Drill-Down and Analysis** (Issue #24)
+- View SQL text for running sessions
+- Explain plan step analysis
+- AMP skew identification
+- Spec: [Admin User Stories](../specifications/admin-user-stories.md) Section 9
+
+**Dynamic Session Monitoring** (Issue #25)
+- Auto-refresh session display (6-second intervals)
+- Configurable refresh frequency
+- Requires async/TUI architecture
+- Spec: [Admin User Stories](../specifications/admin-user-stories.md) Section 10
+
 ---
 
 ## P3 - Low Priority (Future)
@@ -114,6 +145,23 @@ No P0 features currently in backlog. All critical features have been implemented
 - Double Ctrl-C to force quit
 - Progress feedback during long queries
 - Spec: [REPL Mode - Query Cancellation](../specifications/repl.md#query-cancellation)
+
+### PMON - Advanced Features
+
+**Graphical Resource Displays** (Issue #21)
+- CPU/IO charts, color-coded thresholds
+- Requires TUI framework (ratatui or similar)
+- Spec: [Admin User Stories](../specifications/admin-user-stories.md) Section 6
+
+**Graphical Session Displays** (Issue #22)
+- Session count charts, state distribution
+- Requires TUI framework
+- Spec: [Admin User Stories](../specifications/admin-user-stories.md) Section 7
+
+**Alerting and Threshold Configuration** (Issue #23)
+- Configurable alert thresholds for resource metrics
+- Color indicators for warning conditions
+- Spec: [Admin User Stories](../specifications/admin-user-stories.md) Section 8
 
 ### Output Format Extensions
 

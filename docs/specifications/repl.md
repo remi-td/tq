@@ -397,6 +397,7 @@ tq> SELECT COUNT(*) FROM employees WHERE dept = 'IT';
 **Completable Metacommands:**
 - `/describe` - Describe table structure
 - `/list` - Schema inspection (databases, tables, views)
+- `/locks` - Display current lock contention and blocking chains
 - `/logon` - Connect/switch database
 - `/disconnect` - Disconnect current connection
 - `/reconnect` - Reconnect to database
@@ -406,6 +407,7 @@ tq> SELECT COUNT(*) FROM employees WHERE dept = 'IT';
 - `/export` - Export results
 - `/session` - Show session info
 - `/sessions` - List active Teradata sessions
+- `/sysconfig` - Display system topology
 - `/timing` - Enable/disable query timing
 - `/set` - Set configuration
 - `/pager` - Enable/disable result paging
@@ -433,6 +435,7 @@ Available metacommands:
     /help        Show help
     /history     Show command history
     /list        Schema inspection (databases, tables, views)
+    /locks       Display current lock contention and blocking chains
     /logon       Connect/switch database
     /pager       Enable/disable result paging
     /peek        Show first rows and column info
@@ -444,6 +447,7 @@ Available metacommands:
     /session     Show session info
     /sessions    List active Teradata sessions with performance metrics
     /set         Set configuration
+    /sysconfig   Display system topology (version, nodes, AMPs, PEs)
     /timing      Enable/disable query timing
 ```
 
@@ -1757,6 +1761,8 @@ Suggestions:
 | Command | Alias | Description | Example |
 |---------|-------|-------------|---------|
 | `/sessions` | `/s` | List active Teradata sessions with performance metrics | `/sessions` |
+| `/sysconfig` | `/sc` | Display system topology: version, nodes, AMPs, PEs | `/sysconfig` |
+| `/locks` | `/lk` | Display current lock contention and blocking chains | `/locks` |
 
 **`/list databases` Metacommand**
 
@@ -2330,6 +2336,575 @@ SessionNo,UserName,LogonTime,PEstate,AMPState,AMPCPUSec,AMPIO,ReqSpool,Amp CPU S
 - Execute with `/set format json` and verify JSON output
 - Type `/s<TAB>` and verify tab completion suggestions include `/sessions`
 - Execute `/help` and verify `/sessions` appears in command list
+
+---
+
+**`/sysconfig` Metacommand**
+
+**Requirement:** Display a compact system configuration summary showing Teradata version, node count, AMP count, and PE count so DBAs can verify topology at a glance.
+
+**Syntax:**
+```
+/sysconfig
+/sc                 -- Short alias
+```
+
+**Output Format:**
+```
+tq> /sysconfig
+
+System Configuration - prod-td01.company.com:
+┌──────────────────────┬─────────────────────────────────────┐
+│ Property             │ Value                               │
+├──────────────────────┼─────────────────────────────────────┤
+│ Teradata Version     │ 17.20.00.17                         │
+│ Release              │ 17.20.00.17 (Released: 2024-01-15)  │
+│ Node Count           │ 4                                   │
+│ AMP Count            │ 128                                 │
+│ PE Count             │ 16                                  │
+└──────────────────────┴─────────────────────────────────────┘
+
+(Query time: 0.045s)
+```
+
+**Column Descriptions:**
+
+| Property | Description |
+|----------|-------------|
+| Teradata Version | Installed software version from DBC.DBCInfoV |
+| Release | Full release string including build date |
+| Node Count | Total number of nodes in the system |
+| AMP Count | Total number of Access Module Processors (via HASHAMP()+1) |
+| PE Count | Total number of Parsing Engines |
+
+**Behavior Requirements:**
+
+**REQ-SYSCONFIG-001: Command Availability and Aliases**
+
+The `/sysconfig` command SHALL be available as a metacommand in REPL mode with the following characteristics:
+
+1. **REQ-SYSCONFIG-001.1** - Primary command: `/sysconfig`
+2. **REQ-SYSCONFIG-001.2** - Short alias: `/sc`
+3. **REQ-SYSCONFIG-001.3** - Both forms SHALL execute identically
+4. **REQ-SYSCONFIG-001.4** - Command SHALL execute immediately (no arguments required)
+5. **REQ-SYSCONFIG-001.5** - Command SHALL be case-insensitive (`/Sysconfig`, `/SYSCONFIG`, `/sc` all valid)
+
+**REQ-SYSCONFIG-002: Data Source and Query Execution**
+
+The command SHALL retrieve system configuration from Teradata system views:
+
+1. **REQ-SYSCONFIG-002.1** - Teradata version and release: Query `DBC.DBCInfoV` (InfoKey IN ('RELEASE','VERSION'))
+2. **REQ-SYSCONFIG-002.2** - AMP count: Compute via `HASHAMP() + 1`
+3. **REQ-SYSCONFIG-002.3** - Node count: Derive from DBC system views (e.g., `DBC.ResUsageSpma` or equivalent)
+4. **REQ-SYSCONFIG-002.4** - PE count: Derive from DBC system views
+5. **REQ-SYSCONFIG-002.5** - Query execution time SHALL be displayed in summary footer
+6. **REQ-SYSCONFIG-002.6** - Queries SHALL be read-only (no side effects)
+
+**REQ-SYSCONFIG-003: Output Formatting and Display**
+
+The command SHALL format output as a two-column key-value table:
+
+1. **REQ-SYSCONFIG-003.1** - Default output format: Two-column key-value table (box-drawing characters)
+2. **REQ-SYSCONFIG-003.2** - Column 1 header: `Property`; Column 2 header: `Value`
+3. **REQ-SYSCONFIG-003.3** - Properties displayed in a logical order (version info first, then resource counts)
+4. **REQ-SYSCONFIG-003.4** - Header line: `System Configuration - <hostname>:` above the table
+5. **REQ-SYSCONFIG-003.5** - Footer: `(Query time: X.XXXs)` below the table
+6. **REQ-SYSCONFIG-003.6** - Column widths SHALL auto-adjust to content
+
+**REQ-SYSCONFIG-004: Output Format Compatibility**
+
+The command SHALL work with all output format modes:
+
+1. **REQ-SYSCONFIG-004.1** - Table format (default): Two-column key-value table as shown above
+2. **REQ-SYSCONFIG-004.2** - CSV format: Two columns (`Property,Value`) with one row per property
+   ```csv
+   Property,Value
+   Teradata Version,17.20.00.17
+   Release,"17.20.00.17 (Released: 2024-01-15)"
+   Node Count,4
+   AMP Count,128
+   PE Count,16
+   ```
+3. **REQ-SYSCONFIG-004.3** - JSON format: Single object with property names as keys
+   ```json
+   {
+     "Teradata Version": "17.20.00.17",
+     "Release": "17.20.00.17 (Released: 2024-01-15)",
+     "Node Count": 4,
+     "AMP Count": 128,
+     "PE Count": 16
+   }
+   ```
+4. **REQ-SYSCONFIG-004.4** - Format selection: Command SHALL respect current output format setting (`/set format <fmt>`)
+
+**REQ-SYSCONFIG-005: Error Handling**
+
+The command SHALL handle errors and edge cases gracefully:
+
+**Insufficient Privileges:**
+```
+tq> /sysconfig
+
+Error: Unable to retrieve system configuration
+Reason: SELECT permission denied on DBC.DBCInfoV
+
+This command requires SELECT access to DBC system views.
+Contact your DBA to request access or use the GRANT statement:
+  GRANT SELECT ON DBC.DBCInfoV TO <your_username>;
+```
+
+**Connection Lost:**
+```
+tq> /sysconfig
+
+Error: Cannot retrieve system configuration - connection lost
+Use /reconnect to establish new connection
+```
+
+**Specific Requirements:**
+
+1. **REQ-SYSCONFIG-005.1** - Privilege errors SHALL include helpful explanation and GRANT statement example
+2. **REQ-SYSCONFIG-005.2** - Connection errors SHALL suggest `/reconnect` metacommand
+3. **REQ-SYSCONFIG-005.3** - All errors SHALL return to REPL prompt (non-fatal)
+4. **REQ-SYSCONFIG-005.4** - If a specific property cannot be retrieved, display `[unavailable]` for that row rather than failing the entire command
+
+**REQ-SYSCONFIG-006: Tab Completion and Help Integration**
+
+The command SHALL be discoverable through standard REPL features:
+
+1. **REQ-SYSCONFIG-006.1** - Tab completion: Typing `/sc<TAB>` SHALL auto-complete to `/sysconfig`
+2. **REQ-SYSCONFIG-006.2** - Tab completion: Typing `/sys<TAB>` SHALL auto-complete to `/sysconfig`
+3. **REQ-SYSCONFIG-006.3** - Help text: `/help` SHALL list `/sysconfig` command with description
+4. **REQ-SYSCONFIG-006.4** - Help text description: "Display system topology (version, nodes, AMPs, PEs)"
+5. **REQ-SYSCONFIG-006.5** - Detailed help: `/help sysconfig` SHALL display extended help including property descriptions
+6. **REQ-SYSCONFIG-006.6** - Command SHALL appear in metacommand list when typing `/<TAB>`
+
+**Example Help Output:**
+```sql
+tq> /help sysconfig
+
+/sysconfig - Display system configuration summary
+
+SYNTAX:
+  /sysconfig
+  /sc                        Short alias
+
+DESCRIPTION:
+  Display a compact summary of the Teradata system topology including
+  software version, node count, AMP count, and PE count. Useful for
+  verifying system configuration during DBA operations.
+
+  Data is retrieved from DBC.DBCInfoV and Teradata system functions.
+  Requires SELECT privilege on DBC system views.
+
+EXAMPLES:
+  /sysconfig                 Show system configuration
+  /sc                        Same using short alias
+
+RELATED COMMANDS:
+  /sessions                  List active sessions
+  /locks                     Display lock contention
+
+For more information, see documentation at: docs/user/metacommands.md
+```
+
+**REQ-SYSCONFIG-007: Performance Requirements**
+
+1. **REQ-SYSCONFIG-007.1** - Target execution time: <500ms
+2. **REQ-SYSCONFIG-007.2** - Loading indicator: Display "Loading system configuration..." if query takes >500ms
+3. **REQ-SYSCONFIG-007.3** - Result caching: NOT cached (always queries fresh for current state)
+4. **REQ-SYSCONFIG-007.4** - Query cancellation: Ctrl-C SHALL cancel query and return to prompt
+
+**Example Interaction:**
+
+**Basic usage:**
+```sql
+tq> /sysconfig
+
+System Configuration - prod-td01.company.com:
+┌──────────────────────┬─────────────────────────────────────┐
+│ Property             │ Value                               │
+├──────────────────────┼─────────────────────────────────────┤
+│ Teradata Version     │ 17.20.00.17                         │
+│ Release              │ 17.20.00.17 (Released: 2024-01-15)  │
+│ Node Count           │ 4                                   │
+│ AMP Count            │ 128                                 │
+│ PE Count             │ 16                                  │
+└──────────────────────┴─────────────────────────────────────┘
+
+(Query time: 0.045s)
+
+tq> /sc
+[Same output using short alias]
+```
+
+**With JSON output:**
+```sql
+tq> /set format json
+Output format set to: json
+
+tq> /sysconfig
+{
+  "Teradata Version": "17.20.00.17",
+  "Release": "17.20.00.17 (Released: 2024-01-15)",
+  "Node Count": 4,
+  "AMP Count": 128,
+  "PE Count": 16
+}
+```
+
+**Tab completion:**
+```sql
+tq> /sc<TAB>
+tq> /sysconfig_
+[Auto-completed]
+
+tq> /sys<TAB>
+tq> /sysconfig_
+[Auto-completed]
+```
+
+**Acceptance Test:**
+- Execute `/sysconfig` and verify all five properties are displayed
+- Execute `/sc` (alias) and verify identical behavior
+- Verify output includes Teradata Version, Release, Node Count, AMP Count, PE Count
+- Execute with `/set format csv` and verify CSV output with Property,Value headers
+- Execute with `/set format json` and verify JSON object output
+- Trigger privilege error and verify helpful error message with GRANT example
+- Type `/sc<TAB>` and verify tab completion resolves to `/sysconfig`
+- Execute `/help sysconfig` and verify extended help is displayed
+
+---
+
+**`/locks` Metacommand**
+
+**Requirement:** Display current lock contention information showing locked objects, lock types, locking sessions, and waiting sessions so DBAs can diagnose and resolve blocking issues.
+
+**Syntax:**
+```
+/locks
+/lk                 -- Short alias
+```
+
+**Output Format:**
+
+**When locks exist:**
+```
+tq> /locks
+
+Lock Information on prod-td01.company.com:
+┌──────────────────────┬───────────┬────────────┬──────────────┬──────────────┬────────────────────────┐
+│ Locked Object        │ Lock Type │ Lock Mode  │ Locking Sess │ Waiting Sess │ Blocked Since          │
+├──────────────────────┼───────────┼────────────┼──────────────┼──────────────┼────────────────────────┤
+│ PRODUCTION.orders    │ Table     │ WRITE      │ 1023         │ 1045, 1067   │ 2026/01/27 14:32:15.00 │
+│ PRODUCTION.customers │ Table     │ EXCLUSIVE  │ 1023         │ 1051         │ 2026/01/27 14:32:15.00 │
+│ PRODUCTION.employees │ Row Hash  │ READ       │ 1078         │ (none)       │ 2026/01/27 14:45:00.00 │
+└──────────────────────┴───────────┴────────────┴──────────────┴──────────────┴────────────────────────┘
+
+3 locks found - 1 blocking chain detected (Query time: 0.089s)
+
+Blocking Chain:
+  Session 1023 (etl_user) blocks sessions: 1045, 1051, 1067
+```
+
+**When no locks exist:**
+```
+tq> /locks
+
+Lock Information on prod-td01.company.com:
+No locks currently held.
+
+(Query time: 0.023s)
+```
+
+**Column Descriptions:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| Locked Object | VARCHAR | Fully qualified name of the locked database object (database.table) |
+| Lock Type | VARCHAR | Granularity of the lock: Table, Row Hash, Database |
+| Lock Mode | VARCHAR | Lock severity: READ, WRITE, EXCLUSIVE, ACCESS |
+| Locking Sess | INTEGER | Session ID that holds the lock |
+| Waiting Sess | VARCHAR | Comma-separated list of session IDs waiting for this lock, or `(none)` |
+| Blocked Since | TIMESTAMP | When the lock was first acquired (YYYY/MM/DD HH:MM:SS.ss format) |
+
+**Lock Mode Definitions:**
+
+| Lock Mode | Description |
+|-----------|-------------|
+| ACCESS | Weakest lock - prevents only EXCLUSIVE locks. Allows concurrent reads and writes. |
+| READ | Shared lock - allows concurrent reads, blocks WRITE and EXCLUSIVE. |
+| WRITE | Exclusive on writes - blocks other WRITE and EXCLUSIVE, allows READ. |
+| EXCLUSIVE | Strongest lock - blocks all other lock modes including ACCESS. |
+
+**Behavior Requirements:**
+
+**REQ-LOCKS-001: Command Availability and Aliases**
+
+The `/locks` command SHALL be available as a metacommand in REPL mode with the following characteristics:
+
+1. **REQ-LOCKS-001.1** - Primary command: `/locks`
+2. **REQ-LOCKS-001.2** - Short alias: `/lk`
+3. **REQ-LOCKS-001.3** - Both forms SHALL execute identically
+4. **REQ-LOCKS-001.4** - Command SHALL execute immediately (no arguments required)
+5. **REQ-LOCKS-001.5** - Command SHALL be case-insensitive (`/Locks`, `/LOCKS`, `/lk` all valid)
+
+**REQ-LOCKS-002: Data Source and Query Execution**
+
+The command SHALL retrieve lock information from Teradata system views:
+
+1. **REQ-LOCKS-002.1** - Primary data source: `DBC.LockInfoV` (or platform-equivalent view)
+2. **REQ-LOCKS-002.2** - Query scope: All current locks system-wide
+3. **REQ-LOCKS-002.3** - Query results SHALL include all active locks regardless of lock mode
+4. **REQ-LOCKS-002.4** - Query execution time SHALL be displayed in summary footer
+5. **REQ-LOCKS-002.5** - Queries SHALL be read-only (no side effects)
+6. **REQ-LOCKS-002.6** - If `DBC.LockInfoV` is unavailable, the command SHALL report the unavailability clearly rather than silently returning empty results
+
+**REQ-LOCKS-003: Output Formatting and Display**
+
+The command SHALL format lock information as a table:
+
+1. **REQ-LOCKS-003.1** - Default output format: Table (box-drawing characters)
+2. **REQ-LOCKS-003.2** - Column headers SHALL match column names exactly as specified above
+3. **REQ-LOCKS-003.3** - Timestamp format: `YYYY/MM/DD HH:MM:SS.ss` (Teradata default timestamp format)
+4. **REQ-LOCKS-003.4** - Waiting sessions: Comma-separated session IDs or `(none)` when no waiters
+5. **REQ-LOCKS-003.5** - Header line: `Lock Information on <hostname>:` above the table
+6. **REQ-LOCKS-003.6** - Summary footer format: `N locks found - M blocking chain(s) detected (Query time: X.XXXs)`
+7. **REQ-LOCKS-003.7** - When no locks exist, display `No locks currently held.` instead of an empty table
+8. **REQ-LOCKS-003.8** - Column widths SHALL auto-adjust to content (minimum width: header width)
+
+**REQ-LOCKS-004: Blocking Chain Identification**
+
+The command SHALL identify and display blocking chains:
+
+1. **REQ-LOCKS-004.1** - A blocking chain exists when one or more sessions are waiting for a lock held by another session
+2. **REQ-LOCKS-004.2** - After the main lock table, display a "Blocking Chain:" section if any chains exist
+3. **REQ-LOCKS-004.3** - Each chain entry format: `Session <N> (<username>) blocks sessions: <id1>, <id2>, ...`
+4. **REQ-LOCKS-004.4** - Multiple independent blocking chains SHALL each be listed on a separate line
+5. **REQ-LOCKS-004.5** - If no blocking chains exist, the "Blocking Chain:" section SHALL NOT be shown
+6. **REQ-LOCKS-004.6** - Chain detection SHALL be based on the Waiting Sess column data
+
+**Blocking chain example with multiple chains:**
+```
+Blocking Chain:
+  Session 1023 (etl_user) blocks sessions: 1045, 1051, 1067
+  Session 1089 (batch_proc) blocks sessions: 1092
+```
+
+**REQ-LOCKS-005: Output Format Compatibility**
+
+The command SHALL work with all output format modes:
+
+1. **REQ-LOCKS-005.1** - Table format (default): Box-drawing table as shown above
+2. **REQ-LOCKS-005.2** - CSV format: Standard CSV with headers, waiting sessions as quoted comma-separated string
+   ```csv
+   Locked Object,Lock Type,Lock Mode,Locking Sess,Waiting Sess,Blocked Since
+   PRODUCTION.orders,Table,WRITE,1023,"1045, 1067",2026/01/27 14:32:15.00
+   PRODUCTION.customers,Table,EXCLUSIVE,1023,1051,2026/01/27 14:32:15.00
+   PRODUCTION.employees,Row Hash,READ,1078,,2026/01/27 14:45:00.00
+   ```
+3. **REQ-LOCKS-005.3** - JSON format: Array of lock objects, waiting sessions as JSON array
+   ```json
+   [
+     {
+       "Locked Object": "PRODUCTION.orders",
+       "Lock Type": "Table",
+       "Lock Mode": "WRITE",
+       "Locking Sess": 1023,
+       "Waiting Sess": [1045, 1067],
+       "Blocked Since": "2026/01/27 14:32:15.00"
+     },
+     {
+       "Locked Object": "PRODUCTION.customers",
+       "Lock Type": "Table",
+       "Lock Mode": "EXCLUSIVE",
+       "Locking Sess": 1023,
+       "Waiting Sess": [1051],
+       "Blocked Since": "2026/01/27 14:32:15.00"
+     },
+     {
+       "Locked Object": "PRODUCTION.employees",
+       "Lock Type": "Row Hash",
+       "Lock Mode": "READ",
+       "Locking Sess": 1078,
+       "Waiting Sess": [],
+       "Blocked Since": "2026/01/27 14:45:00.00"
+     }
+   ]
+   ```
+4. **REQ-LOCKS-005.4** - Format selection: Command SHALL respect current output format setting (`/set format <fmt>`)
+5. **REQ-LOCKS-005.5** - In CSV and JSON formats, the Blocking Chain section SHALL NOT be included (chains can be derived from the data)
+
+**REQ-LOCKS-006: Error Handling**
+
+The command SHALL handle errors and edge cases gracefully:
+
+**Insufficient Privileges:**
+```
+tq> /locks
+
+Error: Unable to retrieve lock information
+Reason: SELECT permission denied on DBC.LockInfoV
+
+This command requires SELECT access to DBC lock views.
+Contact your DBA to request access or use the GRANT statement:
+  GRANT SELECT ON DBC.LockInfoV TO <your_username>;
+```
+
+**Lock View Not Available:**
+```
+tq> /locks
+
+Error: Lock information view not available
+DBC.LockInfoV is not accessible on this system.
+
+This may indicate a Teradata version compatibility issue or a
+configuration restriction. Contact your DBA for assistance.
+```
+
+**Connection Lost:**
+```
+tq> /locks
+
+Error: Cannot retrieve lock information - connection lost
+Use /reconnect to establish new connection
+```
+
+**Specific Requirements:**
+
+1. **REQ-LOCKS-006.1** - Privilege errors SHALL include helpful explanation and GRANT statement example
+2. **REQ-LOCKS-006.2** - View availability errors SHALL explain the issue without suggesting it is a privilege problem
+3. **REQ-LOCKS-006.3** - Connection errors SHALL suggest `/reconnect` metacommand
+4. **REQ-LOCKS-006.4** - All errors SHALL return to REPL prompt (non-fatal)
+5. **REQ-LOCKS-006.5** - Empty result (no locks) SHALL display the "No locks currently held." message, not an error
+
+**REQ-LOCKS-007: Tab Completion and Help Integration**
+
+The command SHALL be discoverable through standard REPL features:
+
+1. **REQ-LOCKS-007.1** - Tab completion: Typing `/lk<TAB>` SHALL auto-complete to `/locks`
+2. **REQ-LOCKS-007.2** - Tab completion: Typing `/lo<TAB>` SHALL suggest `/locks` and `/logon`
+3. **REQ-LOCKS-007.3** - Help text: `/help` SHALL list `/locks` command with description
+4. **REQ-LOCKS-007.4** - Help text description: "Display current lock contention and blocking chains"
+5. **REQ-LOCKS-007.5** - Detailed help: `/help locks` SHALL display extended help including lock mode definitions
+6. **REQ-LOCKS-007.6** - Command SHALL appear in metacommand list when typing `/<TAB>`
+
+**Example Help Output:**
+```sql
+tq> /help locks
+
+/locks - Display current lock contention and blocking chains
+
+SYNTAX:
+  /locks
+  /lk                        Short alias
+
+DESCRIPTION:
+  Display all current locks held on the Teradata system, identifying
+  which sessions hold locks, which sessions are waiting, and the
+  nature of the contention. Blocking chains are automatically
+  identified and summarized.
+
+  Lock Modes:
+    ACCESS    - Weakest lock; blocks only EXCLUSIVE
+    READ      - Shared lock; blocks WRITE and EXCLUSIVE
+    WRITE     - Blocks other WRITE and EXCLUSIVE
+    EXCLUSIVE - Strongest lock; blocks all other modes
+
+  Data is retrieved from DBC.LockInfoV.
+  Requires SELECT privilege on DBC system views.
+
+EXAMPLES:
+  /locks                     Show all current locks
+  /lk                        Same using short alias
+
+RELATED COMMANDS:
+  /sessions                  List active sessions
+  /sysconfig                 Display system topology
+
+For more information, see documentation at: docs/user/metacommands.md
+```
+
+**REQ-LOCKS-008: Performance Requirements**
+
+1. **REQ-LOCKS-008.1** - Target execution time: <1 second for systems with typical lock activity
+2. **REQ-LOCKS-008.2** - Loading indicator: Display "Loading lock information..." if query takes >500ms
+3. **REQ-LOCKS-008.3** - Result caching: NOT cached (each execution is a fresh query for real-time monitoring)
+4. **REQ-LOCKS-008.4** - Query cancellation: Ctrl-C SHALL cancel query and return to prompt
+5. **REQ-LOCKS-008.5** - Resource impact: Query SHALL use read-only system views (no locks, no modifications)
+
+**Example Interaction:**
+
+**No locks:**
+```sql
+tq> /locks
+
+Lock Information on prod-td01.company.com:
+No locks currently held.
+
+(Query time: 0.023s)
+```
+
+**With active locks and blocking:**
+```sql
+tq> /locks
+
+Lock Information on prod-td01.company.com:
+┌──────────────────────┬───────────┬────────────┬──────────────┬──────────────┬────────────────────────┐
+│ Locked Object        │ Lock Type │ Lock Mode  │ Locking Sess │ Waiting Sess │ Blocked Since          │
+├──────────────────────┼───────────┼────────────┼──────────────┼──────────────┼────────────────────────┤
+│ PRODUCTION.orders    │ Table     │ WRITE      │ 1023         │ 1045, 1067   │ 2026/01/27 14:32:15.00 │
+│ PRODUCTION.customers │ Table     │ EXCLUSIVE  │ 1023         │ 1051         │ 2026/01/27 14:32:15.00 │
+└──────────────────────┴───────────┴────────────┴──────────────┴──────────────┴────────────────────────┘
+
+2 locks found - 1 blocking chain detected (Query time: 0.089s)
+
+Blocking Chain:
+  Session 1023 (etl_user) blocks sessions: 1045, 1051, 1067
+```
+
+**With JSON output:**
+```sql
+tq> /set format json
+Output format set to: json
+
+tq> /locks
+[
+  {
+    "Locked Object": "PRODUCTION.orders",
+    "Lock Type": "Table",
+    "Lock Mode": "WRITE",
+    "Locking Sess": 1023,
+    "Waiting Sess": [1045, 1067],
+    "Blocked Since": "2026/01/27 14:32:15.00"
+  }
+]
+```
+
+**Tab completion:**
+```sql
+tq> /lk<TAB>
+tq> /locks_
+[Auto-completed]
+
+tq> /lo<TAB>
+
+Matching metacommands:
+    /locks   Display current lock contention and blocking chains
+    /logon   Connect/switch database
+```
+
+**Acceptance Test:**
+- Execute `/locks` with no active locks and verify "No locks currently held." message
+- Execute `/locks` with active locks and verify all lock rows are displayed with correct columns
+- Execute `/lk` (alias) and verify identical behavior
+- Verify blocking chains section appears when sessions are waiting
+- Verify blocking chains section does NOT appear when no waiters exist
+- Execute with `/set format csv` and verify CSV output
+- Execute with `/set format json` and verify JSON array output with Waiting Sess as array
+- Trigger privilege error and verify helpful error message with GRANT example
+- Type `/lk<TAB>` and verify tab completion resolves to `/locks`
+- Execute `/help locks` and verify extended help with lock mode definitions is displayed
 
 ---
 

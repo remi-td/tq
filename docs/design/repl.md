@@ -4923,6 +4923,990 @@ Contact your database administrator for access.
 
 ---
 
+## System Configuration Command (/sysconfig)
+
+This section documents the technical design for the `/sysconfig` metacommand, which displays Teradata system topology and configuration in a compact summary format.
+
+### Overview
+
+The `/sysconfig` command queries multiple Teradata system views to build a consolidated system configuration summary. Unlike the tabular output of `/sessions`, this command produces a key-value summary display that gives DBAs immediate visibility into the system topology (version, nodes, AMPs, PEs) without running multiple queries.
+
+**User Stories:** US-1.1, US-1.2, US-1.3 (Configuration Summary)
+
+### Architecture
+
+```
+Sysconfig Command Flow:
+
+/sysconfig (REPL) or tq sysconfig (batch)
+        |
+        v
+Execute multiple SQL queries:
+  1. DBC.DBCInfoV -> version, release
+  2. HASHAMP()+1 -> total AMP count
+  3. Node topology query -> node count
+        |
+        v
+Parse results into SystemConfig struct
+        |
+        v
+Format output:
+  REPL: Compact key-value summary
+  Batch: table/csv/json per --format flag
+```
+
+### Module Structure
+
+New file: `src/commands/sysconfig.rs`
+
+Following the established `sessions.rs` pattern:
+- SQL constants for each query
+- Parsed data struct (`SystemConfig`)
+- `execute()` for batch mode
+- `execute_for_repl()` for REPL mode
+- `display_table()`, `display_csv()`, `display_json()` formatters
+
+### SQL Query Design
+
+Three separate queries are executed sequentially within the same connection:
+
+#### Query 1: System Version and Release
+
+```sql
+SELECT InfoKey, CAST(InfoData AS VARCHAR(256)) AS InfoData
+FROM DBC.DBCInfoV
+ORDER BY InfoKey
+```
+
+This returns rows with `InfoKey` values including:
+- `VERSION` - The database engine version (e.g., `16.20.53.30`)
+- `RELEASE` - The release identifier (e.g., `16.20.53.30`)
+- `LANGUAGE SUPPORT MODE` - Character set mode
+
+The query uses `CAST(InfoData AS VARCHAR(256))` to ensure the `InfoData` column (which may be a longer type) is returned as a manageable string.
+
+#### Query 2: Total AMP Count
+
+```sql
+SELECT HASHAMP()+1 AS TotalAMPs
+```
+
+`HASHAMP()` is a built-in Teradata function that returns the highest AMP number (zero-indexed). Adding 1 gives the total AMP count. This is the canonical way to determine AMP count and works on all Teradata versions.
+
+#### Query 3: Node Count (with fallback)
+
+Primary query:
+```sql
+SELECT COUNT(DISTINCT NodeID) AS NodeCount
+FROM DBC.ResUsageSpma
+WHERE TheDate = DATE
+```
+
+This queries `DBC.ResUsageSpma` (System Performance Measurement Architecture) for today's data to determine the number of physical nodes. The `WHERE TheDate = DATE` filter limits the scan to recent data.
+
+Fallback query (if ResUsageSpma is unavailable or empty):
+```sql
+SELECT COUNT(DISTINCT NodeID) AS NodeCount
+FROM DBC.ResCpuUsageByAmpView
+```
+
+If both fail, the node count is reported as "N/A" rather than causing a command failure.
+
+#### PE Count
+
+PE count is derived from the node count using a heuristic (1 PE per node for typical configurations), or if available, queried from the system. Since PE count is not reliably available from standard DBC views on all configurations, the implementation reports it when available and omits it gracefully when not.
+
+### Data Model
+
+```rust
+/// System configuration information extracted from DBC views
+#[derive(Debug, Clone)]
+pub struct SystemConfig {
+    /// Teradata software version string (e.g., "16.20.53.30")
+    pub version: String,
+    /// Teradata release string
+    pub release: String,
+    /// Total number of AMPs in the system
+    pub amp_count: i64,
+    /// Number of physical/logical nodes (None if unavailable)
+    pub node_count: Option<i64>,
+    /// Number of Parsing Engines (None if unavailable)
+    pub pe_count: Option<i64>,
+    /// Additional info key-value pairs from DBCInfoV
+    pub info_entries: Vec<(String, String)>,
+}
+```
+
+The struct uses `Option<i64>` for fields that may not be available due to view permissions or system configuration. The `info_entries` vector captures all key-value pairs from `DBC.DBCInfoV` for completeness.
+
+### Row Parsing
+
+```rust
+impl SystemConfig {
+    /// Build SystemConfig from DBC.DBCInfoV query result
+    pub fn from_dbcinfo_result(result: &QueryResult) -> Self {
+        let mut version = String::from("Unknown");
+        let mut release = String::from("Unknown");
+        let mut info_entries = Vec::new();
+
+        for row in &result.rows {
+            if row.len() < 2 { continue; }
+
+            let key = match &row[0] {
+                Value::String(s) => s.trim().to_string(),
+                _ => continue,
+            };
+            let value = match &row[1] {
+                Value::String(s) => s.trim().to_string(),
+                Value::Null => "[NULL]".to_string(),
+                other => other.display(),
+            };
+
+            match key.to_uppercase().as_str() {
+                "VERSION" => version = value.clone(),
+                "RELEASE" => release = value.clone(),
+                _ => {}
+            }
+            info_entries.push((key, value));
+        }
+
+        Self {
+            version,
+            release,
+            amp_count: 0,  // Set separately
+            node_count: None,
+            pe_count: None,
+            info_entries,
+        }
+    }
+}
+```
+
+### REPL Display Format
+
+The REPL display uses a compact key-value summary format rather than a table:
+
+```
+System Configuration:
+  Version:    16.20.53.30
+  Release:    16.20.53.30
+  Nodes:      4
+  AMPs:       64
+  AMPs/Node:  16
+
+(Query time: 0.234s)
+```
+
+This is implemented using plain `writeln!` formatting for alignment:
+
+```rust
+pub fn execute_for_repl<W: Write>(client: &DatabaseClient, writer: &mut W) -> Result<()> {
+    writeln!(writer)?;
+
+    match build_system_config(client) {
+        Ok(config) => {
+            writeln!(writer, "System Configuration:")?;
+            writeln!(writer, "  Version:    {}", config.version)?;
+            writeln!(writer, "  Release:    {}", config.release)?;
+            if let Some(nodes) = config.node_count {
+                writeln!(writer, "  Nodes:      {}", nodes)?;
+            }
+            writeln!(writer, "  AMPs:       {}", config.amp_count)?;
+            if let (Some(nodes), amp_count) = (config.node_count, config.amp_count) {
+                if nodes > 0 {
+                    writeln!(writer, "  AMPs/Node:  {}", amp_count / nodes)?;
+                }
+            }
+            if let Some(pes) = config.pe_count {
+                writeln!(writer, "  PEs:        {}", pes)?;
+            }
+        }
+        Err(e) => {
+            // Error handling follows sessions.rs pattern
+            handle_sysconfig_error(&e, writer)?;
+        }
+    }
+
+    writeln!(writer)?;
+    Ok(())
+}
+```
+
+### Batch Mode Display
+
+For batch mode, three output formats are supported:
+
+**Table format:** Uses `comfy_table` with a key-value layout:
+
+```
+System Configuration:
++-----------+---------------+
+| Property  | Value         |
++-----------+---------------+
+| Version   | 16.20.53.30   |
+| Release   | 16.20.53.30   |
+| Nodes     | 4             |
+| AMPs      | 64            |
+| AMPs/Node | 16            |
++-----------+---------------+
+```
+
+**CSV format:**
+```
+Property,Value
+Version,16.20.53.30
+Release,16.20.53.30
+Nodes,4
+AMPs,64
+AMPs/Node,16
+```
+
+**JSON format:**
+```json
+{
+  "Version": "16.20.53.30",
+  "Release": "16.20.53.30",
+  "Nodes": 4,
+  "AMPs": 64,
+  "AMPsPerNode": 16
+}
+```
+
+### Error Handling
+
+Privilege errors are detected and presented with actionable guidance, following the sessions.rs pattern:
+
+```rust
+fn handle_sysconfig_error<W: Write>(e: &crate::error::TqError, writer: &mut W) -> Result<()> {
+    let error_str = e.to_string().to_lowercase();
+
+    if error_str.contains("privilege") || error_str.contains("access")
+        || error_str.contains("permission") || error_str.contains("3523")
+    {
+        writeln!(writer, "Error: Insufficient privileges to query system configuration.")?;
+        writeln!(writer)?;
+        writeln!(writer, "Required: SELECT privilege on DBC.DBCInfoV")?;
+        writeln!(writer)?;
+        writeln!(writer, "To grant access, a DBA can run:")?;
+        writeln!(writer, "  GRANT SELECT ON DBC.DBCInfoV TO <username>;")?;
+    } else {
+        writeln!(writer, "Error querying system configuration: {}", e)?;
+    }
+    Ok(())
+}
+```
+
+The multi-query approach is resilient: if the AMP count query succeeds but the node count query fails (e.g., due to `ResUsageSpma` not being collected), the command still displays available information rather than failing entirely.
+
+### CLI Integration
+
+```rust
+// In src/cli.rs - Command enum
+/// Display system configuration and topology
+///
+/// Shows Teradata version, node count, AMP count, and system topology.
+/// Requires SELECT privilege on DBC.DBCInfoV.
+Sysconfig(SysconfigArgs),
+
+/// Arguments for the sysconfig command
+#[derive(Parser, Debug)]
+pub struct SysconfigArgs {
+    /// Output format
+    #[arg(
+        short, long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+```
+
+### Tab Completion Integration
+
+Add to the `METACOMMANDS` array in `metadata_completer.rs`:
+
+```rust
+MetacommandDef {
+    name: "sysconfig",
+    aliases: &["sc"],
+    description: "Show system configuration and topology",
+},
+```
+
+### Metacommand Handler Integration
+
+In `metacommands.rs`, both `handle_metacommand` and `handle_metacommand_with_state`:
+
+```rust
+// System configuration command
+"sysconfig" | "sc" => {
+    crate::commands::sysconfig::execute_for_repl(completion_state.client(), writer)?;
+}
+```
+
+### Help Text Integration
+
+Add to the "System Monitoring" section in `print_help_extended()`:
+
+```rust
+writeln!(writer, "System Monitoring:")?;
+writeln!(writer, "  /sessions              List active sessions with performance metrics")?;
+writeln!(writer, "  /sysconfig, /sc        Show system configuration and topology")?;
+```
+
+### Unit Tests
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_system_config_from_dbcinfo_result() {
+        // Test parsing of DBC.DBCInfoV result rows
+    }
+
+    #[test]
+    fn test_system_config_version_extraction() {
+        // Test that VERSION key is correctly extracted
+    }
+
+    #[test]
+    fn test_system_config_missing_keys() {
+        // Test graceful handling when expected keys are absent
+    }
+
+    #[test]
+    fn test_amp_count_parsing() {
+        // Test HASHAMP()+1 result parsing
+    }
+
+    #[test]
+    fn test_node_count_parsing() {
+        // Test node count from ResUsageSpma
+    }
+
+    #[test]
+    fn test_display_table_format() {
+        // Test table formatter output
+    }
+
+    #[test]
+    fn test_display_csv_format() {
+        // Test CSV formatter output
+    }
+
+    #[test]
+    fn test_display_json_format() {
+        // Test JSON formatter output
+    }
+
+    #[test]
+    fn test_repl_display_format() {
+        // Test compact REPL display output
+    }
+
+    #[test]
+    fn test_repl_display_with_missing_node_count() {
+        // Test REPL display when node count is unavailable
+    }
+}
+```
+
+### Design Decisions
+
+**Why multiple queries instead of one combined query?**
+- The three data sources (`DBC.DBCInfoV`, `HASHAMP()`, node topology views) cannot be efficiently joined in a single query
+- Sequential execution allows partial results if some views are unavailable
+- Each query is lightweight (no table scans, instant results)
+
+**Why compact key-value format instead of table format for REPL?**
+- System configuration is a small fixed set of properties, not a variable-length list
+- Key-value format is more readable for summary data
+- Follows the pattern of database CLI tools like `psql`'s `\conninfo`
+
+**Why include AMPs/Node derived field?**
+- This ratio is valuable for DBAs to verify even distribution across nodes
+- Teradata documentation frequently references this metric
+- It is trivially computed from available data
+
+---
+
+## Session Blocking and Lock Information Command (/locks)
+
+This section documents the technical design for the `/locks` metacommand, which displays current lock contention and blocking chains to help DBAs diagnose session blocking issues.
+
+### Overview
+
+The `/locks` command queries the Teradata `MonitorSession` table function to identify sessions that are currently blocked, the sessions that are blocking them, and the lock relationships between them. This provides DBAs with immediate visibility into lock contention without needing to run multiple manual queries or use Teradata Viewpoint.
+
+**User Stories:** US-3.2, US-3.3, US-3.5, US-3.6 (Session and Lock Information)
+
+### Architecture
+
+```
+Locks Command Flow:
+
+/locks (REPL) or tq locks (batch)
+        |
+        v
+Execute SQL query:
+  MonitorSession(-1, '*', 0) with blocking columns
+        |
+        v
+Filter for sessions where AMPState='BLOCKED' or PEState='BLOCKED'
+        |
+        v
+Parse into LockInfo structs
+        |
+        v
+Build blocking chains (blocker -> blocked relationships)
+        |
+        v
+Format output:
+  REPL: Table with blocking chain annotations
+  Batch: table/csv/json per --format flag
+```
+
+### Module Structure
+
+New file: `src/commands/locks.rs`
+
+Following the established `sessions.rs` pattern:
+- SQL constant for the lock query
+- Parsed data struct (`LockInfo`)
+- Blocking chain builder
+- `execute()` for batch mode
+- `execute_for_repl()` for REPL mode
+- `display_table()`, `display_csv()`, `display_json()` formatters
+
+### SQL Query Design
+
+The primary query uses `MonitorSession` to detect blocking relationships:
+
+```sql
+SELECT
+    SessionNo,
+    UserName,
+    PEState,
+    AMPState,
+    Blk1SessNo,
+    Blk1UserId
+FROM TABLE (MonitorSession(-1, '*', 0)) AS t1
+ORDER BY SessionNo
+```
+
+**Key columns for lock detection:**
+- `PEState` / `AMPState` - When either is `'BLOCKED'`, the session is waiting for a lock
+- `Blk1SessNo` - Session number of the session holding the blocking lock
+- `Blk1UserId` - User ID of the blocking user (numeric; requires `IDENTIFYUSER()` for name resolution)
+
+**User name resolution for blockers:**
+
+The blocking user ID (`Blk1UserId`) is a numeric value. To resolve it to a user name, we use the `IDENTIFYUSER()` function:
+
+```sql
+SELECT
+    t1.SessionNo,
+    t1.UserName,
+    t1.PEState,
+    t1.AMPState,
+    t1.Blk1SessNo,
+    CASE WHEN t1.Blk1SessNo > 0
+         THEN IDENTIFYUSER(t1.Blk1UserId)
+         ELSE ''
+    END AS Blk1UserName
+FROM TABLE (MonitorSession(-1, '*', 0)) AS t1
+ORDER BY SessionNo
+```
+
+The `CASE` prevents calling `IDENTIFYUSER()` on zero values (which indicates no blocking).
+
+**Design Note on DBC.LockInfoV:**
+
+The `DBC.LockInfoV` view would provide more detailed lock information (lock type, lock level, locked object name) but is not available on all Teradata systems and requires additional privileges. The `MonitorSession`-based approach is preferred because:
+1. It uses the same function already proven by the `/sessions` command
+2. It is available on Teradata 14.10+ (same requirement as `/sessions`)
+3. It identifies blocking relationships directly
+4. It requires the same EXECUTE FUNCTION privilege already needed for `/sessions`
+
+If future needs require detailed lock type information, a secondary query to `DBC.LockInfoV` can be added as an enhancement.
+
+### Data Model
+
+```rust
+/// Lock/blocking information for a session
+#[derive(Debug, Clone)]
+pub struct LockInfo {
+    /// Session number of the blocked session
+    pub session_no: i64,
+    /// User name of the blocked session
+    pub user_name: String,
+    /// Parsing Engine state (BLOCKED, IDLE, etc.)
+    pub pe_state: String,
+    /// AMP state (BLOCKED, ACTIVE, IDLE, etc.)
+    pub amp_state: String,
+    /// Session number of the blocking session (0 if not blocked)
+    pub blocking_session: i64,
+    /// User name of the blocking session (empty if not blocked)
+    pub blocking_user: String,
+}
+
+impl LockInfo {
+    /// Create LockInfo from a MonitorSession query result row
+    ///
+    /// Expected columns: SessionNo, UserName, PEState, AMPState,
+    /// Blk1SessNo, Blk1UserName
+    pub fn from_row(row: &[Value]) -> Option<Self> {
+        if row.len() < 6 { return None; }
+        // ... extraction logic following SessionInfo pattern
+    }
+
+    /// Whether this session is currently blocked
+    pub fn is_blocked(&self) -> bool {
+        self.pe_state.to_uppercase() == "BLOCKED"
+            || self.amp_state.to_uppercase() == "BLOCKED"
+    }
+}
+```
+
+### Blocking Chain Logic
+
+Blocking chains are built by analyzing the blocker-blocked relationships across all sessions:
+
+```rust
+/// A blocking chain showing which sessions block which
+#[derive(Debug, Clone)]
+pub struct BlockingChain {
+    /// The root blocker session (the session holding the lock)
+    pub blocker_session: i64,
+    /// The root blocker user name
+    pub blocker_user: String,
+    /// Sessions directly or transitively blocked by this session
+    pub blocked_sessions: Vec<BlockedSession>,
+}
+
+/// A session that is blocked, with its depth in the chain
+#[derive(Debug, Clone)]
+pub struct BlockedSession {
+    /// The blocked session number
+    pub session_no: i64,
+    /// The blocked session user name
+    pub user_name: String,
+    /// Depth in the blocking chain (1 = directly blocked by root)
+    pub depth: usize,
+}
+
+/// Build blocking chains from a list of lock info entries
+///
+/// Algorithm:
+/// 1. Collect all sessions into a map by session_no
+/// 2. For each blocked session, trace back to the root blocker
+/// 3. Group blocked sessions by their root blocker
+/// 4. Sort chains by blocker session number
+fn build_blocking_chains(sessions: &[LockInfo]) -> Vec<BlockingChain> {
+    use std::collections::HashMap;
+
+    let session_map: HashMap<i64, &LockInfo> = sessions
+        .iter()
+        .map(|s| (s.session_no, s))
+        .collect();
+
+    let mut chains: HashMap<i64, Vec<BlockedSession>> = HashMap::new();
+
+    for session in sessions {
+        if !session.is_blocked() || session.blocking_session == 0 {
+            continue;
+        }
+
+        // Trace back to root blocker
+        let mut current = session.blocking_session;
+        let mut depth = 1;
+        let mut visited = std::collections::HashSet::new();
+
+        while let Some(blocker) = session_map.get(&current) {
+            if !blocker.is_blocked() || blocker.blocking_session == 0 {
+                break; // Found the root blocker
+            }
+            if !visited.insert(current) {
+                break; // Cycle detection
+            }
+            current = blocker.blocking_session;
+            depth += 1;
+        }
+
+        chains.entry(current).or_default().push(BlockedSession {
+            session_no: session.session_no,
+            user_name: session.user_name.clone(),
+            depth,
+        });
+    }
+
+    // Convert to sorted Vec<BlockingChain>
+    let mut result: Vec<BlockingChain> = chains
+        .into_iter()
+        .map(|(blocker_id, blocked)| {
+            let blocker_user = session_map
+                .get(&blocker_id)
+                .map(|s| s.user_name.clone())
+                .unwrap_or_else(|| format!("[Session {}]", blocker_id));
+            BlockingChain {
+                blocker_session: blocker_id,
+                blocker_user,
+                blocked_sessions: blocked,
+            }
+        })
+        .collect();
+
+    result.sort_by_key(|c| c.blocker_session);
+    result
+}
+```
+
+**Cycle detection:** The chain-building algorithm includes a visited set to handle circular blocking scenarios (which are rare but possible in deadlock situations). If a cycle is detected, the chain is terminated at the cycle point.
+
+### REPL Display Format
+
+The REPL display shows two sections: a summary table and blocking chain annotations:
+
+```
+Lock Contention:
++-----------+----------+---------+----------+-------------------+------------------+
+| SessionNo | UserName | PEState | AMPState | BlockingSession   | BlockingUser     |
++-----------+----------+---------+----------+-------------------+------------------+
+|      1078 | DBC      | BLOCKED | BLOCKED  |              1076 | ADMIN            |
+|      1080 | ETL_USER | BLOCKED | BLOCKED  |              1076 | ADMIN            |
+|      1082 | ANALYST  | BLOCKED | BLOCKED  |              1078 | DBC              |
++-----------+----------+---------+----------+-------------------+------------------+
+
+Blocking Chains:
+  Session 1076 (ADMIN) blocks 3 session(s):
+    -> Session 1078 (DBC)
+    -> Session 1080 (ETL_USER)
+    -> -> Session 1082 (ANALYST) [via 1078]
+
+3 blocked session(s), 1 blocking chain(s) (Query time: 0.156s)
+```
+
+When no locks are detected:
+
+```
+Lock Contention:
+(no blocked sessions found)
+
+0 blocked session(s) (Query time: 0.089s)
+```
+
+### Batch Mode Display
+
+**Table format:** Same as REPL table but without the blocking chain annotations.
+
+**CSV format:**
+```
+SessionNo,UserName,PEState,AMPState,BlockingSession,BlockingUser
+1078,DBC,BLOCKED,BLOCKED,1076,ADMIN
+1080,ETL_USER,BLOCKED,BLOCKED,1076,ADMIN
+1082,ANALYST,BLOCKED,BLOCKED,1078,DBC
+```
+
+**JSON format:**
+```json
+{
+  "blocked_sessions": [
+    {
+      "SessionNo": 1078,
+      "UserName": "DBC",
+      "PEState": "BLOCKED",
+      "AMPState": "BLOCKED",
+      "BlockingSession": 1076,
+      "BlockingUser": "ADMIN"
+    }
+  ],
+  "blocking_chains": [
+    {
+      "blocker_session": 1076,
+      "blocker_user": "ADMIN",
+      "blocked_count": 3,
+      "blocked": [
+        {"session": 1078, "user": "DBC", "depth": 1},
+        {"session": 1080, "user": "ETL_USER", "depth": 1},
+        {"session": 1082, "user": "ANALYST", "depth": 2}
+      ]
+    }
+  ]
+}
+```
+
+### Error Handling
+
+```rust
+fn handle_locks_error<W: Write>(e: &crate::error::TqError, writer: &mut W) -> Result<()> {
+    let error_str = e.to_string().to_lowercase();
+
+    if error_str.contains("privilege") || error_str.contains("access")
+        || error_str.contains("permission") || error_str.contains("3523")
+    {
+        writeln!(writer, "Error: Insufficient privileges to query lock information.")?;
+        writeln!(writer)?;
+        writeln!(writer, "Required: EXECUTE FUNCTION privilege on SYSLIB.MonitorSession")?;
+        writeln!(writer)?;
+        writeln!(writer, "To grant access, a DBA can run:")?;
+        writeln!(writer, "  GRANT EXECUTE FUNCTION ON SYSLIB.MonitorSession TO <username>;")?;
+    } else if error_str.contains("monitorsession")
+        && (error_str.contains("syntax") || error_str.contains("not found"))
+    {
+        writeln!(writer, "Error: MonitorSession function not available.")?;
+        writeln!(writer)?;
+        writeln!(writer, "This feature requires Teradata 14.10 or later.")?;
+        writeln!(writer, "Your system may be running an earlier version.")?;
+    } else {
+        writeln!(writer, "Error querying lock information: {}", e)?;
+    }
+    Ok(())
+}
+```
+
+### CLI Integration
+
+```rust
+// In src/cli.rs - Command enum
+/// Display lock contention and blocking sessions
+///
+/// Shows which sessions are blocked and the blocking chains.
+/// Requires EXECUTE FUNCTION privilege on SYSLIB.MonitorSession.
+Locks(LocksArgs),
+
+/// Arguments for the locks command
+#[derive(Parser, Debug)]
+pub struct LocksArgs {
+    /// Output format
+    #[arg(
+        short, long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+```
+
+### Tab Completion Integration
+
+Add to the `METACOMMANDS` array in `metadata_completer.rs`:
+
+```rust
+MetacommandDef {
+    name: "locks",
+    aliases: &["lk"],
+    description: "Show lock contention and blocking sessions",
+},
+```
+
+### Metacommand Handler Integration
+
+In `metacommands.rs`, both `handle_metacommand` and `handle_metacommand_with_state`:
+
+```rust
+// Lock contention command
+"locks" | "lk" => {
+    crate::commands::locks::execute_for_repl(completion_state.client(), writer)?;
+}
+```
+
+### Help Text Integration
+
+Add to the "System Monitoring" section in `print_help_extended()`:
+
+```rust
+writeln!(writer, "System Monitoring:")?;
+writeln!(writer, "  /sessions              List active sessions with performance metrics")?;
+writeln!(writer, "  /sysconfig, /sc        Show system configuration and topology")?;
+writeln!(writer, "  /locks, /lk            Show lock contention and blocking sessions")?;
+```
+
+### Unit Tests
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lock_info_from_row_blocked() {
+        // Test parsing of a blocked session row
+    }
+
+    #[test]
+    fn test_lock_info_from_row_not_blocked() {
+        // Test that non-blocked sessions are parsed but is_blocked() returns false
+    }
+
+    #[test]
+    fn test_lock_info_from_row_insufficient_columns() {
+        // Test graceful handling of rows with too few columns
+    }
+
+    #[test]
+    fn test_lock_info_from_row_with_nulls() {
+        // Test NULL value handling
+    }
+
+    #[test]
+    fn test_lock_info_is_blocked() {
+        // Test blocked state detection for PE and AMP states
+    }
+
+    #[test]
+    fn test_build_blocking_chains_simple() {
+        // Test: A blocks B -> 1 chain with 1 entry
+    }
+
+    #[test]
+    fn test_build_blocking_chains_multi_level() {
+        // Test: A blocks B, B blocks C -> chain with depth 1 and 2
+    }
+
+    #[test]
+    fn test_build_blocking_chains_fan_out() {
+        // Test: A blocks B, A blocks C -> 1 chain with 2 entries at depth 1
+    }
+
+    #[test]
+    fn test_build_blocking_chains_no_blocks() {
+        // Test: No blocked sessions -> empty chains
+    }
+
+    #[test]
+    fn test_build_blocking_chains_cycle_detection() {
+        // Test: A blocks B, B blocks A -> terminates without infinite loop
+    }
+
+    #[test]
+    fn test_display_table_format() {
+        // Test table output format
+    }
+
+    #[test]
+    fn test_display_csv_format() {
+        // Test CSV output format
+    }
+
+    #[test]
+    fn test_display_json_format() {
+        // Test JSON output format with blocking chains
+    }
+
+    #[test]
+    fn test_repl_display_no_locks() {
+        // Test REPL output when no blocked sessions exist
+    }
+
+    #[test]
+    fn test_repl_display_with_locks() {
+        // Test REPL output with blocked sessions and chains
+    }
+}
+```
+
+### Design Decisions
+
+**Why use MonitorSession instead of DBC.LockInfoV?**
+- `MonitorSession` is already proven to work by the `/sessions` command
+- Same EXECUTE FUNCTION privilege is reused (no new grants needed)
+- `DBC.LockInfoV` is not available on all Teradata installations
+- `MonitorSession` provides direct blocker-to-blocked relationship data
+- Single privilege grant enables both `/sessions` and `/locks`
+
+**Why include blocking chain analysis?**
+- Raw lock data (who blocks whom) is less useful than chain analysis
+- DBAs need to find the root cause (root blocker) to resolve contention
+- Chain depth helps prioritize intervention (deeper chains = more impact)
+- This matches the output of tools like Teradata Viewpoint's Lock Viewer
+
+**Why filter for BLOCKED sessions only?**
+- Showing all sessions with lock information would duplicate `/sessions` output
+- The `/locks` command focuses specifically on contention situations
+- DBAs invoking `/locks` are troubleshooting blocking, not general monitoring
+- Non-blocked sessions have `Blk1SessNo = 0` which provides no useful lock data
+
+**Why include the blocker session in the output even if it is not blocked itself?**
+- The root blocker is the actionable item (the session to investigate/abort)
+- Including it in the blocking chain view gives DBAs the full picture
+- The blocker's user name helps identify who to contact
+
+**Why the /lk short alias?**
+- `/l` is already taken by `/list`
+- `/lk` is intuitive (first two consonants of "locks")
+- Follows the short alias pattern established by `/sc` for sysconfig
+
+---
+
+## Monitoring Commands: Shared Patterns
+
+This section documents common patterns shared across the monitoring command family (`/sessions`, `/sysconfig`, `/locks`).
+
+### Module Pattern
+
+Each monitoring command follows this structure:
+
+```
+src/commands/<command>.rs
+  - SQL constant(s)
+  - Parsed data struct
+  - from_row() parser
+  - execute() for batch mode
+  - execute_for_repl() for REPL mode
+  - display_table() using comfy_table
+  - display_csv() using writeln!
+  - display_json() using serde_json
+  - handle_<command>_error() for privilege errors
+  - #[cfg(test)] mod tests
+```
+
+### Integration Touchpoints
+
+Adding a new monitoring command requires changes to exactly these files:
+
+1. `src/commands/<command>.rs` (NEW) - Command implementation
+2. `src/commands/mod.rs` - Register module and re-export
+3. `src/cli.rs` - Add `<Command>Args` struct and `Command` enum variant
+4. `src/main.rs` - Handle new command variant in `run()` function
+5. `src/commands/repl/metacommands.rs` - Add to both handler functions and help text
+6. `src/commands/repl/metadata_completer.rs` - Add to `METACOMMANDS` array
+
+### Error Handling Pattern
+
+All monitoring commands follow the same privilege error handling pattern:
+
+1. Detect privilege/access errors via string matching on error message
+2. Display clear error message identifying the required privilege
+3. Provide the exact GRANT statement needed to fix the issue
+4. Handle version compatibility errors separately
+5. Fall back to generic error display for unexpected errors
+
+### Output Format Pattern
+
+All monitoring commands support the same three output formats:
+
+- **Table** (`comfy_table`): Human-readable, used by default
+- **CSV**: Machine-readable, pipe-friendly
+- **JSON**: Structured output for programmatic consumption
+
+The format is controlled by:
+- REPL mode: Always uses table/summary format (no format flag)
+- Batch mode: `--format` flag with `table`/`csv`/`json` values
+
+---
+
 ## Future Enhancements
 
 - Query history search (Ctrl-R) - already supported by reedline
@@ -4935,5 +5919,8 @@ Contact your database administrator for access.
 - Fuzzy matching for completion (like pgcli)
 - Second TAB accepts selection (requires reedline enhancement)
 - Session filtering for `/sessions` (by user, state, etc.)
-- External editor integration (`/edit` command) - requires more design work
 - Additional `/show` subcommands (constraints, statistics, partitions)
+- Lock type information via `DBC.LockInfoV` (when available) for `/locks` enhancement
+- Performance resource monitoring (`/perf`) using ResUsage views
+- Session history tracking (`/history`) using DBQL data
+- Real-time auto-refresh for monitoring commands

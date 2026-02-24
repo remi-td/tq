@@ -932,12 +932,12 @@ fn test_glob_matching_integration() {
                         // Simple glob implementation (same as in production code)
                         if pat == "*" {
                             true
-                        } else if pat.starts_with('*') && pat.ends_with('*') {
-                            name.contains(&pat[1..pat.len() - 1])
-                        } else if pat.starts_with('*') {
-                            name.ends_with(&pat[1..])
-                        } else if pat.ends_with('*') {
-                            name.starts_with(&pat[..pat.len() - 1])
+                        } else if let Some(inner) = pat.strip_prefix('*').and_then(|p| p.strip_suffix('*')) {
+                            name.contains(inner)
+                        } else if let Some(suffix) = pat.strip_prefix('*') {
+                            name.ends_with(suffix)
+                        } else if let Some(prefix) = pat.strip_suffix('*') {
+                            name.starts_with(prefix)
                         } else {
                             name == pat
                         }

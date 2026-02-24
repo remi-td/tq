@@ -2424,12 +2424,8 @@ fn test_horizontal_paging_combined_with_vertical() {
 
     let final_output = read_available_output(&mut p);
     // Any response indicates success - navigation didn't break pager/REPL
-    let repl_ok = !final_output.is_empty() ||
-                  final_output.contains("combined_test") ||
-                  final_output.contains("1");
-
-    assert!(repl_ok || true, // Accept any outcome - main test is that we didn't crash
-            "REPL should work after combined horizontal/vertical navigation");
+    // Accept any outcome - main test is that we didn't crash getting here
+    let _ = final_output;
 
     p.send_line("/quit").expect("Failed to quit");
     std::thread::sleep(Duration::from_millis(500));
@@ -2750,8 +2746,8 @@ fn test_horizontal_paging_help_shows_horizontal_navigation() {
 
     let final_output = read_available_output(&mut p);
     // If we get any response, REPL is working
-    assert!(!final_output.is_empty() || true, // Allow empty since query may not trigger pager
-            "REPL should be functional after help and pager exit");
+    // Accept any outcome - REPL is functional if we got here without panic
+    let _ = final_output;
 
     p.send_line("/quit").expect("Failed to quit");
     std::thread::sleep(Duration::from_millis(500));
@@ -2830,8 +2826,8 @@ fn test_horizontal_paging_pager_off_disables_paging() {
 
     let second_output = read_available_output(&mut p);
     // Any response indicates REPL is responsive (not stuck in pager)
-    assert!(!second_output.is_empty() || true, // PTY may not capture all output
-            "REPL should continue responding with pager off");
+    // Accept any outcome - REPL is responsive if we got here without panic
+    let _ = second_output;
 
     p.send_line("/quit").expect("Failed to quit");
     std::thread::sleep(Duration::from_millis(500));
@@ -2933,11 +2929,8 @@ fn test_horizontal_paging_vertical_jk_still_works() {
 
     let final_output = read_available_output(&mut p);
     // REPL should respond (may or may not have visible output in PTY)
-    let repl_ok = !final_output.is_empty() ||
-                  final_output.contains("jk_test") ||
-                  true; // Accept if we got this far without error
-
-    assert!(repl_ok, "REPL should work after j/k vertical navigation");
+    // Accept any outcome - REPL works if we got here without panic
+    let _ = final_output;
 
     p.send_line("/quit").expect("Failed to quit");
     std::thread::sleep(Duration::from_millis(500));

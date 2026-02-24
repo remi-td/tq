@@ -37,8 +37,10 @@ Available metacommands:
     /colors      Enable/disable syntax highlighting
     /describe    Describe table structure
     /disconnect  Disconnect current connection
+    /edit        Edit last query in external editor
     /help        Show help
     /list        Schema inspection (databases, tables, views)
+    /locks       Display current lock contention and blocking chains
     /logon       Connect/switch database
     /pager       Enable/disable result paging
     /peek        Show first rows and column info (optional row count)
@@ -48,8 +50,10 @@ Available metacommands:
     /repeat      Re-execute last query
     /sample      Show random sample
     /session     Show session info
-    /sessions    List all database sessions
+    /sessions    List active Teradata sessions with performance metrics
+    /set         Set configuration options
     /show        Show schema information (indexes)
+    /sysconfig   Display system topology (version, nodes, AMPs, PEs)
     /timing      Enable/disable query timing
 ```
 
@@ -72,6 +76,7 @@ tq> /l<TAB>
 
 Matching metacommands:
     /list        Schema inspection (databases, tables, views)
+    /locks       Display current lock contention and blocking chains
     /logon       Connect/switch database
 ```
 
@@ -1002,6 +1007,253 @@ The `/sessions` command displays ALL active sessions on the Teradata system, reg
 
 **Note:** This command requires SELECT permission on `DBC.MonitorSession`. If you see a permission error, contact your DBA.
 
+### Display System Configuration
+
+Check system topology - Teradata version, number of nodes, AMPs, and PEs - at a glance:
+
+```sql
+tq> /sysconfig
+
+System Configuration - prod-td01.company.com:
+┌──────────────────────┬─────────────────────────────────────┐
+│ Property             │ Value                               │
+├──────────────────────┼─────────────────────────────────────┤
+│ Teradata Version     │ 17.20.00.17                         │
+│ Release              │ 17.20.00.17 (Released: 2024-01-15)  │
+│ Node Count           │ 4                                   │
+│ AMP Count            │ 128                                 │
+│ PE Count             │ 16                                  │
+└──────────────────────┴─────────────────────────────────────┘
+
+(Query time: 0.045s)
+```
+
+**Short alias:** `/sc`
+
+```sql
+tq> /sc
+```
+
+**What you see:**
+
+- **Teradata Version** - The installed software version retrieved from `DBC.DBCInfoV`
+- **Release** - Full release string including build date
+- **Node Count** - Total number of nodes in the system
+- **AMP Count** - Total number of Access Module Processors (computed via `HASHAMP()+1`)
+- **PE Count** - Total number of Parsing Engines
+
+**Use cases:**
+
+- Confirm the Teradata version before running version-specific SQL features
+- Verify system topology during capacity planning
+- Document configuration snapshots as part of change management
+- Quickly orient yourself when connecting to an unfamiliar system
+
+**Output formats:**
+
+Use `/set format` to switch output format before running the command:
+
+```sql
+# CSV output - useful for logging and spreadsheet analysis
+tq> /set format csv
+tq> /sysconfig
+Property,Value
+Teradata Version,17.20.00.17
+Release,"17.20.00.17 (Released: 2024-01-15)"
+Node Count,4
+AMP Count,128
+PE Count,16
+
+# JSON output - useful for scripting
+tq> /set format json
+tq> /sysconfig
+{
+  "Teradata Version": "17.20.00.17",
+  "Release": "17.20.00.17 (Released: 2024-01-15)",
+  "Node Count": 4,
+  "AMP Count": 128,
+  "PE Count": 16
+}
+```
+
+**Tab completion:**
+
+```sql
+tq> /sc<TAB>
+tq> /sysconfig_
+
+tq> /sys<TAB>
+tq> /sysconfig_
+```
+
+**Batch mode equivalent:**
+
+```bash
+# Table output (default)
+tq sysconfig
+
+# JSON output for scripting
+tq sysconfig --format json
+
+# Capture AMP count in a shell script
+AMP_COUNT=$(tq sysconfig --format json | jq '.["AMP Count"]')
+echo "System has ${AMP_COUNT} AMPs"
+
+# Export a configuration snapshot to CSV
+tq sysconfig --format csv --output sysconfig_$(date +%Y%m%d).csv
+```
+
+**Note:** This command requires SELECT privilege on `DBC.DBCInfoV`. If you see a permission error, contact your DBA and request access with:
+```sql
+GRANT SELECT ON DBC.DBCInfoV TO <your_username>;
+```
+
+---
+
+### Display Lock Information
+
+Inspect current lock contention on the system. This shows which objects are locked, what type of lock is held, which session holds it, and which sessions are waiting:
+
+```sql
+tq> /locks
+
+Lock Information on prod-td01.company.com:
+┌──────────────────────┬───────────┬────────────┬──────────────┬──────────────┬────────────────────────┐
+│ Locked Object        │ Lock Type │ Lock Mode  │ Locking Sess │ Waiting Sess │ Blocked Since          │
+├──────────────────────┼───────────┼────────────┼──────────────┼──────────────┼────────────────────────┤
+│ PRODUCTION.orders    │ Table     │ WRITE      │ 1023         │ 1045, 1067   │ 2026/01/27 14:32:15.00 │
+│ PRODUCTION.customers │ Table     │ EXCLUSIVE  │ 1023         │ 1051         │ 2026/01/27 14:32:15.00 │
+│ PRODUCTION.employees │ Row Hash  │ READ       │ 1078         │ (none)       │ 2026/01/27 14:45:00.00 │
+└──────────────────────┴───────────┴────────────┴──────────────┴──────────────┴────────────────────────┘
+
+3 locks found - 1 blocking chain detected (Query time: 0.089s)
+
+Blocking Chain:
+  Session 1023 (etl_user) blocks sessions: 1045, 1051, 1067
+```
+
+When no locks are active, you'll see a clean confirmation instead of an empty table:
+
+```sql
+tq> /locks
+
+Lock Information on prod-td01.company.com:
+No locks currently held.
+
+(Query time: 0.023s)
+```
+
+**Short alias:** `/lk`
+
+```sql
+tq> /lk
+```
+
+**What you see:**
+
+- **Locked Object** - Fully qualified name of the locked object (`database.table`)
+- **Lock Type** - Granularity of the lock: `Table`, `Row Hash`, or `Database`
+- **Lock Mode** - Severity of the lock (see lock mode table below)
+- **Locking Sess** - Session ID that currently holds the lock
+- **Waiting Sess** - Comma-separated list of session IDs waiting for this lock, or `(none)` if none are waiting
+- **Blocked Since** - Timestamp when the lock was first acquired
+
+**Lock mode reference:**
+
+| Lock Mode | Blocks | Description |
+|-----------|--------|-------------|
+| ACCESS | EXCLUSIVE only | Weakest lock. Allows concurrent reads and writes. |
+| READ | WRITE, EXCLUSIVE | Shared lock. Allows concurrent reads. |
+| WRITE | WRITE, EXCLUSIVE | Exclusive writes. Allows concurrent reads. |
+| EXCLUSIVE | All modes | Strongest lock. Blocks all other lock modes. |
+
+**Blocking chain summary:**
+
+When one or more sessions are waiting for a lock, tq automatically identifies the blocking chain and summarizes it below the table:
+
+```
+Blocking Chain:
+  Session 1023 (etl_user) blocks sessions: 1045, 1051, 1067
+  Session 1089 (batch_proc) blocks sessions: 1092
+```
+
+This makes it immediately clear which session to investigate or ask to commit/rollback.
+
+**Use cases:**
+
+- Diagnose why a query is hanging - check if it is waiting for a lock
+- Identify which session is causing blocking and contact its owner
+- Confirm the system is clear before running a maintenance operation
+- Investigate lock contention during peak ETL load windows
+
+**Output formats:**
+
+```sql
+# JSON output - useful for automated monitoring scripts
+tq> /set format json
+tq> /locks
+[
+  {
+    "Locked Object": "PRODUCTION.orders",
+    "Lock Type": "Table",
+    "Lock Mode": "WRITE",
+    "Locking Sess": 1023,
+    "Waiting Sess": [1045, 1067],
+    "Blocked Since": "2026/01/27 14:32:15.00"
+  },
+  {
+    "Locked Object": "PRODUCTION.employees",
+    "Lock Type": "Row Hash",
+    "Lock Mode": "READ",
+    "Locking Sess": 1078,
+    "Waiting Sess": [],
+    "Blocked Since": "2026/01/27 14:45:00.00"
+  }
+]
+```
+
+Note: The "Blocking Chain" summary section appears only in table format. In CSV and JSON output, the raw data is returned so you can derive chains programmatically.
+
+**Tab completion:**
+
+```sql
+tq> /lk<TAB>
+tq> /locks_
+
+tq> /lo<TAB>
+
+Matching metacommands:
+    /locks   Display current lock contention and blocking chains
+    /logon   Connect/switch database
+```
+
+**Batch mode equivalent:**
+
+```bash
+# Table output (default)
+tq locks
+
+# JSON output for scripting
+tq locks --format json
+
+# Filter for only EXCLUSIVE locks
+tq locks --format json | jq '.[] | select(.["Lock Mode"] == "EXCLUSIVE")'
+
+# Check if any sessions are blocked and alert
+BLOCKED=$(tq locks --format json | jq '[.[] | select(.["Waiting Sess"] | length > 0)] | length')
+if [[ "$BLOCKED" -gt 0 ]]; then
+  echo "WARNING: $BLOCKED blocking lock(s) detected"
+fi
+
+# Export a lock snapshot for incident analysis
+tq locks --format csv --output locks_$(date +%Y%m%d_%H%M%S).csv
+```
+
+**Note:** This command requires SELECT privilege on `DBC.LockInfoV`. If you see a permission error, contact your DBA and request access with:
+```sql
+GRANT SELECT ON DBC.LockInfoV TO <your_username>;
+```
+
 ### Clear Screen
 
 Clear the terminal:
@@ -1037,7 +1289,7 @@ tq> /quit
 2. **Use `/list` commands** - They're faster than writing SQL for schema exploration
 3. **Use patterns** - Filter tables with `/list tables pattern` instead of viewing all tables
 4. **Watch for loading indicators** - They tell you when tq is fetching data
-5. **Use short aliases** - Commands like `\l`, `\dt`, `\d`, `\e`, `\r` save typing
+5. **Use short aliases** - Commands like `/sc`, `/lk`, `/s`, `\l`, `\dt`, `\d` save typing
 6. **Write readable multi-line queries** - They're stored as single history entries, so formatting makes them easier to recall and edit
 7. **Use `/edit` for complex changes** - When you need to refine a query with JOINs, filters, or formatting, use `/edit` to open it in your editor
 8. **Sample before selecting** - Use `/sample` to inspect data before writing complex queries
@@ -1046,6 +1298,9 @@ tq> /quit
 11. **Combine sampling with patterns** - First use `/list tables pattern%` to find tables, then `/sample` to inspect them
 12. **Iterative query development** - Start simple, run it, then use `/edit` to add complexity step by step
 13. **The pager is experimental** - By default, wide results show with truncation. You can try `/pager on` to test interactive navigation
+14. **Orient yourself on new systems** - Run `/sysconfig` as soon as you connect to an unfamiliar Teradata instance to understand its topology
+15. **Use `/locks` before maintenance** - Always check for active locks before running DDL or bulk operations to avoid unexpected blocking
+16. **Diagnose hangs with `/locks` + `/sessions`** - If a query is hanging, use `/locks` to see if it is blocked, then cross-reference with `/sessions` to identify the blocking session's workload
 
 ## Keyboard Shortcuts Reference
 

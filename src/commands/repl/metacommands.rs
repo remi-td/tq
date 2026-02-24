@@ -203,6 +203,20 @@ pub fn handle_metacommand<W: Write>(
             )?;
         }
 
+        // Sprint 38: Sysconfig and locks (basic handler - no client available)
+        "sysconfig" | "sc" => {
+            writeln!(
+                writer,
+                "The /sysconfig command requires full REPL mode with database connection."
+            )?;
+        }
+        "locks" | "lk" => {
+            writeln!(
+                writer,
+                "The /locks command requires full REPL mode with database connection."
+            )?;
+        }
+
         // Unknown command
         _ => {
             writeln!(writer, "Unknown command: /{}", command)?;
@@ -488,6 +502,16 @@ pub fn handle_metacommand_with_state<W: Write>(
             }
         }
 
+        // Sprint 38: System configuration command
+        "sysconfig" | "sc" => {
+            crate::commands::sysconfig::execute_for_repl(completion_state.client(), writer)?;
+        }
+
+        // Sprint 38: Lock information command
+        "locks" | "lk" => {
+            crate::commands::locks::execute_for_repl(completion_state.client(), writer)?;
+        }
+
         // Unknown command
         _ => {
             writeln!(writer, "Unknown command: /{}", command)?;
@@ -567,6 +591,14 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(
         writer,
         "  /sessions              List active sessions with performance metrics"
+    )?;
+    writeln!(
+        writer,
+        "  /sysconfig, /sc        Display system topology (version, nodes, AMPs, PEs)"
+    )?;
+    writeln!(
+        writer,
+        "  /locks, /lk            Display current lock contention and blocking chains"
     )?;
     writeln!(writer)?;
     writeln!(writer, "SQL Execution:")?;
@@ -3464,7 +3496,7 @@ mod tests {
         assert!(result.is_ok());
 
         let (_temp, path) = result.unwrap();
-        assert!(path.extension().map_or(false, |ext| ext == "sql"));
+        assert!(path.extension().is_some_and(|ext| ext == "sql"));
 
         let read_back = std::fs::read_to_string(&path).unwrap();
         assert_eq!(read_back, content);

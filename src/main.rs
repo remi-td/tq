@@ -134,6 +134,28 @@ fn run(cli: Cli) -> Result<()> {
                 commands::peek(&client, &args, &mut stdout, use_color)?;
             }
         }
+        // Sprint 38: Sysconfig command for system topology
+        Command::Sysconfig(args) => {
+            if args.output.is_some() {
+                let file = std::fs::File::create(args.output.as_ref().unwrap())?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::sysconfig(&client, &args, &mut writer, use_color)?;
+            } else {
+                let mut stdout = io::stdout();
+                commands::sysconfig(&client, &args, &mut stdout, use_color)?;
+            }
+        }
+        // Sprint 38: Locks command for lock contention analysis
+        Command::Locks(args) => {
+            if args.output.is_some() {
+                let file = std::fs::File::create(args.output.as_ref().unwrap())?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::locks(&client, &args, &mut writer, use_color)?;
+            } else {
+                let mut stdout = io::stdout();
+                commands::locks(&client, &args, &mut stdout, use_color)?;
+            }
+        }
         // Help and Profiles already handled above
         Command::Help(_) | Command::Profiles => unreachable!(),
     }
