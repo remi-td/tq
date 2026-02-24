@@ -67,12 +67,25 @@
    - Verify it's NOT documented in user guides
    - Verify specifications mark it as future work
 
-**Common Issues to Check** (from Sprint 22 & 23):
+**Common Issues to Check** (from Sprints 22, 23, 38, 39):
 - Pattern syntax mismatch (SQL LIKE `%` vs glob `*`)
 - Flags documented but not implemented (`--force`)
 - Loading indicators described but not built
 - Session types described incorrectly
 - Qualified patterns documented but not supported
+- **Output schema mismatch**: User guide/spec shows different columns or properties than actual implementation (Sprint 38: Node Count/PE Count; Sprint 39: Session/User/Query Text vs multi-query history)
+- **Alias conflicts**: Short aliases documented but already used by another command (Sprint 39: `/q` conflicts with `/quit`)
+- **Error message text divergence**: User guide shows one error message, code produces a different one
+- **JSON/CSV field names mismatch**: Scripting examples use wrong field names for `jq` or parsing
+- **Help text describing unimplemented features**: Extended help mentions features not in the code (Sprint 39: sysconfig "nodes, PEs")
+
+**Output Schema Verification** (added Sprint 39):
+For each new command, compare ACTUAL output against documented output:
+1. Read the display function in source code (display_repl_table, display_csv, display_json)
+2. List actual columns/properties from the code
+3. Compare against user guide example output
+4. Compare against specification (REQ-XXX) output examples
+5. Fix any discrepancies BEFORE commit
 
 **Verdict**:
 - ✅ **PASS**: All documentation matches delivered features
