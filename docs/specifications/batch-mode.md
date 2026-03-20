@@ -1018,7 +1018,7 @@ start_date: "2024-01-01"
 | Integer | `count: 100` | `100` |
 | Float | `threshold: 99.5` | `99.5` |
 | Boolean | `active: true` | `true` |
-| Null | `filter: ~` | (empty string) |
+| Null | `filter: ~` | `NULL` (SQL keyword) |
 
 **Unsupported YAML value types** (produce an error when referenced):
 

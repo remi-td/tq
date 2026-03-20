@@ -2846,9 +2846,10 @@ fn handle_params_basic<W: Write>(
                 } else {
                     writeln!(writer, "Available variables:")?;
                     for (path, value) in &vars {
-                        // Truncate long values for display
+                        // Truncate long values for display (UTF-8 safe)
                         let display_value = if value.len() > 60 {
-                            format!("{}...", &value[..57])
+                            let truncated: String = value.chars().take(57).collect();
+                            format!("{}...", truncated)
                         } else {
                             value.clone()
                         };

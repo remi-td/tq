@@ -634,7 +634,7 @@ filters:
 | Integer | `count: 100` | `100` |
 | Float | `threshold: 99.5` | `99.5` |
 | Boolean | `active: true` | `true` |
-| Null | `filter: ~` | (empty string) |
+| Null | `filter: ~` | `NULL` (SQL keyword) |
 
 ### Dot Notation for Nested Keys
 
