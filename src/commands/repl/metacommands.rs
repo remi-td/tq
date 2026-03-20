@@ -224,6 +224,11 @@ pub fn handle_metacommand<W: Write>(
             )?;
         }
 
+        // Sprint 40: Params command (basic handler)
+        "params" | "p" => {
+            handle_params_basic(&args, state, writer)?;
+        }
+
         // Unknown command
         _ => {
             writeln!(writer, "Unknown command: /{}", command)?;
@@ -555,6 +560,11 @@ pub fn handle_metacommand_with_state<W: Write>(
             }
         }
 
+        // Sprint 40: Params command (full handler)
+        "params" | "p" => {
+            handle_params_basic(&args, state, writer)?;
+        }
+
         // Unknown command
         _ => {
             writeln!(writer, "Unknown command: /{}", command)?;
@@ -646,6 +656,24 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(
         writer,
         "  /query <id>, /qi <id>  Show recent SQL queries for a session"
+    )?;
+    writeln!(writer)?;
+    writeln!(writer, "Variable Substitution:")?;
+    writeln!(
+        writer,
+        "  /params load <file>    Load a YAML parameter file"
+    )?;
+    writeln!(
+        writer,
+        "  /params unload         Clear all loaded parameters"
+    )?;
+    writeln!(
+        writer,
+        "  /params show           Show loaded parameters and variables"
+    )?;
+    writeln!(
+        writer,
+        "  /p                     Shortcut for /params"
     )?;
     writeln!(writer)?;
     writeln!(writer, "SQL Execution:")?;
@@ -1651,7 +1679,7 @@ fn parse_export_args<'a>(
     let mut deprecation = DeprecationWarning::None;
 
     // Check if "--append" appears in args (deprecated)
-    if args.iter().any(|&arg| arg == "--append") {
+    if args.contains(&"--append") {
         append = true;
         deprecation = DeprecationWarning::AppendMode;
     }
@@ -2375,18 +2403,12 @@ fn create_temp_sql_file(content: &str) -> Result<(tempfile::NamedTempFile, std::
         .suffix(".sql")
         .tempfile()
         .map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to create temp file: {}", e),
-            )
+            std::io::Error::other(format!("Failed to create temp file: {}", e))
         })?;
 
     let path = temp_file.path().to_path_buf();
     std::fs::write(&path, content).map_err(|e| {
-        std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("Failed to write temp file: {}", e),
-        )
+        std::io::Error::other(format!("Failed to write temp file: {}", e))
     })?;
 
     Ok((temp_file, path))
@@ -2463,10 +2485,7 @@ fn execute_edit<W: Write>(
 
     // 5. Read edited content
     let edited_sql = std::fs::read_to_string(&temp_path).map_err(|e| {
-        std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("Failed to read edited file: {}", e),
-        )
+        std::io::Error::other(format!("Failed to read edited file: {}", e))
     })?;
 
     // 6. Check if content changed
@@ -2770,6 +2789,108 @@ fn handle_sample_error<W: Write>(
         writeln!(writer, "Error: {}", error_msg)?;
     }
 
+    Ok(())
+}
+
+/// Handle the /params metacommand (Sprint 40)
+///
+/// Provides runtime parameter file management in the REPL:
+/// - `/params load <file>` - Load a YAML parameter file
+/// - `/params unload` - Clear all loaded parameters
+/// - `/params show` - Display currently loaded parameters and variables
+/// - `/params` (no args) - Show usage help
+fn handle_params_basic<W: Write>(
+    args: &[&str],
+    state: &mut ReplState,
+    writer: &mut W,
+) -> Result<()> {
+    match args.first().copied() {
+        Some("load") => {
+            let path_str = match args.get(1) {
+                Some(p) => *p,
+                None => {
+                    writeln!(writer, "Usage: /params load <file.yaml>")?;
+                    return Ok(());
+                }
+            };
+            let path = Path::new(path_str);
+            match state.params.load_file(path) {
+                Ok(()) => {
+                    writeln!(writer, "Loaded parameters from '{}'", path_str)?;
+                    let paths = state.params.list_available_paths();
+                    if !paths.is_empty() {
+                        writeln!(writer, "Variables available: {}", paths.len())?;
+                    }
+                }
+                Err(e) => {
+                    writeln!(writer, "{}", e)?;
+                }
+            }
+        }
+        Some("unload") => {
+            state.params.clear();
+            writeln!(writer, "All parameters cleared.")?;
+        }
+        Some("show") => {
+            if state.params.is_empty() {
+                writeln!(writer, "No parameters loaded.")?;
+            } else {
+                writeln!(writer, "Loaded files:")?;
+                for f in state.params.loaded_files() {
+                    writeln!(writer, "  {}", f.display())?;
+                }
+                writeln!(writer)?;
+                let vars = state.params.list_variables();
+                if vars.is_empty() {
+                    writeln!(writer, "No variables defined (files may be empty).")?;
+                } else {
+                    writeln!(writer, "Available variables:")?;
+                    for (path, value) in &vars {
+                        // Truncate long values for display
+                        let display_value = if value.len() > 60 {
+                            format!("{}...", &value[..57])
+                        } else {
+                            value.clone()
+                        };
+                        writeln!(writer, "  {{{{{}}}}} = {}", path, display_value)?;
+                    }
+                }
+            }
+        }
+        Some(other) => {
+            writeln!(writer, "Unknown /params subcommand: {}", other)?;
+            writeln!(writer, "Usage: /params [load <file> | unload | show]")?;
+        }
+        None => {
+            writeln!(writer)?;
+            writeln!(writer, "Usage: /params <subcommand>")?;
+            writeln!(writer)?;
+            writeln!(writer, "Subcommands:")?;
+            writeln!(
+                writer,
+                "  load <file>    Load a YAML parameter file"
+            )?;
+            writeln!(
+                writer,
+                "  unload         Clear all loaded parameters"
+            )?;
+            writeln!(
+                writer,
+                "  show           Show currently loaded parameters"
+            )?;
+            writeln!(writer)?;
+            writeln!(writer, "Examples:")?;
+            writeln!(writer, "  /params load params.yaml")?;
+            writeln!(writer, "  /params show")?;
+            writeln!(writer, "  /params unload")?;
+            writeln!(writer)?;
+            writeln!(
+                writer,
+                "SQL variables use {{{{key}}}} syntax. See 'tq help params' for details."
+            )?;
+            writeln!(writer)?;
+        }
+    }
     Ok(())
 }
 

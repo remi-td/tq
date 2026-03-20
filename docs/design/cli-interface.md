@@ -405,10 +405,41 @@ mod tests {
 **Cons**: Can appear anywhere in command line (potentially confusing)
 **Rationale**: User convenience outweighs potential confusion
 
+## Parameter File Flag
+
+The `--params`/`-p` global option loads YAML parameter files for variable substitution. It is defined on `GlobalOpts` so it applies to all database commands (query, repl, etc.).
+
+```rust
+// src/cli.rs - in GlobalOpts
+
+/// YAML parameter file(s) for variable substitution
+///
+/// Load variables from YAML files. Variables in SQL are referenced
+/// as {{variable.path}}. Multiple files can be specified; later files
+/// override earlier ones.
+///
+/// Example: tq -p params.yaml query "SELECT * FROM {{target.database}}.orders"
+#[arg(short = 'p', long = "params", value_name = "FILE", global = true)]
+pub params: Vec<PathBuf>,
+```
+
+**Key design points**:
+- Uses `Vec<PathBuf>` so clap naturally supports multiple `-p` flags via append action
+- `global = true` allows placement anywhere on the command line
+- Works with `query` (inline, `--file`, stdin) and `repl` subcommands
+- Files are loaded once at startup in `main.rs` and passed through to command handlers
+- In REPL mode, the initial param files are loaded into `ReplState::params`, and can be augmented at runtime via `/params load`
+
+**Parsing and loading flow**:
+```
+CLI parse → Vec<PathBuf> → build_param_store() → ParamStore → pass to commands
+```
+
+See `docs/design/params.md` for the full variable substitution engine design.
+
 ## Future Enhancements
 
 - **Config file flag**: `--config <path>` to override default config location
-- **Profile selection**: `--profile <name>` to use named connection profile
 - **Dry-run mode**: `--dry-run` to validate without executing
 - **Output templates**: `--template <name>` for custom formatting
-- **Batch mode flags**: `--continue-on-error`, `--atomic`
+- **Batch mode flags**: `--continue-on-error`

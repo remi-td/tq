@@ -224,7 +224,6 @@ fn display_json<W: Write>(info: &SysconfigInfo, writer: &mut W) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::Value;
 
     #[test]
     fn test_sysconfig_info_as_properties() {
@@ -261,44 +260,7 @@ mod tests {
         assert_eq!(props[2].1, "0");
     }
 
-    #[test]
-    fn test_extract_trimmed_string_from_string() {
-        let value = Value::String("  hello  ".to_string());
-        assert_eq!(extract_trimmed_string(&value, "[unavailable]"), "hello");
-    }
-
-    #[test]
-    fn test_extract_trimmed_string_from_null() {
-        let value = Value::Null;
-        assert_eq!(
-            extract_trimmed_string(&value, "[unavailable]"),
-            "[unavailable]"
-        );
-    }
-
-    #[test]
-    fn test_extract_trimmed_string_from_integer() {
-        let value = Value::Integer(42);
-        assert_eq!(extract_trimmed_string(&value, "[unavailable]"), "42");
-    }
-
-    #[test]
-    fn test_extract_integer_from_integer() {
-        let value = Value::Integer(128);
-        assert_eq!(extract_integer(&value), Some(128));
-    }
-
-    #[test]
-    fn test_extract_integer_from_decimal() {
-        let value = Value::Decimal(128.0);
-        assert_eq!(extract_integer(&value), Some(128));
-    }
-
-    #[test]
-    fn test_extract_integer_from_null() {
-        let value = Value::Null;
-        assert_eq!(extract_integer(&value), None);
-    }
+    // extract_trimmed_string and extract_integer tests removed: already tested in monitoring_utils.rs
 
     #[test]
     fn test_display_table_output() {
@@ -379,38 +341,7 @@ mod tests {
         assert!(output_str.contains("AMP Count"));
     }
 
-    #[test]
-    fn test_escape_csv_simple() {
-        assert_eq!(escape_csv("hello"), "hello");
-    }
-
-    #[test]
-    fn test_escape_csv_with_comma() {
-        assert_eq!(escape_csv("hello,world"), "\"hello,world\"");
-    }
-
-    #[test]
-    fn test_escape_csv_with_quotes() {
-        assert_eq!(escape_csv("say \"hello\""), "\"say \"\"hello\"\"\"");
-    }
-
-    #[test]
-    fn test_escape_csv_with_parentheses_and_colon() {
-        // This tests a value like "17.20.00.17 (Released: 2024-01-15)"
-        // which does not contain comma/quote/newline so should not be quoted
-        let val = "17.20.00.17 (Released: 2024-01-15)";
-        assert_eq!(escape_csv(val), val);
-    }
-
-    #[test]
-    fn test_escape_csv_release_with_comma() {
-        // If the release field contains a comma, it should be quoted
-        let val = "17.20.00.17 (Released: January 15, 2024)";
-        assert_eq!(
-            escape_csv(val),
-            "\"17.20.00.17 (Released: January 15, 2024)\""
-        );
-    }
+    // escape_csv tests removed: already tested in monitoring_utils.rs
 
     // =========================================================================
     // Error handling tests (Sprint 39)

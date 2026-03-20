@@ -9,10 +9,14 @@ This guide covers using tq for non-interactive batch operations: scripts, automa
 3. [Output to File](#output-to-file)
 4. [Transaction Control](#transaction-control)
 5. [Multi-Statement Scripts](#multi-statement-scripts)
-6. [Error Handling](#error-handling)
-7. [Scripting Patterns](#scripting-patterns)
-8. [Performance Tips](#performance-tips)
-9. [Common Recipes](#common-recipes)
+6. [Variable Substitution](#variable-substitution)
+7. [Error Handling](#error-handling)
+8. [Scripting Patterns](#scripting-patterns)
+9. [Performance Tips](#performance-tips)
+10. [Common Recipes](#common-recipes)
+11. [Teradata Session Types and Transaction Support](#teradata-session-types-and-transaction-support)
+12. [Best Practices](#best-practices)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -557,6 +561,331 @@ INSERT INTO messages VALUES ('Hello; World');
 
 ---
 
+## Variable Substitution
+
+tq provides native variable substitution for SQL templates. Write your SQL with `{{variable}}` markers and supply values from a YAML file using the `-p`/`--params` flag. This keeps SQL logic separate from execution parameters and enables safe reuse of scripts across environments.
+
+### Quick Example
+
+**1. Create a parameter file:**
+
+```yaml
+# params.yaml
+table: employees
+limit: 25
+```
+
+**2. Write a SQL template:**
+
+```sql
+SELECT * FROM {{table}} SAMPLE {{limit}};
+```
+
+**3. Execute with parameters:**
+
+```bash
+tq -p params.yaml query --file report.sql
+# Executes: SELECT * FROM employees SAMPLE 25
+```
+
+### The `--params` / `-p` Flag
+
+The `-p` flag is a global option, meaning it comes before the subcommand:
+
+```bash
+tq -p params.yaml query "SELECT * FROM {{table}}"
+tq -p params.yaml query --file script.sql
+cat script.sql | tq -p params.yaml query
+```
+
+The `--params` form works the same way:
+
+```bash
+tq --params params.yaml query --file report.sql
+```
+
+### Parameter File Format (YAML)
+
+Parameter files are standard YAML files with key-value pairs. Both flat and nested structures are supported:
+
+```yaml
+# deploy.yaml
+
+# Simple scalars
+table: employees
+limit: 100
+run_date: "2026-01-01"
+
+# Nested structure (accessed via dot notation)
+target:
+  database: PRODUCTION
+  schema: HR
+
+filters:
+  region: EMEA
+  active: true
+```
+
+**Supported value types:**
+
+| YAML Type | Example | Substituted As |
+|-----------|---------|----------------|
+| String | `name: employees` | `employees` |
+| Integer | `count: 100` | `100` |
+| Float | `threshold: 99.5` | `99.5` |
+| Boolean | `active: true` | `true` |
+| Null | `filter: ~` | (empty string) |
+
+### Dot Notation for Nested Keys
+
+Access nested YAML keys using dot notation in your markers:
+
+```yaml
+# deploy.yaml
+target:
+  database: PRODUCTION
+  schema: HR
+```
+
+```sql
+-- migrate.sql
+SELECT * FROM {{target.database}}.{{target.schema}}.employees;
+-- Executes: SELECT * FROM PRODUCTION.HR.employees;
+```
+
+This is especially useful for grouping related parameters together:
+
+```yaml
+# config.yaml
+source:
+  database: STAGING
+  schema: HR
+
+dest:
+  database: PRODUCTION
+  schema: HR
+```
+
+```sql
+-- copy.sql
+INSERT INTO {{dest.database}}.{{dest.schema}}.employees
+SELECT * FROM {{source.database}}.{{source.schema}}.employees
+WHERE hire_date > '{{run_date}}';
+```
+
+### Environment Variable Substitution
+
+Use the `{{$ENV.VAR_NAME}}` syntax to read values directly from environment variables. No YAML file is needed for this:
+
+```bash
+# Read database host from environment
+export TARGET_DB=PRODUCTION
+
+tq query "SELECT * FROM {{$ENV.TARGET_DB}}.HR.employees SAMPLE 10"
+# Executes: SELECT * FROM PRODUCTION.HR.employees SAMPLE 10
+```
+
+Mix environment variables and YAML params in the same query:
+
+```yaml
+# params.yaml
+schema: HR
+limit: 50
+```
+
+```bash
+export ENV_NAME=prod
+
+tq -p params.yaml query \
+  "SELECT * FROM {{$ENV.ENV_NAME}}.{{schema}}.employees SAMPLE {{limit}}"
+# Executes: SELECT * FROM prod.HR.employees SAMPLE 50
+```
+
+**When the environment variable is not set:**
+
+```
+Error: Undefined environment variable in template
+
+Variable '{{$ENV.TARGET_DB}}' references environment variable 'TARGET_DB'
+which is not set in the current environment.
+
+Fix:
+  export TARGET_DB=myvalue
+  tq query -p params.yaml "..."
+```
+
+### Multiple Parameter Files
+
+Supply multiple `-p` flags to merge parameter files. Later files override earlier files on conflicting keys, but non-conflicting keys are preserved:
+
+```bash
+tq -p base.yaml -p prod-overrides.yaml query --file report.sql
+```
+
+**How merging works:**
+
+```yaml
+# base.yaml
+database: STAGING
+schema: HR
+filters:
+  region: GLOBAL
+  active: true
+```
+
+```yaml
+# prod-overrides.yaml
+database: PRODUCTION       # overrides base.yaml
+filters:
+  region: EMEA             # overrides base.yaml filters.region
+  # filters.active is not here, so it stays 'true' from base.yaml
+```
+
+**Effective parameters after merge:**
+
+```yaml
+database: PRODUCTION       # from prod-overrides.yaml
+schema: HR                 # from base.yaml (not overridden)
+filters:
+  region: EMEA             # from prod-overrides.yaml
+  active: true             # from base.yaml (not overridden)
+```
+
+**Pattern:** Keep stable defaults in `base.yaml`, environment-specific overrides in separate files:
+
+```bash
+# Development
+tq -p base.yaml -p envs/dev.yaml query --file report.sql
+
+# Production
+tq -p base.yaml -p envs/prod.yaml query --file report.sql
+```
+
+### Quoting in SQL Templates
+
+Variable substitution inserts values as raw text. You are responsible for SQL quoting in the template:
+
+```yaml
+# params.yaml
+department: Sales
+```
+
+```sql
+-- Correct: quotes are in the template
+SELECT * FROM employees WHERE department = '{{department}}';
+-- Executes: SELECT * FROM employees WHERE department = 'Sales';
+
+-- Incorrect: missing quotes will fail
+SELECT * FROM employees WHERE department = {{department}};
+-- Executes: SELECT * FROM employees WHERE department = Sales; (syntax error)
+```
+
+### Error Handling
+
+**Undefined variable:**
+
+```
+Error: Undefined variable in template
+
+Variable '{{target_schema}}' is not defined.
+
+Available variables:
+  database          PRODUCTION
+  filters.region    EMEA
+  filters.active    true
+  row_count         100
+
+Fix:
+  Add 'target_schema: <value>' to your parameter file, or
+  use '-p another-file.yaml' with the missing key defined.
+
+Hint: Run 'tq help params' for syntax reference.
+```
+
+**Parameter file not found:**
+
+```
+Error: Parameter file not found
+
+Could not read: myparams.yaml
+Reason: No such file or directory
+
+Check:
+  - File path is correct (relative paths are resolved from current directory)
+  - File exists and is readable
+  - Current directory: /Users/alice/project
+```
+
+**YAML parse error:**
+
+```
+Error: Invalid YAML in parameter file
+
+Could not parse: params.yaml
+Line 7: mapping values are not allowed in this context
+
+Fix:
+  - Verify the file is valid YAML
+  - Check for missing quotes around special characters
+  - Check for incorrect indentation
+```
+
+All variable substitution errors produce exit code 2 (usage error). No SQL is sent to Teradata when a variable cannot be resolved.
+
+### Interaction with --atomic
+
+Variable substitution runs before transaction wrapping. All markers in all statements are resolved first. If any marker is undefined, no statements execute and no transaction starts:
+
+```bash
+tq -p params.yaml query --file migration.sql --atomic
+```
+
+### Variable Substitution in Scripts
+
+**Deploy across environments:**
+
+```bash
+#!/bin/bash
+# deploy.sh
+
+ENV=${1:-staging}
+
+tq -p config/base.yaml \
+   -p config/envs/${ENV}.yaml \
+   query --file migrations/latest.sql --atomic
+
+echo "Deployed to ${ENV}"
+```
+
+**Parameterized reporting:**
+
+```bash
+#!/bin/bash
+# generate_report.sh
+
+DATE=$(date +%Y-%m-%d)
+QUARTER=$(date +Q%q-%Y)
+
+# Create a temporary params file for today's run
+cat > /tmp/run_params.yaml <<EOF
+run_date: "${DATE}"
+quarter: "${QUARTER}"
+output_table: reports_${DATE//-/}
+EOF
+
+tq -p config/report_base.yaml \
+   -p /tmp/run_params.yaml \
+   query --file reports/quarterly_summary.sql \
+   --format csv \
+   --output "reports/summary_${DATE}.csv"
+
+rm /tmp/run_params.yaml
+```
+
+**Full reference:** Run `tq help params` for complete variable substitution syntax.
+
+---
+
 ## Error Handling
 
 ### Exit Codes
@@ -752,12 +1081,23 @@ tq ping && tq query --file step1.sql && tq query --file step2.sql || {
 
 ### Variable Substitution
 
-Use shell features for dynamic SQL:
+For reusable SQL templates, use tq's native `-p`/`--params` flag with a YAML parameter file. This is safer and more expressive than shell-based substitution:
 
 ```bash
 #!/bin/bash
 
-# Method 1: heredoc with variable expansion
+# Recommended: tq native variable substitution
+tq -p params.yaml query --file report.sql
+```
+
+See the [Variable Substitution](#variable-substitution) section above for full details.
+
+For simple one-off cases, shell features also work:
+
+```bash
+#!/bin/bash
+
+# heredoc with shell variable expansion
 TABLE="employees"
 DATE="2024-01-01"
 
@@ -768,14 +1108,9 @@ WHERE hire_date > '${DATE}'
 SAMPLE 10;
 EOF
 
-# Method 2: envsubst
+# envsubst (requires envsubst tool)
 export TABLE_NAME=employees
-export MIN_SALARY=50000
-
 cat template.sql | envsubst | tq query
-
-# Method 3: sed replacement
-sed "s/{{TABLE}}/${TABLE}/g" template.sql | tq query
 ```
 
 ### Loop Processing
@@ -1327,15 +1662,17 @@ Suggestions:
 ## Best Practices
 
 1. **Use transactions for critical operations** - Wrap multi-step changes with `--atomic`
-2. **Check exit codes** - Always verify success in scripts
-3. **Separate data and errors** - Use proper stream redirection
-4. **Minimize connections** - Batch queries in files when possible
-5. **Use explicit output** - Prefer `--output` over `>` for safety
-6. **Log everything** - Keep audit trails of batch operations
-7. **Test with small samples** - Use SAMPLE clause during development
-8. **Handle interrupts** - Clean up resources on Ctrl-C
-9. **Version control scripts** - Track SQL files in git
-10. **Document assumptions** - Add comments to complex scripts
+2. **Parameterize SQL templates** - Use `-p params.yaml` instead of shell string substitution for maintainable scripts
+3. **Separate environments with parameter files** - Use `base.yaml` + `prod.yaml` overlays for multi-environment deployments
+4. **Check exit codes** - Always verify success in scripts
+5. **Separate data and errors** - Use proper stream redirection
+6. **Minimize connections** - Batch queries in files when possible
+7. **Use explicit output** - Prefer `--output` over `>` for safety
+8. **Log everything** - Keep audit trails of batch operations
+9. **Test with small samples** - Use SAMPLE clause during development
+10. **Handle interrupts** - Clean up resources on Ctrl-C
+11. **Version control scripts and params** - Track both SQL files and YAML parameter files in git
+12. **Document assumptions** - Add comments to complex scripts
 
 ---
 
@@ -1368,6 +1705,6 @@ Suggestions:
 
 ## See Also
 
-- [REPL Guide](repl-guide.md) - Interactive mode documentation
+- [REPL Guide](repl-guide.md) - Interactive mode with `/params` command for live parameter management
+- `tq help params` - Full variable substitution syntax reference
 - [Specifications](../specifications/batch-mode.md) - Detailed requirements
-- [Examples](https://github.com/example/tq-examples) - More script examples

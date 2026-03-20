@@ -956,24 +956,442 @@ User guidance: Don't use `--atomic` with DDL-heavy scripts.
 
 ## Variable Substitution
 
-### Current Workaround: Shell Substitution
+Variable substitution allows SQL templates to contain placeholder markers that are resolved at execution time from a YAML parameter file. This enables parameterized, reusable SQL scripts without manual string manipulation.
 
-Use shell features for variable substitution:
+### Marker Syntax
+
+**REQ-PARAMS-001: Variable Marker Format**
+
+Variables in SQL are written using double curly braces:
+
+```
+{{variable_name}}
+```
+
+- Markers are case-sensitive: `{{Table}}` and `{{table}}` are distinct.
+- Markers may appear anywhere in SQL text: in identifiers, string literals, numeric values, or comments.
+- A marker with no whitespace inside the braces is required: `{{ var }}` is invalid, `{{var}}` is valid.
+- Markers that span multiple lines are not supported.
+
+**Examples:**
+
+```sql
+-- Simple scalar substitution
+SELECT * FROM {{target_table}} SAMPLE {{row_count}};
+
+-- Nested path substitution (dot notation into YAML hierarchy)
+SELECT * FROM {{env.database}}.{{env.schema}} WHERE region = '{{filters.region}}';
+
+-- Environment variable substitution
+SELECT * FROM {{$ENV.TARGET_DB}}.employees WHERE hire_date > '{{start_date}}';
+```
+
+---
+
+### Parameter File Format
+
+**REQ-PARAMS-002: YAML File Format**
+
+Parameter files must be valid YAML. The top-level document is a mapping of keys to scalar or nested mapping values. YAML sequences (lists) are not valid as variable values.
+
+```yaml
+# params.yaml
+target_table: employees
+row_count: 100
+
+env:
+  database: PRODUCTION
+  schema: HR
+
+filters:
+  region: EMEA
+  min_salary: 50000
+
+start_date: "2024-01-01"
+```
+
+**Supported YAML value types:**
+
+| YAML Type | Example | Substituted As |
+|-----------|---------|----------------|
+| String | `name: employees` | `employees` |
+| Integer | `count: 100` | `100` |
+| Float | `threshold: 99.5` | `99.5` |
+| Boolean | `active: true` | `true` |
+| Null | `filter: ~` | (empty string) |
+
+**Unsupported YAML value types** (produce an error when referenced):
+
+| YAML Type | Example | Error |
+|-----------|---------|-------|
+| Sequence | `tables: [a, b]` | Variable value is a list, not a scalar |
+| Nested mapping (when used as leaf) | `db.schema` referenced as `{{db}}` | Variable value is a map, not a scalar |
+
+---
+
+### Dot Notation for Nested Keys
+
+**REQ-PARAMS-003: Nested Key Resolution**
+
+Dot notation in marker names traverses the YAML hierarchy:
+
+```
+{{section.subsection.key}}
+```
+
+Resolution algorithm:
+1. Split marker text by `.`
+2. Traverse the YAML mapping hierarchy level by level
+3. Return the scalar value at the final key
+
+**Example:**
+
+```yaml
+# params.yaml
+target:
+  database:
+    name: PRODUCTION
+    schema: HR
+```
+
+```sql
+SELECT * FROM {{target.database.name}}.{{target.database.schema}};
+-- Substituted: SELECT * FROM PRODUCTION.HR;
+```
+
+**Edge cases:**
+- A key containing a literal `.` cannot be expressed in dot notation. Name such keys without dots.
+- An intermediate key that resolves to a scalar (not a mapping) produces an error: `Variable 'target.database' is a scalar, cannot traverse further`.
+
+---
+
+### Environment Variable Access
+
+**REQ-PARAMS-004: `$ENV` Special Dictionary**
+
+Within a marker, the prefix `$ENV.` reads from the process environment. No YAML file entry is needed:
+
+```
+{{$ENV.VARIABLE_NAME}}
+```
+
+- `VARIABLE_NAME` is the exact environment variable name (case-sensitive on Linux/macOS).
+- `$ENV` is a reserved prefix and cannot be used as a YAML key name.
+- `$ENV` access is evaluated at substitution time from the live environment.
+
+**Examples:**
+
+```sql
+-- Read database host from environment
+SELECT * FROM {{$ENV.DB_HOST}}.HR.employees;
+
+-- Mix YAML params and ENV vars in the same query
+INSERT INTO {{target_schema}}.{{$ENV.TABLE_NAME}} SELECT * FROM staging;
+```
+
+**Error when environment variable is not set:**
+
+```
+Error: Undefined environment variable in template
+
+Variable '{{$ENV.TARGET_DB}}' references environment variable 'TARGET_DB'
+which is not set in the current environment.
+
+Fix:
+  export TARGET_DB=myvalue
+  tq query -p params.yaml "..."
+```
+
+---
+
+### CLI Flag
+
+**REQ-PARAMS-005: `--params` / `-p` Flag**
+
+The `--params` flag is a global option available on all commands. It specifies the path to a YAML parameter file.
 
 ```bash
-# Method 1: envsubst
-export TABLE_NAME=employees
-envsubst < template.sql | tq query
+tq -p params.yaml query "SELECT * FROM {{table}}"
+tq --params params.yaml query --file script.sql
+tq -p base.yaml -p overrides.yaml query --file script.sql
+```
 
-# Method 2: heredoc with variable expansion
-TABLE="employees"
-tq query <<EOF
-SELECT * FROM ${TABLE} SAMPLE 10;
-EOF
+- Flag name: `--params` (long), `-p` (short)
+- Argument: file path (absolute or relative to current working directory)
+- Repeatable: multiple `-p` flags are accepted; later files override earlier files on key conflicts
+- Scope: global (applies to any command that accepts SQL input)
+- The flag is silently ignored when the executed command does not process SQL templates
 
-# Method 3: sed
-TABLE="employees"
-sed "s/{{TABLE}}/${TABLE}/g" template.sql | tq query
+---
+
+### Multiple Parameter Files: Merge Semantics
+
+**REQ-PARAMS-006: Merge Rules for Multiple `-p` Flags**
+
+When two or more `-p` flags are provided, parameter files are merged in the order specified. Conflicts are resolved by last-writer-wins at the key level.
+
+```bash
+tq -p base.yaml -p env-overrides.yaml query --file report.sql
+```
+
+**Merge behavior:**
+
+```yaml
+# base.yaml
+database: STAGING
+schema: HR
+filters:
+  region: GLOBAL
+  active: true
+
+# env-overrides.yaml
+database: PRODUCTION    # overrides base.yaml
+filters:
+  region: EMEA          # overrides base.yaml filters.region
+  # filters.active is NOT in env-overrides.yaml, so it remains 'true' from base.yaml
+```
+
+After merge, effective parameters:
+```yaml
+database: PRODUCTION    # from env-overrides.yaml
+schema: HR              # from base.yaml (not overridden)
+filters:
+  region: EMEA          # from env-overrides.yaml
+  active: true          # from base.yaml (not overridden)
+```
+
+Merge is deep (recursive): nested mappings are merged key-by-key. A top-level key in a later file does NOT replace the entire nested mapping from an earlier file unless the key in the later file is a scalar that overwrites the mapping.
+
+---
+
+### Substitution Execution
+
+**REQ-PARAMS-007: Substitution Timing and Scope**
+
+Variable substitution is performed after SQL is read from its source (argument, file, or stdin) and before the SQL is sent to Teradata. The original SQL source is never modified.
+
+- Substitution applies to all statements in a multi-statement file.
+- Substitution applies to the inline query argument when `-p` is provided.
+- All markers must be resolved before execution; a single undefined marker aborts the entire execution.
+- Substituted values are inserted as raw text (no quoting or escaping is added). The user is responsible for correct SQL quoting in the template.
+
+**Example with quoting:**
+
+```yaml
+# params.yaml
+department: Sales
+```
+
+```sql
+-- Template must include the quotes explicitly:
+SELECT * FROM employees WHERE department = '{{department}}';
+-- After substitution: SELECT * FROM employees WHERE department = 'Sales';
+
+-- NOT:
+SELECT * FROM employees WHERE department = {{department}};
+-- After substitution: SELECT * FROM employees WHERE department = Sales; (invalid SQL)
+```
+
+---
+
+### Error Handling
+
+**REQ-PARAMS-008: Undefined Variable Error**
+
+When a marker references a key not found in the merged parameter set (and it is not a `$ENV.*` marker):
+
+```
+Error: Undefined variable in template
+
+Variable '{{target_schema}}' is not defined.
+
+Available variables:
+  database          PRODUCTION
+  filters.region    EMEA
+  filters.active    true
+  row_count         100
+
+Fix:
+  Add 'target_schema: <value>' to your parameter file, or
+  use '-p another-file.yaml' with the missing key defined.
+
+Hint: Run 'tq help params' for syntax reference.
+```
+
+Exit code: `2` (usage error)
+
+---
+
+**REQ-PARAMS-009: YAML Parse Error**
+
+When a parameter file cannot be parsed as valid YAML:
+
+```
+Error: Invalid YAML in parameter file
+
+Could not parse: params.yaml
+Line 7: mapping values are not allowed in this context
+
+Fix:
+  - Verify the file is valid YAML
+  - Check for missing quotes around special characters
+  - Check for incorrect indentation
+
+Hint: Run 'tq help params' for parameter file format reference.
+```
+
+Exit code: `2` (usage error)
+
+---
+
+**REQ-PARAMS-010: Parameter File Not Found**
+
+When the file path given to `-p` does not exist or is not readable:
+
+```
+Error: Parameter file not found
+
+Could not read: myparams.yaml
+Reason: No such file or directory
+
+Check:
+  - File path is correct (relative paths are resolved from current directory)
+  - File exists and is readable
+  - Current directory: /Users/alice/project
+```
+
+Exit code: `2` (usage error)
+
+---
+
+**REQ-PARAMS-011: Non-Scalar Variable Value Error**
+
+When a marker resolves to a YAML sequence or nested mapping (not a scalar):
+
+```
+Error: Variable value is not a scalar
+
+Variable '{{filters}}' resolved to a mapping, not a scalar value.
+
+The variable 'filters' contains nested keys:
+  filters.region    EMEA
+  filters.active    true
+
+Fix:
+  Use dot notation to access a specific key: {{filters.region}}
+```
+
+Exit code: `2` (usage error)
+
+---
+
+**REQ-PARAMS-012: Circular Reference Detection**
+
+Variable markers within values are not recursively expanded. A value `"{{other_var}}"` in a YAML file is treated as the literal string `{{other_var}}` and substituted as-is into the SQL. Circular references are therefore impossible and do not need detection.
+
+---
+
+**REQ-PARAMS-013: Empty YAML File**
+
+An empty YAML file (zero bytes or whitespace-only) is accepted as a valid parameter file with zero variables. If the SQL template contains any markers, REQ-PARAMS-008 applies.
+
+---
+
+**REQ-PARAMS-014: Unused Variables**
+
+Variables defined in the parameter file but not referenced by any marker in the SQL template are silently ignored. No warning is emitted.
+
+---
+
+### Interaction with Other Features
+
+**REQ-PARAMS-015: Interaction with `--file`**
+
+Variable substitution applies to SQL loaded from a file:
+
+```bash
+tq -p params.yaml query --file report.sql
+```
+
+All markers in `report.sql` are resolved against the merged parameter set before execution.
+
+---
+
+**REQ-PARAMS-016: Interaction with stdin**
+
+Variable substitution applies to SQL read from stdin:
+
+```bash
+cat report.sql | tq -p params.yaml query
+```
+
+---
+
+**REQ-PARAMS-017: Interaction with `--atomic`**
+
+Variable substitution is performed before transaction wrapping. All markers in all statements are resolved first; if any marker is undefined, no statements execute and no transaction is started.
+
+---
+
+**REQ-PARAMS-018: Interaction with `--output`**
+
+Variable substitution has no effect on output handling. The `--output` flag operates on query results, not on the SQL template.
+
+---
+
+### Help Topic
+
+**REQ-PARAMS-019: `tq help params` Topic**
+
+`tq help params` displays a dedicated help page for variable substitution. See the CLI Interface specification for the exact content.
+
+---
+
+### Examples
+
+**Simple parameterized query:**
+
+```bash
+# params.yaml
+# table: employees
+# limit: 25
+
+tq -p params.yaml query "SELECT * FROM {{table}} SAMPLE {{limit}}"
+# Executes: SELECT * FROM employees SAMPLE 25
+```
+
+**Parameterized SQL file with nested keys:**
+
+```yaml
+# deploy.yaml
+target:
+  db: PRODUCTION
+  schema: HR
+run_date: "2026-01-01"
+```
+
+```sql
+-- migrate.sql
+INSERT INTO {{target.db}}.{{target.schema}}.audit
+  SELECT CURRENT_TIMESTAMP AS ts, '{{run_date}}' AS run_date, COUNT(*) AS cnt
+  FROM {{target.db}}.{{target.schema}}.employees;
+```
+
+```bash
+tq -p deploy.yaml query --file migrate.sql
+```
+
+**Base + override pattern:**
+
+```bash
+tq -p base.yaml -p prod-overrides.yaml query --file report.sql
+```
+
+**Using environment variables:**
+
+```bash
+export SCHEMA=PRODUCTION
+tq query "SELECT * FROM {{$ENV.SCHEMA}}.employees SAMPLE 10"
 ```
 
 ---

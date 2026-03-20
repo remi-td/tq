@@ -71,6 +71,7 @@ pub mod db;
 pub mod error;
 pub mod format;
 pub mod help;
+pub mod params;
 pub mod sql;
 
 // Re-export commonly used types for convenience

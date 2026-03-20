@@ -60,6 +60,7 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 | `--verbose` | `-v` | flag | false | Verbose output (repeatable: `-vv`, `-vvv`) |
 | `--quiet` | `-q` | flag | false | Suppress non-essential output |
 | `--color` | - | enum | `auto` | Color output: `auto`, `always`, `never` |
+| `--params` | `-p` | path | - | YAML parameter file for variable substitution (repeatable) |
 | `--profile` | - | string | - | Select connection profile from config file |
 | `--help` | `-h` | flag | - | Show help |
 | `--version` | `-V` | flag | - | Show version |
@@ -81,6 +82,7 @@ tq help [TOPIC]
 | (none) | Show general help (equivalent to `tq --help`) |
 | `config` | Configuration file format and usage |
 | `credentials` | Password and credential management |
+| `params` | Variable substitution syntax and YAML parameter files |
 
 **Examples**:
 ```bash
@@ -93,11 +95,130 @@ tq help config
 # Credentials help
 tq help credentials
 
+# Variable substitution help
+tq help params
+
 # Unknown topic handling
 tq help unknown
 # Error: Unknown help topic 'unknown'
-# Available topics: config, credentials
+# Available topics: config, credentials, params
 ```
+
+---
+
+### `tq help params` Content
+
+**REQ-PARAMS-HELP-001: Exact content of `tq help params`**
+
+```
+tq - Variable Substitution
+
+Use {{variable}} markers in SQL to substitute values at execution time.
+Values come from a YAML parameter file specified with -p/--params.
+
+Usage:
+  tq -p <file.yaml> query "SELECT * FROM {{table}}"
+  tq -p <file.yaml> query --file script.sql
+  tq -p base.yaml -p overrides.yaml query --file report.sql
+  cat script.sql | tq -p params.yaml query
+
+Marker Syntax:
+  {{key}}              Simple key from YAML file
+  {{section.key}}      Nested key using dot notation
+  {{$ENV.VAR_NAME}}    Environment variable (no YAML entry needed)
+
+Parameter File Format (YAML):
+  # params.yaml
+  table: employees
+  limit: 100
+
+  target:
+    database: PRODUCTION
+    schema: HR
+
+  filters:
+    region: EMEA
+    active: true
+
+Dot Notation for Nested Keys:
+  YAML key 'target.database' is accessed with {{target.database}}
+  YAML key 'target.schema'   is accessed with {{target.schema}}
+
+Environment Variables:
+  {{$ENV.DATABASE_HOST}}  reads the DATABASE_HOST environment variable
+  $ENV variables are resolved at execution time from the live environment.
+  No YAML entry is needed.
+
+Multiple Parameter Files:
+  tq -p base.yaml -p prod.yaml query --file report.sql
+
+  Files are merged left to right. Later files override earlier files
+  on conflicting keys. Nested mappings are merged recursively.
+
+  # base.yaml          # prod.yaml (overrides)
+  db: STAGING          db: PRODUCTION
+  limit: 10            # limit stays 10 (not in prod.yaml)
+
+Quoting:
+  Substitution inserts raw text. Add SQL quotes in the template:
+    Good:  WHERE name = '{{employee_name}}'
+    Bad:   WHERE name = {{employee_name}}   (missing quotes)
+
+Examples:
+  # Inline query with params file
+  tq -p params.yaml query "SELECT * FROM {{table}} SAMPLE {{limit}}"
+
+  # SQL file with nested params
+  tq -p deploy.yaml query --file migrate.sql
+
+  # Environment variable (no params file needed)
+  tq query "SELECT * FROM {{$ENV.SCHEMA}}.employees"
+
+  # Base + environment override
+  tq -p base.yaml -p prod.yaml query --file report.sql
+
+Error Messages:
+  Undefined variable:
+    Error: Undefined variable in template
+    Variable '{{table}}' is not defined.
+    Available variables: limit, target.database, target.schema
+
+  File not found:
+    Error: Parameter file not found
+    Could not read: params.yaml
+
+  YAML parse error:
+    Error: Invalid YAML in parameter file
+    Could not parse: params.yaml
+    Line 5: mapping values are not allowed in this context
+
+  Env var not set:
+    Error: Undefined environment variable in template
+    Variable '{{$ENV.SCHEMA}}' references environment variable 'SCHEMA'
+    which is not set.
+
+REPL Usage:
+  In REPL mode, use /params to manage parameter files interactively:
+    /params load <file>    Load a parameter file
+    /params unload         Clear all loaded parameters
+    /params show           Show currently loaded parameters
+
+See also:
+  tq help config          Configuration file format
+  tq query --help         Query command options
+```
+
+**REQ-PARAMS-HELP-002: Unknown topic error message**
+
+When the user runs `tq help <unknown-topic>`:
+
+```
+Error: Unknown help topic '<unknown-topic>'
+
+Available topics: config, credentials, params
+```
+
+Exit code: `2`
 
 **Exit Codes**:
 - `0`: Help displayed successfully
@@ -1198,6 +1319,10 @@ Global Options:
           Color output [default: auto]
           [possible values: auto, always, never]
 
+  -p, --params <FILE>
+          YAML parameter file for {{variable}} substitution in SQL
+          (repeatable: -p base.yaml -p overrides.yaml)
+
   -h, --help
           Print help information
 
@@ -1312,6 +1437,14 @@ Examples:
   # Piped input
   cat queries.sql | tq query
   echo "SELECT 1" | tq query
+
+  # Parameterized query with variable substitution
+  tq -p params.yaml query "SELECT * FROM {{table}} SAMPLE {{limit}}"
+  tq -p params.yaml query --file report.sql
+  tq -p base.yaml -p prod.yaml query --file report.sql
+
+  # Learn about variable substitution
+  tq help params
 ```
 
 ---

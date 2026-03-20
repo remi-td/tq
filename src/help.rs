@@ -17,13 +17,21 @@ pub fn credentials_help() -> &'static str {
     include_str!("help/credentials.txt")
 }
 
+/// Get help content for variable substitution
+///
+/// Returns detailed help about YAML parameter files and `{{variable}}` syntax.
+pub fn params_help() -> &'static str {
+    include_str!("help/params.txt")
+}
+
 /// Get general help when no topic is specified
 ///
 /// Returns a list of available help topics.
 pub fn general_help() -> &'static str {
     "Available help topics:\n\n  \
      tq help config       Configuration file format and usage\n  \
-     tq help credentials  Password and credential management\n\n\
+     tq help credentials  Password and credential management\n  \
+     tq help params       Variable substitution syntax and YAML parameter files\n\n\
      For command help, use:\n  \
      tq <command> --help\n"
 }
@@ -73,5 +81,24 @@ mod tests {
         let help = general_help();
         assert!(help.contains("config"));
         assert!(help.contains("credentials"));
+        assert!(help.contains("params"));
+    }
+
+    #[test]
+    fn test_params_help_not_empty() {
+        let help = params_help();
+        assert!(!help.is_empty());
+        assert!(help.contains("Variable Substitution"));
+        assert!(help.contains("{{"));
+        assert!(help.contains("$ENV"));
+    }
+
+    #[test]
+    fn test_params_help_includes_repl_section() {
+        let help = params_help();
+        assert!(help.contains("REPL Usage"));
+        assert!(help.contains("/params load"));
+        assert!(help.contains("/params unload"));
+        assert!(help.contains("/params show"));
     }
 }

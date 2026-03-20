@@ -6183,12 +6183,162 @@ This may mean:
 
 ---
 
+## Variable Substitution in REPL (`/params`)
+
+This section documents the `/params` metacommand for managing YAML-based variable substitution at runtime within the REPL.
+
+See `docs/design/params.md` for the full substitution engine design.
+
+### State Management
+
+The `ParamStore` is held in `ReplState`:
+
+```rust
+// src/commands/repl/state.rs
+pub struct ReplState {
+    // ... existing fields ...
+    pub params: ParamStore,
+}
+```
+
+When the REPL starts, `ParamStore` is initialized from any `--params`/`-p` CLI flags:
+
+```rust
+// In REPL initialization (mod.rs)
+let mut params = ParamStore::new();
+for path in &global.params {
+    params.load_file(path)?;
+}
+state.params = params;
+```
+
+### Metacommand Handler
+
+**Primary file**: `src/commands/repl/metacommands.rs`
+
+The `/params` metacommand (alias `/p`) supports three subcommands:
+
+| Subcommand | Syntax | Behavior |
+|------------|--------|----------|
+| `show` (default) | `/params` or `/params show` | Display loaded files and available variables |
+| `load` | `/params load <file>` | Load and merge a YAML parameter file |
+| `unload` | `/params unload` | Clear all loaded parameters |
+
+Handler integration in the main match block:
+
+```rust
+// In handle_metacommand or handle_metacommand_with_state
+"params" | "p" => {
+    handle_params(&args, state, writer)?;
+}
+```
+
+The handler function:
+
+```rust
+fn handle_params<W: Write>(
+    args: &[&str],
+    state: &mut ReplState,
+    writer: &mut W,
+) -> Result<()> {
+    match args.first().copied() {
+        Some("load") => {
+            let path_str = args.get(1).ok_or_else(|| TqError::InvalidConfig(
+                "Usage: /params load <file>\n\nProvide a path to a YAML parameter file.".to_string()
+            ))?;
+            let path = Path::new(path_str);
+            state.params.load_file(path)?;
+            writeln!(writer, "Loaded parameters from '{}'", path.display())?;
+            // Show count of available variables
+            let paths = state.params.list_available_paths();
+            writeln!(writer, "{} variable(s) available.", paths.len())?;
+        }
+        Some("unload") => {
+            state.params.clear();
+            writeln!(writer, "All parameters cleared.")?;
+        }
+        Some("show") | None => {
+            if state.params.is_empty() {
+                writeln!(writer, "No parameters loaded.")?;
+                writeln!(writer)?;
+                writeln!(writer, "Use /params load <file> to load a YAML parameter file.")?;
+            } else {
+                writeln!(writer, "Loaded files:")?;
+                for f in state.params.loaded_files() {
+                    writeln!(writer, "  {}", f.display())?;
+                }
+                writeln!(writer)?;
+                writeln!(writer, "Available variables:")?;
+                for var_path in state.params.list_available_paths() {
+                    writeln!(writer, "  {{{{{}}}}}", var_path)?;
+                }
+            }
+        }
+        Some(other) => {
+            writeln!(writer, "Unknown /params subcommand: {}", other)?;
+            writeln!(writer, "Usage: /params [load <file> | unload | show]")?;
+        }
+    }
+    Ok(())
+}
+```
+
+### SQL Substitution Hook
+
+Substitution is applied in `executor.rs` before any SQL is sent to Teradata:
+
+```rust
+// src/commands/repl/executor.rs - in execute_sql()
+let substituted = if !state.params.is_empty() {
+    match state.params.substitute(trimmed) {
+        Ok(s) => s,
+        Err(e) => {
+            writeln!(writer, "Parameter substitution error: {}", e)?;
+            return Ok(0);
+        }
+    }
+} else {
+    trimmed.to_string()
+};
+// Execute substituted SQL...
+```
+
+In REPL mode, substitution errors are non-fatal: they print the error and return to the prompt.
+
+### Tab Completion
+
+Add `/params` to the metacommand completion registry in `metadata_completer.rs`:
+
+```rust
+MetacommandDef {
+    name: "params",
+    aliases: &["p"],
+    description: "Manage variable substitution parameters",
+},
+```
+
+Subcommand completion for `/params`:
+- After `/params `, suggest `load`, `unload`, `show`
+- After `/params load `, file path completion (using reedline's file completer if available)
+
+### Help Text
+
+Add to `print_help_extended()`:
+
+```
+  /params [show]           Show loaded parameter files and available variables
+  /params load <file>      Load a YAML parameter file for variable substitution
+  /params unload           Clear all loaded parameters
+  /p                       Alias for /params
+```
+
+---
+
 ## Future Enhancements
 
 - Query history search (Ctrl-R) - already supported by reedline
 - Result export from REPL (\export)
 - Session transcripts (\spool)
-- Variable substitution (\set, \unset)
 - Transaction control (\begin, \commit, \rollback)
 - Async metadata loading (background thread)
 - DDL-triggered cache invalidation

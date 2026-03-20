@@ -334,6 +334,12 @@ const METACOMMANDS: &[MetacommandDef] = &[
         aliases: &["qi"],
         description: "Show recent SQL queries for a session",
     },
+    // Sprint 40: Parameter management command
+    MetacommandDef {
+        name: "params",
+        aliases: &["p"],
+        description: "Manage YAML parameter files for variable substitution",
+    },
 ];
 
 /// Test helper: returns metacommand names matching a prefix
@@ -380,6 +386,11 @@ fn complete_metacommands(prefix: &str, line_start: usize, cursor_pos: usize) -> 
     // Sprint 36: Check for /show subcommand completion
     if !prefix_parts.is_empty() && prefix_parts[0] == "show" {
         return complete_show_subcommands(&prefix_parts, line_start, cursor_pos);
+    }
+
+    // Sprint 40: Check for /params subcommand completion
+    if !prefix_parts.is_empty() && prefix_parts[0] == "params" {
+        return complete_params_subcommands(&prefix_parts, line_start, cursor_pos);
     }
 
     // Filter metacommands by prefix
@@ -470,6 +481,43 @@ fn complete_show_subcommands(
         if partial.is_empty() || name.starts_with(partial) {
             suggestions.push(Suggestion {
                 value: format!("/show {}", name),
+                description: Some(description.to_string()),
+                style: None,
+                extra: None,
+                span: reedline::Span {
+                    start: line_start,
+                    end: cursor_pos,
+                },
+                append_whitespace: true,
+            });
+        }
+    }
+
+    suggestions
+}
+
+/// Complete /params subcommands (load, unload, show)
+///
+/// Sprint 40: Tab completion for /params subcommands.
+fn complete_params_subcommands(
+    parts: &[&str],
+    line_start: usize,
+    cursor_pos: usize,
+) -> Vec<Suggestion> {
+    let subcommands = [
+        ("load", "Load a YAML parameter file"),
+        ("unload", "Clear all loaded parameters"),
+        ("show", "Show currently loaded parameters"),
+    ];
+
+    let partial = if parts.len() > 1 { parts[1] } else { "" };
+
+    let mut suggestions = Vec::new();
+
+    for (name, description) in subcommands {
+        if partial.is_empty() || name.starts_with(partial) {
+            suggestions.push(Suggestion {
+                value: format!("/params {}", name),
                 description: Some(description.to_string()),
                 style: None,
                 extra: None,

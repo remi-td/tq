@@ -477,25 +477,7 @@ mod tests {
 
     // Note: format_column_type tests are in src/sql/types.rs
 
-    #[test]
-    fn test_escape_csv_simple() {
-        assert_eq!(escape_csv("hello"), "hello");
-    }
-
-    #[test]
-    fn test_escape_csv_with_comma() {
-        assert_eq!(escape_csv("hello,world"), "\"hello,world\"");
-    }
-
-    #[test]
-    fn test_escape_csv_with_quotes() {
-        assert_eq!(escape_csv("say \"hello\""), "\"say \"\"hello\"\"\"");
-    }
-
-    #[test]
-    fn test_escape_csv_with_newline() {
-        assert_eq!(escape_csv("line1\nline2"), "\"line1\nline2\"");
-    }
+    // escape_csv tests removed: already tested in monitoring_utils.rs
 
     #[test]
     fn test_constants() {

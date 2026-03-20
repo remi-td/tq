@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
-**Last Updated:** 2026-02-24
-**Current Version:** 1.20.0
-**Latest Sprint:** Sprint 39 Complete (PMON Hardening & Query Inspection)
+**Last Updated:** 2026-03-20
+**Current Version:** 1.21.0
+**Latest Sprint:** Sprint 40 Complete (Variable Substitution)
 
 ---
 
@@ -210,7 +210,7 @@ All core features are complete and tested.
 | Atomic file writes | ✅ | [Batch Mode](../specifications/batch-mode.md#atomic-writes) | v1.10.0 (Sprint 23) |
 | Transaction control (--atomic flag) | ✅ | [Batch Mode](../specifications/batch-mode.md#transactions) | v1.10.0 (Sprint 23) |
 | Streaming large results | 📋 | [Performance](../specifications/performance.md#streaming) | Future |
-| Variable substitution | 📋 | [Batch Mode](../specifications/batch-mode.md#variables) | Future |
+| Variable substitution | ✅ | [Batch Mode](../specifications/batch-mode.md#variable-substitution) | v1.21.0 (Sprint 40) |
 
 ---
 
@@ -320,16 +320,25 @@ All core features are complete and tested.
 - **Tab completion**: `/query` and `/qi` in metacommand completion menu
 - 830 total tests (100% pass rate), zero clippy warnings
 
+**Sprint 40 Enhancements (v1.21.0):**
+- **Variable substitution**: YAML parameter files with `--params`/`-p` flag for SQL templating
+- **`{{variable}}` markers**: Dot-notation nested access, `{{$ENV.VAR}}` for environment variables
+- **`/params` metacommand**: Load/unload/show parameter files in REPL mode
+- **`tq help params`**: Comprehensive help topic for variable substitution
+- **Multiple file merging**: Deep merge with last-writer-wins semantics
+- **Sprint 39 remediation**: REQ-QUERY spec updated, 31 redundant utility tests removed
+- 855 total tests (100% pass rate), zero clippy warnings
+
 ---
 
 ## Summary Statistics
 
-- **Total Features**: 82
-- **Implemented**: 79 (96%)
+- **Total Features**: 83
+- **Implemented**: 80 (96%)
 - **Planned**: 3 (4%)
-- **Test Pass Rate**: 100% (830/830 executed, 57 ignored database-dependent)
+- **Test Pass Rate**: 100% (855/855 executed, 57 ignored database-dependent)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 39 - PMON Hardening & Query Inspection
+- **Latest Sprint**: Sprint 40 - Variable Substitution
 
 ---
 

@@ -1,7 +1,7 @@
 # Feature Backlog
 
-**Last Updated:** 2026-02-24
-**Next Sprint:** Sprint 40
+**Last Updated:** 2026-03-20
+**Next Sprint:** Sprint 41
 
 ---
 
@@ -56,12 +56,6 @@ No P0 features currently in backlog. All critical features have been implemented
 - Spec: [Performance - Caching](../specifications/performance.md#caching)
 
 ### Batch Mode Enhancements
-
-**Variable Substitution**
-- `${VAR}` syntax for variable substitution in SQL
-- Command-line variable passing: `--var name=value`
-- Environment variable expansion
-- Spec: [Batch Mode - Variables](../specifications/batch-mode.md#variables)
 
 **Script Preprocessing**
 - Include files: `-- @include common.sql`

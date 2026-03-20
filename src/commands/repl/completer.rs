@@ -9,6 +9,10 @@ use reedline::{Completer, Suggestion};
 ///
 /// Provides completion suggestions for SQL keywords based on typed prefix.
 /// Matches are case-insensitive but preserve the user's casing in input.
+///
+/// Note: Currently unused (Sprint 18 removed keyword completion from the active
+/// completer pipeline). Kept for potential future use.
+#[allow(dead_code)]
 pub struct SqlCompleter {
     /// Complete list of SQL keywords
     keywords: Vec<String>,
@@ -16,6 +20,7 @@ pub struct SqlCompleter {
 
 impl SqlCompleter {
     /// Create a new SQL completer with all supported keywords
+    #[allow(dead_code)]
     pub fn new() -> Self {
         let keywords = vec![
             // DML statements

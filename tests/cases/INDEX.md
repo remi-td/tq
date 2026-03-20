@@ -1,9 +1,9 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.8.0 (Sprint 33 - Pager Bug Fix + Data Sampling)
-**Last Updated:** 2026-02-03
-**Base Commit:** [Sprint 33 - In Progress]
+**Version:** 2.1.0 (Sprint 40 - Variable Substitution)
+**Last Updated:** 2026-03-20
+**Base Commit:** [Sprint 40 - In Progress]
 
 ## Overview
 
@@ -470,6 +470,71 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 - **Feature 2 Focus**: Optional live-DB validation for Sprint 36's `/show indexes`
 - **Manual Validation**: Real editor compatibility checklist (vim, nano, VS Code) recommended but not required
 - **Acceptance**: All automated tests pass + mock editors functional + manual validation documented + zero regressions
+
+### Sprint 39: PMON Hardening & Query Inspection
+
+**Sprint 39 Context:** Monitoring utilities extraction (shared `monitoring_utils.rs`), Sprint 38 bug fixes (CSV no-waiter, error handling tests), and new `/query-inspect` command showing SQL text from DBC.QryLogV.
+
+- **TC-039-001**: Monitoring Utils Shared Module Unit Tests
+- **TC-039-002**: Sprint 38 Bug Fixes - CSV Output and Error Handling
+- **TC-039-003**: QueryInspectInfo SQL, Parsing, Truncation, Error Unit Tests
+- **TC-039-004**: Query Inspect Batch Mode CLI Integration Tests
+- **TC-039-005**: Query Inspect REPL Tab Completion and Help
+- **TC-039-006**: Query Inspect REPL Command Execution and Alias
+
+---
+
+### Sprint 40: Variable Substitution
+
+**Sprint 40 Context:** YAML-based variable substitution engine for SQL templates using `{{variable}}` markers, `{{$ENV.VAR_NAME}}` for environment variables, multi-file parameter merging, CLI `--params`/`-p` flag, and REPL `/params` metacommand. Also Sprint 39 remediation: remove 31 redundant utility tests from consumer modules.
+
+**Sprint 40 Test Cases (4 test case documents):**
+
+#### Feature 1: Variable Substitution Engine (P0) - 3 test documents
+- **TC-040-001**: Variable Substitution Engine - Unit Tests (AC-2, AC-3, AC-4, AC-5, AC-8, AC-11)
+  - YAML parsing: flat, nested 2-level, nested 3-level, type coercion, empty, invalid, special chars (9 tests)
+  - Variable resolution: simple, nested path, multiple markers, same variable twice, env var, missing env var, undefined var error with name/available list, passthrough (no markers) (11 tests)
+  - Multi-file merge: non-overlapping, override (later wins), three-file priority, nested override (4 tests)
+  - Edge cases: empty SQL, single `{`, unclosed `{{`, value with curly braces, YAML null value, `$env` case sensitivity, markers at boundaries (7 tests)
+  - **Total: 30 unit tests**
+
+- **TC-040-002**: Variable Substitution - CLI Batch Integration Tests (AC-1, AC-6, AC-8, AC-9)
+  - Flag acceptance: `--params` long flag, `-p` short flag (2 no-DB tests)
+  - Error cases: file not found, invalid YAML, undefined variable, multiple -p flags (4 no-DB tests)
+  - Help: `tq help params` topic exists and contains syntax (1 no-DB test)
+  - Passthrough and nested path substitution via CLI (2 no-DB tests)
+  - Live-DB: inline SQL, file SQL, stdin SQL with substitution (3 `#[ignore]` tests)
+  - **Total: 12 integration tests (9 no-DB + 3 `#[ignore]`)**
+
+- **TC-040-003**: Variable Substitution - REPL Metacommand Interactive Tests (AC-7, AC-10)
+  - Tab completion shows `/params` (1 test)
+  - `/params load` confirmation (1 test)
+  - `/params show` displays variables (1 test)
+  - Parameters used in subsequent query (1 test)
+  - `/params unload` clears state (1 test)
+  - `/params load` non-existent file - error without REPL crash (1 test)
+  - **Total: 6 interactive tests (all `#[ignore]`, all require live database)**
+
+#### Feature 2: Sprint 39 Remediation - Redundant Test Removal (P0) - 1 test document
+- **TC-040-004**: Sprint 39 Remediation - Redundant Test Removal (AC-13)
+  - Identifies 31 redundant tests across sessions.rs (9), sysconfig.rs (11), locks.rs (7), sample.rs (4)
+  - Validates removal via regression suite + clippy check
+  - Verifies monitoring_utils.rs still provides equivalent coverage (27 authoritative tests)
+
+**Sprint 40 Test Strategy:**
+- **Test Count**: 4 test case documents
+- **New Tests Added**: 48 tests (30 unit + 12 integration + 6 interactive)
+- **Tests Removed (redundant)**: 31 tests from consumer modules
+- **Net Change**: +17 tests from Sprint 39 baseline (~790 → ~807)
+- **Type**: Feature Sprint (Variable Substitution) + Remediation Sprint
+- **Database Required**: Yes (for 6 interactive + 3 live-DB integration tests; all marked `#[ignore]`)
+- **Test Types**: Unit (30) + Integration CLI (9 no-DB + 3 live-DB) + Interactive REPL (6) + Regression (after removal)
+- **Fixture Files Required**: `tests/fixtures/params/` directory with 6 YAML fixture files
+- **Critical Success**: 100% test pass rate + ~807 tests total + all 11 ACs (AC-1 to AC-11) + remediation complete
+- **No New Testing Tools Required**: serde_yaml sufficient for unit tests; existing expectrl for interactive tests
+- **Acceptance**: All automated tests pass + all AC covered + 31 redundant tests removed + zero regressions
+
+---
 
 ### Security
 - **TC022**: Security - No Password Exposure

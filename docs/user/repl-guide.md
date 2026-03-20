@@ -43,6 +43,7 @@ Available metacommands:
     /locks       Display current lock contention and blocking chains
     /logon       Connect/switch database
     /pager       Enable/disable result paging
+    /params      Manage YAML parameter files for variable substitution
     /peek        Show first rows and column info (optional row count)
     /ping        Test connection
     /query       Show current SQL query for a session
@@ -646,6 +647,348 @@ tq> SELECT * FROM employees
 ```
 
 Each press of ↑ recalls one complete statement, whether it was typed on one line or many.
+
+## Parameterized Queries
+
+tq supports SQL templates with `{{variable}}` markers that are resolved from YAML parameter files. In REPL mode you load parameter files with the `/params` metacommand. Once loaded, every query you type is automatically substituted before being sent to Teradata.
+
+### Why Use Parameters?
+
+Instead of rewriting the same query for different tables, databases, or dates, you write a template once and supply values through a YAML file. Parameters also let you switch between environments (staging vs. production) without editing SQL.
+
+### The `/params` Metacommand
+
+The `/params` command manages parameter files within your REPL session:
+
+```
+/params load <file>    Load a YAML parameter file
+/params unload         Clear all loaded parameters
+/params show           Show currently loaded parameters
+/params                Display usage help
+```
+
+### Loading a Parameter File
+
+Create a YAML file with your variables:
+
+```yaml
+# deploy.yaml
+target:
+  database: PRODUCTION
+  schema: HR
+
+run_date: "2026-01-01"
+row_count: 100
+```
+
+Then load it in the REPL:
+
+```sql
+tq> /params load deploy.yaml
+Loaded 4 variables from deploy.yaml (4 total)
+```
+
+Now every query you type has those variables available:
+
+```sql
+tq> SELECT COUNT(*) FROM {{target.database}}.{{target.schema}}.employees
+    WHERE hire_date > '{{run_date}}';
+-- Executes: SELECT COUNT(*) FROM PRODUCTION.HR.employees WHERE hire_date > '2026-01-01';
+
+┌──────────┐
+│ Count(*) │
+├──────────┤
+│ 312      │
+└──────────┘
+
+1 row in set (0.087s)
+```
+
+### Viewing Loaded Parameters
+
+Check which variables are available at any time:
+
+```sql
+tq> /params show
+
+Active parameters (4 variables from 1 file):
+
+  Variable               Value          Source
+  ─────────────────────────────────────────────────────────
+  row_count              100            deploy.yaml
+  run_date               2026-01-01     deploy.yaml
+  target.database        PRODUCTION     deploy.yaml
+  target.schema          HR             deploy.yaml
+
+Use {{variable}} in SQL to substitute these values.
+Use {{$ENV.VAR_NAME}} for environment variable substitution.
+```
+
+When no parameters are loaded:
+
+```sql
+tq> /params show
+No parameters are currently loaded.
+
+To load parameters: /params load <file.yaml>
+To learn more: /help params
+```
+
+### Environment Variables
+
+Use `{{$ENV.VAR_NAME}}` to read environment variables directly. No YAML file is needed:
+
+```sql
+tq> SELECT * FROM {{$ENV.TARGET_DB}}.HR.employees SAMPLE 10;
+```
+
+Environment variables can be combined with YAML params in the same query:
+
+```sql
+tq> /params load config.yaml
+Loaded 3 variables from config.yaml (3 total)
+
+tq> SELECT * FROM {{$ENV.ENV_NAME}}.{{target.schema}}.employees
+    WHERE region = '{{filters.region}}';
+```
+
+Environment variable errors are clear:
+
+```sql
+tq> SELECT * FROM {{$ENV.MISSING_VAR}}.employees;
+Error: Undefined environment variable in template
+
+Variable '{{$ENV.MISSING_VAR}}' references environment variable 'MISSING_VAR'
+which is not set in the current environment.
+
+Fix:
+  export MISSING_VAR=myvalue
+```
+
+### Loading Multiple Files
+
+Load multiple parameter files to combine or override values. Later files override earlier ones on conflicting keys, but non-conflicting keys from earlier files are preserved:
+
+```sql
+tq> /params load base.yaml
+Loaded 5 variables from base.yaml (5 total)
+
+tq> /params load prod-overrides.yaml
+Loaded 2 variables from prod-overrides.yaml (6 total, 1 override)
+```
+
+After loading both files, `/params show` reflects the merged result, showing which file each value came from:
+
+```sql
+tq> /params show
+
+Active parameters (6 variables from 2 files):
+
+  Variable               Value          Source
+  ─────────────────────────────────────────────────────────
+  filters.active         true           base.yaml
+  filters.region         EMEA           prod-overrides.yaml
+  run_date               2026-01-01     base.yaml
+  target.database        PRODUCTION     prod-overrides.yaml
+  target.schema          HR             base.yaml
+  target.table           employees      base.yaml
+
+Use {{variable}} in SQL to substitute these values.
+Use {{$ENV.VAR_NAME}} for environment variable substitution.
+```
+
+### Clearing Parameters
+
+Clear all loaded parameters with `/params unload`:
+
+```sql
+tq> /params unload
+Parameters cleared. No variables currently loaded.
+```
+
+If no parameters are loaded, you get a notice:
+
+```sql
+tq> /params unload
+No parameters are currently loaded.
+```
+
+### Undefined Variables
+
+If a query references a variable that is not defined, the query is aborted with a clear error. The REPL remains active:
+
+```sql
+tq> SELECT * FROM {{undefined_table}};
+Error: Undefined variable in template
+
+Variable '{{undefined_table}}' is not defined.
+
+Available variables:
+  filters.active    true
+  filters.region    EMEA
+  target.database   PRODUCTION
+  target.schema     HR
+
+Hint: Load a params file with /params load <file> or use /params show to review loaded variables.
+
+tq>
+```
+
+### Error Handling
+
+**File not found:**
+
+```sql
+tq> /params load missing.yaml
+Error: Parameter file not found
+
+Could not read: missing.yaml
+Reason: No such file or directory
+
+Check:
+  - File path is correct
+  - Current directory: /Users/alice/project
+```
+
+**YAML parse error:**
+
+```sql
+tq> /params load broken.yaml
+Error: Invalid YAML in parameter file
+
+Could not parse: broken.yaml
+Line 4: mapping values are not allowed in this context
+
+Fix:
+  - Verify the file is valid YAML
+  - Check for incorrect indentation or missing quotes
+```
+
+**Missing file argument:**
+
+```sql
+tq> /params load
+Error: Missing argument
+
+Usage: /params load <file>
+
+Example: /params load deploy.yaml
+```
+
+All `/params` errors are non-fatal: the REPL continues after any error and returns you to the `tq>` prompt.
+
+### Tab Completion
+
+Tab completion works for the `/params` command and its subcommands:
+
+```sql
+# Show all /params subcommands
+tq> /params <TAB>
+
+Subcommands:
+    load    Load a YAML parameter file
+    show    Show currently loaded parameters
+    unload  Clear all loaded parameters
+
+# Complete partial subcommand
+tq> /params l<TAB>
+tq> /params load _
+
+# File path completion after 'load'
+tq> /params load <TAB>
+deploy.yaml  base.yaml  prod-overrides.yaml
+```
+
+### Session Persistence
+
+Parameters loaded with `/params load` persist for the duration of your REPL session:
+
+- Parameters survive database reconnects (`/reconnect`)
+- Parameters are cleared when you exit (`/quit`, Ctrl-D)
+- Parameters are NOT automatically saved between sessions
+
+### Complete Workflow Example
+
+```sql
+# 1. Start REPL and load your environment config
+tq> /params load config/base.yaml
+Loaded 5 variables from base.yaml (5 total)
+
+tq> /params load config/envs/production.yaml
+Loaded 2 variables from production.yaml (6 total, 1 override)
+
+# 2. Check what variables are available
+tq> /params show
+
+Active parameters (6 variables from 2 files):
+
+  Variable               Value          Source
+  ─────────────────────────────────────────────────────────
+  filters.active         true           base.yaml
+  filters.region         EMEA           production.yaml
+  run_date               2026-01-01     base.yaml
+  target.database        PRODUCTION     production.yaml
+  target.schema          HR             base.yaml
+  target.table           employees      base.yaml
+
+# 3. Run parameterized queries
+tq> SELECT COUNT(*) FROM {{target.database}}.{{target.schema}}.{{target.table}}
+    WHERE region = '{{filters.region}}' AND active = {{filters.active}};
+
+┌──────────┐
+│ Count(*) │
+├──────────┤
+│ 1523     │
+└──────────┘
+
+1 row in set (0.091s)
+
+# 4. Quick override: switch to staging without editing any files
+tq> /params load config/envs/staging.yaml
+Loaded 1 variable from staging.yaml (6 total, 1 override)
+
+tq> SELECT COUNT(*) FROM {{target.database}}.{{target.schema}}.{{target.table}}
+    WHERE region = '{{filters.region}}';
+-- Now runs against STAGING
+
+# 5. Clear parameters when done
+tq> /params unload
+Parameters cleared. No variables currently loaded.
+```
+
+### Getting Help
+
+```sql
+tq> /help params
+
+/params - Manage YAML parameter files for variable substitution
+
+Usage:
+  /params load <file>   Load a YAML parameter file
+  /params unload        Clear all loaded parameters
+  /params show          Show currently loaded parameters
+
+Variable Syntax:
+  Use {{variable}} markers in SQL queries:
+    SELECT * FROM {{target.database}}.{{target.schema}}.employees;
+
+  Use dot notation for nested YAML keys:
+    {{section.key}}  ->  section: { key: value }
+
+  Use $ENV prefix for environment variables:
+    {{$ENV.DATABASE_HOST}}  reads the DATABASE_HOST env var
+
+...
+
+See also:
+  tq help params    Full variable substitution reference
+```
+
+For the complete syntax reference outside the REPL:
+
+```bash
+tq help params
+```
 
 ## Other Useful Commands
 
@@ -1484,6 +1827,9 @@ tq> /quit
 15. **Use `/locks` before maintenance** - Always check for active locks before running DDL or bulk operations to avoid unexpected blocking
 16. **Diagnose hangs with `/locks` + `/sessions`** - If a query is hanging, use `/locks` to see if it is blocked, then cross-reference with `/sessions` to identify the blocking session's workload
 17. **Drill into heavy sessions with `/query`** - When `/sessions` shows a session with high CPU or spool, use `/query <session_id>` to see what SQL it is executing
+18. **Use `/params` for repeatable analysis** - Load a YAML parameter file once, then run the same SQL template against different databases or dates without retyping queries
+19. **Switch environments quickly with `/params load`** - Load a different override file to point queries at staging or production without editing SQL
+20. **Use `/params show` to audit active parameters** - Check which values are loaded before running a critical query
 
 ## Keyboard Shortcuts Reference
 
@@ -1803,5 +2149,6 @@ tq> _
 ## Next Steps
 
 - Learn about [advanced REPL features](../specifications/repl.md) (multi-line editing, result paging, etc.)
-- Explore [batch mode](../specifications/batch-mode.md) for running scripts
+- Explore [batch mode guide](batch-mode-guide.md) for running scripts with `--params` and other flags
 - Read about [output formats](../specifications/output-formats.md) (JSON, CSV)
+- Run `tq help params` for the complete variable substitution syntax reference

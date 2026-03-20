@@ -46,6 +46,8 @@ pub use sql_context::{analyze_context, CompletionContext, TableReference};
 pub use state::ReplState;
 pub use validator::SqlStatementValidator;
 
+use crate::params::ParamStore;
+
 /// Execute the REPL command
 ///
 /// Sprint 7: Updated to support metadata completion and /logon.
@@ -102,6 +104,88 @@ pub fn execute<W: Write>(
 
     // Initialize reedline editor with persistent history and editor mode
     // Note: Databases are already cached, so tab completion won't trigger queries
+    let mut editor = create_editor(args, writer, Arc::clone(&completion_state))?;
+
+    // Create prompt
+    let prompt = TqPrompt::new();
+
+    // Main REPL loop
+    repl_loop(
+        &mut editor,
+        &completion_state,
+        &mut state,
+        &prompt,
+        writer,
+        use_color,
+        args.default_limit,
+    )?;
+
+    // Clean exit
+    writeln!(writer, "Goodbye!")?;
+    Ok(())
+}
+
+/// Execute the REPL command with an initial ParamStore (Sprint 40)
+///
+/// This variant accepts a pre-built ParamStore from CLI --params flags,
+/// making variables available for substitution from the start.
+pub fn execute_with_params<W: Write>(
+    client: DatabaseClient,
+    args: &ReplArgs,
+    initial_params: ParamStore,
+    writer: &mut W,
+    use_color: bool,
+    _verbose: bool,
+) -> Result<()> {
+    // Create shared completion state (thread-safe for reedline)
+    let database = client.config().database.clone();
+    let completion_state = Arc::new(Mutex::new(CompletionState::new(client, database)));
+
+    // Initialize REPL state with params
+    let mut state = {
+        let cs = completion_state.lock().unwrap();
+        let mut s = ReplState::new(cs.client().config().clone());
+        s.set_default_limit(args.default_limit);
+        s.params = initial_params;
+        s
+    };
+
+    // Pre-load ALL metadata BEFORE editor initialization
+    {
+        let mut cs = completion_state.lock().unwrap();
+        log::info!("Pre-loading metadata for tab completion...");
+        if cs.ensure_databases_loaded() {
+            log::info!("Database names loaded successfully");
+        } else {
+            log::warn!("Failed to pre-load database names; tab completion may be limited");
+        }
+        if cs.ensure_tables_loaded() {
+            log::info!("Table metadata loaded successfully");
+        } else {
+            log::warn!("Failed to pre-load table metadata; tab completion may be limited");
+        }
+    }
+
+    // Show startup banner
+    {
+        let cs = completion_state.lock().unwrap();
+        print_banner(&cs, args, writer)?;
+    }
+
+    // Show params status if params were loaded from CLI
+    if !state.params.is_empty() {
+        let count = state.params.list_available_paths().len();
+        writeln!(
+            writer,
+            "Parameters loaded: {} variable(s) from {} file(s)",
+            count,
+            state.params.loaded_files().len()
+        )?;
+        writeln!(writer, "Use /params show to see variables, /params unload to clear.")?;
+        writeln!(writer)?;
+    }
+
+    // Initialize reedline editor
     let mut editor = create_editor(args, writer, Arc::clone(&completion_state))?;
 
     // Create prompt
@@ -442,6 +526,21 @@ fn repl_loop<W: Write>(
                 // The validator returns `Complete` only when statement ends with ';'.
                 // We no longer need to manually accumulate or check for semicolon.
                 let sql = buffer;
+
+                // Sprint 40: Apply variable substitution before execution
+                let sql = if !state.params.is_empty() {
+                    match state.params.substitute(&sql) {
+                        Ok(substituted) => substituted,
+                        Err(e) => {
+                            writeln!(writer, "\n{}", e)?;
+                            writeln!(writer)?;
+                            state.clear_input();
+                            continue;
+                        }
+                    }
+                } else {
+                    sql
+                };
 
                 // Clear the state's input buffer since we're executing
                 state.clear_input();

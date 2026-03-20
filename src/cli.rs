@@ -169,6 +169,16 @@ pub struct GlobalOpts {
         global = true
     )]
     pub color: ColorChoice,
+
+    /// YAML parameter file(s) for variable substitution in SQL
+    ///
+    /// Load variables from YAML files. Variables in SQL are referenced
+    /// as {{variable.path}}. Multiple files can be specified; later files
+    /// override earlier ones.
+    ///
+    /// Example: tq -p params.yaml query "SELECT * FROM {{target.database}}.orders"
+    #[arg(short = 'p', long = "params", value_name = "FILE", global = true)]
+    pub params: Vec<PathBuf>,
 }
 
 /// Available commands for tq
@@ -273,6 +283,8 @@ pub enum HelpTopic {
     Config,
     /// Password and credential management
     Credentials,
+    /// Variable substitution syntax and YAML parameter files
+    Params,
 }
 
 /// Arguments for the ping command
@@ -1294,6 +1306,63 @@ mod tests {
             assert_eq!(args.session_id, 1234);
         } else {
             panic!("Expected QueryInspect command");
+        }
+    }
+
+    // Sprint 40: Tests for --params flag
+
+    #[test]
+    fn test_cli_params_single_file() {
+        let args = vec!["tq", "-p", "params.yaml", "query", "SELECT 1"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert_eq!(cli.global.params, vec![PathBuf::from("params.yaml")]);
+    }
+
+    #[test]
+    fn test_cli_params_long_form() {
+        let args = vec!["tq", "--params", "params.yaml", "query", "SELECT 1"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert_eq!(cli.global.params, vec![PathBuf::from("params.yaml")]);
+    }
+
+    #[test]
+    fn test_cli_params_multiple_files() {
+        let args = vec![
+            "tq",
+            "-p", "base.yaml",
+            "-p", "overrides.yaml",
+            "query", "SELECT 1",
+        ];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert_eq!(
+            cli.global.params,
+            vec![PathBuf::from("base.yaml"), PathBuf::from("overrides.yaml")]
+        );
+    }
+
+    #[test]
+    fn test_cli_params_no_files() {
+        let args = vec!["tq", "query", "SELECT 1"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert!(cli.global.params.is_empty());
+    }
+
+    #[test]
+    fn test_cli_params_with_repl() {
+        let args = vec!["tq", "-p", "params.yaml", "repl"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert_eq!(cli.global.params, vec![PathBuf::from("params.yaml")]);
+        assert!(matches!(cli.command, Command::Repl(_)));
+    }
+
+    #[test]
+    fn test_cli_help_params_topic() {
+        let args = vec!["tq", "help", "params"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Help(args) = cli.command {
+            assert_eq!(args.topic, Some(HelpTopic::Params));
+        } else {
+            panic!("Expected Help command");
         }
     }
 }

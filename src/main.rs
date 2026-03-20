@@ -12,6 +12,7 @@ use tq::cli::{Cli, Command, GlobalOpts, HelpTopic};
 use tq::config::{parse_logmech, Config};
 use tq::db::{parse_duration, ConnectionConfig, DatabaseClient};
 use tq::error::TqError;
+use tq::params::ParamStore;
 use tq::{commands, help, Result};
 
 fn main() -> ExitCode {
@@ -62,6 +63,9 @@ fn run(cli: Cli) -> Result<()> {
         _ => {}
     }
 
+    // Build ParamStore from --params flag(s)
+    let param_store = build_param_store(&cli.global.params)?;
+
     // Build connection configuration for database commands
     let password_override = read_password_if_needed(&cli.global)?;
     let conn_config = build_connection_config(&cli.global, &config, password_override)?;
@@ -83,61 +87,62 @@ fn run(cli: Cli) -> Result<()> {
             if args.output.is_some() {
                 // Write to file
                 let mut stderr = io::stderr();
-                commands::query::execute_to_file(&client, &args, &mut stderr, use_color, verbose)?;
+                commands::query::execute_to_file_with_params(
+                    &client, &args, &param_store, &mut stderr, use_color, verbose,
+                )?;
             } else {
                 // Write to stdout
                 let mut stdout = io::stdout();
-                commands::query(&client, &args, &mut stdout, use_color, verbose)?;
+                commands::query::execute_with_params(
+                    &client, &args, &param_store, &mut stdout, use_color, verbose,
+                )?;
             }
         }
         Command::Repl(args) => {
             let mut stdout = io::stdout();
             // Sprint 7: Pass ownership of client to REPL for /logon support
-            commands::repl(client, &args, &mut stdout, use_color, verbose)?;
+            // Sprint 40: Pass param_store for variable substitution
+            commands::repl::execute_with_params(
+                client, &args, param_store, &mut stdout, use_color, verbose,
+            )?;
         }
         // Sprint 26: Sessions command for system monitoring
         Command::Sessions(args) => {
-            if args.output.is_some() {
-                // Write to file
-                let file = std::fs::File::create(args.output.as_ref().unwrap())?;
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
                 let mut writer = std::io::BufWriter::new(file);
                 commands::sessions(&client, &args, &mut writer, use_color)?;
             } else {
-                // Write to stdout
                 let mut stdout = io::stdout();
                 commands::sessions(&client, &args, &mut stdout, use_color)?;
             }
         }
         // Sprint 33: Sample command for random data sampling
         Command::Sample(args) => {
-            if args.output.is_some() {
-                // Write to file
-                let file = std::fs::File::create(args.output.as_ref().unwrap())?;
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
                 let mut writer = std::io::BufWriter::new(file);
                 commands::sample(&client, &args, &mut writer, use_color)?;
             } else {
-                // Write to stdout
                 let mut stdout = io::stdout();
                 commands::sample(&client, &args, &mut stdout, use_color)?;
             }
         }
         // Sprint 33: Peek command for data preview with column metadata
         Command::Peek(args) => {
-            if args.output.is_some() {
-                // Write to file
-                let file = std::fs::File::create(args.output.as_ref().unwrap())?;
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
                 let mut writer = std::io::BufWriter::new(file);
                 commands::peek(&client, &args, &mut writer, use_color)?;
             } else {
-                // Write to stdout
                 let mut stdout = io::stdout();
                 commands::peek(&client, &args, &mut stdout, use_color)?;
             }
         }
         // Sprint 38: Sysconfig command for system topology
         Command::Sysconfig(args) => {
-            if args.output.is_some() {
-                let file = std::fs::File::create(args.output.as_ref().unwrap())?;
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
                 let mut writer = std::io::BufWriter::new(file);
                 commands::sysconfig(&client, &args, &mut writer, use_color)?;
             } else {
@@ -147,8 +152,8 @@ fn run(cli: Cli) -> Result<()> {
         }
         // Sprint 38: Locks command for lock contention analysis
         Command::Locks(args) => {
-            if args.output.is_some() {
-                let file = std::fs::File::create(args.output.as_ref().unwrap())?;
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
                 let mut writer = std::io::BufWriter::new(file);
                 commands::locks(&client, &args, &mut writer, use_color)?;
             } else {
@@ -158,8 +163,8 @@ fn run(cli: Cli) -> Result<()> {
         }
         // Sprint 39: Query inspection for session drill-down
         Command::QueryInspect(args) => {
-            if args.output.is_some() {
-                let file = std::fs::File::create(args.output.as_ref().unwrap())?;
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
                 let mut writer = std::io::BufWriter::new(file);
                 commands::query_inspect(&client, &args, &mut writer, use_color)?;
             } else {
@@ -179,6 +184,7 @@ fn handle_help(args: &tq::HelpArgs) -> Result<()> {
     let content = match args.topic {
         Some(HelpTopic::Config) => help::config_help(),
         Some(HelpTopic::Credentials) => help::credentials_help(),
+        Some(HelpTopic::Params) => help::params_help(),
         None => help::general_help(),
     };
 
@@ -555,4 +561,13 @@ fn build_connection_from_profile(
         logmech,
         timeout,
     })
+}
+
+/// Build a ParamStore from a list of parameter file paths
+fn build_param_store(paths: &[std::path::PathBuf]) -> Result<ParamStore> {
+    let mut store = ParamStore::new();
+    for path in paths {
+        store.load_file(path)?;
+    }
+    Ok(store)
 }

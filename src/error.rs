@@ -399,7 +399,7 @@ impl TqError {
 
 /// Helper to convert a string into a boxed error (for use in TqError variants)
 pub fn string_to_error(s: String) -> Box<dyn std::error::Error + Send + Sync> {
-    Box::new(std::io::Error::new(std::io::ErrorKind::Other, s))
+    Box::new(std::io::Error::other(s))
 }
 
 #[cfg(test)]

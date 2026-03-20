@@ -1,7 +1,7 @@
 # Sprint temp-1 - Token Usage Metrics
 
-**Session ID:** 93583c02-d3a3-4c61-8b4f-49d9b4aac8ac
-**Generated:** Fri Jan 23 20:57:29 CET 2026
+**Session ID:** cf1c9ac6-5461-423b-90ca-fa778c00852f
+**Generated:** Fri Feb 13 09:19:00 CET 2026
 
 ---
 
@@ -11,133 +11,100 @@
 
 | Metric | Value |
 |--------|-------|
-| Input Tokens | 30,289 |
-| Output Tokens | 331 |
-| Cache Creation | 2,093,160 |
-| Cache Reads | 9,907,775 |
-| **Total Tokens** | **12,031,555** |
-| Cache Hit Rate | 82.4% |
+| Input Tokens | 49,618 |
+| Output Tokens | 6,609 |
+| Cache Creation | 1,917,972 |
+| Cache Reads | 11,083,947 |
+| **Total Tokens** | **13,058,146** |
+| Cache Hit Rate | 84.9% |
 
-### Agent: quality-validator (ID: a241ffd)
+### Agent: cli-ux-designer (ID: a1285d9)
 
 | Metric | Value |
 |--------|-------|
-| Input Tokens | 23,871 |
-| Output Tokens | 132 |
-| Cache Creation | 200,091 |
-| Cache Reads | 3,096,654 |
-| **Total Tokens** | **3,320,748** |
+| Input Tokens | 117 |
+| Output Tokens | 39 |
+| Cache Creation | 97,873 |
+| Cache Reads | 383,341 |
+| **Total Tokens** | **481,370** |
+| Cache Hit Rate | 79.6% |
+
+### Agent: quality-validator (ID: a1917f7)
+
+| Metric | Value |
+|--------|-------|
+| Input Tokens | 131 |
+| Output Tokens | 175 |
+| Cache Creation | 143,985 |
+| Cache Reads | 1,147,830 |
+| **Total Tokens** | **1,292,121** |
+| Cache Hit Rate | 88.8% |
+
+### Agent: quality-validator (ID: a3154fb)
+
+| Metric | Value |
+|--------|-------|
+| Input Tokens | 194 |
+| Output Tokens | 108 |
+| Cache Creation | 74,356 |
+| Cache Reads | 621,534 |
+| **Total Tokens** | **696,192** |
+| Cache Hit Rate | 89.3% |
+
+### Agent: rust-teradata-architect (ID: a3959bd)
+
+| Metric | Value |
+|--------|-------|
+| Input Tokens | 6,357 |
+| Output Tokens | 151 |
+| Cache Creation | 430,895 |
+| Cache Reads | 2,249,656 |
+| **Total Tokens** | **2,687,059** |
+| Cache Hit Rate | 83.7% |
+
+### Agent: cli-ux-designer (ID: a4eada1)
+
+| Metric | Value |
+|--------|-------|
+| Input Tokens | 158 |
+| Output Tokens | 113 |
+| Cache Creation | 109,717 |
+| Cache Reads | 1,523,662 |
+| **Total Tokens** | **1,633,650** |
 | Cache Hit Rate | 93.3% |
 
-### Agent: quality-validator (ID: a3c90ac)
+### Agent: rust-teradata-architect (ID: aa8c065)
 
 | Metric | Value |
 |--------|-------|
-| Input Tokens | 22,381 |
-| Output Tokens | 23 |
-| Cache Creation | 75,974 |
-| Cache Reads | 132,486 |
-| **Total Tokens** | **230,864** |
-| Cache Hit Rate | 57.4% |
+| Input Tokens | 151 |
+| Output Tokens | 671 |
+| Cache Creation | 446,703 |
+| Cache Reads | 14,586,655 |
+| **Total Tokens** | **15,034,180** |
+| Cache Hit Rate | 97.0% |
 
-### Agent: quality-validator (ID: a484883)
-
-| Metric | Value |
-|--------|-------|
-| Input Tokens | 56,765 |
-| Output Tokens | 20 |
-| Cache Creation | 271,007 |
-| Cache Reads | 232,498 |
-| **Total Tokens** | **560,290** |
-| Cache Hit Rate | 41.5% |
-
-### Agent: cli-ux-designer (ID: a6502e2)
+### Agent: quality-validator (ID: aab689f)
 
 | Metric | Value |
 |--------|-------|
-| Input Tokens | 84 |
-| Output Tokens | 112 |
-| Cache Creation | 107,467 |
-| Cache Reads | 770,634 |
-| **Total Tokens** | **878,297** |
-| Cache Hit Rate | 87.8% |
+| Input Tokens | 143 |
+| Output Tokens | 52 |
+| Cache Creation | 224,306 |
+| Cache Reads | 805,777 |
+| **Total Tokens** | **1,030,278** |
+| Cache Hit Rate | 78.2% |
 
-### Agent: quality-validator (ID: a6bb966)
-
-| Metric | Value |
-|--------|-------|
-| Input Tokens | 1,631 |
-| Output Tokens | 30 |
-| Cache Creation | 139,508 |
-| Cache Reads | 612,639 |
-| **Total Tokens** | **753,808** |
-| Cache Hit Rate | 81.3% |
-
-### Agent: cli-ux-designer (ID: a7371ef)
+### Agent: quality-validator (ID: acompact-b1109a)
 
 | Metric | Value |
 |--------|-------|
-| Input Tokens | 11,592 |
-| Output Tokens | 90 |
-| Cache Creation | 150,275 |
-| Cache Reads | 498,533 |
-| **Total Tokens** | **660,490** |
-| Cache Hit Rate | 75.5% |
-
-### Agent: rust-teradata-architect (ID: aadbdd1)
-
-| Metric | Value |
-|--------|-------|
-| Input Tokens | 62,853 |
-| Output Tokens | 568 |
-| Cache Creation | 719,684 |
-| Cache Reads | 8,537,894 |
-| **Total Tokens** | **9,320,999** |
-| Cache Hit Rate | 91.6% |
-
-### Agent: quality-validator (ID: ad41f6e)
-
-| Metric | Value |
-|--------|-------|
-| Input Tokens | 24,212 |
-| Output Tokens | 176 |
-| Cache Creation | 378,269 |
-| Cache Reads | 6,439,585 |
-| **Total Tokens** | **6,842,242** |
-| Cache Hit Rate | 94.1% |
-
-### Agent: quality-validator (ID: ae507c5)
-
-| Metric | Value |
-|--------|-------|
-| Input Tokens | 52,741 |
-| Output Tokens | 17 |
-| Cache Creation | 118,735 |
-| Cache Reads | 33,114 |
-| **Total Tokens** | **204,607** |
-| Cache Hit Rate | 16.2% |
-
-### Agent: Explore (ID: ae64fdf)
-
-| Metric | Value |
-|--------|-------|
-| Input Tokens | 96 |
-| Output Tokens | 36 |
-| Cache Creation | 110,020 |
-| Cache Reads | 369,065 |
-| **Total Tokens** | **479,217** |
-| Cache Hit Rate | 77.0% |
-
-### Agent: rust-teradata-architect (ID: aff3dac)
-
-| Metric | Value |
-|--------|-------|
-| Input Tokens | 64,571 |
-| Output Tokens | 176 |
-| Cache Creation | 528,775 |
-| Cache Reads | 2,080,370 |
-| **Total Tokens** | **2,673,892** |
-| Cache Hit Rate | 77.8% |
+| Input Tokens | 10,994 |
+| Output Tokens | 936 |
+| Cache Creation | 23,494 |
+| Cache Reads | 313,495 |
+| **Total Tokens** | **348,919** |
+| Cache Hit Rate | 90.1% |
 
 ---
 
@@ -145,21 +112,21 @@
 
 | Metric | Value |
 |--------|-------|
-| Total Input Tokens | 351,086 |
-| Total Output Tokens | 1,711 |
-| Total Cache Creation | 4,892,965 |
-| Total Cache Reads | 32,711,247 |
-| **Grand Total** | **37,957,009** |
-| Overall Cache Hit Rate | 86.2% |
+| Total Input Tokens | 67,863 |
+| Total Output Tokens | 8,854 |
+| Total Cache Creation | 3,469,301 |
+| Total Cache Reads | 32,715,897 |
+| **Grand Total** | **36,261,915** |
+| Overall Cache Hit Rate | 90.2% |
 
 ## Estimated Cost (Sonnet 4.5 pricing)
 
 | Category | Cost |
 |----------|------|
-| Input Tokens | $15.73 |
-| Output Tokens | $0.03 |
+| Input Tokens | $10.61 |
+| Output Tokens | $0.13 |
 | Cache Reads | $9.81 |
-| **Total** | **$25.57** |
+| **Total** | **$20.55** |
 
 **Note:** Actual costs may vary based on model mix (Opus/Sonnet/Haiku).
 

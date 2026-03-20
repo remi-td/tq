@@ -8,6 +8,7 @@
 //! - Connection string storage for /logon metacommand
 
 use crate::db::{ConnectionConfig, MetadataCache, QueryResult};
+use crate::params::ParamStore;
 use std::time::Instant;
 
 /// State of the REPL session
@@ -51,6 +52,9 @@ pub struct ReplState {
 
     /// Default row limit for SELECT queries in REPL (Sprint 36: for /repeat)
     default_limit: usize,
+
+    /// Parameter store for variable substitution (Sprint 40)
+    pub params: ParamStore,
 }
 
 impl ReplState {
@@ -71,6 +75,7 @@ impl ReplState {
             metadata_cache: MetadataCache::new(database),
             connection_string: None,
             default_limit: 0,
+            params: ParamStore::new(),
         }
     }
 

@@ -892,45 +892,8 @@ mod tests {
         assert!(waiting.is_empty());
     }
 
-    #[test]
-    fn test_escape_csv_simple() {
-        assert_eq!(escape_csv("hello"), "hello");
-    }
-
-    #[test]
-    fn test_escape_csv_with_comma() {
-        assert_eq!(escape_csv("1045, 1067"), "\"1045, 1067\"");
-    }
-
-    #[test]
-    fn test_extract_trimmed_string_from_string() {
-        let value = Value::String("  PROD.orders  ".to_string());
-        assert_eq!(extract_trimmed_string(&value, "[NULL]"), "PROD.orders");
-    }
-
-    #[test]
-    fn test_extract_trimmed_string_from_null() {
-        let value = Value::Null;
-        assert_eq!(extract_trimmed_string(&value, "[NULL]"), "[NULL]");
-    }
-
-    #[test]
-    fn test_extract_integer_from_integer() {
-        let value = Value::Integer(1023);
-        assert_eq!(extract_integer(&value), Some(1023));
-    }
-
-    #[test]
-    fn test_extract_integer_from_decimal() {
-        let value = Value::Decimal(1023.0);
-        assert_eq!(extract_integer(&value), Some(1023));
-    }
-
-    #[test]
-    fn test_extract_integer_from_null() {
-        let value = Value::Null;
-        assert_eq!(extract_integer(&value), None);
-    }
+    // escape_csv, extract_trimmed_string, and extract_integer tests removed:
+    // already tested in monitoring_utils.rs
 
     #[test]
     fn test_lock_info_from_row_with_decimal_sessions() {

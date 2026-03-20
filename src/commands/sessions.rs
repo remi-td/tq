@@ -352,7 +352,7 @@ fn format_spool(spool: i64) -> String {
     let chars: Vec<char> = s.chars().collect();
 
     for (i, c) in chars.iter().enumerate() {
-        if i > 0 && (chars.len() - i) % 3 == 0 {
+        if i > 0 && (chars.len() - i).is_multiple_of(3) {
             result.push(',');
         }
         result.push(*c);
@@ -517,20 +517,7 @@ mod tests {
         assert_eq!(format_spool(1234567), "1,234,567");
     }
 
-    #[test]
-    fn test_escape_csv_simple() {
-        assert_eq!(escape_csv("hello"), "hello");
-    }
-
-    #[test]
-    fn test_escape_csv_with_comma() {
-        assert_eq!(escape_csv("hello,world"), "\"hello,world\"");
-    }
-
-    #[test]
-    fn test_escape_csv_with_quotes() {
-        assert_eq!(escape_csv("say \"hello\""), "\"say \"\"hello\"\"\"");
-    }
+    // escape_csv tests removed: already tested in monitoring_utils.rs
 
     #[test]
     fn test_session_info_from_row() {
@@ -636,45 +623,7 @@ mod tests {
         assert!(session.io_skew.is_none());
     }
 
-    #[test]
-    fn test_extract_integer_from_integer() {
-        let value = Value::Integer(42);
-        assert_eq!(extract_integer(&value), Some(42));
-    }
-
-    #[test]
-    fn test_extract_integer_from_decimal() {
-        let value = Value::Decimal(42.5);
-        assert_eq!(extract_integer(&value), Some(42));
-    }
-
-    #[test]
-    fn test_extract_integer_from_null() {
-        let value = Value::Null;
-        assert_eq!(extract_integer(&value), None);
-    }
-
-    #[test]
-    fn test_extract_decimal_from_decimal() {
-        let value = Value::Decimal(42.5);
-        let result = extract_decimal(&value);
-        assert!(result.is_some());
-        assert!((result.unwrap() - 42.5).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_extract_decimal_from_integer() {
-        let value = Value::Integer(42);
-        let result = extract_decimal(&value);
-        assert!(result.is_some());
-        assert!((result.unwrap() - 42.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_extract_decimal_from_null() {
-        let value = Value::Null;
-        assert_eq!(extract_decimal(&value), None);
-    }
+    // extract_integer and extract_decimal tests removed: already tested in monitoring_utils.rs
 
     #[test]
     fn test_session_info_from_row_with_non_string_state() {

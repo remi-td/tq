@@ -439,6 +439,7 @@ Available metacommands:
     /locks       Display current lock contention and blocking chains
     /logon       Connect/switch database
     /pager       Enable/disable result paging
+    /params      Manage YAML parameter files for variable substitution
     /peek        Show first rows and column info
     /ping        Test connection
     /query       Show current SQL query for a session
@@ -2902,18 +2903,26 @@ Matching metacommands:
 
 **Output Format:**
 
-**When query text is found:**
+**When query history is found (multiple recent queries displayed):**
 ```
 tq> /query 1023
 
-Query for session 1023:
-┌────────────┬──────────────────────────────────────────────────────────────────┐
-│ Property   │ Value                                                            │
-├────────────┼──────────────────────────────────────────────────────────────────┤
-│ Session    │ 1023                                                             │
-│ User       │ etl_user                                                         │
-│ Query Text │ UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_... │
-└────────────┴──────────────────────────────────────────────────────────────────┘
+Recent Queries for Session 1023:
+┌──────────────┬──────────────────────────────────────────────────────────────────┐
+│ Property     │ Value                                                            │
+├──────────────┼──────────────────────────────────────────────────────────────────┤
+│ Query #      │ 1                                                                │
+│ Start Time   │ 2026-02-24 10:30:00                                              │
+│ Elapsed Time │ 00:00:05.123                                                     │
+│ Status       │ Complete                                                         │
+│ SQL          │ UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_...  │
+├──────────────┼──────────────────────────────────────────────────────────────────┤
+│ Query #      │ 2                                                                │
+│ Start Time   │ 2026-02-24 10:29:00                                              │
+│ Elapsed Time │ 00:00:01.500                                                     │
+│ Status       │ Complete                                                         │
+│ SQL          │ SELECT COUNT(*) FROM PRODUCTION.orders                           │
+└──────────────┴──────────────────────────────────────────────────────────────────┘
 
 (Query time: 0.123s)
 ```
@@ -2932,29 +2941,38 @@ enabled for this user. Contact your DBA to enable DBQL logging.
 
 | Property | Description |
 |----------|-------------|
-| Session | The session ID that was queried |
-| User | The database user account running that session |
-| Query Text | The most recent SQL text logged for the session (truncated in table view) |
+| Query # | Sequential number of the query (1 = most recent) |
+| Start Time | When the query started executing |
+| Elapsed Time | Total elapsed time for the query |
+| Status | Execution status: Complete, Aborted, or Error |
+| SQL | The SQL text of the query (truncated to 200 characters in table view) |
 
 **Behavior Requirements:**
 
 **REQ-QUERY-001: Query Text Display**
 
-The command SHALL display SQL text for a given session ID:
+The command SHALL display recent SQL queries for a given session ID:
 
-1. **REQ-QUERY-001.1** - Retrieve query text from `DBC.QryLogV` for the specified session ID
-2. **REQ-QUERY-001.2** - Return the most recent (latest `CollectTimeStamp`) query log entry for the session
-3. **REQ-QUERY-001.3** - Display output as a two-column key-value table with properties: Session, User, Query Text
-4. **REQ-QUERY-001.4** - Header line: `Query for session <N>:` above the table
+1. **REQ-QUERY-001.1** - Retrieve query history from `DBC.QryLogV` for the specified session ID
+2. **REQ-QUERY-001.2** - Return up to 5 most recent queries (latest `CollectTimeStamp` first)
+3. **REQ-QUERY-001.3** - Display output as a two-column key-value table with properties per query: Query #, Start Time, Elapsed Time, Status, SQL
+4. **REQ-QUERY-001.4** - Header line: `Recent Queries for Session <N>:` above the table
 5. **REQ-QUERY-001.5** - Footer: `(Query time: X.XXXs)` below the table
 6. **REQ-QUERY-001.6** - SQL query template:
    ```sql
-   SELECT TOP 1
-       LogonName,
-       QueryText
+   SELECT TOP 5
+       SessionID,
+       CAST(QueryText AS VARCHAR(10000)) AS QueryText,
+       CAST(StartTime AS VARCHAR(30)) AS StartTime,
+       CAST(TotalElapsedTime AS VARCHAR(30)) AS TotalElapsedTime,
+       CASE
+           WHEN AbortFlag = 'Y' THEN 'Aborted'
+           WHEN ErrorCode <> 0 THEN 'Error'
+           ELSE 'Complete'
+       END AS QueryStatus
    FROM DBC.QryLogV
-   WHERE LogDate >= DATE - 1
-     AND SessionNo = <session_id>
+   WHERE SessionID = <session_id>
+     AND CollectTimeStamp >= CURRENT_TIMESTAMP - INTERVAL '1' DAY
    ORDER BY CollectTimeStamp DESC
    ```
 
@@ -2971,19 +2989,23 @@ The command SHALL be available as a batch mode subcommand:
 
 The command SHALL work with all output format modes:
 
-1. **REQ-QUERY-003.1** - Table format (default): Two-column key-value table as shown above, with Query Text truncated to 200 characters with `...`
-2. **REQ-QUERY-003.2** - CSV format: Three columns (`Session,User,Query Text`) with full untruncated query text
+1. **REQ-QUERY-003.1** - Table format (default): Two-column key-value table with per-query sections (Query #, Start Time, Elapsed Time, Status, SQL), with SQL truncated to 200 characters with `...`
+2. **REQ-QUERY-003.2** - CSV format: Five columns (`SessionID,StartTime,ElapsedTime,Status,QueryText`) with full untruncated query text
    ```csv
-   Session,User,Query Text
-   1023,etl_user,"UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_date < '2026-01-01'"
+   SessionID,StartTime,ElapsedTime,Status,QueryText
+   1023,2026-02-24 10:30:00,00:00:05.123,Complete,"UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_date < '2026-01-01'"
    ```
-3. **REQ-QUERY-003.3** - JSON format: Single object with full untruncated query text
+3. **REQ-QUERY-003.3** - JSON format: Array of query objects with full untruncated query text
    ```json
-   {
-     "Session": 1023,
-     "User": "etl_user",
-     "Query Text": "UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_date < '2026-01-01'"
-   }
+   [
+     {
+       "SessionID": 1023,
+       "StartTime": "2026-02-24 10:30:00",
+       "ElapsedTime": "00:00:05.123",
+       "Status": "Complete",
+       "QueryText": "UPDATE PRODUCTION.orders SET status = 'shipped' WHERE order_date < '2026-01-01'"
+     }
+   ]
    ```
 4. **REQ-QUERY-003.4** - Format selection: Command SHALL respect current output format setting (`/set format <fmt>`)
 5. **REQ-QUERY-003.5** - Full query text is always available in CSV and JSON formats regardless of length
@@ -3988,6 +4010,9 @@ Session Information:
 | `/history` | - | Show command history | `/history` |
 | `/edit` | `\e` | Edit last query in $EDITOR | `/edit` |
 | `/repeat` | `\r` | Re-execute last query | `/repeat` |
+| `/params load <file>` | - | Load YAML parameter file | `/params load deploy.yaml` |
+| `/params unload` | - | Clear all loaded parameters | `/params unload` |
+| `/params show` | - | Show loaded parameters | `/params show` |
 | `/quit` | `\q` | Exit REPL | `/quit` |
 
 ---
@@ -4379,3 +4404,337 @@ Did you mean: SELECT?
 Fix and retry? [Y/n] y
 [Executes corrected query]
 ```
+
+---
+
+## `/params` - Variable Substitution Parameter Management
+
+**Requirement:** Manage YAML parameter files in REPL mode so that SQL queries containing `{{variable}}` markers are automatically resolved before execution.
+
+---
+
+**REQ-PARAMS-REPL-001: Command Availability and Syntax**
+
+The `/params` command SHALL be available as a metacommand in REPL mode with the following subcommands:
+
+1. **REQ-PARAMS-REPL-001.1** - `/params load <file>` - Load a YAML parameter file and add its variables to the active parameter set
+2. **REQ-PARAMS-REPL-001.2** - `/params unload` - Clear all loaded parameters, resetting the parameter set to empty
+3. **REQ-PARAMS-REPL-001.3** - `/params show` - Display all currently loaded parameters and their values
+4. **REQ-PARAMS-REPL-001.4** - `/params` with no subcommand - Display usage hint (same as `/help params`)
+5. **REQ-PARAMS-REPL-001.5** - Command SHALL be case-insensitive (`/Params`, `/PARAMS` are valid)
+6. **REQ-PARAMS-REPL-001.6** - No short alias is defined for `/params`
+
+**Rationale:** The three-subcommand structure (load/unload/show) mirrors common parameter management patterns. The lack of a short alias reflects the infrequency of use in typical sessions - a user sets params once then queries many times.
+
+---
+
+**REQ-PARAMS-REPL-002: `/params load <file>` Behavior**
+
+Loading a parameter file in REPL mode:
+
+1. **REQ-PARAMS-REPL-002.1** - `<file>` argument is required; if omitted, show usage error
+2. **REQ-PARAMS-REPL-002.2** - File path is resolved relative to current working directory
+3. **REQ-PARAMS-REPL-002.3** - File is parsed as YAML immediately; parse errors are reported before any merge occurs
+4. **REQ-PARAMS-REPL-002.4** - Keys from the new file are merged into the active parameter set using last-writer-wins semantics (same as CLI `-p` merge rules)
+5. **REQ-PARAMS-REPL-002.5** - A success message is displayed showing the number of variables loaded and the cumulative total
+6. **REQ-PARAMS-REPL-002.6** - Multiple `/params load` calls accumulate; each call adds to or overrides the existing set
+7. **REQ-PARAMS-REPL-002.7** - The REPL does NOT reconnect or reset state on parameter load
+
+**Example:**
+
+```sql
+tq> /params load deploy.yaml
+Loaded 5 variables from deploy.yaml (5 total)
+
+tq> /params load prod-overrides.yaml
+Loaded 2 variables from prod-overrides.yaml (6 total, 1 override)
+
+tq> SELECT * FROM {{target.database}}.{{target.schema}}.employees;
+```
+
+---
+
+**REQ-PARAMS-REPL-003: `/params unload` Behavior**
+
+1. **REQ-PARAMS-REPL-003.1** - Clears ALL loaded parameters regardless of how many files have been loaded
+2. **REQ-PARAMS-REPL-003.2** - Displays a confirmation message
+3. **REQ-PARAMS-REPL-003.3** - After unloading, any query with `{{markers}}` will produce an undefined variable error
+4. **REQ-PARAMS-REPL-003.4** - Has no effect (and shows a notice) when no parameters are currently loaded
+
+**Example:**
+
+```sql
+tq> /params unload
+Parameters cleared. No variables currently loaded.
+
+tq> /params unload
+No parameters are currently loaded.
+```
+
+---
+
+**REQ-PARAMS-REPL-004: `/params show` Behavior**
+
+1. **REQ-PARAMS-REPL-004.1** - Displays a two-column table: variable path and current value
+2. **REQ-PARAMS-REPL-004.2** - Variables are listed in alphabetical order by path
+3. **REQ-PARAMS-REPL-004.3** - Nested YAML keys are shown in dot notation
+4. **REQ-PARAMS-REPL-004.4** - The source file for each variable is shown in a third column
+5. **REQ-PARAMS-REPL-004.5** - `$ENV.*` variables are NOT listed (they are resolved on demand and not stored in the parameter set)
+6. **REQ-PARAMS-REPL-004.6** - When no parameters are loaded, a clear message is shown
+
+**Example output when parameters are loaded:**
+
+```sql
+tq> /params show
+
+Active parameters (6 variables from 2 files):
+
+  Variable               Value          Source
+  ─────────────────────────────────────────────────────────
+  filters.active         true           deploy.yaml
+  filters.region         EMEA           prod-overrides.yaml
+  run_date               2026-01-01     deploy.yaml
+  target.database        PRODUCTION     prod-overrides.yaml
+  target.schema          HR             deploy.yaml
+  target.table           employees      deploy.yaml
+
+Use {{variable}} in SQL to substitute these values.
+Use {{$ENV.VAR_NAME}} for environment variable substitution.
+```
+
+**Example output when no parameters are loaded:**
+
+```sql
+tq> /params show
+No parameters are currently loaded.
+
+To load parameters: /params load <file.yaml>
+To learn more: /help params
+```
+
+---
+
+**REQ-PARAMS-REPL-005: Variable Substitution During SQL Execution**
+
+When parameters are loaded in the REPL:
+
+1. **REQ-PARAMS-REPL-005.1** - Every SQL statement executed at the prompt is subject to variable substitution before being sent to Teradata
+2. **REQ-PARAMS-REPL-005.2** - Substitution uses the current active parameter set at the time of execution (not at load time)
+3. **REQ-PARAMS-REPL-005.3** - `{{$ENV.VAR_NAME}}` markers are always resolved from the live environment, even without a loaded params file
+4. **REQ-PARAMS-REPL-005.4** - An undefined marker aborts the specific statement with an error; the REPL continues (non-fatal)
+5. **REQ-PARAMS-REPL-005.5** - The prompt does NOT change to indicate that parameters are active; users use `/params show` to inspect the state
+
+**Example - successful substitution:**
+
+```sql
+tq> /params load deploy.yaml
+Loaded 5 variables from deploy.yaml (5 total)
+
+tq> SELECT COUNT(*) FROM {{target.database}}.{{target.schema}}.employees;
+-- Executes: SELECT COUNT(*) FROM PRODUCTION.HR.employees;
+
+┌──────────┐
+│ Count(*) │
+├──────────┤
+│ 1523     │
+└──────────┘
+
+1 row in set (0.087s)
+```
+
+**Example - undefined variable error (non-fatal):**
+
+```sql
+tq> SELECT * FROM {{undefined_table}};
+Error: Undefined variable in template
+
+Variable '{{undefined_table}}' is not defined.
+
+Available variables:
+  filters.active    true
+  filters.region    EMEA
+  target.database   PRODUCTION
+  target.schema     HR
+
+Hint: Load a params file with /params load <file> or use /params show to review loaded variables.
+
+tq>
+```
+
+---
+
+**REQ-PARAMS-REPL-006: Error Handling**
+
+**File Not Found:**
+
+```sql
+tq> /params load missing.yaml
+Error: Parameter file not found
+
+Could not read: missing.yaml
+Reason: No such file or directory
+
+Check:
+  - File path is correct
+  - Current directory: /Users/alice/project
+```
+
+**YAML Parse Error:**
+
+```sql
+tq> /params load broken.yaml
+Error: Invalid YAML in parameter file
+
+Could not parse: broken.yaml
+Line 4: mapping values are not allowed in this context
+
+Fix:
+  - Verify the file is valid YAML
+  - Check for incorrect indentation or missing quotes
+```
+
+**Missing Subcommand Argument:**
+
+```sql
+tq> /params load
+Error: Missing argument
+
+Usage: /params load <file>
+
+Example: /params load deploy.yaml
+```
+
+**Unknown Subcommand:**
+
+```sql
+tq> /params reload
+Error: Unknown subcommand 'reload'
+
+Usage:
+  /params load <file>   Load a YAML parameter file
+  /params unload        Clear all loaded parameters
+  /params show          Show loaded parameters
+```
+
+All errors in `/params` commands:
+- Are non-fatal: the REPL remains active after any error
+- Go to the REPL output (not a separate stream)
+- Return the user to the `tq>` prompt
+
+---
+
+**REQ-PARAMS-REPL-007: Tab Completion**
+
+1. **REQ-PARAMS-REPL-007.1** - Typing `/p<TAB>` SHALL suggest `/params` (and `/ping` and `/peek` if they exist)
+2. **REQ-PARAMS-REPL-007.2** - Typing `/params<TAB>` or `/params <TAB>` SHALL show the three subcommands: `load`, `unload`, `show`
+3. **REQ-PARAMS-REPL-007.3** - Typing `/params l<TAB>` SHALL auto-complete to `/params load`
+4. **REQ-PARAMS-REPL-007.4** - Typing `/params load <TAB>` SHALL trigger file path completion (`.yaml` and `.yml` files suggested first)
+5. **REQ-PARAMS-REPL-007.5** - Typing `/params u<TAB>` SHALL auto-complete to `/params unload`
+6. **REQ-PARAMS-REPL-007.6** - Typing `/params s<TAB>` SHALL auto-complete to `/params show`
+7. **REQ-PARAMS-REPL-007.7** - `/params` SHALL appear in the metacommand list when typing `/<TAB>`
+
+**Tab completion example:**
+
+```sql
+tq> /params <TAB>
+
+Subcommands:
+    load    Load a YAML parameter file
+    show    Show currently loaded parameters
+    unload  Clear all loaded parameters
+
+tq> /params load <TAB>
+deploy.yaml  base.yaml  prod-overrides.yaml
+```
+
+---
+
+**REQ-PARAMS-REPL-008: Help Integration**
+
+1. **REQ-PARAMS-REPL-008.1** - `/help` SHALL list `/params` in the command summary with description: "Manage YAML parameter files for variable substitution"
+2. **REQ-PARAMS-REPL-008.2** - `/help params` SHALL display detailed help (see example below)
+3. **REQ-PARAMS-REPL-008.3** - `/params` with no subcommand SHALL display the same output as `/help params`
+4. **REQ-PARAMS-REPL-008.4** - `/params` SHALL appear in metacommand list when typing `/<TAB>`
+
+**Example `/help params` output:**
+
+```sql
+tq> /help params
+
+/params - Manage YAML parameter files for variable substitution
+
+Usage:
+  /params load <file>   Load a YAML parameter file
+  /params unload        Clear all loaded parameters
+  /params show          Show currently loaded parameters
+
+Variable Syntax:
+  Use {{variable}} markers in SQL queries:
+    SELECT * FROM {{target.database}}.{{target.schema}}.employees;
+
+  Use dot notation for nested YAML keys:
+    {{section.key}}  →  section: { key: value }
+
+  Use $ENV prefix for environment variables:
+    {{$ENV.DATABASE_HOST}}  reads the DATABASE_HOST env var
+
+Parameter File Format (YAML):
+  # deploy.yaml
+  target:
+    database: PRODUCTION
+    schema: HR
+  run_date: "2026-01-01"
+  row_count: 100
+
+Multiple Files:
+  /params load base.yaml
+  /params load prod-overrides.yaml
+  Later files override earlier files on conflicting keys.
+
+Examples:
+  /params load deploy.yaml
+  /params show
+  SELECT * FROM {{target.database}}.{{target.schema}}.employees;
+  /params unload
+
+Notes:
+  - Parameters persist for the duration of the REPL session
+  - Use /params unload to clear all variables
+  - Undefined {{variables}} produce an error but do not close the REPL
+  - {{$ENV.VAR_NAME}} works without loading any params file
+
+See also:
+  tq help params    Full variable substitution reference
+  /describe         Inspect table structure
+```
+
+---
+
+**REQ-PARAMS-REPL-009: Session Persistence**
+
+1. **REQ-PARAMS-REPL-009.1** - Loaded parameters persist for the entire REPL session until explicitly unloaded or the REPL exits
+2. **REQ-PARAMS-REPL-009.2** - Parameters loaded via `/params load` are NOT persisted between REPL sessions (not saved to disk)
+3. **REQ-PARAMS-REPL-009.3** - On REPL exit (via `/quit`, `\q`, or Ctrl-D), all loaded parameters are discarded
+4. **REQ-PARAMS-REPL-009.4** - Database reconnect (`/reconnect`) does NOT clear loaded parameters
+
+---
+
+**Acceptance Tests:**
+
+- Execute `/params load <valid-file.yaml>` and verify success message with variable count
+- Execute `/params load <nonexistent-file.yaml>` and verify file-not-found error; REPL remains active
+- Execute `/params load <invalid.yaml>` and verify YAML parse error with line number; REPL remains active
+- Execute `/params show` after loading a file and verify two-column table with variable path, value, and source
+- Execute `/params show` with no params loaded and verify guidance message
+- Execute `/params unload` after loading and verify parameters are cleared
+- Execute `/params unload` when nothing is loaded and verify "no parameters loaded" notice
+- Execute a SQL query with `{{variable}}` after loading the variable's YAML file and verify correct substitution
+- Execute a SQL query with `{{undefined_var}}` and verify non-fatal error with list of available variables
+- Execute a SQL query with `{{$ENV.SOME_ENV_VAR}}` (set in environment) and verify correct substitution
+- Type `/params <TAB>` and verify subcommand completions (load, unload, show)
+- Type `/params load <TAB>` and verify file path completion with YAML files shown
+- Execute `/help params` and verify detailed help is displayed
+- Execute `/params` with no subcommand and verify same output as `/help params`
+- Execute `/params unknown` and verify unknown-subcommand error
+- Verify `/params` appears in `/<TAB>` metacommand list with description
+- Load a file, execute `/quit`, restart REPL, execute `/params show` and verify no parameters are loaded
