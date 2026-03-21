@@ -271,7 +271,11 @@ fn handle_edit(
 
     write_config_table(&table)?;
 
-    println!("Profile '{}' updated.", name);
+    println!(
+        "Profile '{}' updated in {}",
+        name,
+        config_file_path().display()
+    );
     Ok(())
 }
 
@@ -300,7 +304,11 @@ fn handle_delete(name: &str, force: bool) -> Result<()> {
 
     write_config_table(&table)?;
 
-    println!("Profile '{}' deleted.", name);
+    println!(
+        "Profile '{}' deleted from {}",
+        name,
+        config_file_path().display()
+    );
     Ok(())
 }
 
