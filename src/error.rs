@@ -186,6 +186,10 @@ pub enum TqError {
     // ========================================================================
     // Internal Errors
     // ========================================================================
+    /// SQL parse error (unterminated string, block comment, etc.)
+    #[error("SQL parse error: {0}")]
+    SqlParseError(String),
+
     /// Internal error (bug)
     #[error("Internal error: {0}\n\nThis is a bug. Please report it!")]
     InternalError(String),

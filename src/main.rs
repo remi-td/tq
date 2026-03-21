@@ -60,6 +60,9 @@ fn run(cli: Cli) -> Result<()> {
         Command::Profiles => {
             return handle_profiles(&config);
         }
+        Command::Profile(action) => {
+            return commands::profile::execute(action, &config);
+        }
         _ => {}
     }
 
@@ -172,8 +175,8 @@ fn run(cli: Cli) -> Result<()> {
                 commands::query_inspect(&client, &args, &mut stdout, use_color)?;
             }
         }
-        // Help and Profiles already handled above
-        Command::Help(_) | Command::Profiles => unreachable!(),
+        // Help, Profiles, and Profile already handled above
+        Command::Help(_) | Command::Profiles | Command::Profile(_) => unreachable!(),
     }
 
     Ok(())

@@ -1,15 +1,24 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.23.0 (Sprint 42 - SQL Parser Hardening)
+**Version:** 1.24.0 (Sprint 43 - Profile Management & Parser Polish)
 **Last Updated:** 2026-03-21
-**Base Commit:** [Sprint 42 - In Progress]
+**Base Commit:** [Sprint 43 - In Progress]
 
 ## Overview
 
 This directory contains comprehensive test case definitions for the tq CLI tool. These test cases cover all implemented MVP features (FR-001 through FR-010) and provide detailed procedures for validating functionality, usability, error handling, and security.
 
 ## Test Case Categories
+
+### Sprint 43: Profile Management & Parser Polish
+
+- **TC-043-001**: Profile Add - Happy Path (Integration + Unit, no-DB)
+- **TC-043-002**: Profile Add - Error Cases (Integration + Unit, no-DB)
+- **TC-043-003**: Profile Edit - Happy Path and Errors (Integration + Unit, no-DB)
+- **TC-043-004**: Profile Delete - Happy Path and Errors (Integration + Code Inspection, no-DB)
+- **TC-043-005**: Parser Remediation - Result Return Type and Error Location (Unit + Integration, no-DB)
+- **TC-043-006**: Config Preservation - Add/Edit/Delete Preserve Unrelated Content (Integration + Unit, no-DB)
 
 ### Sprint 42: SQL Parser Hardening (Bugs #28, #29, #30)
 

@@ -14,7 +14,7 @@
 //! let sql = "SELECT 1; SELECT 2;";
 //!
 //! if has_multiple_statements(sql) {
-//!     let statements = parse_statements(sql);
+//!     let statements = parse_statements(sql).unwrap();
 //!     for stmt in statements {
 //!         println!("Statement {}: {}", stmt.statement_number, stmt.sql);
 //!     }
@@ -50,7 +50,7 @@ pub mod parser;
 pub mod types;
 
 // Re-export commonly used types from parser
-pub use parser::{has_multiple_statements, parse_statements, ParsedStatement};
+pub use parser::{has_multiple_statements, parse_statements, ParseError, ParsedStatement};
 
 // Re-export type formatting
 pub use types::format_column_type;

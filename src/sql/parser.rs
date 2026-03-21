@@ -12,11 +12,16 @@
 //!
 //! - **State-machine lexer**: Scans character-by-character with a four-state enum
 //! - **Comments stripped**: Removed before statement assembly to prevent contamination
-//! - **Quoted strings preserved**: Including escaped quotes (`''`)
+//! - **Quoted strings preserve**: Including escaped quotes (`''`)
 //! - **Line tracking**: Incremented on every `\n` regardless of state
+//! - **Column tracking**: Incremented per character, reset to 1 after `\n`
 //! - **Empty handling**: Skip whitespace-only or comment-only statements
+//! - **Error reporting**: Unterminated strings and block comments return `ParseError`
+//!   with line and column of the opening delimiter
 //!
 //! See `docs/design/batch-mode.md` for the full design rationale.
+
+use std::fmt;
 
 /// Lexer state for SQL parsing
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +35,29 @@ enum LexState {
     /// Inside a block comment (/* ... */)
     InBlockComment,
 }
+
+/// Error returned when SQL input cannot be parsed
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseError {
+    /// Human-readable description of the error
+    pub message: String,
+    /// 1-based line number where the error originates
+    pub line: usize,
+    /// 1-based column number where the error originates
+    pub column: usize,
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} at line {}, column {}",
+            self.message, self.line, self.column
+        )
+    }
+}
+
+impl std::error::Error for ParseError {}
 
 /// A parsed SQL statement with metadata for error reporting
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,22 +109,25 @@ fn record_content(ch: char, buf: &mut String, start_line: &mut Option<usize>, cu
 /// * `sql` - The SQL text to parse (may contain multiple statements)
 ///
 /// # Returns
-/// A vector of parsed statements. Empty statements (whitespace-only or comment-only)
-/// are skipped.
+/// `Ok(Vec<ParsedStatement>)` on success. Empty statements (whitespace-only or
+/// comment-only) are skipped.
+///
+/// `Err(ParseError)` if the input contains an unterminated string literal or
+/// block comment, with line/column pointing to the opening delimiter.
 ///
 /// # Example
 /// ```
 /// use tq::sql::parser::parse_statements;
 ///
 /// let sql = "SELECT 1;\nSELECT 2;\n\nSELECT 3;";
-/// let statements = parse_statements(sql);
+/// let statements = parse_statements(sql).unwrap();
 ///
 /// assert_eq!(statements.len(), 3);
 /// assert_eq!(statements[0].sql, "SELECT 1");
 /// assert_eq!(statements[0].statement_number, 1);
 /// assert_eq!(statements[0].start_line, 1);
 /// ```
-pub fn parse_statements(sql: &str) -> Vec<ParsedStatement> {
+pub fn parse_statements(sql: &str) -> Result<Vec<ParsedStatement>, ParseError> {
     let mut statements: Vec<ParsedStatement> = Vec::new();
     let mut state = LexState::Normal;
 
@@ -105,7 +136,14 @@ pub fn parse_statements(sql: &str) -> Vec<ParsedStatement> {
     // Line number of the first content character in `current`
     let mut stmt_start_line: Option<usize> = None;
     let mut current_line: usize = 1;
+    let mut current_col: usize = 1;
     let mut statement_number: usize = 0;
+
+    // Track opening position for unterminated string/comment detection
+    let mut string_start_line: usize = 0;
+    let mut string_start_col: usize = 0;
+    let mut comment_start_line: usize = 0;
+    let mut comment_start_col: usize = 0;
 
     let mut chars = sql.chars().peekable();
 
@@ -118,20 +156,24 @@ pub fn parse_statements(sql: &str) -> Vec<ParsedStatement> {
                 LexState::InLineComment => {
                     // Transition back to Normal. Add a space to prevent token merging.
                     current_line += 1;
+                    current_col = 1;
                     current.push(' ');
                     state = LexState::Normal;
                 }
                 LexState::InBlockComment => {
                     current_line += 1;
+                    current_col = 1;
                     // Discard newlines inside block comments (already counted)
                 }
                 LexState::Normal => {
                     current_line += 1;
+                    current_col = 1;
                     // Newlines in normal text go into the buffer
                     record_content(ch, &mut current, &mut stmt_start_line, current_line);
                 }
                 LexState::InSingleQuotedString => {
                     current_line += 1;
+                    current_col = 1;
                     // Newlines inside strings are preserved
                     current.push(ch);
                 }
@@ -142,16 +184,23 @@ pub fn parse_statements(sql: &str) -> Vec<ParsedStatement> {
         match state {
             LexState::Normal => match ch {
                 '\'' => {
+                    string_start_line = current_line;
+                    string_start_col = current_col;
                     record_content(ch, &mut current, &mut stmt_start_line, current_line);
                     state = LexState::InSingleQuotedString;
+                    current_col += 1;
                 }
                 '-' if chars.peek() == Some(&'-') => {
                     chars.next(); // consume second '-'
                     state = LexState::InLineComment;
+                    current_col += 2;
                 }
                 '/' if chars.peek() == Some(&'*') => {
+                    comment_start_line = current_line;
+                    comment_start_col = current_col;
                     chars.next(); // consume '*'
                     state = LexState::InBlockComment;
+                    current_col += 2;
                 }
                 ';' => {
                     // Statement boundary -- emit if non-empty
@@ -166,29 +215,38 @@ pub fn parse_statements(sql: &str) -> Vec<ParsedStatement> {
                     }
                     current.clear();
                     stmt_start_line = None;
+                    current_col += 1;
                 }
                 other => {
                     record_content(other, &mut current, &mut stmt_start_line, current_line);
+                    current_col += 1;
                 }
             },
 
             LexState::InSingleQuotedString => match ch {
                 '\'' if chars.peek() == Some(&'\'') => {
-                    // Escaped quote -- consume both, append both to preserve literal
+                    // Escaped quote -- consume both, append both to preserve literal.
+                    // Safety: unwrap is safe here because peek() confirmed the next char exists.
                     let next = chars.next().unwrap();
                     current.push(ch);
                     current.push(next);
+                    current_col += 2;
                 }
                 '\'' => {
                     current.push(ch);
                     state = LexState::Normal;
+                    current_col += 1;
                 }
-                other => current.push(other),
+                other => {
+                    current.push(other);
+                    current_col += 1;
+                }
             },
 
             LexState::InLineComment => {
                 // Non-newline characters in a line comment are discarded.
                 // Newline handling is done above in the \n branch.
+                current_col += 1;
             }
 
             LexState::InBlockComment => {
@@ -197,10 +255,32 @@ pub fn parse_statements(sql: &str) -> Vec<ParsedStatement> {
                     // Add a space to prevent token merging
                     current.push(' ');
                     state = LexState::Normal;
+                    current_col += 2;
+                } else {
+                    // Block comment content discarded.
+                    current_col += 1;
                 }
-                // Block comment content discarded.
             }
         }
+    }
+
+    // Check for unterminated constructs at end of input
+    match state {
+        LexState::InSingleQuotedString => {
+            return Err(ParseError {
+                message: "Unterminated string literal".to_string(),
+                line: string_start_line,
+                column: string_start_col,
+            });
+        }
+        LexState::InBlockComment => {
+            return Err(ParseError {
+                message: "Unterminated block comment".to_string(),
+                line: comment_start_line,
+                column: comment_start_col,
+            });
+        }
+        _ => {}
     }
 
     // Flush trailing statement (no terminating semicolon)
@@ -214,12 +294,13 @@ pub fn parse_statements(sql: &str) -> Vec<ParsedStatement> {
         ));
     }
 
-    statements
+    Ok(statements)
 }
 
 /// Check if a SQL string contains multiple statements
 ///
 /// This is useful for determining whether to use single-statement or batch execution.
+/// If parsing fails (e.g. unterminated string), returns `false` as a safe default.
 ///
 /// # Arguments
 /// * `sql` - The SQL text to check
@@ -227,7 +308,9 @@ pub fn parse_statements(sql: &str) -> Vec<ParsedStatement> {
 /// # Returns
 /// `true` if the SQL contains more than one statement
 pub fn has_multiple_statements(sql: &str) -> bool {
-    parse_statements(sql).len() > 1
+    parse_statements(sql)
+        .ok()
+        .is_some_and(|stmts| stmts.len() > 1)
 }
 
 #[cfg(test)]
@@ -236,7 +319,7 @@ mod tests {
 
     #[test]
     fn test_parse_single_statement() {
-        let statements = parse_statements("SELECT 1");
+        let statements = parse_statements("SELECT 1").unwrap();
         assert_eq!(statements.len(), 1);
         assert_eq!(statements[0].sql, "SELECT 1");
         assert_eq!(statements[0].statement_number, 1);
@@ -245,14 +328,14 @@ mod tests {
 
     #[test]
     fn test_parse_single_statement_with_semicolon() {
-        let statements = parse_statements("SELECT 1;");
+        let statements = parse_statements("SELECT 1;").unwrap();
         assert_eq!(statements.len(), 1);
         assert_eq!(statements[0].sql, "SELECT 1");
     }
 
     #[test]
     fn test_parse_multiple_statements() {
-        let statements = parse_statements("SELECT 1; SELECT 2; SELECT 3;");
+        let statements = parse_statements("SELECT 1; SELECT 2; SELECT 3;").unwrap();
         assert_eq!(statements.len(), 3);
         assert_eq!(statements[0].sql, "SELECT 1");
         assert_eq!(statements[1].sql, "SELECT 2");
@@ -267,7 +350,7 @@ mod tests {
     #[test]
     fn test_parse_multiline_statements() {
         let sql = "SELECT 1;\nSELECT 2;\n\nSELECT 3;";
-        let statements = parse_statements(sql);
+        let statements = parse_statements(sql).unwrap();
         assert_eq!(statements.len(), 3);
 
         // Line tracking
@@ -278,19 +361,19 @@ mod tests {
 
     #[test]
     fn test_parse_empty_input() {
-        let statements = parse_statements("");
+        let statements = parse_statements("").unwrap();
         assert!(statements.is_empty());
     }
 
     #[test]
     fn test_parse_whitespace_only() {
-        let statements = parse_statements("   \n\n   ");
+        let statements = parse_statements("   \n\n   ").unwrap();
         assert!(statements.is_empty());
     }
 
     #[test]
     fn test_parse_empty_statements_skipped() {
-        let statements = parse_statements("SELECT 1;;; SELECT 2;");
+        let statements = parse_statements("SELECT 1;;; SELECT 2;").unwrap();
         assert_eq!(statements.len(), 2);
         assert_eq!(statements[0].sql, "SELECT 1");
         assert_eq!(statements[1].sql, "SELECT 2");
@@ -300,7 +383,7 @@ mod tests {
     fn test_parse_strips_line_comments() {
         // Line comments are stripped from statement output
         let sql = "-- This is a comment\nSELECT 1;";
-        let statements = parse_statements(sql);
+        let statements = parse_statements(sql).unwrap();
         assert_eq!(statements.len(), 1);
         assert_eq!(statements[0].sql, "SELECT 1");
     }
@@ -309,7 +392,7 @@ mod tests {
     fn test_parse_strips_block_comments() {
         // Block comments are stripped from statement output
         let sql = "/* Multi-line\n   comment */\nSELECT 1;";
-        let statements = parse_statements(sql);
+        let statements = parse_statements(sql).unwrap();
         assert_eq!(statements.len(), 1);
         assert_eq!(statements[0].sql, "SELECT 1");
     }
@@ -329,7 +412,7 @@ SELECT * FROM temp_data;
 -- Cleanup
 DROP TABLE temp_data;
 "#;
-        let statements = parse_statements(sql);
+        let statements = parse_statements(sql).unwrap();
         assert_eq!(statements.len(), 5);
 
         // Comments are stripped; statements contain only SQL
@@ -346,7 +429,7 @@ DROP TABLE temp_data;
     #[test]
     fn test_parse_statement_with_newlines() {
         let sql = "SELECT\n  a,\n  b,\n  c\nFROM\n  table_name;";
-        let statements = parse_statements(sql);
+        let statements = parse_statements(sql).unwrap();
         assert_eq!(statements.len(), 1);
         assert!(statements[0].sql.contains("SELECT"));
         assert!(statements[0].sql.contains("FROM"));
@@ -354,14 +437,14 @@ DROP TABLE temp_data;
 
     #[test]
     fn test_parse_trailing_semicolons() {
-        let statements = parse_statements("SELECT 1;;;");
+        let statements = parse_statements("SELECT 1;;;").unwrap();
         assert_eq!(statements.len(), 1);
         assert_eq!(statements[0].sql, "SELECT 1");
     }
 
     #[test]
     fn test_parse_leading_whitespace() {
-        let statements = parse_statements("  \n  SELECT 1;  \n  SELECT 2;  ");
+        let statements = parse_statements("  \n  SELECT 1;  \n  SELECT 2;  ").unwrap();
         assert_eq!(statements.len(), 2);
         assert_eq!(statements[0].sql, "SELECT 1");
         assert_eq!(statements[1].sql, "SELECT 2");
@@ -410,7 +493,7 @@ DROP TABLE temp_data;
     #[test]
     fn test_line_tracking_accuracy() {
         let sql = "SELECT 1;\n\n\nSELECT 2;";
-        let statements = parse_statements(sql);
+        let statements = parse_statements(sql).unwrap();
         assert_eq!(statements.len(), 2);
         assert_eq!(statements[0].start_line, 1);
         assert_eq!(statements[1].start_line, 4); // After 3 newlines
@@ -419,7 +502,7 @@ DROP TABLE temp_data;
     #[test]
     fn test_windows_line_endings() {
         let sql = "SELECT 1;\r\nSELECT 2;\r\n";
-        let statements = parse_statements(sql);
+        let statements = parse_statements(sql).unwrap();
         assert_eq!(statements.len(), 2);
         // Line tracking counts \n, so \r\n counts as one line
         assert_eq!(statements[0].start_line, 1);
@@ -430,7 +513,7 @@ DROP TABLE temp_data;
     #[test]
     fn test_semicolon_in_string_literal_not_a_boundary() {
         let sql = "INSERT INTO t (id, desc) VALUES (1, 'a; b');";
-        let statements = parse_statements(sql);
+        let statements = parse_statements(sql).unwrap();
         assert_eq!(statements.len(), 1);
         assert_eq!(
             statements[0].sql,
@@ -441,7 +524,7 @@ DROP TABLE temp_data;
     #[test]
     fn test_escaped_quote_with_semicolon_in_string() {
         let sql = "INSERT INTO t VALUES ('it''s; complex');";
-        let statements = parse_statements(sql);
+        let statements = parse_statements(sql).unwrap();
         assert_eq!(statements.len(), 1);
         assert_eq!(
             statements[0].sql,
@@ -454,7 +537,7 @@ DROP TABLE temp_data;
     #[test]
     fn test_multi_line_statement_is_single_statement() {
         let sql = "INSERT INTO employees (\n  id,\n  name,\n  salary\n) VALUES (\n  1,\n  'Alice',\n  50000\n);";
-        let statements = parse_statements(sql);
+        let statements = parse_statements(sql).unwrap();
         assert_eq!(statements.len(), 1);
         assert!(statements[0].sql.contains("INSERT INTO employees"));
         assert!(statements[0].sql.contains("'Alice'"));
@@ -466,7 +549,7 @@ DROP TABLE temp_data;
     #[test]
     fn test_block_comment_between_statements_does_not_contaminate() {
         let sql = "SELECT 1; /* this is a comment */ SELECT 2;";
-        let statements = parse_statements(sql);
+        let statements = parse_statements(sql).unwrap();
         assert_eq!(statements.len(), 2);
         assert_eq!(statements[0].sql, "SELECT 1");
         assert_eq!(statements[1].sql, "SELECT 2");
@@ -478,7 +561,7 @@ DROP TABLE temp_data;
     #[test]
     fn test_line_comment_between_statements_does_not_contaminate() {
         let sql = "SELECT 1;\n-- this is a comment\nSELECT 2;";
-        let statements = parse_statements(sql);
+        let statements = parse_statements(sql).unwrap();
         assert_eq!(statements.len(), 2);
         assert_eq!(statements[0].sql, "SELECT 1");
         assert_eq!(statements[1].sql, "SELECT 2");
@@ -491,7 +574,7 @@ DROP TABLE temp_data;
     fn test_comments_are_stripped_from_output() {
         // Inline comment after SQL
         let sql = "SELECT 1 -- get one\n;";
-        let statements = parse_statements(sql);
+        let statements = parse_statements(sql).unwrap();
         assert_eq!(statements.len(), 1);
         assert_eq!(statements[0].sql, "SELECT 1");
     }
@@ -500,7 +583,7 @@ DROP TABLE temp_data;
     fn test_comment_only_segment_is_skipped() {
         // A segment that is only a comment should not produce a statement
         let sql = "SELECT 1; -- just a comment\n; SELECT 2;";
-        let statements = parse_statements(sql);
+        let statements = parse_statements(sql).unwrap();
         assert_eq!(statements.len(), 2);
         assert_eq!(statements[0].sql, "SELECT 1");
         assert_eq!(statements[1].sql, "SELECT 2");
@@ -521,7 +604,7 @@ INSERT INTO t VALUES (2, 'it''s; a test');
 -- Query
 SELECT * FROM t WHERE name = 'hello; world';
 "#;
-        let statements = parse_statements(sql);
+        let statements = parse_statements(sql).unwrap();
         assert_eq!(statements.len(), 4);
         assert!(statements[0].sql.starts_with("CREATE TABLE"));
         assert_eq!(
@@ -545,7 +628,7 @@ SELECT * FROM t WHERE name = 'hello; world';
     #[test]
     fn test_block_comment_spanning_multiple_lines() {
         let sql = "SELECT 1;\n/*\nThis is\na multi-line\ncomment\n*/\nSELECT 2;";
-        let statements = parse_statements(sql);
+        let statements = parse_statements(sql).unwrap();
         assert_eq!(statements.len(), 2);
         assert_eq!(statements[0].sql, "SELECT 1");
         assert_eq!(statements[1].sql, "SELECT 2");
@@ -555,8 +638,93 @@ SELECT * FROM t WHERE name = 'hello; world';
     fn test_string_with_newline() {
         // Newlines inside strings are preserved
         let sql = "SELECT 'line1\nline2';";
-        let statements = parse_statements(sql);
+        let statements = parse_statements(sql).unwrap();
         assert_eq!(statements.len(), 1);
         assert_eq!(statements[0].sql, "SELECT 'line1\nline2'");
+    }
+
+    // --- Sprint 43: Unterminated string literal error ---
+
+    #[test]
+    fn test_unterminated_string_literal_returns_error() {
+        let result = parse_statements("SELECT 'unterminated");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.message, "Unterminated string literal");
+        assert_eq!(err.line, 1);
+        assert_eq!(err.column, 8); // The opening quote position
+    }
+
+    #[test]
+    fn test_unterminated_string_on_second_line() {
+        let result = parse_statements("SELECT 1;\nSELECT 'oops");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.message, "Unterminated string literal");
+        assert_eq!(err.line, 2);
+        assert_eq!(err.column, 8);
+    }
+
+    // --- Sprint 43: Unterminated block comment error ---
+
+    #[test]
+    fn test_unterminated_block_comment_returns_error() {
+        let result = parse_statements("SELECT 1; /* never closed");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.message, "Unterminated block comment");
+        assert_eq!(err.line, 1);
+        assert_eq!(err.column, 11); // The opening /* position
+    }
+
+    #[test]
+    fn test_unterminated_block_comment_multiline() {
+        let result = parse_statements("SELECT 1;\n/* comment starts here\nbut never ends");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.message, "Unterminated block comment");
+        assert_eq!(err.line, 2);
+        assert_eq!(err.column, 1);
+    }
+
+    // --- Sprint 43: Comment marker inside string is not a comment ---
+
+    #[test]
+    fn test_comment_marker_inside_string_is_not_comment() {
+        // -- inside a string should NOT start a line comment
+        let sql = "SELECT '-- not a comment';";
+        let statements = parse_statements(sql).unwrap();
+        assert_eq!(statements.len(), 1);
+        assert_eq!(statements[0].sql, "SELECT '-- not a comment'");
+
+        // /* inside a string should NOT start a block comment
+        let sql2 = "SELECT '/* not a comment */';";
+        let statements2 = parse_statements(sql2).unwrap();
+        assert_eq!(statements2.len(), 1);
+        assert_eq!(statements2[0].sql, "SELECT '/* not a comment */'");
+    }
+
+    // --- Sprint 43: ParseError Display ---
+
+    #[test]
+    fn test_parse_error_display() {
+        let err = ParseError {
+            message: "Unterminated string literal".to_string(),
+            line: 3,
+            column: 15,
+        };
+        assert_eq!(
+            err.to_string(),
+            "Unterminated string literal at line 3, column 15"
+        );
+    }
+
+    // --- Sprint 43: has_multiple_statements returns false on parse error ---
+
+    #[test]
+    fn test_has_multiple_statements_returns_false_on_parse_error() {
+        // Unterminated string should not panic, just return false
+        assert!(!has_multiple_statements("SELECT 'unterminated"));
+        assert!(!has_multiple_statements("/* unterminated comment"));
     }
 }

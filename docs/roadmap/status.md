@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-03-21
-**Current Version:** 1.23.0
-**Latest Sprint:** Sprint 42 Complete (SQL Parser Hardening)
+**Current Version:** 1.24.0
+**Latest Sprint:** Sprint 43 Complete (Profile Management & Parser Polish)
 
 ---
 
@@ -228,7 +228,7 @@ All core features are complete and tested.
 | Password file permission enforcement | ✅ | [Security](../specifications/security.md#file-permissions) | v1.7.0 |
 | Security check ordering fix | ✅ | [Security](../specifications/security.md) | v1.7.0 |
 | Project config file (`.tq.toml`) | ✅ | [Configuration](../specifications/configuration.md#project-config) | v1.16.0 (Sprint 35) |
-| Profile editing commands | 📋 | [Configuration](../specifications/configuration.md#profile-management) | Future |
+| Profile editing commands | ✅ | [Configuration](../specifications/configuration.md#profile-management) | v1.24.0 (Sprint 43) |
 | Keyring integration | 📋 | [Security](../specifications/security.md#keyring) | Future |
 | Config validation command | 📋 | [Configuration](../specifications/configuration.md#validation) | Future |
 
@@ -345,16 +345,25 @@ All core features are complete and tested.
 - **Sprint 41 remediation**: Pinned cross-rs v0.2.5, renamed TMPDIR in install.sh, marked flaky test as `#[ignore]`
 - 674 unit tests + 179 integration tests (100% pass rate), zero clippy warnings
 
+**Sprint 43 Enhancements (v1.24.0):**
+- **Profile management commands**: `tq profile add`, `tq profile edit`, `tq profile delete`, `tq profile list`
+- **Non-interactive CLI**: Flag-based profile CRUD for scriptability (no interactive prompts)
+- **Validation**: Logmech (TD2/LDAP/KRB5/TDNEGO) and port (1-65535) validation with clear error messages
+- **Config preservation**: Atomic writes with existing config content preservation
+- **Parser error handling**: `parse_statements()` returns `Result` with `ParseError` (line/column) for unterminated strings and block comments
+- **Sprint 42 remediation**: Parser spec clarifications (REQ-PARSE-015, REQ-PARSE-018), space-injection documentation
+- 705 unit tests + 191 integration tests (100% pass rate), zero clippy warnings
+
 ---
 
 ## Summary Statistics
 
 - **Total Features**: 83
-- **Implemented**: 80 (96%)
-- **Planned**: 3 (4%)
-- **Test Pass Rate**: 100% (853/853 executed, 58 ignored database-dependent)
+- **Implemented**: 81 (98%)
+- **Planned**: 2 (2%)
+- **Test Pass Rate**: 100% (896/896 executed, 58 ignored database-dependent)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 42 - SQL Parser Hardening
+- **Latest Sprint**: Sprint 43 - Profile Management & Parser Polish
 
 ---
 

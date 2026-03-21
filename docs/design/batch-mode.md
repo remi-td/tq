@@ -126,9 +126,45 @@ The lexer increments a `current_line: usize` counter on every `\n` character enc
 
 This is implemented by recording `statement_start_line` at the moment the first non-whitespace character is appended to the current statement buffer. The counter is reset to `None` at the start of each new statement and set on first content.
 
-### API
+### Error Handling: Result Return Type (Sprint 43)
 
-The public API is unchanged from the previous implementation:
+Sprint 43 changes `parse_statements()` to return `Result<Vec<ParsedStatement>, ParseError>` instead of `Vec<ParsedStatement>`. This enables callers to receive a structured, actionable error when the input contains unterminated constructs rather than silently producing a partial or malformed result.
+
+#### ParseError Type
+
+```rust
+/// Error from the SQL statement parser
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseError {
+    /// Human-readable description of the error
+    pub message: String,
+    /// 1-based line number where the error was detected
+    pub line: usize,
+    /// 1-based column number where the error was detected
+    pub col: usize,
+}
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} at line {}, column {}", self.message, self.line, self.col)
+    }
+}
+
+impl std::error::Error for ParseError {}
+```
+
+#### Error Conditions
+
+| Condition | Error message |
+|-----------|--------------|
+| Input ends while inside a single-quoted string | `"Unterminated string literal"` |
+| Input ends while inside a block comment | `"Unterminated block comment"` |
+
+Line and column are the position of the opening delimiter (`'` or `/*`) that was never closed.
+
+**Unterminated line comments are not an error**: a line comment with no trailing newline is treated as if the newline is present. The comment is stripped and the input ends cleanly.
+
+#### Updated API
 
 ```rust
 /// A parsed SQL statement with metadata for error reporting.
@@ -146,13 +182,78 @@ pub struct ParsedStatement {
 /// Returns statements in order. Empty and whitespace-only statements
 /// (including comment-only segments) are skipped. Comments are stripped
 /// from statement text before returning.
-pub fn parse_statements(sql: &str) -> Vec<ParsedStatement>
+///
+/// # Errors
+///
+/// Returns `Err(ParseError)` if the input contains an unterminated
+/// single-quoted string literal or an unterminated block comment.
+pub fn parse_statements(sql: &str) -> Result<Vec<ParsedStatement>, ParseError>
 
 /// Returns true if the SQL contains more than one statement.
+///
+/// Returns false if parsing fails (defensive: errors are reported by
+/// `parse_statements` at the call sites that need them).
 pub fn has_multiple_statements(sql: &str) -> bool
 ```
 
-`ParsedStatement::preview()` is also unchanged — it normalises whitespace in the trimmed SQL, which now never contains comment text.
+`has_multiple_statements` continues to return a plain `bool` by internally calling `parse_statements` and treating errors as `false`. This keeps the call sites that only need the boolean unaffected.
+
+#### Call Site Updates
+
+Every call site of `parse_statements` must handle the `Result`:
+
+**`src/commands/query.rs`** (batch execution path):
+```rust
+// Before (Sprint 42):
+let statements = parse_statements(sql);
+
+// After (Sprint 43):
+let statements = parse_statements(sql)
+    .map_err(|e| TqError::SqlParseError(e.to_string()))?;
+```
+
+`TqError::SqlParseError` surfaces the line/column from `ParseError` in the user-facing error message:
+
+```
+Error: SQL parse error at line 3, column 12
+
+  Unterminated string literal
+
+  Check that all single-quoted strings are properly closed.
+```
+
+#### Tracking Opening Delimiters for Error Reporting
+
+To report the position of the opening delimiter, the parser records the line and column of:
+- The `'` that starts a single-quoted string
+- The `/` of `/*` that starts a block comment
+
+These are stored as `Option<(usize, usize)>` (line, col) fields in the parser local state. Column tracking is added to the parser loop: a `current_col` counter increments on each character and resets to 1 on each `\n`.
+
+#### Space Injection Behavior (Documentation)
+
+The parser injects a single space character at two transition points to prevent accidental token merging:
+
+1. **End of line comment** (`\n` while in `InLineComment`): A space is pushed to `current` before returning to `Normal` state. This prevents `keyword--comment\nidentifier` from producing `keywordidentifier`.
+
+2. **End of block comment** (`*/`): A space is pushed to `current`. This prevents `keyword/*comment*/identifier` from producing `keywordidentifier`.
+
+These injected spaces are harmless; SQL parsers in Teradata treat runs of whitespace identically to a single space.
+
+**Note on `unwrap()` at parser.rs line 178**: The line:
+```rust
+let next = chars.next().unwrap();
+```
+is inside the `InSingleQuotedString` branch handling `'\'' if chars.peek() == Some(&'\'')`  — that is, it only executes after `peek()` has already confirmed the next character exists and equals `'`. The `unwrap()` is therefore unreachable as `None` and safe by invariant. It cannot be replaced with `?` because the surrounding function currently returns `Vec<T>` (before Sprint 43) or `Result<Vec<T>, ParseError>` (after Sprint 43, where only `ParseError` is a valid error variant, not an iterator exhaustion case).
+
+### API Summary
+
+```rust
+pub fn parse_statements(sql: &str) -> Result<Vec<ParsedStatement>, ParseError>
+pub fn has_multiple_statements(sql: &str) -> bool
+```
+
+`ParsedStatement::preview()` is unchanged — it normalises whitespace in the trimmed SQL, which never contains comment text.
 
 ### Implementation Sketch
 
@@ -283,7 +384,7 @@ The `has_multiple_statements` function and all line-tracking tests are unaffecte
 
 ### New Tests to Add
 
-The following test cases must be added to cover the three bugs:
+The following test cases must be added to cover the three Sprint 42 bugs and the Sprint 43 remediation items:
 
 ```rust
 // Bug #28 — semicolon inside single-quoted string
@@ -313,6 +414,36 @@ fn test_comments_are_stripped_from_output() { ... }
 // Empty-after-stripping: a comment-only segment is not emitted
 #[test]
 fn test_comment_only_segment_is_skipped() { ... }
+
+// Sprint 43 AC-17: comment marker (--) inside a string literal is not treated as a comment
+#[test]
+fn test_comment_marker_inside_string_is_not_comment() {
+    // The -- inside the string must NOT start a line comment
+    let sql = "SELECT 'hello -- world' FROM t;";
+    let statements = parse_statements(sql).unwrap();
+    assert_eq!(statements.len(), 1);
+    assert_eq!(statements[0].sql, "SELECT 'hello -- world' FROM t");
+}
+
+// Sprint 43 AC-13: unterminated string returns ParseError with line/col
+#[test]
+fn test_unterminated_string_returns_parse_error() {
+    let result = parse_statements("SELECT 'unterminated");
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.message.contains("Unterminated string"));
+    assert_eq!(err.line, 1);
+    assert_eq!(err.col, 8); // position of opening '
+}
+
+// Sprint 43 AC-14: unterminated block comment returns ParseError with line/col
+#[test]
+fn test_unterminated_block_comment_returns_parse_error() {
+    let result = parse_statements("SELECT 1; /* unterminated");
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.message.contains("Unterminated block comment"));
+}
 ```
 
 ### Backwards Compatibility

@@ -62,7 +62,7 @@ Configuration sources are loaded in order (later overrides earlier):
 1. **Built-in defaults** - Hardcoded sensible defaults (`Config::default()`)
 2. **System config** - `/etc/tq/config.toml` (administrator settings)
 3. **User config** - `~/.tq/config.toml` (personal preferences)
-4. **Project config** - `.tq.toml` (team-shared settings)
+4. **Project config** - `.tq.toml` (team-shared settings, walked up from CWD)
 5. **Environment variables** - `TQ_*` variables
 6. **CLI arguments** - Command-line flags (applied at runtime, not in figment)
 
@@ -80,11 +80,15 @@ src/
 │   ├── Config::load()     # Load from all sources
 │   ├── find_project_config() # Walk up tree for .tq.toml
 │   └── read_password_from_file() # Secure credential loading
+├── commands/
+│   └── profile.rs         # Profile management commands (add/edit/delete/list)
 ├── main.rs
 │   ├── build_connection_config()      # Merge config + CLI
-│   └── build_connection_from_profile() # Load named profile
+│   ├── build_connection_from_profile() # Load named profile
+│   └── handle_profiles()              # tq profiles / tq profile list display
 └── cli.rs
-    └── GlobalOpts          # CLI argument definitions
+    ├── GlobalOpts          # CLI argument definitions
+    └── Command::Profile    # Profile subcommand tree
 ```
 
 ## Config Types
@@ -147,6 +151,239 @@ impl Default for ConnectionSettings {
 - `password_file` instead of inline password for security
 - `serde(default)` allows partial TOML files
 
+## Profile Management Commands
+
+### Overview
+
+Sprint 43 adds `tq profile add/edit/delete/list` commands for managing profiles in `~/.tq/config.toml` without manual file editing. These are non-interactive, flag-based operations for scriptability.
+
+### CLI Structure (`src/cli.rs`)
+
+The `Profile` subcommand is added to the top-level `Command` enum:
+
+```rust
+/// Manage connection profiles
+///
+/// Add, edit, delete, and list connection profiles stored in ~/.tq/config.toml.
+Profile(ProfileArgs),
+```
+
+`ProfileArgs` uses a nested subcommand:
+
+```rust
+#[derive(Parser, Debug)]
+pub struct ProfileArgs {
+    #[command(subcommand)]
+    pub action: ProfileAction,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ProfileAction {
+    /// Add a new connection profile
+    Add(ProfileAddArgs),
+    /// Update an existing connection profile
+    Edit(ProfileEditArgs),
+    /// Remove a connection profile
+    Delete(ProfileDeleteArgs),
+    /// List available connection profiles
+    List,
+}
+
+#[derive(Parser, Debug)]
+pub struct ProfileAddArgs {
+    /// Profile name
+    pub name: String,
+    /// Teradata host
+    #[arg(long)]
+    pub host: String,
+    /// Database port (1-65535)
+    #[arg(long)]
+    pub port: Option<u16>,
+    /// Default database
+    #[arg(long)]
+    pub database: Option<String>,
+    /// Username
+    #[arg(long)]
+    pub user: Option<String>,
+    /// Authentication mechanism (TD2, LDAP, KRB5, TDNEGO)
+    #[arg(long)]
+    pub logmech: Option<String>,
+    /// Path to password file
+    #[arg(long)]
+    pub password_file: Option<PathBuf>,
+    /// Overwrite if profile already exists
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Parser, Debug)]
+pub struct ProfileEditArgs {
+    /// Profile name
+    pub name: String,
+    // Same optional fields as Add, all optional
+    #[arg(long)]
+    pub host: Option<String>,
+    // ... etc.
+}
+
+#[derive(Parser, Debug)]
+pub struct ProfileDeleteArgs {
+    /// Profile name
+    pub name: String,
+    /// Skip confirmation prompt
+    #[arg(long)]
+    pub force: bool,
+}
+```
+
+### Implementation Module (`src/commands/profile.rs`)
+
+Profile management lives in a dedicated module following the pattern established by other command modules.
+
+**Public API:**
+
+```rust
+/// Add a new profile to ~/.tq/config.toml
+pub fn add_profile(args: &ProfileAddArgs) -> Result<()>
+
+/// Edit an existing profile in ~/.tq/config.toml
+pub fn edit_profile(args: &ProfileEditArgs) -> Result<()>
+
+/// Delete a profile from ~/.tq/config.toml
+pub fn delete_profile(args: &ProfileDeleteArgs) -> Result<()>
+```
+
+`tq profile list` reuses the existing `handle_profiles()` logic from `src/main.rs`.
+
+### TOML Read/Write Strategy
+
+**Decision: Full Serde Round-Trip (not comment-preserving)**
+
+Profile add/edit/delete operations use the following approach:
+
+1. Read `~/.tq/config.toml` with `std::fs::read_to_string` (if exists)
+2. Parse into `toml::Table` (a `HashMap<String, toml::Value>`) using `toml::from_str`
+3. Mutate the in-memory table (add, update, or remove the `[profiles.<name>]` section)
+4. Serialize back to TOML string using `toml::to_string_pretty`
+5. Write atomically using write-to-temp-file + `std::fs::rename`
+
+**Rationale: comment-preserving vs. clean rewrite**
+
+The `toml_edit` crate can preserve comments and whitespace, but it adds a dependency and significant complexity. For a `~/.tq/config.toml` that is primarily machine-managed (the profile commands are the primary write path), a clean round-trip is acceptable. The trade-off is:
+
+- **Lose**: Comments in user-hand-edited config will be stripped on first write operation
+- **Gain**: Simpler code, no extra dependency, consistent output formatting
+
+This is documented to users in the help text: "Note: profile commands reformat config.toml; hand-written comments will be removed."
+
+**Alternative considered**: `toml_edit` crate preserves comments but adds ~200KB to binary. Given that `~/.tq/config.toml` is small and comments are uncommon in practice, the simpler approach is chosen.
+
+### Table Manipulation Pattern
+
+```rust
+/// Load the user config TOML table, creating it if absent
+fn load_config_table() -> Result<toml::Table> {
+    let path = Config::user_config_path();
+    if !path.exists() {
+        return Ok(toml::Table::new());
+    }
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| TqError::FileReadError { path: path.clone(), source: e })?;
+    toml::from_str(&content)
+        .map_err(|e| TqError::ConfigParseError(e.to_string()))
+}
+
+/// Save the config table to ~/.tq/config.toml atomically
+fn save_config_table(table: &toml::Table) -> Result<()> {
+    let path = Config::user_config_path();
+
+    // Ensure parent directory exists
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| TqError::FileReadError { path: parent.to_path_buf(), source: e })?;
+    }
+
+    let content = toml::to_string_pretty(table)
+        .map_err(|e| TqError::ConfigParseError(e.to_string()))?;
+
+    // Atomic write: temp file in same directory + rename
+    let tmp_path = path.with_extension("toml.tmp");
+    std::fs::write(&tmp_path, &content)
+        .map_err(|e| TqError::FileWriteError { path: tmp_path.clone(), source: e })?;
+    std::fs::rename(&tmp_path, &path)
+        .map_err(|e| TqError::FileWriteError { path: path.clone(), source: e })?;
+
+    Ok(())
+}
+```
+
+### Profile Section Access Pattern
+
+```rust
+/// Get or create the [profiles] section
+fn get_profiles_mut(table: &mut toml::Table) -> &mut toml::Table {
+    table
+        .entry("profiles".to_string())
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+        .as_table_mut()
+        .expect("profiles key must be a table")
+}
+```
+
+### Validation
+
+Validation happens before any file mutation:
+
+| Input | Validation |
+|-------|-----------|
+| `--logmech` | Must be one of TD2, LDAP, KRB5, TDNEGO (case-insensitive) via `parse_logmech()` |
+| `--port` | `u16` range enforced by clap's type system (1-65535); additionally reject 0 |
+| `--host` (add) | Required for `add` (enforced by clap `long` without `Option`) |
+| Profile name | Must not be empty; alphanumeric + hyphens + underscores |
+| Profile exists (add) | Error unless `--force` |
+| Profile missing (edit/delete) | Always error; list available profiles in message |
+
+### Command Dispatch in `main.rs`
+
+```rust
+Command::Profile(args) => {
+    return handle_profile_command(args);
+}
+
+fn handle_profile_command(args: &ProfileArgs) -> Result<()> {
+    match &args.action {
+        ProfileAction::Add(add_args)      => commands::profile::add_profile(add_args),
+        ProfileAction::Edit(edit_args)    => commands::profile::edit_profile(edit_args),
+        ProfileAction::Delete(del_args)   => commands::profile::delete_profile(del_args),
+        ProfileAction::List               => {
+            let config = Config::load().unwrap_or_default();
+            handle_profiles(&config)
+        }
+    }
+}
+```
+
+`Profile` is handled in the early `match` block (before database connection is established), alongside `Help` and `Profiles`.
+
+### Output Messages
+
+| Command | Success output (stdout) |
+|---------|------------------------|
+| `add` | `Profile 'dev' added successfully.` |
+| `edit` | `Profile 'dev' updated successfully.` |
+| `delete` | `Profile 'dev' deleted.` |
+| `list` | existing `handle_profiles()` output |
+
+Error output goes to stderr via the standard `TqError` path.
+
+### Tab Completion for Profile Names
+
+Clap does not provide dynamic shell completion from runtime data. The tab completion noted in AC-9 is achieved at the shell level:
+
+- Shell completion scripts (generated by `clap_complete`) can include static completions for subcommand argument values, but dynamic profile names require a custom completion approach.
+- For sprint 43 scope: the `edit` and `delete` subcommands accept a positional `name` argument. Shell completion will show the argument placeholder `<NAME>` but will not dynamically enumerate profile names.
+- This is acceptable for the initial implementation. A future enhancement could add a `tq profile list --names-only` flag and source it in shell completion scripts.
+
 ## Project Config Implementation
 
 ### Path Resolution Algorithm
@@ -175,50 +412,6 @@ pub fn find_project_config() -> Option<PathBuf> {
 - Returns `None` if no project config found (graceful fallback)
 - Does not follow symlinks for security (uses `is_file()` check)
 
-**Edge cases handled**:
-- No project config: Returns `None`, user config still applies
-- Multiple nested projects: Nearest `.tq.toml` wins
-- Permission errors: Silently continue walking up
-- Filesystem root: Loop terminates when `parent()` returns `None`
-
-### Config Loading Integration
-
-```rust
-impl Config {
-    pub fn load() -> Result<Self> {
-        let project_config_path = find_project_config();
-
-        let mut figment = Figment::new()
-            // Built-in defaults
-            .merge(Serialized::defaults(Config::default()))
-            // System config
-            .merge(Toml::file("/etc/tq/config.toml"))
-            // User config
-            .merge(Toml::file(Self::user_config_path()));
-
-        // Project config (if found)
-        if let Some(path) = project_config_path {
-            figment = figment.merge(Toml::file(path));
-        }
-
-        // Environment variables
-        figment = figment.merge(Env::prefixed("TQ_").split("_").lowercase(false));
-
-        let config: Config = figment
-            .extract()
-            .map_err(|e| TqError::ConfigParseError(e.to_string()))?;
-
-        Ok(config)
-    }
-}
-```
-
-**Design decisions**:
-- Project config merged after user config (project overrides user)
-- Figment handles missing files gracefully (no error if file doesn't exist)
-- Environment variables can still override project config
-- Error message includes which file failed to parse
-
 ## Profile Resolution
 
 ### Profile Merging Strategy
@@ -237,14 +430,8 @@ fn build_connection_from_profile(
         TqError::InvalidConfig(format!("Profile '{}' not found", profile_name))
     })?;
 
-    // 2. Build connection config from profile
-    let host = profile.host.clone().ok_or_else(|| {
-        TqError::InvalidConfig(format!("Profile '{}' missing 'host'", profile_name))
-    })?;
-
+    // 2. Build connection config from profile fields
     // 3. Apply CLI overrides (--database, --user, etc.)
-    // CLI arguments take precedence over profile values
-
     Ok(ConnectionConfig { /* ... */ })
 }
 ```
@@ -254,27 +441,14 @@ fn build_connection_from_profile(
 - Profiles only defined in user config remain accessible
 - Profiles only defined in project config are team-shared
 
-### Profiles Command Enhancement
+### Profiles Command
 
-The `tq profiles` command displays profiles with source indicators:
+The `tq profiles` command and `tq profile list` alias both call `handle_profiles()` in `src/main.rs`. This function:
 
-```rust
-fn handle_profiles(config: &Config) -> Result<()> {
-    // Group profiles by source for display
-    println!("Available profiles:\n");
-
-    for name in sorted_profile_names {
-        let profile = config.profiles.get(name).unwrap();
-        println!("  {}", name);
-        println!("    Host:     {}", profile.host.as_deref().unwrap_or("<not set>"));
-        // ... other fields
-    }
-
-    Ok(())
-}
-```
-
-**Future enhancement**: Track profile source (user vs project) for display.
+1. Loads user config via `Config::load_user_only()`
+2. Loads project config via `Config::load_project_only()`
+3. Categorises profiles by source (user-only, project-only, merged)
+4. Prints with source indicators
 
 ## Error Handling
 
@@ -293,34 +467,32 @@ pub enum TqError {
 
     /// Failed to read file
     #[error("Failed to read file '{}': {}", .path.display(), .source)]
-    FileReadError {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
+    FileReadError { path: PathBuf, source: std::io::Error },
+
+    /// Failed to write file
+    #[error("Failed to write file '{}': {}", .path.display(), .source)]
+    FileWriteError { path: PathBuf, source: std::io::Error },
 }
 ```
 
-**User-friendly error messages**:
+### Profile-Specific Error Messages
 
-```
-Error: Failed to parse configuration
-
-File: /path/to/project/.tq.toml
-Line 5: invalid value for 'port': expected integer
-
-Troubleshooting:
-  - Check TOML syntax at the indicated line
-  - Verify value types match expected format
-  - Use 'tq help config' for configuration reference
-```
+| Scenario | Error text |
+|----------|-----------|
+| `add` and profile exists | `Profile 'dev' already exists. Use --force to overwrite.` |
+| `edit`/`delete` and profile missing | `Profile 'dev' not found. Available profiles: prod, staging.` |
+| Invalid `--logmech` | `Invalid logon mechanism 'X'. Must be one of: TD2, LDAP, KRB5, TDNEGO.` |
+| Invalid `--port` value | Handled by clap type validation before reaching command handler |
+| Config file unreadable | `Failed to read file '~/.tq/config.toml': permission denied` |
+| Config file invalid TOML | `Failed to parse configuration: ...` (toml parse error) |
 
 ### Validation Points
 
-1. **TOML syntax** - Figment reports parse errors with line numbers
+1. **TOML syntax** - `toml::from_str` reports parse errors
 2. **Type validation** - Serde validates field types during extraction
-3. **Profile completeness** - Required fields checked when profile used
+3. **Profile completeness** - Required fields checked when profile used for connection
 4. **Password file permissions** - Security check before reading
+5. **Profile name uniqueness** - Checked during `add` before writing
 
 ## Security Considerations
 
@@ -334,8 +506,6 @@ pub fn read_password_from_file(path: &Path) -> Result<String> {
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = std::fs::metadata(&expanded_path)?.permissions().mode() & 0o777;
-
-        // Reject if group or world readable/writable
         if mode & 0o077 != 0 {
             return Err(TqError::InvalidConfig(format!(
                 "Password file '{}' has insecure permissions {:04o}. Required: 0600.",
@@ -348,374 +518,66 @@ pub fn read_password_from_file(path: &Path) -> Result<String> {
 }
 ```
 
-### Project Config Security
+### Config Write Safety
 
-**Considerations**:
-- Project config may be committed to version control
-- Should NOT contain passwords (use `password_file` referencing gitignored files)
-- Can reference user-specific password files (`~/.tq/passwords/<profile>`)
-
-**Recommended pattern**:
-```toml
-# .tq.toml (committed to repo)
-[profiles.dev]
-host = "dev.company.com"
-database = "development"
-user = "team_user"
-# Password file is gitignored or in user's home
-password_file = "~/.tq/passwords/dev"
-```
+- `~/.tq/config.toml` writes use atomic temp-file + rename to prevent partial writes
+- The `profile add/edit/delete` commands only write to the user config (`~/.tq/config.toml`), never to the project config (`.tq.toml`)
+- Project config is read-only from the CLI perspective; teams manage it via version control
 
 ## Testing Strategy
 
-### Unit Tests
-
-```rust
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_find_project_config_in_current_dir() {
-        // Create temp dir with .tq.toml
-        let temp = tempfile::tempdir().unwrap();
-        let config_path = temp.path().join(".tq.toml");
-        std::fs::write(&config_path, "[profiles.test]\nhost = \"test\"").unwrap();
-
-        // Change to temp dir and find config
-        std::env::set_current_dir(temp.path()).unwrap();
-        let found = find_project_config();
-        assert_eq!(found, Some(config_path));
-    }
-
-    #[test]
-    fn test_find_project_config_walks_up() {
-        // Create nested structure: /tmp/project/.tq.toml, /tmp/project/subdir/
-        let temp = tempfile::tempdir().unwrap();
-        let config_path = temp.path().join(".tq.toml");
-        std::fs::write(&config_path, "").unwrap();
-
-        let subdir = temp.path().join("subdir");
-        std::fs::create_dir(&subdir).unwrap();
-
-        std::env::set_current_dir(&subdir).unwrap();
-        let found = find_project_config();
-        assert_eq!(found, Some(config_path));
-    }
-
-    #[test]
-    fn test_find_project_config_returns_none() {
-        // In a directory with no .tq.toml in any ancestor
-        let temp = tempfile::tempdir().unwrap();
-        std::env::set_current_dir(temp.path()).unwrap();
-        let found = find_project_config();
-        assert!(found.is_none());
-    }
-
-    #[test]
-    fn test_project_config_overrides_user_config() {
-        // Test that profiles in project config override user config
-    }
-}
-```
-
-### Integration Tests
+### Unit Tests (in `src/commands/profile.rs`)
 
 ```rust
 #[test]
-fn test_profiles_command_shows_project_profiles() {
-    // Create temp dir with .tq.toml containing profiles
-    // Run: tq profiles
-    // Assert output includes project profiles
-}
+fn test_add_profile_creates_file_when_absent() { /* ... */ }
 
 #[test]
-fn test_profile_flag_uses_project_profile() {
-    // Create temp dir with .tq.toml containing dev profile
-    // Run: tq --profile dev ping
-    // Assert connection uses project profile settings
-}
+fn test_add_profile_preserves_other_profiles() { /* ... */ }
+
+#[test]
+fn test_add_profile_fails_if_exists_without_force() { /* ... */ }
+
+#[test]
+fn test_add_profile_overwrites_with_force() { /* ... */ }
+
+#[test]
+fn test_edit_profile_updates_only_specified_fields() { /* ... */ }
+
+#[test]
+fn test_edit_profile_fails_if_not_found() { /* ... */ }
+
+#[test]
+fn test_delete_profile_removes_only_target() { /* ... */ }
+
+#[test]
+fn test_delete_profile_fails_if_not_found() { /* ... */ }
+
+#[test]
+fn test_add_profile_validates_logmech() { /* ... */ }
+
+#[test]
+fn test_add_profile_creates_tq_directory() { /* ... */ }
 ```
 
 ## Code Linkage
 
 | Component | File Path | Key Functions |
 |-----------|-----------|---------------|
-| Config types | `src/config.rs` | `Config`, `ConnectionSettings`, `OutputSettings` |
+| Config types | `src/config.rs` | `Config`, `ConnectionSettings` |
 | Config loading | `src/config.rs` | `Config::load()`, `find_project_config()` |
 | User config path | `src/config.rs` | `Config::user_config_path()` |
 | Password reading | `src/config.rs` | `read_password_from_file()`, `expand_home_dir()` |
+| Profile CRUD | `src/commands/profile.rs` | `add_profile()`, `edit_profile()`, `delete_profile()` |
+| Profile CLI args | `src/cli.rs` | `ProfileArgs`, `ProfileAction`, `ProfileAddArgs`, etc. |
 | Profile resolution | `src/main.rs` | `build_connection_from_profile()` |
-| Profiles command | `src/main.rs` | `handle_profiles()` |
-| CLI options | `src/cli.rs` | `GlobalOpts` |
-
-## Implementation Notes
-
-### Current State (Post-Sprint 35)
-
-The project configuration system is fully implemented:
-
-**Implemented features**:
-- `find_project_config()` function walks up directory tree to find `.tq.toml`
-- `Config::load()` uses traversal-found path for project config
-- `Config::load_user_only()` and `Config::load_project_only()` for source tracking
-- `Config::project_config_path()` exposes the found project config path
-- `tq profiles` command shows profiles grouped by source with indicators
-- Profile field-level source indicators (`[project]`, `[user]`, `[default]`)
-- Comprehensive unit tests (12 tests covering all edge cases)
-- `.tq.toml.example` documented example file in repository root
-
-**Key implementation details**:
-- Uses mutex for test isolation (prevents parallel tests from interfering)
-- Canonicalizes paths for comparison (handles macOS /var symlink)
-- Stops at filesystem root when walking up (graceful termination)
-- Uses `is_file()` check (ignores directories named `.tq.toml`)
-
-### Test Coverage
-
-The implementation includes 12 unit tests:
-1. `test_find_project_config_in_current_directory` - Basic case
-2. `test_find_project_config_walks_up_to_parent` - Single level up
-3. `test_find_project_config_walks_up_multiple_levels` - Deep nesting
-4. `test_find_project_config_stops_at_first_found` - Nearest config wins
-5. `test_find_project_config_returns_none_when_not_found` - No config case
-6. `test_find_project_config_ignores_directory_named_tq_toml` - Directory vs file
-7. `test_find_project_config_with_valid_toml_content` - Parseable content
-8. `test_project_config_path_method` - Public API method
-9. `test_project_config_path_returns_none_when_no_config` - No config case
-10. `test_load_project_only_with_profiles` - Project-only loading
-11. `test_load_project_only_returns_none_when_no_config` - No config case
-12. Unicode identifier quoting test (in `sql/identifiers.rs`)
-
-## Error Handling and Graceful Degradation
-
-### Invalid Project Config
-
-When project config exists but contains invalid TOML syntax, the tool should warn the user but continue operation using user config and other sources.
-
-**Design Principles:**
-- **Non-blocking**: Invalid project config should not prevent tool usage
-- **Visible warning**: User should be notified of the problem via stderr
-- **Graceful fallback**: Continue with user config, environment variables, and CLI args
-- **Clear guidance**: Error message should explain the problem and how to fix it
-
-#### Current Behavior
-
-The current implementation fails hard on invalid project config:
-
-```rust
-// src/config.rs - Config::load()
-
-let config: Config = figment
-    .extract()
-    .map_err(|e| TqError::ConfigParseError(e.to_string()))?;
-    // ^ This exits with error if project config is invalid
-```
-
-#### Proposed Behavior
-
-Wrap project config loading in error handling:
-
-```rust
-// src/config.rs - Config::load()
-
-pub fn load() -> Result<Self> {
-    // Find project config by walking up the directory tree
-    let project_config_path = find_project_config();
-
-    let mut figment = Figment::new()
-        .merge(Serialized::defaults(Config::default()))
-        .merge(Toml::file("/etc/tq/config.toml"))
-        .merge(Toml::file(Self::user_config_path()));
-
-    // Project config: try to load, warn on error but continue
-    if let Some(ref path) = project_config_path {
-        log::debug!("Found project config: {}", path.display());
-
-        // Try to load project config
-        let project_figment = figment.clone().merge(Toml::file(path));
-
-        // Test if it's valid by attempting extraction
-        match project_figment.extract::<Config>() {
-            Ok(_) => {
-                // Valid project config, use it
-                figment = project_figment;
-            }
-            Err(e) => {
-                // Invalid project config - warn but continue
-                eprintln!("Warning: Invalid project config at {}", path.display());
-                eprintln!("  Error: {}", e);
-                eprintln!("  Continuing without project config.");
-                eprintln!();
-                // figment remains unchanged (no project config merged)
-            }
-        }
-    }
-
-    // Environment variables (TQ_HOST, TQ_PORT, etc.)
-    figment = figment.merge(Env::prefixed("TQ_").split("_").lowercase(false));
-
-    let config: Config = figment
-        .extract()
-        .map_err(|e| TqError::ConfigParseError(e.to_string()))?;
-
-    Ok(config)
-}
-```
-
-#### Warning Format
-
-The stderr warning should include:
-1. File path (absolute)
-2. Parse error details (line number, column, error message)
-3. Guidance on how to proceed
-
-**Example warning output:**
-
-```
-Warning: Invalid project config at /Users/alice/projects/analytics/.tq.toml
-  Error: TOML parse error at line 8, column 15
-  expected '=', found ':'
-
-  [profiles.dev]
-  host: "dev.company.com"
-       ^
-
-  Continuing without project config.
-```
-
-#### Alternative Approach: Hard Fail
-
-An alternative design is to fail hard on invalid project config, requiring the user to fix it before proceeding.
-
-**Rationale for Graceful Degradation:**
-- **Non-blocking**: User can still use the tool with personal config
-- **Team scenarios**: One team member's invalid project config shouldn't block others
-- **Discoverability**: Warning is more user-friendly than hard failure
-- **Consistency**: Mirrors behavior of missing project config (no error, just absent)
-
-**When Hard Fail is Better:**
-- **User config**: Personal config should fail hard (high confidence it's intentional)
-- **CLI-specified config**: `--config file.toml` should fail hard (explicit intent)
-- **Environment variables**: Bad env var values should fail hard (often scripted)
-
-#### Help Text Updates
-
-The `tq help config` text should mention project config warnings:
-
-```
-PROJECT CONFIGURATION
-    tq looks for a project configuration file at:
-      .tq.toml (in current directory or parents)
-
-    Project config enables team-shared profiles and settings.
-
-    If .tq.toml contains invalid TOML syntax, tq will:
-      - Display a warning to stderr with error details
-      - Continue operation using user config and other sources
-      - Suggest fixing the syntax error
-
-    To validate project config:
-      cat .tq.toml | toml validate    # If toml CLI tool is installed
-```
-
-#### UX Improvements for `tq profiles`
-
-When displaying profiles, show project config path (if found) in the header:
-
-**Current behavior:**
-```
-Available profiles:
-
-From user config (~/.tq/config.toml):
-  personal
-    Host:     my-home-server.local
-    ...
-```
-
-**Proposed behavior:**
-```
-User config: /Users/alice/.tq/config.toml
-Project config: /Users/alice/projects/analytics/.tq.toml
-
-Available profiles:
-
-From user config:
-  personal
-    Host:     my-home-server.local
-    ...
-```
-
-**When project config is invalid:**
-```
-User config: /Users/alice/.tq/config.toml
-Project config: /Users/alice/projects/analytics/.tq.toml (invalid - not loaded)
-
-Available profiles:
-
-From user config:
-  personal
-    Host:     my-home-server.local
-    ...
-```
-
-#### Empty State Improvement
-
-When no profiles are defined, mention project config as an option:
-
-**Current behavior:**
-```
-No profiles defined.
-
-To create a profile, add to ~/.tq/config.toml:
-
-  [profiles.myprofile]
-  host = "myhost.example.com"
-  ...
-```
-
-**Proposed behavior:**
-```
-No profiles defined.
-
-To create a profile, add to ~/.tq/config.toml:
-
-  [profiles.myprofile]
-  host = "myhost.example.com"
-  port = 1025
-  database = "mydb"
-  user = "myuser"
-  password_file = "~/.tq/passwords/myprofile"
-
-Tip: Create .tq.toml in your project root for team-shared profiles
-```
-
-#### Code Changes Summary
-
-**Files to modify:**
-1. `src/config.rs` - `Config::load()` function (graceful degradation logic)
-2. `src/main.rs` - `handle_profiles()` function (show project config path and status)
-3. `src/help/config.txt` - Add project config warning section
-
-**Testing strategy:**
-1. Unit test: Invalid project config produces warning (capture stderr)
-2. Unit test: Invalid project config still loads user config successfully
-3. Integration test: `tq profiles` shows project config status
-4. Manual test: Create invalid `.tq.toml` and verify warning message
-
-#### Code Linkage
-
-| Component | File Path | Key Functions |
-|-----------|-----------|---------------|
-| Config loading | `src/config.rs` | `Config::load()` |
-| Warning output | `src/config.rs` | `eprintln!` for stderr |
 | Profiles display | `src/main.rs` | `handle_profiles()` |
-| Help text | `src/help/config.txt` | Project config section |
-
----
+| Command dispatch | `src/main.rs` | `handle_profile_command()` |
 
 ## Future Enhancements
 
 - **Config validation command**: `tq config validate` to check syntax
-- **Config initialization**: `tq init` to create `.tq.toml` interactively
-- **Profile editing**: `tq profile add/edit/delete` commands
-- **Config location override**: `--config` flag for explicit config file
-- **Watch mode**: Reload config when files change (useful for long-running processes)
+- **Comment-preserving writes**: Switch to `toml_edit` crate if user demand warrants
+- **Dynamic shell completion**: `tq profile list --names-only` for shell completion sourcing
+- **Profile copy/rename**: `tq profile copy <src> <dst>`
+- **Profile test**: `tq profile test <name>` to validate a profile connects successfully

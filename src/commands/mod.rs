@@ -6,6 +6,7 @@
 pub mod locks;
 pub mod monitoring_utils;
 pub mod ping;
+pub mod profile;
 pub mod query;
 pub mod query_inspect;
 pub mod repl;

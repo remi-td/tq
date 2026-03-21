@@ -16,29 +16,26 @@ tq supports multiple configuration methods to match your workflow:
 
 ### First-Time Setup
 
-Create a basic user configuration:
+The fastest way to create your first profile is with `tq profile add`:
 
 ```bash
-# Create tq config directory
+# Create tq config directory and password file
 mkdir -p ~/.tq/passwords
-
-# Create a password file
 echo "mypassword" > ~/.tq/passwords/dev
 chmod 0600 ~/.tq/passwords/dev
 
-# Create config file
-cat > ~/.tq/config.toml <<EOF
-[profiles.dev]
-host = "dev.company.com"
-port = 1025
-database = "development"
-user = "alice"
-password_file = "~/.tq/passwords/dev"
-EOF
+# Create a profile (config file is created automatically if it doesn't exist)
+tq profile add dev \
+  --host dev.company.com \
+  --database development \
+  --user alice \
+  --password-file ~/.tq/passwords/dev
 
 # Use the profile
 tq --profile dev query "SELECT CURRENT_DATE"
 ```
+
+See [Managing Profiles](#managing-profiles) for the full guide to adding, editing, and deleting profiles.
 
 ## Configuration Hierarchy
 
@@ -221,6 +218,169 @@ Config file permissions are recommended but not enforced:
 - **Accepted**: `0644` (world-readable)
 
 A warning is issued if permissions are too permissive, but tq continues to work.
+
+## Managing Profiles
+
+The `tq profile` subcommand lets you create, update, and delete profiles in `~/.tq/config.toml` without manually editing the TOML file. It is designed for both interactive use and scripting.
+
+### Adding a Profile
+
+Use `tq profile add` to create a new profile. The `--host` flag is required; all other fields are optional.
+
+```bash
+# Minimal profile (host only)
+tq profile add local --host localhost
+
+# Full profile
+tq profile add dev \
+  --host dev.company.com \
+  --port 1025 \
+  --database development \
+  --user alice \
+  --logmech LDAP \
+  --password-file ~/.tq/passwords/dev
+```
+
+**Output:**
+
+```
+Profile 'dev' added to ~/.tq/config.toml
+```
+
+If `~/.tq/config.toml` does not exist yet, tq creates the file and directory automatically.
+
+**If the profile already exists:**
+
+```
+Error: Profile 'dev' already exists in ~/.tq/config.toml
+
+Use 'tq profile edit dev' to update an existing profile.
+Use 'tq profile delete dev' to remove it first.
+```
+
+### Editing a Profile
+
+Use `tq profile edit` to update individual fields of an existing profile. Only the flags you provide are changed; all other fields remain untouched.
+
+```bash
+# Update just the host
+tq profile edit dev --host new-dev.company.com
+
+# Update database and user at the same time
+tq profile edit dev --database dev2 --user bob
+
+# Switch to LDAP authentication
+tq profile edit prod --logmech LDAP
+```
+
+**Output:**
+
+```
+Profile 'dev' updated in ~/.tq/config.toml
+```
+
+You must provide at least one flag. Running `tq profile edit dev` with no flags is an error:
+
+```
+Error: No fields specified to update.
+Provide at least one option flag.
+
+Usage: tq profile edit <name> [--host <host>] [--port <port>] ...
+Example: tq profile edit dev --host new-dev.company.com
+```
+
+**If the profile does not exist:**
+
+```
+Error: Profile 'staging' not found in ~/.tq/config.toml
+
+Available profiles: dev, prod, local
+Use 'tq profile add staging' to create a new profile.
+```
+
+### Deleting a Profile
+
+Use `tq profile delete` to remove a profile. Without `--force`, tq prompts for confirmation when run interactively.
+
+```bash
+# Interactive confirmation
+tq profile delete prod
+```
+
+```
+Delete profile 'prod' from ~/.tq/config.toml? [y/N] _
+```
+
+Press `y` to confirm, or press Enter (or any other key) to abort. Aborting is not an error (exit code `0`):
+
+```
+Aborted. Profile 'prod' was not deleted.
+```
+
+**Scripting without a confirmation prompt:**
+
+Pass `--force` to skip the confirmation. This is the recommended approach for scripts and CI/CD pipelines:
+
+```bash
+tq profile delete old-profile --force
+```
+
+```
+Profile 'old-profile' deleted from ~/.tq/config.toml
+```
+
+When stdin is not a terminal and `--force` is not provided, tq exits with an error rather than hanging:
+
+```
+Error: Interactive confirmation required but stdin is not a terminal.
+Use --force to bypass confirmation:
+  tq profile delete prod --force
+```
+
+### Listing Profiles
+
+`tq profile list` is an alias for `tq profiles`. Both commands show identical output.
+
+```bash
+tq profile list
+# equivalent to:
+tq profiles
+```
+
+### Profile Name Rules
+
+Profile names must contain only letters, digits, hyphens, and underscores. Spaces and other characters are rejected:
+
+```
+Error: Invalid profile name 'my profile'
+Profile names may only contain letters, digits, hyphens, and underscores.
+
+Examples of valid names: dev, staging, prod-us, my_db
+```
+
+### Flag Reference
+
+All `add` and `edit` flags:
+
+| Flag | Short | Required for `add` | Description |
+|------|-------|--------------------|-------------|
+| `--host` | - | Yes | Database hostname |
+| `--port` | - | No (default: 1025) | Database port (1-65535) |
+| `--database` | `-d` | No | Default database name |
+| `--user` | `-u` | No | Username |
+| `--logmech` | - | No (default: `TD2`) | Auth mechanism: `TD2`, `LDAP`, `KRB5`, `TDNEGO` |
+| `--password-file` | - | No | Path to file containing the password |
+
+Accepted `--logmech` values: `TD2`, `LDAP`, `KRB5`, `TDNEGO` (case-insensitive). Any other value is rejected with exit code `2`.
+
+### Important Behaviours
+
+- **Profile management never connects to the database.** Commands operate on the local config file only. Connection flags (`--logon`, `--profile`) are ignored.
+- **Config file comments and formatting are preserved.** tq does not reformat or reorder content it does not touch.
+- **Writes are atomic.** tq writes to a temporary file and renames it to prevent corruption on failure.
+- **Profile management targets user config only.** `tq profile` commands read and write `~/.tq/config.toml` only. Project config (`.tq.toml`) is never modified. If a profile exists only in a project config, `edit` and `delete` will report it as not found.
+
+---
 
 ## Project Configuration
 
@@ -639,48 +799,57 @@ TQ_DATABASE=testing tq --profile dev query "SELECT 1"
 
 ### Workflow 1: Personal Development
 
-Simple setup for individual use:
+Set up a local profile from the command line:
+
+```bash
+# Create password file
+mkdir -p ~/.tq/passwords
+echo "mypassword" > ~/.tq/passwords/local
+chmod 0600 ~/.tq/passwords/local
+
+# Add the profile
+tq profile add local \
+  --host localhost \
+  --port 1025 \
+  --database testdb \
+  --user dbc \
+  --password-file ~/.tq/passwords/local
+
+# Run queries
+tq --profile local query "SELECT CURRENT_DATE"
+```
+
+You can also set global defaults by editing `~/.tq/config.toml` directly:
 
 ```toml
-# ~/.tq/config.toml
-
 [defaults]
 format = "table"
 timing = true
-
-[profiles.local]
-host = "localhost"
-port = 1025
-database = "testdb"
-user = "dbc"
-password_file = "~/.tq/passwords/local"
 ```
 
 ### Workflow 2: Multiple Environments
 
-Managing dev, staging, and production:
+Add all three profiles, then switch between them:
 
-```toml
-# ~/.tq/config.toml
+```bash
+tq profile add dev \
+  --host dev.company.com \
+  --database development \
+  --user alice \
+  --password-file ~/.tq/passwords/dev
 
-[profiles.dev]
-host = "dev.company.com"
-database = "development"
-user = "alice"
-password_file = "~/.tq/passwords/dev"
+tq profile add staging \
+  --host staging.company.com \
+  --database staging \
+  --user alice \
+  --password-file ~/.tq/passwords/staging
 
-[profiles.staging]
-host = "staging.company.com"
-database = "staging"
-user = "alice"
-password_file = "~/.tq/passwords/staging"
-
-[profiles.prod]
-host = "prod.company.com"
-database = "production"
-user = "alice"
-logmech = "LDAP"
-password_file = "~/.tq/passwords/prod"
+tq profile add prod \
+  --host prod.company.com \
+  --database production \
+  --user alice \
+  --logmech LDAP \
+  --password-file ~/.tq/passwords/prod
 ```
 
 Switch environments easily:
@@ -693,7 +862,7 @@ tq --profile prod query "SELECT COUNT(*) FROM users"
 
 ### Workflow 3: Team-Shared Configuration
 
-Repository with project config:
+Repository with project config (hosts in `.tq.toml`, credentials in personal user config):
 
 ```toml
 # .tq.toml (committed to git)
@@ -712,18 +881,12 @@ database = "team_prod"
 logmech = "LDAP"
 ```
 
-Each team member adds credentials:
+Each team member adds their own credentials using `tq profile add`:
 
-```toml
-# ~/.tq/config.toml (personal)
-
-[profiles.dev]
-user = "alice"
-password_file = "~/.tq/passwords/dev"
-
-[profiles.prod]
-user = "alice"
-password_file = "~/.tq/passwords/prod"
+```bash
+# Add credential-only profiles (host comes from project config via merging)
+tq profile add dev --user alice --password-file ~/.tq/passwords/dev
+tq profile add prod --user alice --password-file ~/.tq/passwords/prod
 ```
 
 ### Workflow 4: Quick Ad-Hoc Connection
@@ -744,15 +907,15 @@ Password: ****
 ## Tips and Best Practices
 
 1. **Use profiles for frequently-used connections** - Saves typing and reduces errors
-2. **Never commit passwords** - Use `password_file` and keep passwords in `~/.tq/passwords/`
-3. **Use project config for teams** - Share connection metadata, keep credentials personal
-4. **Set file permissions** - Always `chmod 0600` on password files
-5. **Use descriptive profile names** - `dev`, `staging`, `prod` are clearer than `db1`, `db2`
-6. **Test profile changes** - Use `tq --profile name query "SELECT 1"` to verify
-7. **Document team profiles** - Add comments to `.tq.toml` explaining each profile
-8. **Use defaults wisely** - Set project defaults for consistency, allow user overrides
+2. **Create profiles with `tq profile add`** - Avoids manual TOML editing and validates your input
+3. **Never commit passwords** - Use `password_file` and keep passwords in `~/.tq/passwords/`
+4. **Use project config for teams** - Share connection metadata, keep credentials personal
+5. **Set file permissions** - Always `chmod 0600` on password files
+6. **Use descriptive profile names** - `dev`, `staging`, `prod` are clearer than `db1`, `db2`
+7. **Test profile changes** - Use `tq --profile name query "SELECT 1"` to verify
+8. **Update profiles without re-creating** - Use `tq profile edit` to change individual fields
 9. **Check merged profiles** - Use `tq profiles` to see how user and project configs merge
-10. **Keep user config simple** - Let project config handle complexity, user config adds credentials
+10. **Script profile cleanup** - Use `tq profile delete --force` in automation to remove stale profiles
 
 ## Troubleshooting
 
@@ -767,7 +930,24 @@ Available profiles:
   - prod
 ```
 
-**Solution:** Check profile names with `tq profiles` and verify spelling.
+**Solution:** Check profile names with `tq profiles` and verify spelling. If the profile is missing, create it with `tq profile add dev --host <host>`.
+
+### Cannot Add a Profile That Already Exists
+
+```
+Error: Profile 'dev' already exists in ~/.tq/config.toml
+
+Use 'tq profile edit dev' to update an existing profile.
+Use 'tq profile delete dev' to remove it first.
+```
+
+**Solution:** Use `tq profile edit dev --host <new-host>` to update the profile in place, or delete and recreate it.
+
+### Cannot Edit a Profile in Project Config
+
+`tq profile edit` and `tq profile delete` operate on `~/.tq/config.toml` only. Profiles defined solely in a project `.tq.toml` file will be reported as not found.
+
+**Solution:** Edit `.tq.toml` manually for project-level profiles.
 
 ### Permission Denied on Password File
 

@@ -214,6 +214,13 @@ pub enum Command {
     /// Shows profile names and partial connection info (no passwords).
     Profiles,
 
+    /// Manage connection profiles (add, edit, delete, list)
+    ///
+    /// Add, edit, delete, or list connection profiles stored in ~/.tq/config.toml.
+    /// Profiles store connection settings that can be referenced with --profile.
+    #[command(subcommand)]
+    Profile(ProfileAction),
+
     /// List active database sessions with performance metrics
     ///
     /// Displays active Teradata sessions including user, state, and
@@ -264,6 +271,103 @@ pub enum Command {
     /// Example: tq query-inspect 1234
     #[command(name = "query-inspect")]
     QueryInspect(QueryInspectArgs),
+}
+
+/// Profile management subcommands
+#[derive(Subcommand, Debug)]
+pub enum ProfileAction {
+    /// Add a new connection profile
+    ///
+    /// Creates a new profile in ~/.tq/config.toml. Requires --host.
+    /// Other fields are optional.
+    ///
+    /// Example: tq profile add dev --host dev.company.com --database devdb --user alice
+    Add {
+        /// Profile name
+        #[arg(value_name = "NAME")]
+        name: String,
+
+        /// Database host (required)
+        #[arg(long)]
+        host: String,
+
+        /// Database port (1-65535)
+        #[arg(long, value_name = "PORT")]
+        port: Option<u16>,
+
+        /// Default database
+        #[arg(long, value_name = "DB")]
+        database: Option<String>,
+
+        /// Username
+        #[arg(long, value_name = "USER")]
+        user: Option<String>,
+
+        /// Authentication mechanism (TD2, LDAP, KRB5, TDNEGO)
+        #[arg(long = "auth", id = "profile_add_logmech", value_name = "MECH")]
+        logmech: Option<String>,
+
+        /// Path to password file
+        #[arg(long = "pass-file", id = "profile_add_password_file", value_name = "FILE")]
+        password_file: Option<PathBuf>,
+    },
+
+    /// Edit an existing connection profile
+    ///
+    /// Updates specific fields of an existing profile. At least one field
+    /// must be specified. Only provided fields are changed.
+    ///
+    /// Example: tq profile edit dev --port 2025 --user bob
+    Edit {
+        /// Profile name
+        #[arg(value_name = "NAME")]
+        name: String,
+
+        /// Database host
+        #[arg(long, value_name = "HOST")]
+        host: Option<String>,
+
+        /// Database port (1-65535)
+        #[arg(long, value_name = "PORT")]
+        port: Option<u16>,
+
+        /// Default database
+        #[arg(long, value_name = "DB")]
+        database: Option<String>,
+
+        /// Username
+        #[arg(long, value_name = "USER")]
+        user: Option<String>,
+
+        /// Authentication mechanism (TD2, LDAP, KRB5, TDNEGO)
+        #[arg(long = "auth", id = "profile_edit_logmech", value_name = "MECH")]
+        logmech: Option<String>,
+
+        /// Path to password file
+        #[arg(long = "pass-file", id = "profile_edit_password_file", value_name = "FILE")]
+        password_file: Option<PathBuf>,
+    },
+
+    /// Delete a connection profile
+    ///
+    /// Removes a profile from ~/.tq/config.toml. Requires --force flag
+    /// for non-interactive confirmation.
+    ///
+    /// Example: tq profile delete dev --force
+    Delete {
+        /// Profile name
+        #[arg(value_name = "NAME")]
+        name: String,
+
+        /// Confirm deletion (required)
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// List all connection profiles
+    ///
+    /// Displays all profiles defined in the configuration file.
+    List,
 }
 
 /// Arguments for the help command

@@ -422,7 +422,18 @@ The line number counter must not reset between statements; it reflects the posit
 
 **REQ-PARSE-015: Statement Start Line Recording**
 
-When the parser begins accumulating characters for a new statement (after emitting the previous one), it records the current line number as the "start line" of that statement. This value is used in error messages and verbose progress output.
+The parser records the current line number as the "start line" of a statement at the moment it encounters the first non-whitespace, non-comment character that belongs to that statement. This is the line number used in error messages and verbose progress output.
+
+Rationale: "begins accumulating characters" is ambiguous when leading whitespace or comment tokens precede the first SQL keyword. The start line must reflect where meaningful SQL content begins, not where blank lines or comment lines were skipped. For example:
+
+```sql
+-- comment on line 1
+-- comment on line 2
+
+SELECT 1;   -- start line is 4 (first non-whitespace SQL character)
+```
+
+The recorded start line for the `SELECT 1` statement is line 4, not line 1.
 
 **REQ-PARSE-016: Error Message Line Numbers**
 
@@ -466,6 +477,37 @@ The following table summarises parser behaviour across representative inputs.
 | `SELECT\n1\nFROM\nt;` | 1 | Multi-line statement |
 | `;;;` | 0 | All empty, suppressed |
 | `-- comment only` | 0 | Comment only, no statement |
+
+---
+
+### Comment Space-Injection
+
+**REQ-PARSE-018: Space Injection When Stripping Comments**
+
+When a comment token is removed from the SQL text and the characters immediately before and immediately after the comment are both non-whitespace, the parser MUST inject a single space character in place of the comment. This prevents two adjacent SQL tokens from being merged into an unrecognised token after comment removal.
+
+**Rationale:** Consider the input `SELECT--comment\nfoo`. After the line comment is stripped, the remaining characters are `SELECT` and `foo`. Without space injection the concatenated result would be `SELECTfoo`, which is not valid SQL. Injecting one space produces `SELECT foo`, which is two valid tokens.
+
+**Space-injection examples:**
+
+| Input (comments shown explicitly) | Output after comment removal | Notes |
+|---|---|---|
+| `SELECT--comment\nfoo` | `SELECT foo` | Space injected between keyword and identifier |
+| `SELECT /*c*/ 1` | `SELECT  1` | Comment replaced by single space (adjacent whitespace is already present before the comment, no additional injection needed; the `/*c*/` itself is replaced by one space) |
+| `col1--note\n+col2` | `col1 +col2` | Space injected before operator |
+| `SELECT\n--full line comment\nfoo` | `SELECT\nfoo` | Newline already separates tokens; no injection needed |
+
+**Detailed rule:**
+
+The parser injects a space if and only if all three of the following conditions hold at the point where the comment is removed:
+
+1. The character immediately preceding the comment (in the original source) is a non-whitespace character.
+2. The character immediately following the comment (in the original source) is a non-whitespace character.
+3. The two characters are not already separated by any whitespace in the output being built.
+
+When a line comment is followed by a newline (`\n`), the newline is preserved in the output; no additional space is injected because the newline itself serves as a token separator.
+
+**Scope:** Space injection applies to both line comments (`--`) and block comments (`/* */`).
 
 ---
 

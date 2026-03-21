@@ -676,6 +676,133 @@ Available profiles (from ~/.tq/config.toml):
 - Password file paths are not shown
 - Only connection metadata is revealed
 
+## Profile Management Commands
+
+The `tq profile` subcommand allows users to create, update, and delete profiles in `~/.tq/config.toml` without manually editing the TOML file. It is designed for scripting and automation as well as interactive use.
+
+For the full CLI interaction specification (flags, output examples, and error messages for each subcommand) see `docs/specifications/cli-interface.md`, section `profile - Manage Connection Profiles`.
+
+### Available Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `tq profile add <name>` | Create a new profile |
+| `tq profile edit <name>` | Update fields on an existing profile |
+| `tq profile delete <name>` | Remove a profile |
+| `tq profile list` | List profiles (alias for `tq profiles`) |
+
+### Requirements
+
+**REQ-PROFILE-001: Scriptability**
+
+All `tq profile` subcommands MUST be fully non-interactive by default. Every action that changes state is controlled by explicit flags. No wizard, prompt, or editor is launched unless explicitly required for confirmation (see REQ-PROFILE-007).
+
+**REQ-PROFILE-002: Supported Profile Fields**
+
+The `add` and `edit` subcommands MUST support setting the following profile fields via flags:
+
+| Flag | Config key | Required for `add` | Description |
+|------|------------|--------------------|-------------|
+| `--host` | `host` | Yes | Database hostname |
+| `--port` | `port` | No (default: 1025) | Database port |
+| `--database` | `database` | No | Default database |
+| `--user` | `user` | No | Username |
+| `--logmech` | `logmech` | No (default: `TD2`) | Authentication mechanism |
+| `--password-file` | `password_file` | No | Path to password file |
+
+**REQ-PROFILE-003: Logmech Validation**
+
+The `--logmech` flag MUST accept only the values `TD2`, `LDAP`, `KRB5`, and `TDNEGO` (case-insensitive). Any other value MUST produce an error with exit code `2` and list the accepted values.
+
+**REQ-PROFILE-004: Port Validation**
+
+The `--port` flag MUST accept only integers in the range 1-65535 (inclusive). Any other value MUST produce an error with exit code `2`.
+
+**REQ-PROFILE-005: Profile Name Validation**
+
+Profile names MUST consist solely of letters (a-z, A-Z), digits (0-9), hyphens (`-`), and underscores (`_`). Names containing spaces or other characters MUST be rejected with exit code `2`.
+
+**REQ-PROFILE-006: Config File Auto-Creation**
+
+If `~/.tq/config.toml` does not exist when `tq profile add` is invoked, the tool MUST create the directory `~/.tq/` (if absent) and the config file before writing the new profile entry.
+
+**REQ-PROFILE-007: Deletion Confirmation**
+
+`tq profile delete <name>` MUST prompt the user for confirmation when stdin is a TTY and `--force` is not provided. The default response is "no" (abort). When stdin is not a TTY and `--force` is not provided, the command MUST exit with an error explaining that `--force` is required for non-interactive use.
+
+**REQ-PROFILE-008: Partial Edit**
+
+`tq profile edit <name>` MUST update only the fields whose flags are explicitly provided. Fields not mentioned in the command MUST remain unchanged in the config file.
+
+**REQ-PROFILE-009: Edit Requires At Least One Flag**
+
+Invoking `tq profile edit <name>` with no option flags MUST produce a usage error (exit code `2`) explaining that at least one field flag is required.
+
+**REQ-PROFILE-010: Error on Duplicate Add**
+
+`tq profile add <name>` MUST fail with exit code `1` and a helpful error message if a profile with the same name already exists. It MUST suggest using `tq profile edit` or `tq profile delete` as alternatives.
+
+**REQ-PROFILE-011: Error on Missing Profile for Edit or Delete**
+
+`tq profile edit <name>` and `tq profile delete <name>` MUST fail with exit code `1` and a helpful error message when the named profile does not exist. The error message MUST list the currently available profile names.
+
+**REQ-PROFILE-012: Config File Preservation**
+
+All write operations on `~/.tq/config.toml` MUST preserve the full content of sections and profiles not involved in the operation, including TOML comments and formatting. The tool MUST NOT reformat or reorder unaffected content.
+
+**REQ-PROFILE-013: Atomic Writes**
+
+Config file modifications MUST be written atomically: write to a temporary file in the same directory, then rename it to replace the original. This prevents partial writes from producing a corrupt config file.
+
+**REQ-PROFILE-014: No Database Connection**
+
+Profile management commands (`add`, `edit`, `delete`, `list`) MUST NOT attempt to connect to any database. They operate exclusively on the local config file. Connection flags provided on the command line (`--logon`, `--profile`, etc.) MUST be silently ignored by these subcommands.
+
+**REQ-PROFILE-015: No Password Display**
+
+The tool MUST never display the contents of a password file in any output. The file path supplied via `--password-file` may be shown in verbose output; the file contents MUST NOT be shown.
+
+**REQ-PROFILE-016: Success Messages**
+
+Every successful write operation MUST print a concise confirmation message to stdout indicating the profile name and the config file path that was modified. Example:
+
+```
+Profile 'dev' added to ~/.tq/config.toml
+```
+
+**REQ-PROFILE-017: User Config Only**
+
+Profile management commands operate exclusively on the user config file (`~/.tq/config.toml`). They do NOT read from or write to project config files (`.tq.toml`). If a user attempts to manage a profile that exists only in a project config, `edit` and `delete` MUST report that the profile is not found in the user config and suggest editing the project file manually.
+
+### Common Workflows
+
+**Create a profile for a development environment:**
+```bash
+tq profile add dev \
+  --host dev.company.com \
+  --database development \
+  --user alice \
+  --logmech LDAP \
+  --password-file ~/.tq/passwords/dev
+```
+
+**Update the host of an existing profile:**
+```bash
+tq profile edit dev --host new-dev.company.com
+```
+
+**Remove a profile in a script (no confirmation prompt):**
+```bash
+tq profile delete old-dev --force
+```
+
+**List profiles to verify changes:**
+```bash
+tq profile list
+# or equivalently:
+tq profiles
+```
+
 ## Environment Variables
 
 Environment variables provide a way to configure `tq` without a config file or CLI flags.

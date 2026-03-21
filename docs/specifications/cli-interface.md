@@ -15,6 +15,7 @@
    - [locks - Lock and Blocking Information](#locks---lock-and-blocking-information)
    - [query-inspect - Inspect Session Query Text](#query-inspect---inspect-session-query-text)
    - [profiles - List Connection Profiles](#profiles---list-connection-profiles)
+   - [profile - Manage Connection Profiles](#profile---manage-connection-profiles)
 5. [Input/Output Behavior](#inputoutput-behavior)
 6. [Flag Design Guidelines](#flag-design-guidelines)
 7. [Help Text Design](#help-text-design)
@@ -48,6 +49,7 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 - `locks` - Display current lock contention and blocking chains
 - `query-inspect` - Show SQL text for a specific session
 - `profiles` - List connection profiles
+- `profile` - Manage connection profiles (add, edit, delete, list)
 
 ## Global Options
 
@@ -1192,6 +1194,334 @@ See 'tq help config' for more information
 **Exit Codes**:
 - `0`: Profiles listed successfully (or no profiles found)
 - `1`: Configuration file parsing error
+
+---
+
+### profile - Manage Connection Profiles
+
+**Purpose**: Create, update, and delete connection profiles in `~/.tq/config.toml` without manually editing the file.
+
+**Usage**:
+```bash
+tq profile <SUBCOMMAND> [OPTIONS]
+```
+
+**Subcommands**:
+| Subcommand | Description |
+|------------|-------------|
+| `add <name>` | Create a new profile |
+| `edit <name>` | Update fields on an existing profile |
+| `delete <name>` | Remove a profile |
+| `list` | List profiles (alias for `tq profiles`) |
+
+**Relationship to `tq profiles`**: `tq profile list` and `tq profiles` are equivalent commands. `tq profiles` is kept for backwards compatibility and discoverable shorthand.
+
+---
+
+#### profile add
+
+**Purpose**: Create a new named profile in `~/.tq/config.toml`.
+
+**Usage**:
+```bash
+tq profile add <name> --host <host> [OPTIONS]
+```
+
+**Arguments**:
+- `<name>`: Profile name (required). Must be a valid TOML key: letters, digits, hyphens, and underscores only.
+
+**Options**:
+| Option | Short | Type | Required | Description |
+|--------|-------|------|----------|-------------|
+| `--host` | - | string | Yes | Database hostname |
+| `--port` | - | integer | No | Database port (default: 1025) |
+| `--database` | `-d` | string | No | Default database name |
+| `--user` | `-u` | string | No | Username |
+| `--logmech` | - | enum | No | Auth mechanism: `TD2`, `LDAP`, `KRB5`, `TDNEGO` (default: `TD2`) |
+| `--password-file` | - | path | No | Path to file containing the password |
+
+**Examples**:
+```bash
+# Minimal profile (host only)
+tq profile add local --host localhost
+
+# Full profile
+tq profile add dev \
+  --host dev.company.com \
+  --port 1025 \
+  --database development \
+  --user alice \
+  --logmech LDAP \
+  --password-file ~/.tq/passwords/dev
+
+# Profile with non-default port
+tq profile add dev --host dev.company.com --port 2025
+```
+
+**Output (Success)**:
+```
+Profile 'dev' added to ~/.tq/config.toml
+```
+
+**Output (Dry-run confirmation - verbose mode)**:
+```
+Adding profile 'dev' to ~/.tq/config.toml:
+  Host:          dev.company.com:1025
+  Database:      development
+  User:          alice
+  Logmech:       LDAP
+  Password file: ~/.tq/passwords/dev
+
+Profile 'dev' added.
+```
+
+**Error - Profile Already Exists**:
+```
+Error: Profile 'dev' already exists in ~/.tq/config.toml
+
+Use 'tq profile edit dev' to update an existing profile.
+Use 'tq profile delete dev' to remove it first.
+```
+
+Exit code: `1`
+
+**Error - Invalid Profile Name**:
+```
+Error: Invalid profile name 'my profile'
+Profile names may only contain letters, digits, hyphens, and underscores.
+
+Examples of valid names: dev, staging, prod-us, my_db
+```
+
+Exit code: `2`
+
+**Error - Missing Required Flag**:
+```
+Error: Missing required flag --host
+Usage: tq profile add <name> --host <host> [OPTIONS]
+
+Example: tq profile add dev --host dev.company.com
+```
+
+Exit code: `2`
+
+**Exit Codes**:
+- `0`: Profile created successfully
+- `1`: Profile already exists, or config file cannot be written
+- `2`: Usage error (missing required flag, invalid name, invalid option value)
+
+---
+
+#### profile edit
+
+**Purpose**: Update one or more fields of an existing profile in `~/.tq/config.toml`. Only the flags provided are changed; unspecified fields are left unchanged.
+
+**Usage**:
+```bash
+tq profile edit <name> [OPTIONS]
+```
+
+**Arguments**:
+- `<name>`: Name of the profile to edit (required). Must already exist.
+
+**Options**: Same set as `profile add` (all optional):
+| Option | Short | Type | Description |
+|--------|-------|------|-------------|
+| `--host` | - | string | Update database hostname |
+| `--port` | - | integer | Update database port |
+| `--database` | `-d` | string | Update default database name |
+| `--user` | `-u` | string | Update username |
+| `--logmech` | - | enum | Update auth mechanism: `TD2`, `LDAP`, `KRB5`, `TDNEGO` |
+| `--password-file` | - | path | Update path to password file |
+
+At least one option flag must be provided; calling `tq profile edit <name>` with no flags is an error.
+
+**Examples**:
+```bash
+# Update just the host
+tq profile edit dev --host new-dev.company.com
+
+# Update database and user
+tq profile edit dev --database dev2 --user bob
+
+# Switch to LDAP authentication
+tq profile edit prod --logmech LDAP
+```
+
+**Output (Success)**:
+```
+Profile 'dev' updated in ~/.tq/config.toml
+```
+
+**Output (Verbose)**:
+```
+Updating profile 'dev' in ~/.tq/config.toml:
+  host: dev.company.com -> new-dev.company.com
+
+Profile 'dev' updated.
+```
+
+**Error - Profile Not Found**:
+```
+Error: Profile 'staging' not found in ~/.tq/config.toml
+
+Available profiles: dev, prod, local
+Use 'tq profile add staging' to create a new profile.
+```
+
+Exit code: `1`
+
+**Error - No Fields Provided**:
+```
+Error: No fields specified to update.
+Provide at least one option flag.
+
+Usage: tq profile edit <name> [--host <host>] [--port <port>] ...
+Example: tq profile edit dev --host new-dev.company.com
+```
+
+Exit code: `2`
+
+**Exit Codes**:
+- `0`: Profile updated successfully
+- `1`: Profile not found, or config file cannot be written
+- `2`: Usage error (no flags provided, invalid option value)
+
+---
+
+#### profile delete
+
+**Purpose**: Remove a named profile from `~/.tq/config.toml`.
+
+**Usage**:
+```bash
+tq profile delete <name> [--force]
+```
+
+**Arguments**:
+- `<name>`: Name of the profile to delete (required). Must already exist.
+
+**Options**:
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--force` | `-f` | flag | false | Skip confirmation prompt |
+
+**Interactive confirmation (TTY, without `--force`)**:
+```
+Delete profile 'prod' from ~/.tq/config.toml? [y/N] _
+```
+
+- Pressing `y` or `Y` proceeds with deletion.
+- Any other input (including Enter) aborts.
+- Default is `N` (abort), shown in uppercase.
+
+**Non-interactive behaviour (stdin not a TTY)**:
+
+When stdin is not a TTY and `--force` is not provided, the command exits with an error rather than attempting to read from a non-interactive pipe:
+
+```
+Error: Interactive confirmation required but stdin is not a terminal.
+Use --force to bypass confirmation:
+  tq profile delete prod --force
+```
+
+Exit code: `2`
+
+**Examples**:
+```bash
+# With interactive confirmation
+tq profile delete prod
+
+# Skip confirmation (scripting, CI/CD)
+tq profile delete old-profile --force
+```
+
+**Output (Success)**:
+```
+Profile 'prod' deleted from ~/.tq/config.toml
+```
+
+**Output (Abort)**:
+```
+Aborted. Profile 'prod' was not deleted.
+```
+
+Exit code: `0` (abort is not an error)
+
+**Error - Profile Not Found**:
+```
+Error: Profile 'staging' not found in ~/.tq/config.toml
+
+Available profiles: dev, prod, local
+```
+
+Exit code: `1`
+
+**Exit Codes**:
+- `0`: Profile deleted successfully, or deletion was aborted interactively
+- `1`: Profile not found, or config file cannot be written
+- `2`: Usage error (non-interactive without `--force`)
+
+---
+
+#### profile list
+
+**Purpose**: List all available connection profiles. Alias for `tq profiles`.
+
+**Usage**:
+```bash
+tq profile list
+```
+
+**Output**: Identical to `tq profiles`. See [profiles - List Connection Profiles](#profiles---list-connection-profiles) for full output specification.
+
+**Exit Codes**: Same as `tq profiles`.
+
+---
+
+#### profile - Shared Behaviour
+
+**REQ-PROFILE-CLI-001: Config File Creation**
+
+If `~/.tq/config.toml` does not exist when `tq profile add` is run, the tool SHALL create the file (and the `~/.tq/` directory if needed) before writing the profile.
+
+**REQ-PROFILE-CLI-002: Config File Preservation**
+
+All commands that modify the config file MUST preserve all existing content, including comments, whitespace formatting, and sections unrelated to the profile being modified. The tool MUST NOT reformat or reorder the file.
+
+**REQ-PROFILE-CLI-003: Atomic Writes**
+
+Config file writes MUST be atomic: write to a temporary file in the same directory, then rename to replace the original. This prevents partial writes from corrupting the config file.
+
+**REQ-PROFILE-CLI-004: No Password Display**
+
+The `--password-file` path is accepted as input but the path itself is considered sensitive metadata. In verbose output, show the path. Never display the contents of the password file.
+
+**REQ-PROFILE-CLI-005: Logmech Validation**
+
+The `--logmech` flag MUST only accept: `TD2`, `LDAP`, `KRB5`, `TDNEGO` (case-insensitive input, stored in uppercase). Any other value produces:
+
+```
+Error: Invalid logmech value 'OAUTH'
+Accepted values: TD2, LDAP, KRB5, TDNEGO
+```
+
+Exit code: `2`
+
+**REQ-PROFILE-CLI-006: Port Validation**
+
+The `--port` flag MUST accept only integers in the range 1-65535. Any other value produces:
+
+```
+Error: Invalid port value '99999'
+Port must be an integer between 1 and 65535.
+```
+
+Exit code: `2`
+
+**REQ-PROFILE-CLI-007: No Connection Established**
+
+Profile management commands (`add`, `edit`, `delete`, `list`) do NOT connect to the database. They operate solely on the local config file. Connection flags (`--logon`, `--logmech`, `--password-file`, `--profile`) are ignored for these subcommands.
 
 ---
 

@@ -1,7 +1,7 @@
 # Feature Backlog
 
 **Last Updated:** 2026-03-21
-**Next Sprint:** Sprint 42
+**Next Sprint:** Sprint 44
 
 ---
 
@@ -18,14 +18,6 @@ No P0 features currently in backlog. All critical features have been implemented
 ---
 
 ## P1 - High Priority (Should Have)
-
-### Configuration Management
-
-**Profile Editing Commands**
-- `tq profile add <name>` - Add new profile interactively
-- `tq profile edit <name>` - Edit existing profile
-- `tq profile delete <name>` - Remove profile
-- Spec: [Configuration - Profile Management](../specifications/configuration.md#profile-management)
 
 ### REPL Enhancements
 
