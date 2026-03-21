@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-03-21
-**Current Version:** 1.24.0
-**Latest Sprint:** Sprint 43 Complete (Profile Management & Parser Polish)
+**Current Version:** 1.25.0
+**Latest Sprint:** Sprint 44 Complete (Driver Distribution Fix & Profile Polish)
 
 ---
 
@@ -354,6 +354,16 @@ All core features are complete and tested.
 - **Sprint 42 remediation**: Parser spec clarifications (REQ-PARSE-015, REQ-PARSE-018), space-injection documentation
 - 705 unit tests + 191 integration tests (100% pass rate), zero clippy warnings
 
+**Sprint 44 Bug Fixes & Polish (v1.25.0):**
+- **Runtime driver resolution** (Issue #31): Binary finds teradatasql library relative to executable path, not hardcoded CI build path
+- **Driver search fallback chain**: --driver-lib-dir → TERADATA_LIB_DIR env var → executable directory → current directory
+- **License acceptance**: Install script displays Teradata license and requires acceptance (--accept-license for non-interactive)
+- **Profile flag naming fix**: Profile subcommands now use `--logmech`/`--password-file` (was `--auth`/`--pass-file`)
+- **Profile delete confirmation**: TTY-interactive `[y/N]` prompt, non-TTY requires `--force`
+- **SqlParseError struct variant**: Preserves line/column from ParseError for better error reporting
+- **Shared display_profile() helper**: Eliminated handle_list/handle_profiles duplication
+- 715 unit tests + 178 integration tests (100% pass rate), zero clippy warnings
+
 ---
 
 ## Summary Statistics
@@ -361,9 +371,9 @@ All core features are complete and tested.
 - **Total Features**: 83
 - **Implemented**: 81 (98%)
 - **Planned**: 2 (2%)
-- **Test Pass Rate**: 100% (896/896 executed, 58 ignored database-dependent)
+- **Test Pass Rate**: 100% (893/893 executed, 57 ignored database-dependent)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 43 - Profile Management & Parser Polish
+- **Latest Sprint**: Sprint 44 - Driver Distribution Fix & Profile Polish
 
 ---
 
