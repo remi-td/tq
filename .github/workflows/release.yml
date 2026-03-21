@@ -43,11 +43,14 @@ jobs:
             lib_name: teradatasql.dylib
             package_format: tar.gz
 
-          - target: x86_64-pc-windows-msvc
-            runner: windows-latest
-            build_cmd: cargo build --release --target x86_64-pc-windows-msvc
-            lib_name: teradatasql.dll
-            package_format: zip
+          # Windows build disabled - dependency resolution issue with reedline/crossterm
+          # on Windows MSVC runners. See Sprint 41 review for details.
+          # TODO: Re-enable after investigating cargo lockfile platform resolution.
+          # - target: x86_64-pc-windows-msvc
+          #   runner: windows-latest
+          #   build_cmd: cargo build --release --target x86_64-pc-windows-msvc
+          #   lib_name: teradatasql.dll
+          #   package_format: zip
 
     steps:
       - name: Checkout
@@ -84,19 +87,6 @@ jobs:
           cd staging
           tar czf "tq-${VERSION}-${TARGET}.tar.gz" "tq-${VERSION}-${TARGET}"
 
-      - name: Package (Windows)
-        if: matrix.package_format == 'zip'
-        shell: pwsh
-        run: |
-          $VERSION = Get-Content version.txt
-          $TARGET = "${{ matrix.target }}"
-          $STAGING = "staging\tq-${VERSION}-${TARGET}"
-          New-Item -ItemType Directory -Force -Path $STAGING
-          Copy-Item "target\${TARGET}\release\tq.exe" -Destination $STAGING
-          Copy-Item "target\${TARGET}\release\${{ matrix.lib_name }}" -Destination $STAGING
-          Copy-Item "LICENSE" -Destination $STAGING
-          Compress-Archive -Path $STAGING -DestinationPath "staging\tq-${VERSION}-${TARGET}.zip"
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -118,7 +108,8 @@ jobs:
       - name: Generate checksums
         working-directory: staging
         run: |
-          sha256sum tq-*.tar.gz tq-*.zip > checksums.txt
+          sha256sum tq-*.tar.gz > checksums.txt
+          sha256sum tq-*.zip >> checksums.txt 2>/dev/null || true
           cat checksums.txt
 
       - name: Extract version
@@ -131,6 +122,7 @@ jobs:
             staging/tq-*.tar.gz
             staging/tq-*.zip
             staging/checksums.txt
+          fail_on_unmatched_files: false
           body: |
             ## tq ${{ env.VERSION }}
 
