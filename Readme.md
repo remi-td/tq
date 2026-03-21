@@ -73,14 +73,12 @@ curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh
 The script will show you exactly what it is doing:
 
 ```
-Detected: Linux x86_64
-Downloading tq 1.22.0 for linux-x86_64...
-Verifying checksum... OK
-Installing to ~/.local/bin/tq
-Done! Run: tq --version
-
-Note: Ensure ~/.local/bin is in your PATH.
-  Add to ~/.bashrc or ~/.zshrc: export PATH="$HOME/.local/bin:$PATH"
+tq-install: Detected: Linux (x86_64)
+tq-install: Latest version: v1.22.0
+tq-install: Downloading tq-v1.22.0-x86_64-unknown-linux-gnu.tar.gz...
+tq-install: Checksum verified.
+tq-install: Installed tq to /home/user/.local/bin/tq
+tq-install: Installation complete! Run 'tq --version' to verify.
 ```
 
 To install to a custom location, set `TQ_INSTALL_DIR` before running:
@@ -297,7 +295,7 @@ Or use environment variables:
 - **[Roadmap](docs/roadmap/status.md)** - Current implementation status
 - **[Architecture](docs/design/)** - Technical design documents
 
-**Need help?** Open a [GitHub issue](https://github.com/your-org/tq/issues).
+**Need help?** Open a [GitHub issue](https://github.com/remi-td/tq/issues).
 
 ---
 
@@ -330,7 +328,7 @@ requests, we accept contributions through GitHub Issues.
 While agents handle implementation, you can explore the codebase:
 
 ```bash
-git clone https://github.com/your-org/tq.git
+git clone https://github.com/remi-td/tq.git
 cd tq
 cargo build
 cargo test
@@ -369,5 +367,5 @@ with Teradata database systems.
 ## Links
 
 - [Teradata Rust API](https://github.com/Teradata/teradatarustapi)
-- [Report Issues](https://github.com/your-org/tq/issues)
+- [Report Issues](https://github.com/remi-td/tq/issues)
 - [Project Roadmap](docs/roadmap/status.md)

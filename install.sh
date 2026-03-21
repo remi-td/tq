@@ -57,6 +57,15 @@ detect_platform() {
     esac
 
     TARGET="${ARCH}-${OS}"
+
+    # Human-readable platform name for display
+    case "${TARGET}" in
+        x86_64-unknown-linux-gnu)   PLATFORM_DISPLAY="Linux (x86_64)" ;;
+        aarch64-unknown-linux-gnu)  PLATFORM_DISPLAY="Linux (ARM64)" ;;
+        x86_64-apple-darwin)        PLATFORM_DISPLAY="macOS (Intel)" ;;
+        aarch64-apple-darwin)       PLATFORM_DISPLAY="macOS (Apple Silicon)" ;;
+        *)                          PLATFORM_DISPLAY="${TARGET}" ;;
+    esac
 }
 
 # --- Main ---
@@ -68,7 +77,7 @@ main() {
     fi
 
     detect_platform
-    say "Detected platform: ${TARGET}"
+    say "Detected: ${PLATFORM_DISPLAY}"
 
     # Determine version
     if [ -n "${TQ_VERSION}" ]; then
