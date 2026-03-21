@@ -22,7 +22,7 @@ Execute the 5-phase sprint workflow, launching specialized sub-agents as needed,
 | **1** | Planning | Create `sprint-N-planning.md` with objectives and acceptance criteria. |
 | **2** | Design | Launch `cli-ux-designer` + `rust-teradata-architect` in parallel. |
 | **3** | Build & Test | Launch `rust-teradata-architect` (code) + `quality-validator` (tests) in parallel. |
-| **4** | Ship | Validate against Definition of Done. Commit, push, document. |
+| **4** | Ship | Validate against Definition of Done. Commit, push, **tag release**, document. |
 | **5** | Retrospective | Create `sprint-n-retrospective.md` documenting key metrics, achievements, learnings followup actions|
 | **6** | Framework Optimization | Review retro for improvements, optional token analysis, implement agentic framework optimizations |
 

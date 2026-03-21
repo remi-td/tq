@@ -131,6 +131,29 @@ git commit -m "Complete Sprint N: [Summary of features]
 git push origin main
 ```
 
+### Step 3.1: Tag Release and Trigger Build
+
+**CRITICAL**: After successful push, create a version tag and push it to trigger the GitHub Actions release workflow. This builds cross-platform binaries and creates a GitHub Release.
+
+1. **Read the version** from `Cargo.toml` (should already be bumped during implementation)
+2. **Create and push the tag:**
+
+```bash
+# Get version from Cargo.toml
+VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+git tag "v${VERSION}"
+git push origin "v${VERSION}"
+```
+
+3. **Verify the release workflow started:**
+```bash
+gh run list --workflow=release.yml --limit=1
+```
+
+4. **Do NOT wait for the workflow to complete** — it runs in CI. Proceed to the next step. If the workflow fails, it will be caught in the next sprint's Phase 0 reality check or flagged by the user.
+
+**NEVER skip this step.** Every sprint ships a tagged release with cross-compiled binaries.
+
 ### Step 3.5: Update GitHub Issues
 
 **CRITICAL**: After successful push, use `/github-issues` skill to update completed issues.
