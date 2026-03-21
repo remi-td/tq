@@ -1,9 +1,9 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 2.1.0 (Sprint 40 - Variable Substitution)
+**Version:** 1.22.0 (Sprint 41 - GitHub Releases & Binary Distribution)
 **Last Updated:** 2026-03-20
-**Base Commit:** [Sprint 40 - In Progress]
+**Base Commit:** [Sprint 41 - In Progress]
 
 ## Overview
 
@@ -481,6 +481,30 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 - **TC-039-004**: Query Inspect Batch Mode CLI Integration Tests
 - **TC-039-005**: Query Inspect REPL Tab Completion and Help
 - **TC-039-006**: Query Inspect REPL Command Execution and Alias
+
+---
+
+### Sprint 41: GitHub Releases & Binary Distribution
+
+**Sprint 41 Context:** DevOps/CI sprint delivering GitHub Actions release workflow, cross-compilation build.rs fix, POSIX install script, and Sprint 40 code quality remediation. Test strategy differs from feature sprints: locally-executable tests focus on build verification, regression, code inspection, and static analysis. GitHub Actions runtime execution and end-to-end install are NOT locally testable.
+
+**Sprint 41 Test Cases (5 test case documents):**
+
+- **TC-041-001**: Build Verification and Regression Suite (AC-14, AC-15, AC-26) - `cargo build` + `cargo test` 855+ tests pass
+- **TC-041-002**: Build.rs Cross-Compilation Code Inspection (AC-12, AC-13) - CARGO_CFG_TARGET_OS/ARCH usage verification
+- **TC-041-003**: Release Workflow YAML Structural Validation (AC-1 to AC-11) - actionlint + structure review (runtime deferred)
+- **TC-041-004**: Install Script Static Analysis and Structure Review (AC-16 to AC-22) - shellcheck (BLOCKED) + sh -n + review
+- **TC-041-005**: Sprint 40 Remediation Verification (AC-23 to AC-25) - /p alias, execute deduplication, LazyLock
+
+**Sprint 41 Test Strategy:**
+- **Test Count**: 5 test case documents covering 26 acceptance criteria
+- **Type**: DevOps/CI Sprint
+- **Database Required**: NO (all locally-executable tests are no-DB)
+- **Test Types**: Build verification (2 commands) + Code inspection (13 checks) + Static analysis (shellcheck/actionlint)
+- **Locally Testable ACs**: AC-12 to AC-16, AC-19 to AC-26 (build.rs, remediation, install script structure)
+- **NOT Locally Testable ACs**: AC-1 to AC-11 (workflow runtime), AC-17/AC-18 (download/checksum)
+- **Blocker**: shellcheck not installed (AC-21 test BLOCKED); actionlint not installed (AC workflow syntax limited)
+- **Acceptance**: cargo build passes + 855+ tests pass + code inspection clean + install script syntax valid
 
 ---
 

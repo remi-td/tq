@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
-**Last Updated:** 2026-03-20
-**Current Version:** 1.21.0
-**Latest Sprint:** Sprint 40 Complete (Variable Substitution)
+**Last Updated:** 2026-03-21
+**Current Version:** 1.22.0
+**Latest Sprint:** Sprint 41 Complete (GitHub Releases & Binary Distribution)
 
 ---
 
@@ -327,6 +327,14 @@ All core features are complete and tested.
 - **`tq help params`**: Comprehensive help topic for variable substitution
 - **Multiple file merging**: Deep merge with last-writer-wins semantics
 - **Sprint 39 remediation**: REQ-QUERY spec updated, 31 redundant utility tests removed
+- 855 total tests (100% pass rate), zero clippy warnings
+
+**Sprint 41 Enhancements (v1.22.0):**
+- **GitHub Actions release workflow**: Automated CI/CD pipeline triggered by `v*` tags
+- **Cross-platform binaries**: Builds for Linux x86_64, Linux aarch64, macOS x86_64, macOS aarch64, Windows x86_64
+- **Install script**: POSIX-compatible one-liner installer with checksum verification
+- **Cross-compilation build.rs**: Uses `CARGO_CFG_TARGET_OS`/`CARGO_CFG_TARGET_ARCH` for correct library selection
+- **Sprint 40 remediation**: Eliminated execute/execute_with_params duplication, LazyLock regex, /p alias documented
 - 855 total tests (100% pass rate), zero clippy warnings
 
 ---

@@ -2,6 +2,25 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
+/// Determine the correct teradatasql library filename for the target platform.
+///
+/// Uses Cargo-provided environment variables (`CARGO_CFG_TARGET_OS` and
+/// `CARGO_CFG_TARGET_ARCH`) which always reflect the actual compilation target,
+/// even during cross-compilation. This is in contrast to `cfg!(target_os)` which
+/// evaluates against the host platform.
+fn determine_library_name() -> &'static str {
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+
+    match (target_os.as_str(), target_arch.as_str()) {
+        ("macos", _) => "teradatasql.dylib",
+        ("windows", _) => "teradatasql.dll",
+        ("linux", "aarch64") => "teradatasql.arm.so",
+        ("linux", _) => "teradatasql.so",
+        _ => "teradatasql.so", // fallback for unknown targets
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get the output directory (where the binary will be built)
     let out_dir = env::var("OUT_DIR")?;
@@ -12,14 +31,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("Failed to determine target directory from OUT_DIR")?
         .to_path_buf();
 
-    // Determine the library name based on platform
-    let lib_name = if cfg!(target_os = "macos") {
-        "teradatasql.dylib"
-    } else if cfg!(target_os = "windows") {
-        "teradatasql.dll"
-    } else {
-        "teradatasql.so"
-    };
+    // Determine the library name based on target platform
+    let lib_name = determine_library_name();
 
     // Find the teradatarustapi checkout in cargo cache
     let home = env::var("HOME")
@@ -53,7 +66,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 );
                             } else {
                                 // Successfully copied - no warning needed for success case
-                                // Sprint 28: Removed success warning to provide clean REPL startup
 
                                 // Write the library directory to a file that can be included at compile time
                                 let lib_dir_file =

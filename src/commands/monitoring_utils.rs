@@ -147,10 +147,12 @@ mod tests {
 
     #[test]
     fn test_extract_decimal_negative() {
-        let value = Value::Decimal(-3.14);
+        #[allow(clippy::approx_constant)]
+        let neg_val = -3.14;
+        let value = Value::Decimal(neg_val);
         let result = extract_decimal(&value);
         assert!(result.is_some());
-        assert!((result.unwrap() - (-3.14)).abs() < 0.001);
+        assert!((result.unwrap() - neg_val).abs() < 0.001);
     }
 
     // =========================================================================

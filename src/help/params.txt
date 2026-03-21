@@ -85,10 +85,15 @@ Error Messages:
     which is not set.
 
 REPL Usage:
-  In REPL mode, use /params to manage parameter files interactively:
+  In REPL mode, use /params (or /p) to manage parameter files:
     /params load <file>    Load a parameter file
     /params unload         Clear all loaded parameters
     /params show           Show currently loaded parameters
+
+  Short alias /p supports all subcommands:
+    /p load deploy.yaml    Same as /params load deploy.yaml
+    /p show                Same as /params show
+    /p unload              Same as /params unload
 
 See also:
   tq help config          Configuration file format

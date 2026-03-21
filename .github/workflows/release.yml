@@ -1,0 +1,148 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            build_cmd: cargo build --release --target x86_64-unknown-linux-gnu
+            lib_name: teradatasql.so
+            package_format: tar.gz
+
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+            build_cmd: cross build --release --target aarch64-unknown-linux-gnu
+            lib_name: teradatasql.arm.so
+            package_format: tar.gz
+
+          - target: x86_64-apple-darwin
+            runner: macos-latest
+            build_cmd: cargo build --release --target x86_64-apple-darwin
+            lib_name: teradatasql.dylib
+            package_format: tar.gz
+
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            build_cmd: cargo build --release --target aarch64-apple-darwin
+            lib_name: teradatasql.dylib
+            package_format: tar.gz
+
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            build_cmd: cargo build --release --target x86_64-pc-windows-msvc
+            lib_name: teradatasql.dll
+            package_format: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        shell: bash
+        run: echo "${GITHUB_REF#refs/tags/}" > version.txt
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install cross (aarch64-linux only)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build
+        run: ${{ matrix.build_cmd }}
+
+      - name: Package (Linux/macOS)
+        if: matrix.package_format == 'tar.gz'
+        shell: bash
+        run: |
+          VERSION=$(cat version.txt)
+          TARGET=${{ matrix.target }}
+          STAGING="staging/tq-${VERSION}-${TARGET}"
+          mkdir -p "${STAGING}"
+          cp "target/${TARGET}/release/tq" "${STAGING}/"
+          cp "target/${TARGET}/release/${{ matrix.lib_name }}" "${STAGING}/"
+          cp LICENSE "${STAGING}/"
+          cd staging
+          tar czf "tq-${VERSION}-${TARGET}.tar.gz" "tq-${VERSION}-${TARGET}"
+
+      - name: Package (Windows)
+        if: matrix.package_format == 'zip'
+        shell: pwsh
+        run: |
+          $VERSION = Get-Content version.txt
+          $TARGET = "${{ matrix.target }}"
+          $STAGING = "staging\tq-${VERSION}-${TARGET}"
+          New-Item -ItemType Directory -Force -Path $STAGING
+          Copy-Item "target\${TARGET}\release\tq.exe" -Destination $STAGING
+          Copy-Item "target\${TARGET}\release\${{ matrix.lib_name }}" -Destination $STAGING
+          Copy-Item "LICENSE" -Destination $STAGING
+          Compress-Archive -Path $STAGING -DestinationPath "staging\tq-${VERSION}-${TARGET}.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tq-${{ matrix.target }}
+          path: staging/tq-*.${{ matrix.package_format }}
+          retention-days: 1
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: staging
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: staging
+        run: |
+          sha256sum tq-*.tar.gz tq-*.zip > checksums.txt
+          cat checksums.txt
+
+      - name: Extract version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            staging/tq-*.tar.gz
+            staging/tq-*.zip
+            staging/checksums.txt
+          body: |
+            ## tq ${{ env.VERSION }}
+
+            ### Installation
+
+            **One-liner (Linux/macOS):**
+            ```sh
+            curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh
+            ```
+
+            **Manual download:** Choose your platform from the assets below.
+
+            ### Checksums
+            See `checksums.txt` for SHA256 verification.
+          generate_release_notes: true

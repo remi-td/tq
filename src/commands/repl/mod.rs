@@ -54,9 +54,13 @@ use crate::params::ParamStore;
 /// Sprint 20: Pre-loads database names BEFORE editor initialization to avoid
 /// TTY conflicts during tab completion.
 /// The client is now owned by a shared state that can be updated on reconnection.
+///
+/// When `initial_params` is `Some`, the ParamStore is loaded into REPL state
+/// so that `{{variable}}` substitution is available from the start.
 pub fn execute<W: Write>(
     client: DatabaseClient,
     args: &ReplArgs,
+    initial_params: Option<ParamStore>,
     writer: &mut W,
     use_color: bool,
     _verbose: bool,
@@ -71,6 +75,9 @@ pub fn execute<W: Write>(
         let mut s = ReplState::new(cs.client().config().clone());
         // Sprint 36: Store default_limit so /repeat can re-use it
         s.set_default_limit(args.default_limit);
+        if let Some(params) = initial_params {
+            s.params = params;
+        }
         s
     };
 
@@ -102,76 +109,6 @@ pub fn execute<W: Write>(
         print_banner(&cs, args, writer)?;
     }
 
-    // Initialize reedline editor with persistent history and editor mode
-    // Note: Databases are already cached, so tab completion won't trigger queries
-    let mut editor = create_editor(args, writer, Arc::clone(&completion_state))?;
-
-    // Create prompt
-    let prompt = TqPrompt::new();
-
-    // Main REPL loop
-    repl_loop(
-        &mut editor,
-        &completion_state,
-        &mut state,
-        &prompt,
-        writer,
-        use_color,
-        args.default_limit,
-    )?;
-
-    // Clean exit
-    writeln!(writer, "Goodbye!")?;
-    Ok(())
-}
-
-/// Execute the REPL command with an initial ParamStore (Sprint 40)
-///
-/// This variant accepts a pre-built ParamStore from CLI --params flags,
-/// making variables available for substitution from the start.
-pub fn execute_with_params<W: Write>(
-    client: DatabaseClient,
-    args: &ReplArgs,
-    initial_params: ParamStore,
-    writer: &mut W,
-    use_color: bool,
-    _verbose: bool,
-) -> Result<()> {
-    // Create shared completion state (thread-safe for reedline)
-    let database = client.config().database.clone();
-    let completion_state = Arc::new(Mutex::new(CompletionState::new(client, database)));
-
-    // Initialize REPL state with params
-    let mut state = {
-        let cs = completion_state.lock().unwrap();
-        let mut s = ReplState::new(cs.client().config().clone());
-        s.set_default_limit(args.default_limit);
-        s.params = initial_params;
-        s
-    };
-
-    // Pre-load ALL metadata BEFORE editor initialization
-    {
-        let mut cs = completion_state.lock().unwrap();
-        log::info!("Pre-loading metadata for tab completion...");
-        if cs.ensure_databases_loaded() {
-            log::info!("Database names loaded successfully");
-        } else {
-            log::warn!("Failed to pre-load database names; tab completion may be limited");
-        }
-        if cs.ensure_tables_loaded() {
-            log::info!("Table metadata loaded successfully");
-        } else {
-            log::warn!("Failed to pre-load table metadata; tab completion may be limited");
-        }
-    }
-
-    // Show startup banner
-    {
-        let cs = completion_state.lock().unwrap();
-        print_banner(&cs, args, writer)?;
-    }
-
     // Show params status if params were loaded from CLI
     if !state.params.is_empty() {
         let count = state.params.list_available_paths().len();
@@ -185,7 +122,8 @@ pub fn execute_with_params<W: Write>(
         writeln!(writer)?;
     }
 
-    // Initialize reedline editor
+    // Initialize reedline editor with persistent history and editor mode
+    // Note: Databases are already cached, so tab completion won't trigger queries
     let mut editor = create_editor(args, writer, Arc::clone(&completion_state))?;
 
     // Create prompt

@@ -17,9 +17,8 @@ with Teradata from the command line.
 ## Quick Start
 
 ```bash
-# Install (requires Rust toolchain from https://rustup.rs)
-git clone https://github.com/your-org/tq.git
-cd tq && cargo install --path .
+# Install (Linux / macOS)
+curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh
 
 # Set connection
 export TQ_LOGON="user:pass@host:1025/database"
@@ -62,19 +61,62 @@ a replacement for human developers.*
 
 ## Installation
 
-### Prerequisites
+### Quick Install (Linux and macOS)
 
-tq is written in Rust. Install the Rust toolchain if you have not already:
-https://rustup.rs
-
-**Supported platforms:** Linux, macOS, Windows
-
-**Required:** Rust 1.70 or later
-
-### Install from Source
+The fastest way to install tq. Downloads the correct prebuilt binary for your
+platform, verifies the checksum, and installs to `~/.local/bin`:
 
 ```bash
-git clone https://github.com/your-org/tq.git
+curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh
+```
+
+The script will show you exactly what it is doing:
+
+```
+Detected: Linux x86_64
+Downloading tq 1.22.0 for linux-x86_64...
+Verifying checksum... OK
+Installing to ~/.local/bin/tq
+Done! Run: tq --version
+
+Note: Ensure ~/.local/bin is in your PATH.
+  Add to ~/.bashrc or ~/.zshrc: export PATH="$HOME/.local/bin:$PATH"
+```
+
+To install to a custom location, set `TQ_INSTALL_DIR` before running:
+
+```bash
+TQ_INSTALL_DIR=/usr/local/bin curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh
+```
+
+### Manual Download
+
+Download a prebuilt binary directly from [GitHub Releases](https://github.com/remi-td/tq/releases):
+
+**Supported platforms:**
+
+| Platform | Architecture | Filename |
+|----------|-------------|----------|
+| Linux | x86_64 | `tq-<version>-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux | aarch64 (ARM64) | `tq-<version>-aarch64-unknown-linux-gnu.tar.gz` |
+| macOS | x86_64 (Intel) | `tq-<version>-x86_64-apple-darwin.tar.gz` |
+| macOS | aarch64 (Apple Silicon) | `tq-<version>-aarch64-apple-darwin.tar.gz` |
+| Windows | x86_64 | `tq-<version>-x86_64-pc-windows-msvc.zip` |
+
+Each release also includes a `checksums.txt` file with SHA256 checksums for
+all artifacts. Verify your download before use:
+
+```bash
+# Linux / macOS
+sha256sum -c checksums.txt --ignore-missing
+```
+
+### Build from Source
+
+Requires Rust 1.70 or later ([rustup.rs](https://rustup.rs)):
+
+```bash
+git clone https://github.com/remi-td/tq.git
 cd tq
 cargo install --path .
 ```
@@ -83,7 +125,7 @@ cargo install --path .
 
 ```bash
 tq --version
-# tq 1.12.0
+# tq 1.22.0
 ```
 
 **License Notice:** By installing tq, you accept the license terms for bundled

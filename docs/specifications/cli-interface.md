@@ -19,6 +19,7 @@
 6. [Flag Design Guidelines](#flag-design-guidelines)
 7. [Help Text Design](#help-text-design)
 8. [Version Information](#version-information)
+9. [Installation Experience](#installation-experience)
 
 ---
 
@@ -1463,5 +1464,239 @@ Built: 2024-01-15T10:30:00Z
 Target: x86_64-unknown-linux-musl
 Teradata Driver: 17.20.00.17
 ```
+
+---
+
+## Installation Experience
+
+The install script (`install.sh`) is the primary installation method for Linux
+and macOS users. It is the very first CLI interaction a user has with tq, so it
+must communicate clearly, succeed silently on the happy path, and provide
+actionable guidance when things go wrong.
+
+### Design Principles
+
+- **Minimal noise on success**: Print only essential progress, not verbose internals.
+- **Actionable errors**: Every error message tells the user what to do next.
+- **Transparent about actions**: The user sees what platform was detected, what
+  was downloaded, where it was installed. No surprises.
+- **POSIX compatibility**: The script runs under `sh`, `bash`, and `dash`.
+  No bashisms.
+
+---
+
+### REQ-INSTALL-001: Happy Path Output
+
+On a successful install, the script SHALL print a concise, structured progress
+summary:
+
+```
+Detected: macOS aarch64 (Apple Silicon)
+Downloading tq 1.22.0... done
+Verifying checksum... OK
+Installing to /Users/alice/.local/bin/tq... done
+
+tq 1.22.0 installed successfully.
+
+Run:  tq --version
+Docs: https://github.com/remi-td/tq
+```
+
+Requirements:
+1. **REQ-INSTALL-001.1** - The detected OS and architecture SHALL be shown on the first line.
+2. **REQ-INSTALL-001.2** - Each step (download, checksum, install) SHALL be on its own line with a trailing `done` or `OK` on completion.
+3. **REQ-INSTALL-001.3** - A blank line SHALL precede the success summary.
+4. **REQ-INSTALL-001.4** - The post-install call to action (`tq --version`) SHALL always be shown.
+5. **REQ-INSTALL-001.5** - The docs URL SHALL be shown so users know where to get help.
+
+---
+
+### REQ-INSTALL-002: PATH Notice
+
+When `~/.local/bin` is not present in the user's `$PATH`, the script SHALL
+print an advisory notice after the success summary:
+
+```
+Note: ~/.local/bin is not in your PATH.
+  Add this line to ~/.bashrc or ~/.zshrc:
+    export PATH="$HOME/.local/bin:$PATH"
+  Then reload your shell: source ~/.bashrc
+```
+
+Requirements:
+1. **REQ-INSTALL-002.1** - The notice SHALL appear only when `~/.local/bin` is not in `$PATH`.
+2. **REQ-INSTALL-002.2** - The notice SHALL show the exact export line to add, verbatim.
+3. **REQ-INSTALL-002.3** - The notice SHALL show both `.bashrc` and `.zshrc` as options.
+4. **REQ-INSTALL-002.4** - The notice SHALL show the `source` reload command.
+5. **REQ-INSTALL-002.5** - When `TQ_INSTALL_DIR` is set to a non-default location, the
+   PATH notice SHALL use that directory instead of `~/.local/bin`.
+
+---
+
+### REQ-INSTALL-003: Custom Install Directory
+
+The install directory defaults to `~/.local/bin` and can be overridden with the
+`TQ_INSTALL_DIR` environment variable:
+
+```bash
+TQ_INSTALL_DIR=/usr/local/bin curl -sSL .../install.sh | sh
+```
+
+Requirements:
+1. **REQ-INSTALL-003.1** - When `TQ_INSTALL_DIR` is set, the script SHALL use it as the
+   install destination.
+2. **REQ-INSTALL-003.2** - The script SHALL display the resolved install path (not the
+   variable name) in the progress output.
+3. **REQ-INSTALL-003.3** - If `TQ_INSTALL_DIR` does not exist, the script SHALL attempt
+   to create it with `mkdir -p` and report success or failure.
+
+---
+
+### REQ-INSTALL-004: Unsupported Platform Error
+
+When the script detects an unsupported OS or architecture, it SHALL exit with a
+clear, actionable error:
+
+```
+Error: Unsupported platform: Windows x86_64
+
+Prebuilt binaries are not available for this platform via this script.
+For manual installation options, visit:
+  https://github.com/remi-td/tq/releases
+
+To build from source (requires Rust toolchain):
+  https://rustup.rs
+  git clone https://github.com/remi-td/tq.git
+  cd tq && cargo install --path .
+```
+
+Requirements:
+1. **REQ-INSTALL-004.1** - The error line SHALL name the detected platform exactly as
+   detected (e.g., `Windows x86_64`, `Linux armv7`).
+2. **REQ-INSTALL-004.2** - The releases URL SHALL always be included so the user can
+   attempt manual download.
+3. **REQ-INSTALL-004.3** - Build-from-source instructions SHALL always be included as
+   a fallback.
+4. **REQ-INSTALL-004.4** - The script SHALL exit with a non-zero exit code.
+
+---
+
+### REQ-INSTALL-005: Download Failure Error
+
+When the binary download fails (network error, 404, rate limit), the script
+SHALL show:
+
+```
+Error: Download failed (HTTP 404)
+
+Could not download: tq-1.22.0-x86_64-unknown-linux-gnu.tar.gz
+From: https://github.com/remi-td/tq/releases/download/v1.22.0/...
+
+Check your network connection, or download manually:
+  https://github.com/remi-td/tq/releases
+```
+
+Requirements:
+1. **REQ-INSTALL-005.1** - The HTTP status code SHALL be included when available.
+2. **REQ-INSTALL-005.2** - The exact URL attempted SHALL be shown.
+3. **REQ-INSTALL-005.3** - The manual releases URL SHALL be included.
+4. **REQ-INSTALL-005.4** - The script SHALL exit with a non-zero exit code.
+
+---
+
+### REQ-INSTALL-006: Checksum Verification Failure
+
+When SHA256 verification fails, the script SHALL abort the install and show:
+
+```
+Error: Checksum verification failed
+
+Expected: <expected-sha256>
+Got:      <actual-sha256>
+
+The downloaded file may be corrupted or tampered with.
+The partial download has been removed.
+
+Try again, or download manually and verify:
+  https://github.com/remi-td/tq/releases
+```
+
+Requirements:
+1. **REQ-INSTALL-006.1** - Both the expected and actual checksums SHALL be shown so
+   the user can compare.
+2. **REQ-INSTALL-006.2** - The partial/corrupt download SHALL be deleted before exiting.
+3. **REQ-INSTALL-006.3** - The script SHALL exit with a non-zero exit code.
+4. **REQ-INSTALL-006.4** - The script SHALL never install a binary that failed checksum
+   verification.
+
+---
+
+### REQ-INSTALL-007: Missing Dependencies
+
+When required tools (`curl`, `sha256sum` or `shasum`, `tar`) are not available,
+the script SHALL report which tool is missing and how to get it:
+
+```
+Error: Required tool not found: sha256sum
+
+Install it and try again:
+  Ubuntu/Debian: apt install coreutils
+  Fedora/RHEL:   dnf install coreutils
+  macOS:         shasum is available by default (macOS 10.5+)
+```
+
+Requirements:
+1. **REQ-INSTALL-007.1** - The missing tool name SHALL be named exactly.
+2. **REQ-INSTALL-007.2** - Platform-appropriate install instructions SHALL be shown
+   where known.
+3. **REQ-INSTALL-007.3** - The script SHALL check for all required tools at startup,
+   before beginning any download.
+4. **REQ-INSTALL-007.4** - The script SHALL exit with a non-zero exit code.
+
+---
+
+### REQ-INSTALL-008: Permission Error
+
+When the install directory is not writable, the script SHALL show:
+
+```
+Error: Cannot write to /usr/local/bin
+
+Permission denied. Try one of:
+  Run with sudo:
+    curl -sSL .../install.sh | sudo TQ_INSTALL_DIR=/usr/local/bin sh
+  Or install to your home directory (default):
+    curl -sSL .../install.sh | sh
+```
+
+Requirements:
+1. **REQ-INSTALL-008.1** - The target directory SHALL be named in the error.
+2. **REQ-INSTALL-008.2** - The `sudo` invocation form SHALL be shown correctly
+   (the env var must come after `sudo`).
+3. **REQ-INSTALL-008.3** - The default home-directory install SHALL always be offered
+   as an alternative.
+
+---
+
+### REQ-INSTALL-009: Supported Platforms
+
+The install script SHALL detect and support the following platform combinations:
+
+| OS | Architecture | Detection | Binary Target |
+|----|-------------|-----------|---------------|
+| Linux | x86_64 | `uname -m` → `x86_64` | `x86_64-unknown-linux-gnu` |
+| Linux | aarch64 | `uname -m` → `aarch64` or `arm64` | `aarch64-unknown-linux-gnu` |
+| macOS | x86_64 | `uname -s` → `Darwin`, `uname -m` → `x86_64` | `x86_64-apple-darwin` |
+| macOS | aarch64 | `uname -s` → `Darwin`, `uname -m` → `arm64` | `aarch64-apple-darwin` |
+
+Requirements:
+1. **REQ-INSTALL-009.1** - Platform detection SHALL use `uname -s` (OS) and `uname -m`
+   (architecture).
+2. **REQ-INSTALL-009.2** - Both `aarch64` and `arm64` from `uname -m` SHALL be
+   treated as the same architecture (arm64 is the macOS alias for aarch64).
+3. **REQ-INSTALL-009.3** - Windows SHALL be detected and produce the unsupported
+   platform error (REQ-INSTALL-004) with a pointer to the `.zip` release artifact.
+4. **REQ-INSTALL-009.4** - Any other platform (musl, armv7, FreeBSD, etc.) SHALL
+   produce the unsupported platform error (REQ-INSTALL-004).
 
 ---

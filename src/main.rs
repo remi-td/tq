@@ -87,14 +87,14 @@ fn run(cli: Cli) -> Result<()> {
             if args.output.is_some() {
                 // Write to file
                 let mut stderr = io::stderr();
-                commands::query::execute_to_file_with_params(
-                    &client, &args, &param_store, &mut stderr, use_color, verbose,
+                commands::query::execute_to_file(
+                    &client, &args, Some(&param_store), &mut stderr, use_color, verbose,
                 )?;
             } else {
                 // Write to stdout
                 let mut stdout = io::stdout();
-                commands::query::execute_with_params(
-                    &client, &args, &param_store, &mut stdout, use_color, verbose,
+                commands::query::execute(
+                    &client, &args, Some(&param_store), &mut stdout, use_color, verbose,
                 )?;
             }
         }
@@ -102,8 +102,8 @@ fn run(cli: Cli) -> Result<()> {
             let mut stdout = io::stdout();
             // Sprint 7: Pass ownership of client to REPL for /logon support
             // Sprint 40: Pass param_store for variable substitution
-            commands::repl::execute_with_params(
-                client, &args, param_store, &mut stdout, use_color, verbose,
+            commands::repl::execute(
+                client, &args, Some(param_store), &mut stdout, use_color, verbose,
             )?;
         }
         // Sprint 26: Sessions command for system monitoring

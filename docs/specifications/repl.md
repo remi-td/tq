@@ -4010,9 +4010,9 @@ Session Information:
 | `/history` | - | Show command history | `/history` |
 | `/edit` | `\e` | Edit last query in $EDITOR | `/edit` |
 | `/repeat` | `\r` | Re-execute last query | `/repeat` |
-| `/params load <file>` | - | Load YAML parameter file | `/params load deploy.yaml` |
-| `/params unload` | - | Clear all loaded parameters | `/params unload` |
-| `/params show` | - | Show loaded parameters | `/params show` |
+| `/params load <file>` | `/p load <file>` | Load YAML parameter file | `/p load deploy.yaml` |
+| `/params unload` | `/p unload` | Clear all loaded parameters | `/p unload` |
+| `/params show` | `/p show` | Show loaded parameters | `/p show` |
 | `/quit` | `\q` | Exit REPL | `/quit` |
 
 ---
@@ -4422,9 +4422,9 @@ The `/params` command SHALL be available as a metacommand in REPL mode with the 
 3. **REQ-PARAMS-REPL-001.3** - `/params show` - Display all currently loaded parameters and their values
 4. **REQ-PARAMS-REPL-001.4** - `/params` with no subcommand - Display usage hint (same as `/help params`)
 5. **REQ-PARAMS-REPL-001.5** - Command SHALL be case-insensitive (`/Params`, `/PARAMS` are valid)
-6. **REQ-PARAMS-REPL-001.6** - No short alias is defined for `/params`
+6. **REQ-PARAMS-REPL-001.6** - `/p` SHALL be accepted as a short alias for `/params` (e.g., `/p load deploy.yaml`, `/p show`, `/p unload`)
 
-**Rationale:** The three-subcommand structure (load/unload/show) mirrors common parameter management patterns. The lack of a short alias reflects the infrequency of use in typical sessions - a user sets params once then queries many times.
+**Rationale:** The three-subcommand structure (load/unload/show) mirrors common parameter management patterns. The `/p` short alias is consistent with other short aliases in the REPL (`/s` for `/sessions`, `/sc` for `/sysconfig`) and reduces keystrokes for users who actively manage parameter files during a session.
 
 ---
 
@@ -4625,18 +4625,26 @@ All errors in `/params` commands:
 
 **REQ-PARAMS-REPL-007: Tab Completion**
 
-1. **REQ-PARAMS-REPL-007.1** - Typing `/p<TAB>` SHALL suggest `/params` (and `/ping` and `/peek` if they exist)
+1. **REQ-PARAMS-REPL-007.1** - Typing `/p<TAB>` SHALL suggest `/params`, `/p` (alias), `/ping`, and `/peek`
 2. **REQ-PARAMS-REPL-007.2** - Typing `/params<TAB>` or `/params <TAB>` SHALL show the three subcommands: `load`, `unload`, `show`
 3. **REQ-PARAMS-REPL-007.3** - Typing `/params l<TAB>` SHALL auto-complete to `/params load`
 4. **REQ-PARAMS-REPL-007.4** - Typing `/params load <TAB>` SHALL trigger file path completion (`.yaml` and `.yml` files suggested first)
 5. **REQ-PARAMS-REPL-007.5** - Typing `/params u<TAB>` SHALL auto-complete to `/params unload`
 6. **REQ-PARAMS-REPL-007.6** - Typing `/params s<TAB>` SHALL auto-complete to `/params show`
 7. **REQ-PARAMS-REPL-007.7** - `/params` SHALL appear in the metacommand list when typing `/<TAB>`
+8. **REQ-PARAMS-REPL-007.8** - The `/p` alias SHALL support the same tab completion as `/params` (e.g., `/p <TAB>` shows `load`, `unload`, `show`; `/p load <TAB>` triggers file path completion)
 
 **Tab completion example:**
 
 ```sql
 tq> /params <TAB>
+
+Subcommands:
+    load    Load a YAML parameter file
+    show    Show currently loaded parameters
+    unload  Clear all loaded parameters
+
+tq> /p <TAB>
 
 Subcommands:
     load    Load a YAML parameter file
@@ -4655,18 +4663,19 @@ deploy.yaml  base.yaml  prod-overrides.yaml
 2. **REQ-PARAMS-REPL-008.2** - `/help params` SHALL display detailed help (see example below)
 3. **REQ-PARAMS-REPL-008.3** - `/params` with no subcommand SHALL display the same output as `/help params`
 4. **REQ-PARAMS-REPL-008.4** - `/params` SHALL appear in metacommand list when typing `/<TAB>`
+5. **REQ-PARAMS-REPL-008.5** - The `/help params` output SHALL prominently show `/p` as the short alias on the first usage line
 
 **Example `/help params` output:**
 
 ```sql
 tq> /help params
 
-/params - Manage YAML parameter files for variable substitution
+/params (/p) - Manage YAML parameter files for variable substitution
 
 Usage:
-  /params load <file>   Load a YAML parameter file
-  /params unload        Clear all loaded parameters
-  /params show          Show currently loaded parameters
+  /params load <file>   Load a YAML parameter file      (alias: /p load <file>)
+  /params unload        Clear all loaded parameters      (alias: /p unload)
+  /params show          Show currently loaded parameters (alias: /p show)
 
 Variable Syntax:
   Use {{variable}} markers in SQL queries:
@@ -4692,14 +4701,14 @@ Multiple Files:
   Later files override earlier files on conflicting keys.
 
 Examples:
-  /params load deploy.yaml
-  /params show
+  /p load deploy.yaml
+  /p show
   SELECT * FROM {{target.database}}.{{target.schema}}.employees;
-  /params unload
+  /p unload
 
 Notes:
   - Parameters persist for the duration of the REPL session
-  - Use /params unload to clear all variables
+  - Use /params unload (or /p unload) to clear all variables
   - Undefined {{variables}} produce an error but do not close the REPL
   - {{$ENV.VAR_NAME}} works without loading any params file
 

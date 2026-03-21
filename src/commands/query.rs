@@ -205,9 +205,13 @@ fn read_sql_stdin() -> Result<String> {
 // ============================================================================
 
 /// Execute the query command
+///
+/// When `params` is `Some` and non-empty, `{{variable}}` markers in the SQL
+/// are substituted before execution.
 pub fn execute<W: Write>(
     client: &DatabaseClient,
     args: &QueryArgs,
+    params: Option<&ParamStore>,
     writer: &mut W,
     use_color: bool,
     verbose: bool,
@@ -221,6 +225,12 @@ pub fn execute<W: Write>(
 
     // Read SQL from source
     let sql = read_input_sql(&source)?;
+
+    // Apply variable substitution if params provided and non-empty
+    let sql = match params {
+        Some(p) if !p.is_empty() => p.substitute(&sql)?,
+        _ => sql,
+    };
 
     // Determine execution mode: single statement (fast path) or batch
     // For command-line arguments, always use single statement mode (no splitting)
@@ -235,91 +245,6 @@ pub fn execute<W: Write>(
     } else {
         execute_single(client, &sql, args, writer, use_color, verbose)
     }
-}
-
-/// Execute the query command with variable substitution from ParamStore
-///
-/// Sprint 40: Applies `{{variable}}` substitution to the SQL before execution.
-pub fn execute_with_params<W: Write>(
-    client: &DatabaseClient,
-    args: &QueryArgs,
-    params: &ParamStore,
-    writer: &mut W,
-    use_color: bool,
-    verbose: bool,
-) -> Result<()> {
-    // Determine input source
-    let source = determine_input_source(args)?;
-
-    if verbose {
-        eprintln!("Reading SQL from {}", source.description());
-    }
-
-    // Read SQL from source
-    let sql = read_input_sql(&source)?;
-
-    // Apply variable substitution before any SQL processing
-    let sql = if !params.is_empty() {
-        params.substitute(&sql)?
-    } else {
-        sql
-    };
-
-    // Determine execution mode
-    let use_batch = match source {
-        InputSource::Argument(_) => false,
-        _ => has_multiple_statements(&sql),
-    };
-
-    if use_batch {
-        execute_batch(client, &sql, args, writer, use_color, verbose)
-    } else {
-        execute_single(client, &sql, args, writer, use_color, verbose)
-    }
-}
-
-/// Execute the query command to file with variable substitution
-///
-/// Sprint 40: File output variant with param substitution.
-pub fn execute_to_file_with_params<W: Write>(
-    client: &DatabaseClient,
-    args: &QueryArgs,
-    params: &ParamStore,
-    writer: &mut W,
-    use_color: bool,
-    verbose: bool,
-) -> Result<()> {
-    // If no params loaded, delegate to original function
-    if params.is_empty() {
-        return execute_to_file(client, args, writer, use_color, verbose);
-    }
-
-    // Determine input source
-    let source = determine_input_source(args)?;
-
-    if verbose {
-        eprintln!("Reading SQL from {}", source.description());
-    }
-
-    // Read and substitute SQL
-    let sql = read_input_sql(&source)?;
-    let sql = params.substitute(&sql)?;
-
-    // Create a modified args with the substituted SQL as inline query
-    // This is a workaround to reuse existing file output logic
-    let modified_args = QueryArgs {
-        query: Some(sql),
-        file: None,
-        format: args.format,
-        output: args.output.clone(),
-        no_header: args.no_header,
-        timing: args.timing,
-        limit: args.limit,
-        atomic: args.atomic,
-    };
-
-    // Use the original execute_to_file with the substituted SQL
-    execute_to_file(client, &modified_args, writer, use_color, verbose)
 }
 
 /// Execute a single SQL statement (fast path)
@@ -534,9 +459,13 @@ fn execute_batch<W: Write>(
 /// 1. Write to temporary file in same directory
 /// 2. Rename to final path only on success
 /// 3. Prevents partial files on error or interruption
+///
+/// When `params` is `Some` and non-empty, `{{variable}}` markers in the SQL
+/// are substituted before execution.
 pub fn execute_to_file<W: Write>(
     client: &DatabaseClient,
     args: &QueryArgs,
+    params: Option<&ParamStore>,
     status_writer: &mut W,
     _use_color: bool,
     verbose: bool,
@@ -554,6 +483,12 @@ pub fn execute_to_file<W: Write>(
 
     // Read SQL from source
     let sql = read_input_sql(&source)?;
+
+    // Apply variable substitution if params provided and non-empty
+    let sql = match params {
+        Some(p) if !p.is_empty() => p.substitute(&sql)?,
+        _ => sql,
+    };
 
     // Determine execution mode
     let use_batch = match source {

@@ -414,16 +414,31 @@ Add new config sources via `figment`:
 
 Deliberately minimal: no async runtime (synchronous sufficient), no heavy parsing (simple statement splitting), no complex UI frameworks (terminal-first).
 
+## Build & Distribution Architecture
+
+### Native Library Management
+
+tq depends on `teradatarustapi`, which provides pre-built native libraries (Go-based, loaded via `libloading` at runtime). The `build.rs` script handles copying the correct library to the target directory at build time.
+
+**Cross-compilation support**: `build.rs` uses `CARGO_CFG_TARGET_OS` and `CARGO_CFG_TARGET_ARCH` (not `cfg!()`) to select the correct library for the target platform. See `docs/design/release.md` for the full mapping table.
+
+### Release Pipeline
+
+Releases are automated via GitHub Actions (`.github/workflows/release.yml`), triggered by `v*` tag pushes. The pipeline builds for 5 targets (Linux x86_64, Linux aarch64, macOS x86_64, macOS aarch64, Windows x86_64), packages each with the correct teradatasql native library, and publishes to GitHub Releases with SHA256 checksums.
+
+### Installation
+
+End users install via a POSIX-compatible `install.sh` script that detects OS/architecture, downloads the correct binary, verifies checksums, and installs to `~/.local/bin`. See `docs/design/release.md` for full design.
+
 ## Future Considerations
 
 ### Potential Enhancements
 
-- **Transaction support**: `--atomic` flag for multi-statement batches
-- **Variable substitution**: `--var key=value` for parameterized scripts
-- **Query templates**: Named template library
 - **SSL/TLS configuration**: Certificate pinning, custom CAs
 - **Keyring integration**: OS-native credential storage
 - **Export profiles**: Saved format configurations
+- **Homebrew formula**: Additional distribution channel
+- **cargo-binstall metadata**: Cargo binary installation support
 
 ### Non-Goals
 

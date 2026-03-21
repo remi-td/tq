@@ -15,6 +15,14 @@ use regex::Regex;
 use serde_yaml::Value as YamlValue;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+
+/// Pre-compiled regex for `{{variable}}` pattern matching.
+/// Compiled once on first use via `LazyLock` to avoid repeated compilation
+/// on every `substitute()` call.
+static VARIABLE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\{\{([a-zA-Z0-9_.$]+)\}\}").expect("valid regex")
+});
 
 /// Errors specific to parameter substitution
 #[derive(Debug)]
@@ -311,7 +319,7 @@ impl ParamStore {
     /// variable cannot be resolved. This is all-or-nothing: partial
     /// substitution is never returned.
     pub fn substitute(&self, sql: &str) -> std::result::Result<String, ParamError> {
-        let re = Regex::new(r"\{\{([a-zA-Z0-9_.$]+)\}\}").expect("valid regex");
+        let re = &*VARIABLE_RE;
 
         // First pass: collect all errors
         let mut errors: Vec<String> = Vec::new();
@@ -754,13 +762,13 @@ mod tests {
         // a.b should be 99, a.c should be 2
         let map = merged.as_mapping().unwrap();
         let a = map
-            .get(&YamlValue::String("a".to_string()))
+            .get(YamlValue::String("a".to_string()))
             .unwrap()
             .as_mapping()
             .unwrap();
-        let b = a.get(&YamlValue::String("b".to_string())).unwrap();
+        let b = a.get(YamlValue::String("b".to_string())).unwrap();
         assert_eq!(b.as_u64(), Some(99));
-        let c = a.get(&YamlValue::String("c".to_string())).unwrap();
+        let c = a.get(YamlValue::String("c".to_string())).unwrap();
         assert_eq!(c.as_u64(), Some(2));
     }
 
@@ -771,8 +779,8 @@ mod tests {
         let merged = deep_merge(base, overlay);
 
         let map = merged.as_mapping().unwrap();
-        assert!(map.get(&YamlValue::String("x".to_string())).is_some());
-        assert!(map.get(&YamlValue::String("y".to_string())).is_some());
+        assert!(map.get(YamlValue::String("x".to_string())).is_some());
+        assert!(map.get(YamlValue::String("y".to_string())).is_some());
     }
 
     #[test]
@@ -782,7 +790,7 @@ mod tests {
         let merged = deep_merge(base, overlay);
 
         let map = merged.as_mapping().unwrap();
-        let a = map.get(&YamlValue::String("a".to_string())).unwrap();
+        let a = map.get(YamlValue::String("a".to_string())).unwrap();
         assert_eq!(a.as_str(), Some("scalar"));
     }
 
