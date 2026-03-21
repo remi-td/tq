@@ -1,24 +1,40 @@
 //! SQL statement parsing for batch mode execution
 //!
-//! This module provides simple semicolon-based statement splitting for batch execution.
-//! It follows the MVP approach documented in the Sprint 10 architecture.
+//! This module provides a quote-aware, comment-aware SQL statement parser for batch execution.
+//! It uses a single-pass character lexer with an explicit state machine to correctly handle:
+//!
+//! - Single-quoted string literals (including escaped quotes `''`)
+//! - Line comments (`-- ...`)
+//! - Block comments (`/* ... */`)
+//! - Semicolons as statement boundaries (only in Normal state)
 //!
 //! # Design Decisions
 //!
-//! - **Simple splitting**: Split on `;` without full SQL grammar parsing
-//! - **Comments preserved**: Pass through to Teradata (handles them correctly)
-//! - **Line tracking**: Track line numbers for error messages
-//! - **Empty handling**: Skip whitespace-only statements
+//! - **State-machine lexer**: Scans character-by-character with a four-state enum
+//! - **Comments stripped**: Removed before statement assembly to prevent contamination
+//! - **Quoted strings preserved**: Including escaped quotes (`''`)
+//! - **Line tracking**: Incremented on every `\n` regardless of state
+//! - **Empty handling**: Skip whitespace-only or comment-only statements
 //!
-//! # Known Limitations
-//!
-//! - Semicolons inside string literals may cause incorrect splits (rare in practice)
-//! - Full SQL parsing deferred to future sprints if needed
+//! See `docs/design/batch-mode.md` for the full design rationale.
+
+/// Lexer state for SQL parsing
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LexState {
+    /// Normal SQL text -- semicolons are statement separators here
+    Normal,
+    /// Inside a single-quoted string literal ('...')
+    InSingleQuotedString,
+    /// Inside a line comment (-- ... \n)
+    InLineComment,
+    /// Inside a block comment (/* ... */)
+    InBlockComment,
+}
 
 /// A parsed SQL statement with metadata for error reporting
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedStatement {
-    /// The SQL statement text (trimmed)
+    /// The SQL statement text (trimmed, comments stripped)
     pub sql: String,
     /// 1-based statement number for user-facing messages
     pub statement_number: usize,
@@ -47,22 +63,32 @@ impl ParsedStatement {
     }
 }
 
+/// Push `ch` to `buf` and record the start line on first non-whitespace character.
+#[inline]
+fn record_content(ch: char, buf: &mut String, start_line: &mut Option<usize>, current_line: usize) {
+    if start_line.is_none() && !ch.is_whitespace() {
+        *start_line = Some(current_line);
+    }
+    buf.push(ch);
+}
+
 /// Parse SQL text into individual statements
 ///
-/// Splits the input on semicolons and returns a vector of `ParsedStatement`
-/// structs with statement numbering and line tracking.
+/// Splits the input using a state-machine lexer that correctly handles quoted strings,
+/// line comments, and block comments. Comments are stripped from statement text.
 ///
 /// # Arguments
 /// * `sql` - The SQL text to parse (may contain multiple statements)
 ///
 /// # Returns
-/// A vector of parsed statements. Empty statements (whitespace-only) are skipped.
+/// A vector of parsed statements. Empty statements (whitespace-only or comment-only)
+/// are skipped.
 ///
 /// # Example
 /// ```
 /// use tq::sql::parser::parse_statements;
 ///
-/// let sql = "SELECT 1;\nSELECT 2;\n\n-- Comment\nSELECT 3;";
+/// let sql = "SELECT 1;\nSELECT 2;\n\nSELECT 3;";
 /// let statements = parse_statements(sql);
 ///
 /// assert_eq!(statements.len(), 3);
@@ -71,43 +97,121 @@ impl ParsedStatement {
 /// assert_eq!(statements[0].start_line, 1);
 /// ```
 pub fn parse_statements(sql: &str) -> Vec<ParsedStatement> {
-    let mut statements = Vec::new();
-    let mut statement_number = 0;
+    let mut statements: Vec<ParsedStatement> = Vec::new();
+    let mut state = LexState::Normal;
 
-    // Track current byte position in input
-    let mut byte_offset = 0;
+    // Buffer for the current statement's content (comments excluded)
+    let mut current = String::new();
+    // Line number of the first content character in `current`
+    let mut stmt_start_line: Option<usize> = None;
+    let mut current_line: usize = 1;
+    let mut statement_number: usize = 0;
 
-    // Split on semicolons
-    for segment in sql.split(';') {
-        let trimmed = segment.trim();
+    let mut chars = sql.chars().peekable();
 
-        if !trimmed.is_empty() {
-            // Calculate line number based on newlines before this segment's first non-whitespace char
-            // Count newlines from start to current byte position plus leading whitespace
-            let segment_start = sql[..byte_offset].len();
-            let segment_with_leading = &sql[segment_start..segment_start + segment.len()];
-
-            // Find where content starts (skip leading whitespace)
-            let content_offset = segment_with_leading
-                .find(|c: char| !c.is_whitespace())
-                .unwrap_or(0);
-
-            // Count newlines from start of input to start of content
-            let start_line = 1 + sql[..segment_start + content_offset]
-                .chars()
-                .filter(|&c| c == '\n')
-                .count();
-
-            statement_number += 1;
-            statements.push(ParsedStatement::new(
-                trimmed.to_string(),
-                statement_number,
-                start_line,
-            ));
+    while let Some(ch) = chars.next() {
+        // Line tracking applies in every state
+        if ch == '\n' {
+            // Count the newline before processing state transitions
+            // (except InLineComment where \n triggers transition AND is counted)
+            match state {
+                LexState::InLineComment => {
+                    // Transition back to Normal. Add a space to prevent token merging.
+                    current_line += 1;
+                    current.push(' ');
+                    state = LexState::Normal;
+                }
+                LexState::InBlockComment => {
+                    current_line += 1;
+                    // Discard newlines inside block comments (already counted)
+                }
+                LexState::Normal => {
+                    current_line += 1;
+                    // Newlines in normal text go into the buffer
+                    record_content(ch, &mut current, &mut stmt_start_line, current_line);
+                }
+                LexState::InSingleQuotedString => {
+                    current_line += 1;
+                    // Newlines inside strings are preserved
+                    current.push(ch);
+                }
+            }
+            continue;
         }
 
-        // Move byte offset past this segment and the semicolon
-        byte_offset += segment.len() + 1; // +1 for the semicolon
+        match state {
+            LexState::Normal => match ch {
+                '\'' => {
+                    record_content(ch, &mut current, &mut stmt_start_line, current_line);
+                    state = LexState::InSingleQuotedString;
+                }
+                '-' if chars.peek() == Some(&'-') => {
+                    chars.next(); // consume second '-'
+                    state = LexState::InLineComment;
+                }
+                '/' if chars.peek() == Some(&'*') => {
+                    chars.next(); // consume '*'
+                    state = LexState::InBlockComment;
+                }
+                ';' => {
+                    // Statement boundary -- emit if non-empty
+                    let trimmed = current.trim().to_string();
+                    if !trimmed.is_empty() {
+                        statement_number += 1;
+                        statements.push(ParsedStatement::new(
+                            trimmed,
+                            statement_number,
+                            stmt_start_line.unwrap_or(current_line),
+                        ));
+                    }
+                    current.clear();
+                    stmt_start_line = None;
+                }
+                other => {
+                    record_content(other, &mut current, &mut stmt_start_line, current_line);
+                }
+            },
+
+            LexState::InSingleQuotedString => match ch {
+                '\'' if chars.peek() == Some(&'\'') => {
+                    // Escaped quote -- consume both, append both to preserve literal
+                    let next = chars.next().unwrap();
+                    current.push(ch);
+                    current.push(next);
+                }
+                '\'' => {
+                    current.push(ch);
+                    state = LexState::Normal;
+                }
+                other => current.push(other),
+            },
+
+            LexState::InLineComment => {
+                // Non-newline characters in a line comment are discarded.
+                // Newline handling is done above in the \n branch.
+            }
+
+            LexState::InBlockComment => {
+                if ch == '*' && chars.peek() == Some(&'/') {
+                    chars.next(); // consume '/'
+                    // Add a space to prevent token merging
+                    current.push(' ');
+                    state = LexState::Normal;
+                }
+                // Block comment content discarded.
+            }
+        }
+    }
+
+    // Flush trailing statement (no terminating semicolon)
+    let trimmed = current.trim().to_string();
+    if !trimmed.is_empty() {
+        statement_number += 1;
+        statements.push(ParsedStatement::new(
+            trimmed,
+            statement_number,
+            stmt_start_line.unwrap_or(current_line),
+        ));
     }
 
     statements
@@ -193,20 +297,21 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_preserves_comments() {
-        // SQL comments should be preserved and passed to Teradata
+    fn test_parse_strips_line_comments() {
+        // Line comments are stripped from statement output
         let sql = "-- This is a comment\nSELECT 1;";
         let statements = parse_statements(sql);
         assert_eq!(statements.len(), 1);
-        assert!(statements[0].sql.contains("-- This is a comment"));
+        assert_eq!(statements[0].sql, "SELECT 1");
     }
 
     #[test]
-    fn test_parse_multiline_comment() {
+    fn test_parse_strips_block_comments() {
+        // Block comments are stripped from statement output
         let sql = "/* Multi-line\n   comment */\nSELECT 1;";
         let statements = parse_statements(sql);
         assert_eq!(statements.len(), 1);
-        assert!(statements[0].sql.contains("/* Multi-line"));
+        assert_eq!(statements[0].sql, "SELECT 1");
     }
 
     #[test]
@@ -227,8 +332,9 @@ DROP TABLE temp_data;
         let statements = parse_statements(sql);
         assert_eq!(statements.len(), 5);
 
-        // Verify first statement includes comment
+        // Comments are stripped; statements contain only SQL
         assert!(statements[0].sql.contains("CREATE TABLE"));
+        assert!(!statements[0].sql.contains("Setup script"));
 
         // Verify statement ordering
         assert!(statements[1].sql.contains("INSERT"));
@@ -317,5 +423,140 @@ DROP TABLE temp_data;
         assert_eq!(statements.len(), 2);
         // Line tracking counts \n, so \r\n counts as one line
         assert_eq!(statements[0].start_line, 1);
+    }
+
+    // --- Bug #28: Semicolons inside quoted strings ---
+
+    #[test]
+    fn test_semicolon_in_string_literal_not_a_boundary() {
+        let sql = "INSERT INTO t (id, desc) VALUES (1, 'a; b');";
+        let statements = parse_statements(sql);
+        assert_eq!(statements.len(), 1);
+        assert_eq!(
+            statements[0].sql,
+            "INSERT INTO t (id, desc) VALUES (1, 'a; b')"
+        );
+    }
+
+    #[test]
+    fn test_escaped_quote_with_semicolon_in_string() {
+        let sql = "INSERT INTO t VALUES ('it''s; complex');";
+        let statements = parse_statements(sql);
+        assert_eq!(statements.len(), 1);
+        assert_eq!(
+            statements[0].sql,
+            "INSERT INTO t VALUES ('it''s; complex')"
+        );
+    }
+
+    // --- Bug #29: Multi-line INSERT works correctly ---
+
+    #[test]
+    fn test_multi_line_statement_is_single_statement() {
+        let sql = "INSERT INTO employees (\n  id,\n  name,\n  salary\n) VALUES (\n  1,\n  'Alice',\n  50000\n);";
+        let statements = parse_statements(sql);
+        assert_eq!(statements.len(), 1);
+        assert!(statements[0].sql.contains("INSERT INTO employees"));
+        assert!(statements[0].sql.contains("'Alice'"));
+        assert_eq!(statements[0].start_line, 1);
+    }
+
+    // --- Bug #30: Comments between statements ---
+
+    #[test]
+    fn test_block_comment_between_statements_does_not_contaminate() {
+        let sql = "SELECT 1; /* this is a comment */ SELECT 2;";
+        let statements = parse_statements(sql);
+        assert_eq!(statements.len(), 2);
+        assert_eq!(statements[0].sql, "SELECT 1");
+        assert_eq!(statements[1].sql, "SELECT 2");
+        // No comment text in either statement
+        assert!(!statements[0].sql.contains("comment"));
+        assert!(!statements[1].sql.contains("comment"));
+    }
+
+    #[test]
+    fn test_line_comment_between_statements_does_not_contaminate() {
+        let sql = "SELECT 1;\n-- this is a comment\nSELECT 2;";
+        let statements = parse_statements(sql);
+        assert_eq!(statements.len(), 2);
+        assert_eq!(statements[0].sql, "SELECT 1");
+        assert_eq!(statements[1].sql, "SELECT 2");
+        assert!(!statements[1].sql.contains("comment"));
+    }
+
+    // --- Comment stripping ---
+
+    #[test]
+    fn test_comments_are_stripped_from_output() {
+        // Inline comment after SQL
+        let sql = "SELECT 1 -- get one\n;";
+        let statements = parse_statements(sql);
+        assert_eq!(statements.len(), 1);
+        assert_eq!(statements[0].sql, "SELECT 1");
+    }
+
+    #[test]
+    fn test_comment_only_segment_is_skipped() {
+        // A segment that is only a comment should not produce a statement
+        let sql = "SELECT 1; -- just a comment\n; SELECT 2;";
+        let statements = parse_statements(sql);
+        assert_eq!(statements.len(), 2);
+        assert_eq!(statements[0].sql, "SELECT 1");
+        assert_eq!(statements[1].sql, "SELECT 2");
+    }
+
+    // --- Mixed scenario ---
+
+    #[test]
+    fn test_mixed_multiline_comments_and_quoted_semicolons() {
+        let sql = r#"
+-- Create table
+CREATE TABLE t (id INT, name VARCHAR(50));
+
+/* Insert data with semicolons in strings */
+INSERT INTO t VALUES (1, 'hello; world');
+INSERT INTO t VALUES (2, 'it''s; a test');
+
+-- Query
+SELECT * FROM t WHERE name = 'hello; world';
+"#;
+        let statements = parse_statements(sql);
+        assert_eq!(statements.len(), 4);
+        assert!(statements[0].sql.starts_with("CREATE TABLE"));
+        assert_eq!(
+            statements[1].sql,
+            "INSERT INTO t VALUES (1, 'hello; world')"
+        );
+        assert_eq!(
+            statements[2].sql,
+            "INSERT INTO t VALUES (2, 'it''s; a test')"
+        );
+        assert!(statements[3].sql.contains("'hello; world'"));
+    }
+
+    #[test]
+    fn test_has_multiple_statements_with_quoted_semicolons() {
+        // A semicolon inside a string should NOT count as a statement boundary
+        assert!(!has_multiple_statements("SELECT 'a;b'"));
+        assert!(has_multiple_statements("SELECT 'a;b'; SELECT 2"));
+    }
+
+    #[test]
+    fn test_block_comment_spanning_multiple_lines() {
+        let sql = "SELECT 1;\n/*\nThis is\na multi-line\ncomment\n*/\nSELECT 2;";
+        let statements = parse_statements(sql);
+        assert_eq!(statements.len(), 2);
+        assert_eq!(statements[0].sql, "SELECT 1");
+        assert_eq!(statements[1].sql, "SELECT 2");
+    }
+
+    #[test]
+    fn test_string_with_newline() {
+        // Newlines inside strings are preserved
+        let sql = "SELECT 'line1\nline2';";
+        let statements = parse_statements(sql);
+        assert_eq!(statements.len(), 1);
+        assert_eq!(statements[0].sql, "SELECT 'line1\nline2'");
     }
 }

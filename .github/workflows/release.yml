@@ -68,7 +68,7 @@ jobs:
 
       - name: Install cross (aarch64-linux only)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: cargo install cross --git https://github.com/cross-rs/cross
+        run: cargo install cross --git https://github.com/cross-rs/cross --tag v0.2.5
 
       - name: Build
         run: ${{ matrix.build_cmd }}

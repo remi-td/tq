@@ -94,9 +94,9 @@ main() {
     fi
 
     # Set up temporary directory with cleanup trap
-    TMPDIR=$(mktemp -d)
-    trap 'rm -rf "$TMPDIR"' EXIT
-    cd "$TMPDIR"
+    TQ_TMPDIR=$(mktemp -d)
+    trap 'rm -rf "$TQ_TMPDIR"' EXIT
+    cd "$TQ_TMPDIR"
 
     # Download artifact and checksums
     ASSET="tq-${VERSION}-${TARGET}.tar.gz"

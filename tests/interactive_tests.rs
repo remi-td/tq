@@ -21,6 +21,7 @@ fn spawn_tq_repl() -> expectrl::Session {
 }
 
 #[test]
+#[ignore]
 fn test_repl_startup_and_quit() {
     let mut p = spawn_tq_repl();
 

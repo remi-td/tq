@@ -1,15 +1,23 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.22.0 (Sprint 41 - GitHub Releases & Binary Distribution)
-**Last Updated:** 2026-03-20
-**Base Commit:** [Sprint 41 - In Progress]
+**Version:** 1.23.0 (Sprint 42 - SQL Parser Hardening)
+**Last Updated:** 2026-03-21
+**Base Commit:** [Sprint 42 - In Progress]
 
 ## Overview
 
 This directory contains comprehensive test case definitions for the tq CLI tool. These test cases cover all implemented MVP features (FR-001 through FR-010) and provide detailed procedures for validating functionality, usability, error handling, and security.
 
 ## Test Case Categories
+
+### Sprint 42: SQL Parser Hardening (Bugs #28, #29, #30)
+
+- **TC-042-001**: Semicolons Inside Quoted Strings - Bug #28 (Unit, no-DB)
+- **TC-042-002**: Multi-Line SQL Statements - Bug #29 (Unit, no-DB)
+- **TC-042-003**: Comment Blocks Between Statements - Bug #30 (Unit, no-DB)
+- **TC-042-004**: Combined Scenarios - All 3 Bugs Together (Unit + Integration)
+- **TC-042-005**: Sprint 41 Remediation & Regression Suite (Regression + Code Inspection)
 
 ### Functionality (Core Features)
 - **TC001**: Ping Command - Basic Connectivity Test

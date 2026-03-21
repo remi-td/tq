@@ -1,15 +1,16 @@
 # Batch Mode Technical Design
 
-This document describes the technical architecture for batch mode features in tq, explaining how file output, transaction control, and multi-statement execution are implemented.
+This document describes the technical architecture for batch mode features in tq, explaining how SQL statement parsing, file output, transaction control, and multi-statement execution are implemented.
 
 ## Table of Contents
 
 1. [Architecture Overview](#architecture-overview)
-2. [File Output (--output flag)](#file-output---output-flag)
-3. [Transaction Control (--atomic flag)](#transaction-control---atomic-flag)
-4. [Integration Test Driver Loading](#integration-test-driver-loading)
-5. [Code Organization](#code-organization)
-6. [Error Handling Patterns](#error-handling-patterns)
+2. [SQL Statement Parser](#sql-statement-parser)
+3. [File Output (--output flag)](#file-output---output-flag)
+4. [Transaction Control (--atomic flag)](#transaction-control---atomic-flag)
+5. [Integration Test Driver Loading](#integration-test-driver-loading)
+6. [Code Organization](#code-organization)
+7. [Error Handling Patterns](#error-handling-patterns)
 
 ---
 
@@ -38,6 +39,285 @@ SQL Input → Statement Parser → Sequential Executor → Result Formatter → 
      │
      └─ argument / file / stdin
 ```
+
+---
+
+## SQL Statement Parser
+
+The SQL statement parser lives in `src/sql/parser.rs` and is the entry point for all multi-statement SQL input. Its sole responsibility is splitting raw SQL text into a sequence of `ParsedStatement` values for sequential execution.
+
+### Design Motivation
+
+The original parser used `sql.split(';')`, which treats every semicolon as a statement boundary regardless of context. This produces three categories of failure:
+
+| Bug | Trigger | Effect |
+|-----|---------|--------|
+| #28 | `WHERE name = 'O''Brien;'` | String literal semicolon splits the statement |
+| #29 | Multi-line `SELECT\n  col\nFROM t` | Works, but exposes the root cause clearly |
+| #30 | Block comment before next statement | Comment text leaks into the next statement body |
+
+All three share the same root cause: the parser has no awareness of the SQL lexical context around each character it processes.
+
+### Approach: Single-Pass Character Lexer
+
+The replacement parser scans the input one character (Unicode scalar) at a time, maintaining an explicit state machine. This single pass simultaneously:
+
+1. Identifies statement boundaries (`;` in Normal state only)
+2. Strips comments (line and block) before assembling statement text
+3. Tracks the current line number for error-reporting metadata
+
+A single pass keeps the implementation O(n) in input length and avoids allocating an intermediate token stream.
+
+### State Machine
+
+The lexer uses a four-value state enum:
+
+```rust
+/// Lexer state for SQL parsing
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LexState {
+    /// Normal SQL text — semicolons are statement separators here
+    Normal,
+    /// Inside a single-quoted string literal ('...')
+    InSingleQuotedString,
+    /// Inside a line comment (-- ... \n)
+    InLineComment,
+    /// Inside a block comment (/* ... */)
+    InBlockComment,
+}
+```
+
+The state machine has the following transitions:
+
+```
+Normal
+  ├─ '\''          → InSingleQuotedString  (start string)
+  ├─ '-' '-'       → InLineComment         (start line comment)
+  ├─ '/' '*'       → InBlockComment        (start block comment)
+  └─ ';'           → emit statement, stay Normal
+
+InSingleQuotedString
+  ├─ '\'' '\''     → stay InSingleQuotedString  (escaped quote, consume both)
+  └─ '\''          → Normal                      (end string)
+
+InLineComment
+  └─ '\n'          → Normal   (newline ends line comment)
+
+InBlockComment
+  └─ '*' '/'       → Normal   (end block comment)
+```
+
+Two-character transitions (`--`, `/*`, `''`, `*/`) require one character of lookahead, implemented by peeking at the next character in the iterator rather than backtracking.
+
+### Comment Handling: Strip Comments
+
+Comments are stripped from the output rather than preserved. This decision is deliberate:
+
+- Bug #30 demonstrates that a block comment between two statements (`stmt1; /* comment */ stmt2;`) causes the comment text to attach to `stmt2`, corrupting the SQL sent to Teradata.
+- Teradata handles comments correctly in isolation, but the bug occurs during statement assembly in the parser, not in the Teradata engine.
+- Stripping comments at the parser level is safe: the comment's semantic content (documentation) is irrelevant to execution. Teradata receives clean SQL.
+- Stripping also prevents multi-line block comments from inflating `start_line` by accident.
+
+Note: `--` comments are stripped but the newline that ends them is preserved, because that newline may contribute to line-number accounting.
+
+### Line Number Tracking
+
+The lexer increments a `current_line: usize` counter on every `\n` character encountered, regardless of lexer state. When a statement boundary is recognised (`;` in Normal state), the line number stored in the `ParsedStatement` is the line number of the first non-whitespace character in the current statement buffer.
+
+This is implemented by recording `statement_start_line` at the moment the first non-whitespace character is appended to the current statement buffer. The counter is reset to `None` at the start of each new statement and set on first content.
+
+### API
+
+The public API is unchanged from the previous implementation:
+
+```rust
+/// A parsed SQL statement with metadata for error reporting.
+pub struct ParsedStatement {
+    /// The SQL statement text (trimmed, comments stripped)
+    pub sql: String,
+    /// 1-based statement number for user-facing messages
+    pub statement_number: usize,
+    /// Line number where statement content starts (1-based)
+    pub start_line: usize,
+}
+
+/// Parse SQL text into individual statements.
+///
+/// Returns statements in order. Empty and whitespace-only statements
+/// (including comment-only segments) are skipped. Comments are stripped
+/// from statement text before returning.
+pub fn parse_statements(sql: &str) -> Vec<ParsedStatement>
+
+/// Returns true if the SQL contains more than one statement.
+pub fn has_multiple_statements(sql: &str) -> bool
+```
+
+`ParsedStatement::preview()` is also unchanged — it normalises whitespace in the trimmed SQL, which now never contains comment text.
+
+### Implementation Sketch
+
+```rust
+pub fn parse_statements(sql: &str) -> Vec<ParsedStatement> {
+    let mut statements: Vec<ParsedStatement> = Vec::new();
+    let mut state = LexState::Normal;
+
+    // Buffer for the current statement's content (comments excluded)
+    let mut current: String = String::new();
+    // Line number of the first content character in `current`
+    let mut stmt_start_line: Option<usize> = None;
+    let mut current_line: usize = 1;
+    let mut statement_number: usize = 0;
+
+    let mut chars = sql.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        // Line tracking applies in every state
+        if ch == '\n' {
+            current_line += 1;
+        }
+
+        match state {
+            LexState::Normal => match ch {
+                '\'' => {
+                    record_content(ch, &mut current, &mut stmt_start_line, current_line);
+                    state = LexState::InSingleQuotedString;
+                }
+                '-' if chars.peek() == Some(&'-') => {
+                    chars.next(); // consume second '-'
+                    state = LexState::InLineComment;
+                }
+                '/' if chars.peek() == Some(&'*') => {
+                    chars.next(); // consume '*'
+                    state = LexState::InBlockComment;
+                }
+                ';' => {
+                    // Statement boundary — emit if non-empty
+                    let trimmed = current.trim().to_string();
+                    if !trimmed.is_empty() {
+                        statement_number += 1;
+                        statements.push(ParsedStatement::new(
+                            trimmed,
+                            statement_number,
+                            stmt_start_line.unwrap_or(current_line),
+                        ));
+                    }
+                    current.clear();
+                    stmt_start_line = None;
+                }
+                other => {
+                    record_content(other, &mut current, &mut stmt_start_line, current_line);
+                }
+            },
+
+            LexState::InSingleQuotedString => match ch {
+                '\'' if chars.peek() == Some(&'\'') => {
+                    // Escaped quote — consume both, append both to preserve literal
+                    let next = chars.next().unwrap();
+                    current.push(ch);
+                    current.push(next);
+                }
+                '\'' => {
+                    current.push(ch);
+                    state = LexState::Normal;
+                }
+                other => current.push(other),
+            },
+
+            LexState::InLineComment => {
+                // Newline was already processed above for line counting;
+                // transition back to Normal but do NOT push any comment text.
+                if ch == '\n' {
+                    state = LexState::Normal;
+                }
+                // All other characters in a line comment are discarded.
+            }
+
+            LexState::InBlockComment => {
+                if ch == '*' && chars.peek() == Some(&'/') {
+                    chars.next(); // consume '/'
+                    state = LexState::Normal;
+                }
+                // Block comment content discarded (newlines already counted above).
+            }
+        }
+    }
+
+    // Flush trailing statement (no terminating semicolon)
+    let trimmed = current.trim().to_string();
+    if !trimmed.is_empty() {
+        statement_number += 1;
+        statements.push(ParsedStatement::new(
+            trimmed,
+            statement_number,
+            stmt_start_line.unwrap_or(current_line),
+        ));
+    }
+
+    statements
+}
+
+/// Push `ch` to `buf` and record the start line on first content character.
+#[inline]
+fn record_content(
+    ch: char,
+    buf: &mut String,
+    start_line: &mut Option<usize>,
+    current_line: usize,
+) {
+    if start_line.is_none() && !ch.is_whitespace() {
+        *start_line = Some(current_line);
+    }
+    buf.push(ch);
+}
+```
+
+### Handling of Existing Tests
+
+Several existing unit tests in `src/sql/parser.rs` assert that comments are *preserved* in statement output (e.g., `test_parse_preserves_comments`, `test_parse_multiline_comment`, `test_parse_complex_script`). These tests were written against the old "pass comments through" design decision. Because Sprint 42 deliberately reverses that decision (strip comments), those test assertions must be updated:
+
+- `test_parse_preserves_comments` — assert the statement is `"SELECT 1"` (comment stripped)
+- `test_parse_multiline_comment` — assert the statement is `"SELECT 1"` (block comment stripped)
+- `test_parse_complex_script` — assertions that check `contains("CREATE TABLE")` etc. remain valid; assertions that checked comment text inside statement bodies are removed
+
+The `has_multiple_statements` function and all line-tracking tests are unaffected.
+
+### New Tests to Add
+
+The following test cases must be added to cover the three bugs:
+
+```rust
+// Bug #28 — semicolon inside single-quoted string
+#[test]
+fn test_semicolon_in_string_literal_not_a_boundary() { ... }
+
+// Bug #28 variant — escaped quote inside string
+#[test]
+fn test_escaped_quote_in_string_literal() { ... }
+
+// Bug #29 — multi-line statement
+#[test]
+fn test_multi_line_statement_is_single_statement() { ... }
+
+// Bug #30 — block comment between statements
+#[test]
+fn test_block_comment_between_statements_does_not_contaminate() { ... }
+
+// Bug #30 variant — line comment between statements
+#[test]
+fn test_line_comment_between_statements_does_not_contaminate() { ... }
+
+// Comment stripping general
+#[test]
+fn test_comments_are_stripped_from_output() { ... }
+
+// Empty-after-stripping: a comment-only segment is not emitted
+#[test]
+fn test_comment_only_segment_is_skipped() { ... }
+```
+
+### Backwards Compatibility
+
+The `ParsedStatement` struct, `parse_statements` signature, and `has_multiple_statements` signature are all unchanged. Call sites in `src/commands/query.rs` require no modification. The only observable behaviour change is that comment text no longer appears in `ParsedStatement::sql` — which is the correct behaviour per the updated specification.
 
 ---
 

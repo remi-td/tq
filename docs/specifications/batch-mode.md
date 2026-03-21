@@ -5,12 +5,13 @@
 1. [Overview](#overview)
 2. [Execution Modes](#execution-modes)
 3. [Multiple Statement Execution](#multiple-statement-execution)
-4. [Output Destinations](#output-destinations)
-5. [Error Handling](#error-handling)
-6. [Scripting Integration](#scripting-integration)
-7. [Performance Considerations](#performance-considerations)
-8. [Transaction Control](#transaction-control)
-9. [Variable Substitution](#variable-substitution)
+4. [SQL File Parser Requirements](#sql-file-parser-requirements)
+5. [Output Destinations](#output-destinations)
+6. [Error Handling](#error-handling)
+7. [Scripting Integration](#scripting-integration)
+8. [Performance Considerations](#performance-considerations)
+9. [Transaction Control](#transaction-control)
+10. [Variable Substitution](#variable-substitution)
 
 ---
 
@@ -161,10 +162,14 @@ Files and stdin input support executing multiple SQL statements in sequence. Thi
 ### Statement Parsing
 
 **How it works:**
-- SQL input is split on semicolon (`;`) characters
+- SQL input is split on semicolon (`;`) characters that are outside quoted strings and comments
 - Empty statements (whitespace-only) are skipped
 - Statements execute sequentially in order
 - Each statement is trimmed of leading/trailing whitespace
+- Multi-line statements are supported; newlines are treated as whitespace within a statement
+- Comments (`--` and `/* */`) are recognised and do not interfere with statement boundaries
+
+See [SQL File Parser Requirements](#sql-file-parser-requirements) for the precise parsing rules.
 
 **Example file:**
 ```sql
@@ -210,24 +215,6 @@ All statements executed successfully
 - Starts at 1 (user-friendly, not 0-indexed)
 - Matches line/position in source file
 
-### Known Limitations
-
-**Semicolon in strings:**
-Simple semicolon splitting doesn't handle `;` inside quoted strings:
-```sql
--- This will split incorrectly:
-INSERT INTO messages VALUES ('Hello; World');  -- Splits at `;` inside string
-```
-
-**Mitigation:**
-- Most real-world SQL doesn't have `;` in strings
-- Document this limitation
-- Use single-statement execution for complex cases
-
-**Complex SQL:**
-- Stored procedure definitions with semicolons may split incorrectly
-- Use single-statement execution for complex DDL
-
 ### Inline Queries (Single Statement Only)
 
 Inline query arguments do NOT support multiple statements:
@@ -239,6 +226,248 @@ tq query "SELECT 1; SELECT 2"
 # Use file or stdin for multiple statements instead
 echo "SELECT 1; SELECT 2" | tq query
 ```
+
+## SQL File Parser Requirements
+
+This section defines the precise rules the parser must follow when splitting a SQL file or stdin input into individual statements. These rules ensure that structural SQL syntax (quoted strings, comments, multi-line statements) is handled correctly and that error reporting remains accurate.
+
+The parser operates as a linear, single-pass state machine over the input character stream. It tracks the current lexical context to determine whether a semicolon terminates a statement or is part of a literal or comment.
+
+---
+
+### Statement Boundary Rules
+
+**REQ-PARSE-001: Semicolon as Terminator**
+
+A semicolon (`;`) terminates the current statement if and only if it appears outside of a single-quoted string literal, a line comment, or a block comment. Semicolons in any other context are part of the statement text and must not split it.
+
+Compliant examples:
+
+```sql
+-- Valid terminators (outside any context)
+SELECT 1;
+INSERT INTO t VALUES (42);
+
+-- Semicolons NOT terminators (inside quoted string)
+INSERT INTO messages VALUES ('Hello; World');
+
+-- Semicolons NOT terminators (inside line comment)
+SELECT 1 -- use ';' to end; ok
+;
+
+-- Semicolons NOT terminators (inside block comment)
+SELECT /* a;b;c */ 1;
+```
+
+**REQ-PARSE-002: Trailing Content After Final Terminator**
+
+If the input ends with a non-empty, non-whitespace sequence that is not followed by a semicolon, that trailing content is treated as an implicit final statement. This allows files that omit the trailing semicolon on the last statement to execute correctly.
+
+```sql
+-- Both of these must produce exactly one statement:
+SELECT 1;
+SELECT 1
+```
+
+**REQ-PARSE-003: Empty Statement Suppression**
+
+Statements that are empty or contain only whitespace and comments after trimming are silently discarded. They are not counted in statement numbering, not sent to the database, and do not appear in progress output.
+
+```sql
+-- These produce zero executable statements:
+;
+   ;
+-- just a comment
+;
+/* block comment only */;
+```
+
+**REQ-PARSE-004: Whitespace and Newlines Within Statements**
+
+Newlines, carriage returns, tabs, and spaces within a statement are preserved as-is and passed to the database. The parser never collapses or strips internal whitespace. A statement boundary is formed by a terminating semicolon or end-of-input, not by blank lines.
+
+```sql
+-- This is ONE statement:
+SELECT
+    employee_id,
+    first_name,
+    last_name
+FROM employees
+WHERE department_id = 10
+ORDER BY last_name;
+```
+
+---
+
+### Quoted String Rules
+
+**REQ-PARSE-005: Single-Quoted String Recognition**
+
+The parser enters "quoted string" context on encountering a single-quote character (`'`) that is outside any existing string or comment context. It exits that context on the next closing single quote that is not part of an escaped quote sequence.
+
+While in quoted string context:
+- Semicolons are not statement terminators.
+- Comment-opening sequences (`--` and `/*`) are not recognised as comments.
+- The string content is passed through verbatim (no unescaping by the parser).
+
+**REQ-PARSE-006: Escaped Single Quotes Inside Strings**
+
+A doubled single-quote (`''`) inside a quoted string is the standard SQL escape for a literal single-quote character. The parser must treat `''` as a single escaped character and remain in quoted string context; it does not end the string.
+
+```sql
+-- ONE statement; the string contains an apostrophe
+INSERT INTO greetings VALUES ('it''s fine');
+
+-- ONE statement; semicolon inside string does not split
+INSERT INTO notes VALUES ('step 1; step 2; step 3');
+
+-- ONE statement; multiple escapes
+SELECT 'can''t stop; won''t stop' AS phrase;
+```
+
+**REQ-PARSE-007: Unterminated Quoted String Error**
+
+If end-of-input is reached while still inside a quoted string context, the parser must report an error identifying the line number where the unterminated string began and the statement number in which it appeared.
+
+```
+Error: Unterminated string literal
+
+  File:      script.sql
+  Statement: 3
+  Line:      12
+
+The single-quoted string opened on line 12 was never closed.
+Check for a missing closing quote.
+```
+
+---
+
+### Line Comment Rules
+
+**REQ-PARSE-008: Line Comment Recognition**
+
+The two-character sequence `--` that appears outside a quoted string or block comment begins a line comment. A line comment extends to the end of the current line (the next `\n` character or end-of-input, whichever comes first).
+
+While in line comment context:
+- Semicolons are not statement terminators.
+- Block comment opening sequences (`/*`) are not recognised.
+- Single-quote characters do not start a quoted string.
+
+**REQ-PARSE-009: Line Comment Does Not Affect Statement Content**
+
+A line comment is stripped from the statement text before it is sent to the database. The newline that ends the comment is preserved as whitespace.
+
+```sql
+-- This file contains two statements:
+SELECT 1; -- first query; ignore this semicolon
+SELECT 2; -- second query
+```
+
+---
+
+### Block Comment Rules
+
+**REQ-PARSE-010: Block Comment Recognition**
+
+The two-character sequence `/*` that appears outside a quoted string or line comment begins a block comment. The block comment ends at the first subsequent occurrence of `*/`.
+
+While in block comment context:
+- Semicolons are not statement terminators.
+- Line comment sequences (`--`) are not recognised.
+- Single-quote characters do not start a quoted string.
+
+**REQ-PARSE-011: Block Comments May Span Multiple Lines**
+
+A block comment may extend across any number of lines. The parser must remain in block comment context across newlines until the closing `*/` is encountered.
+
+```sql
+/*
+ * This is a multi-line block comment.
+ * It describes the following migration.
+ * Semicolons here; and here; are not terminators.
+ */
+INSERT INTO schema_version VALUES (42);
+
+SELECT /* inline block comment; still one statement */ 1;
+```
+
+**REQ-PARSE-012: Nested Block Comments Not Supported**
+
+Teradata SQL does not support nested block comments. A `/*` sequence encountered inside an already-open block comment does not open a new nesting level. The first `*/` sequence always closes the outermost block comment.
+
+**REQ-PARSE-013: Unterminated Block Comment Error**
+
+If end-of-input is reached while still inside a block comment context, the parser must report an error identifying the line number where the unterminated comment began.
+
+```
+Error: Unterminated block comment
+
+  File:      script.sql
+  Statement: 2
+  Line:      7
+
+The block comment opened on line 7 was never closed.
+Check for a missing '*/' sequence.
+```
+
+---
+
+### Error Reporting and Line Numbers
+
+**REQ-PARSE-014: Line Number Tracking**
+
+The parser must maintain an accurate line number counter throughout the entire input. Line numbers increment on each `\n` character, regardless of the current lexical context (inside strings, comments, or plain SQL). Line numbers start at 1.
+
+The line number counter must not reset between statements; it reflects the position within the source file or stdin stream at all times.
+
+**REQ-PARSE-015: Statement Start Line Recording**
+
+When the parser begins accumulating characters for a new statement (after emitting the previous one), it records the current line number as the "start line" of that statement. This value is used in error messages and verbose progress output.
+
+**REQ-PARSE-016: Error Message Line Numbers**
+
+When a database error occurs while executing a statement, the error message must include the start line of the failing statement as it appears in the source file. This allows users to navigate directly to the problematic SQL in their editor.
+
+```
+Error: SQL syntax error in statement 3
+
+  File:      migrations/v2.sql
+  Statement: 3 of 5
+  Line:      14
+
+Expected something like a 'SELECT' keyword but found 'SELCT'.
+
+Error Code: 3706
+Session ID: 1429
+
+Failed statement (line 14):
+  SELCT * FROM employees;
+```
+
+**REQ-PARSE-017: Parse Error Line Numbers**
+
+Parse errors (unterminated strings, unterminated block comments) must also reference the exact line number in the source file where the offending construct began, not the line number at end-of-input.
+
+---
+
+### Parser Correctness Examples
+
+The following table summarises parser behaviour across representative inputs.
+
+| Input | Statements produced | Notes |
+|---|---|---|
+| `SELECT 1;` | 1 | Standard case |
+| `SELECT 1` | 1 | Implicit terminator at EOF |
+| `SELECT 1; SELECT 2;` | 2 | Two statements |
+| `INSERT INTO t VALUES ('a;b');` | 1 | Semicolon inside string |
+| `INSERT INTO t VALUES ('it''s');` | 1 | Escaped quote, then terminator |
+| `SELECT 1; -- comment; ignored` | 1 | Line comment after terminator |
+| `SELECT /* a;b */ 1;` | 1 | Block comment inline |
+| `SELECT\n1\nFROM\nt;` | 1 | Multi-line statement |
+| `;;;` | 0 | All empty, suppressed |
+| `-- comment only` | 0 | Comment only, no statement |
+
+---
 
 ## Output Destinations
 
