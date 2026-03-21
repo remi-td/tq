@@ -86,7 +86,7 @@ DROP TABLE temp_data;
 **Characteristics:**
 - Supports multi-statement execution (see section on Multiple Statement Execution)
 - Statements separated by semicolons
-- SQL comments (`--` and `/* */`) are preserved and handled by Teradata
+- SQL comments (`--` and `/* */`) are recognised and stripped before execution (see REQ-PARSE-008 through REQ-PARSE-013)
 - Path can be absolute or relative to current directory
 - File extension doesn't matter (.sql, .txt, or no extension all work)
 
