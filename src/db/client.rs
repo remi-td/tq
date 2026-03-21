@@ -6,11 +6,78 @@
 use crate::db::connection::ConnectionConfig;
 use crate::db::types::{ColumnMetadata, QueryResult, Row, TeradataType, Value};
 use crate::error::{Result, TqError};
+use std::path::Path;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 /// Global driver state to ensure the driver is only loaded once
 static DRIVER_LOADED: OnceLock<()> = OnceLock::new();
+
+/// Determine the platform-specific Teradata driver library filename.
+///
+/// Returns the filename (not path) of the native library for the current platform.
+pub fn determine_library_name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "teradatasql.dylib"
+    } else if cfg!(target_os = "windows") {
+        "teradatasql.dll"
+    } else if cfg!(target_os = "linux") && cfg!(target_arch = "aarch64") {
+        "teradatasql.arm.so"
+    } else {
+        "teradatasql.so"
+    }
+}
+
+/// Resolve the directory containing the Teradata driver library.
+///
+/// Searches in priority order:
+/// 1. Explicit CLI flag (`--driver-lib-dir`) if provided
+/// 2. `TERADATA_LIB_DIR` environment variable (runtime, not compile-time)
+/// 3. Directory containing the tq executable (`std::env::current_exe()` parent)
+/// 4. Current working directory (`"."`)
+///
+/// For steps 2-3, the function verifies the library file actually exists in the
+/// candidate directory before accepting it. Step 1 is trusted unconditionally
+/// (the user explicitly specified it). Step 4 is the last-resort fallback.
+///
+/// Returns a tuple of (chosen_dir, all_searched_paths) where `all_searched_paths`
+/// lists every directory that was checked (for error reporting).
+pub fn resolve_driver_lib_dir(explicit_dir: Option<&str>) -> (String, Vec<String>) {
+    let lib_name = determine_library_name();
+    let mut searched = Vec::new();
+
+    // 1. Explicit CLI flag takes highest priority (trusted unconditionally)
+    if let Some(dir) = explicit_dir {
+        searched.push(dir.to_string());
+        return (dir.to_string(), searched);
+    }
+
+    // 2. Runtime environment variable
+    if let Ok(dir) = std::env::var("TERADATA_LIB_DIR") {
+        if !dir.is_empty() {
+            searched.push(dir.clone());
+            if Path::new(&dir).join(lib_name).exists() {
+                return (dir, searched);
+            }
+        }
+    }
+
+    // 3. Executable's directory (primary path for installed binaries)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let dir_str = exe_dir.to_string_lossy().to_string();
+            searched.push(dir_str.clone());
+            if exe_dir.join(lib_name).exists() {
+                return (dir_str, searched);
+            }
+        }
+    }
+
+    // 4. Current working directory (last resort)
+    let cwd = ".".to_string();
+    searched.push(cwd.clone());
+    (cwd, searched)
+}
 
 /// Database client for Teradata operations
 ///
@@ -18,6 +85,8 @@ static DRIVER_LOADED: OnceLock<()> = OnceLock::new();
 pub struct DatabaseClient {
     config: ConnectionConfig,
     driver_lib_dir: String,
+    /// Directories that were searched during driver resolution (for error reporting)
+    searched_paths: Vec<String>,
 }
 
 impl DatabaseClient {
@@ -39,6 +108,7 @@ impl DatabaseClient {
         Self {
             config,
             driver_lib_dir: ".".to_string(),
+            searched_paths: vec![".".to_string()],
         }
     }
 
@@ -48,13 +118,13 @@ impl DatabaseClient {
     /// * `config` - Connection configuration
     /// * `driver_lib_dir` - Optional directory containing Teradata driver library
     pub fn new(config: ConnectionConfig, driver_lib_dir: Option<String>) -> Result<Self> {
-        // Default to the target directory from build time
-        let default_dir = option_env!("TERADATA_LIB_DIR").unwrap_or(".");
-        let driver_lib_dir = driver_lib_dir.unwrap_or_else(|| default_dir.to_string());
+        let (resolved_dir, searched_paths) =
+            resolve_driver_lib_dir(driver_lib_dir.as_deref());
 
         let client = Self {
             config,
-            driver_lib_dir,
+            driver_lib_dir: resolved_dir,
+            searched_paths,
         };
 
         // Load driver at construction time
@@ -77,6 +147,7 @@ impl DatabaseClient {
         log::info!("Loading Teradata driver from: {}", self.driver_lib_dir);
         teradatarustapi::load_driver(&self.driver_lib_dir).map_err(|e| TqError::DriverLoad {
             path: self.driver_lib_dir.clone(),
+            searched_paths: self.searched_paths.clone(),
             message: format!("{}. Ensure teradatasql library is present.", e),
         })?;
         log::info!("Teradata driver loaded successfully");
@@ -690,6 +761,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_determine_library_name_returns_platform_specific() {
+        let name = determine_library_name();
+        // Should return a non-empty filename
+        assert!(!name.is_empty());
+        // Should start with "teradatasql"
+        assert!(name.starts_with("teradatasql"));
+        // On macOS specifically
+        if cfg!(target_os = "macos") {
+            assert_eq!(name, "teradatasql.dylib");
+        }
+    }
+
+    #[test]
+    fn test_resolve_driver_lib_dir_explicit_override() {
+        let (dir, searched) = resolve_driver_lib_dir(Some("/custom/path"));
+        assert_eq!(dir, "/custom/path");
+        assert_eq!(searched, vec!["/custom/path".to_string()]);
+    }
+
+    #[test]
+    fn test_resolve_driver_lib_dir_fallback_to_cwd() {
+        // With no explicit dir, no env var, and assuming library is not next to
+        // the test binary, the function should eventually fall back to "."
+        let saved = std::env::var("TERADATA_LIB_DIR").ok();
+        std::env::remove_var("TERADATA_LIB_DIR");
+
+        let (dir, searched) = resolve_driver_lib_dir(None);
+        // Should have searched at least exe dir and cwd
+        assert!(!searched.is_empty());
+        // Last entry should be "." (cwd fallback)
+        assert_eq!(searched.last().unwrap(), ".");
+        // The resolved dir could be exe dir (if lib exists there) or "."
+        assert!(!dir.is_empty());
+
+        // Restore
+        if let Some(val) = saved {
+            std::env::set_var("TERADATA_LIB_DIR", val);
+        }
+    }
+
+    #[test]
     fn test_looks_like_date() {
         assert!(DatabaseClient::looks_like_date("2024-01-15"));
         assert!(!DatabaseClient::looks_like_date("2024-1-15"));
@@ -816,6 +928,7 @@ mod tests {
         DatabaseClient {
             config,
             driver_lib_dir: ".".to_string(),
+            searched_paths: vec![".".to_string()],
         }
     }
 

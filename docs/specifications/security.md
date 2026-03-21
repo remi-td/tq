@@ -117,6 +117,22 @@ a3f2b1c... tq-1.0.0-linux-x86_64.tar.gz
 $ gpg --verify tq-1.0.0-linux-x86_64.tar.gz.sig
 ```
 
+### Third-Party Driver License Compliance
+
+`tq` bundles the Teradata SQL driver library, which is proprietary software distributed under a separate Teradata license agreement. The following requirements ensure legal compliance:
+
+**REQ-SEC-LICENSE-001: Installer License Gate**
+
+The install script MUST obtain explicit user acceptance of the Teradata license before installing any files. Interactive and non-interactive modes are both supported. See `docs/specifications/cli-interface.md`, section `REQ-INSTALL-010`, for the complete installer specification.
+
+**REQ-SEC-LICENSE-002: License File Bundling**
+
+Every release archive MUST include `LICENSE.teradata` containing the full Teradata driver license text. This file MUST be sourced from the repository and MUST NOT be fetched remotely at install time.
+
+**REQ-SEC-LICENSE-003: License Text in Repository**
+
+The Teradata driver license text SHALL be stored as a file in the repository (e.g., `LICENSE.teradata` at the project root) so that it is available at build time, auditable via version control, and includable in release archives without network access.
+
 ## Security Hardening
 
 ### Principle of Least Privilege

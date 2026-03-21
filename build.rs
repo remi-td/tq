@@ -67,16 +67,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             } else {
                                 // Successfully copied - no warning needed for success case
 
-                                // Write the library directory to a file that can be included at compile time
-                                let lib_dir_file =
-                                    PathBuf::from(&out_dir).join("teradata_lib_dir.txt");
-                                fs::write(&lib_dir_file, target_dir.to_string_lossy().as_bytes())
-                                    .ok();
-
-                                println!(
-                                    "cargo:rustc-env=TERADATA_LIB_DIR={}",
-                                    target_dir.display()
-                                );
                                 println!("cargo:rerun-if-changed=build.rs");
                                 return Ok(());
                             }

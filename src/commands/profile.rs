@@ -279,17 +279,43 @@ fn handle_edit(
     Ok(())
 }
 
+/// Ask the user for confirmation, reading from the provided reader.
+///
+/// Returns `true` if the user enters "y" or "Y", `false` otherwise.
+/// Extracted for testability.
+fn confirm_deletion(
+    name: &str,
+    is_tty: bool,
+    reader: &mut dyn std::io::BufRead,
+) -> Result<bool> {
+    if is_tty {
+        eprint!("Delete profile '{}'? [y/N] ", name);
+        let mut input = String::new();
+        reader
+            .read_line(&mut input)
+            .map_err(TqError::IoError)?;
+        let trimmed = input.trim();
+        Ok(trimmed == "y" || trimmed == "Y")
+    } else {
+        Err(TqError::InvalidConfig(format!(
+            "Deleting profile '{}' requires --force in non-interactive mode.\n\
+             Usage: tq profile delete {} --force",
+            name, name
+        )))
+    }
+}
+
 fn handle_delete(name: &str, force: bool) -> Result<()> {
+    use std::io::IsTerminal;
+
     if !force {
-        eprintln!(
-            "Error: Deleting profile '{}' requires the --force flag.",
-            name
-        );
-        eprintln!("Usage: tq profile delete {} --force", name);
-        return Err(TqError::InvalidConfig(format!(
-            "Deleting profile '{}' requires --force",
-            name
-        )));
+        let is_tty = std::io::stdin().is_terminal();
+        let mut stdin = std::io::BufReader::new(std::io::stdin());
+        let confirmed = confirm_deletion(name, is_tty, &mut stdin)?;
+        if !confirmed {
+            eprintln!("Aborted.");
+            return Ok(());
+        }
     }
 
     let mut table = read_config_table()?;
@@ -312,12 +338,35 @@ fn handle_delete(name: &str, force: bool) -> Result<()> {
     Ok(())
 }
 
+/// Display a single profile's details to stdout.
+///
+/// Shared helper used by both `tq profile list` and `tq profiles`.
+/// An optional `source_tag` (e.g., "[project]") is appended to each field line.
+pub fn display_profile(
+    name: &str,
+    profile: &crate::config::ConnectionSettings,
+    source_tag: Option<&str>,
+) {
+    let host = profile.host.as_deref().unwrap_or("<not set>");
+    let database = profile.database.as_deref().unwrap_or("<not set>");
+    let user = profile.user.as_deref().unwrap_or("<not set>");
+    let tag = source_tag.map(|t| format!(" {}", t)).unwrap_or_default();
+
+    println!("  {}", name);
+    println!("    Host:     {}{}", host, tag);
+    println!("    Database: {}{}", database, tag);
+    println!("    User:     {}{}", user, tag);
+
+    if let Some(ref lm) = profile.logmech {
+        if lm.to_uppercase() != "TD2" {
+            println!("    Logmech:  {}{}", lm, tag);
+        }
+    }
+    println!();
+}
+
 /// Handle `tq profile list` by delegating to the existing profiles display logic
 fn handle_list(config: &Config) -> Result<()> {
-    // Re-use the same logic as `tq profiles` command in main.rs
-    // We import the display function here to avoid duplication.
-    // Since the display logic is in main.rs, we replicate a simpler version here
-    // that just lists profile names and basic info.
     if config.profiles.is_empty() {
         println!("No profiles defined.\n");
         println!(
@@ -333,21 +382,7 @@ fn handle_list(config: &Config) -> Result<()> {
 
     for name in names {
         if let Some(profile) = config.profiles.get(name) {
-            let host = profile.host.as_deref().unwrap_or("<not set>");
-            let database = profile.database.as_deref().unwrap_or("<not set>");
-            let user = profile.user.as_deref().unwrap_or("<not set>");
-
-            println!("  {}", name);
-            println!("    Host:     {}", host);
-            println!("    Database: {}", database);
-            println!("    User:     {}", user);
-
-            if let Some(ref lm) = profile.logmech {
-                if lm.to_uppercase() != "TD2" {
-                    println!("    Logmech:  {}", lm);
-                }
-            }
-            println!();
+            display_profile(name, profile, None);
         }
     }
 
@@ -692,6 +727,51 @@ mod tests {
             let err_msg = format!("{}", result.unwrap_err());
             assert!(err_msg.contains("does not exist"));
         });
+    }
+
+    // =========================================================================
+    // Delete confirmation tests
+    // =========================================================================
+
+    #[test]
+    fn test_confirm_deletion_tty_yes() {
+        let mut input = std::io::Cursor::new(b"y\n");
+        let result = confirm_deletion("dev", true, &mut input);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_confirm_deletion_tty_yes_uppercase() {
+        let mut input = std::io::Cursor::new(b"Y\n");
+        let result = confirm_deletion("dev", true, &mut input);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_confirm_deletion_tty_no() {
+        let mut input = std::io::Cursor::new(b"n\n");
+        let result = confirm_deletion("dev", true, &mut input);
+        assert!(result.is_ok());
+        assert!(!result.unwrap());
+    }
+
+    #[test]
+    fn test_confirm_deletion_tty_empty() {
+        let mut input = std::io::Cursor::new(b"\n");
+        let result = confirm_deletion("dev", true, &mut input);
+        assert!(result.is_ok());
+        assert!(!result.unwrap()); // Default is No
+    }
+
+    #[test]
+    fn test_confirm_deletion_non_tty_errors() {
+        let mut input = std::io::Cursor::new(b"");
+        let result = confirm_deletion("dev", false, &mut input);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("--force"));
     }
 
     // =========================================================================

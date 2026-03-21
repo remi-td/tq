@@ -740,6 +740,7 @@ Environment variables provide quick configuration overrides without editing file
 | `TQ_FORMAT` | string | Default output format | `json` |
 | `TQ_TIMEOUT` | string | Connection timeout | `30s` |
 | `TQ_PROFILE` | string | Profile name to use | `prod` |
+| `TERADATA_LIB_DIR` | string | Directory containing the Teradata driver library | `/opt/teradata/lib` |
 
 ### Usage Examples
 
@@ -916,6 +917,68 @@ Password: ****
 8. **Update profiles without re-creating** - Use `tq profile edit` to change individual fields
 9. **Check merged profiles** - Use `tq profiles` to see how user and project configs merge
 10. **Script profile cleanup** - Use `tq profile delete --force` in automation to remove stale profiles
+
+## Driver Library Resolution
+
+tq bundles the Teradata native driver library (`teradatasql.so` on Linux, `teradatasql.dylib` on macOS) alongside the binary in each release. The install script copies both files to the same directory, so no additional configuration is needed in the common case.
+
+### How tq Finds the Driver
+
+tq searches for the driver library using the following priority order:
+
+1. **Executable directory** (default) - The directory containing the `tq` binary. This is where the install script places the library.
+2. **`--driver-lib-dir` flag** - Explicitly specify the directory at runtime.
+3. **`TERADATA_LIB_DIR` environment variable** - Set a persistent override.
+4. **Current working directory** - Last resort fallback.
+
+### Using `--driver-lib-dir`
+
+If you have installed the binary and library in separate locations, use this flag to point tq to the driver:
+
+```bash
+tq --driver-lib-dir /opt/teradata/lib query "SELECT 1"
+```
+
+You can also set `TERADATA_LIB_DIR` permanently in your shell profile:
+
+```bash
+export TERADATA_LIB_DIR=/opt/teradata/lib
+```
+
+### Troubleshooting "Failed to Load Teradata Driver"
+
+If you see an error like:
+
+```
+Error: Failed to load Teradata driver from /home/alice/.local/bin
+  Searched: /home/alice/.local/bin, /opt/teradata/lib, .
+  Ensure teradatasql library is present in one of these directories.
+```
+
+**Common causes and fixes:**
+
+1. **Library not in the same directory as binary** - The most common cause. The install script places both `tq` and `teradatasql.*` in the same directory (`~/.local/bin` by default). If you moved just the binary, copy the library as well:
+   ```bash
+   # Find the library in the release archive
+   ls ~/.local/bin/teradatasql.*
+   # If missing, re-run the installer
+   curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh
+   ```
+
+2. **Manual binary install without library** - If you downloaded just the binary (not the `.tar.gz`), download and extract the full archive, then copy the library manually.
+
+3. **Custom install directory** - If you installed to a custom directory, ensure the library was copied there too:
+   ```bash
+   TQ_INSTALL_DIR=/usr/local/bin curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh
+   # Both tq and teradatasql.* should now be in /usr/local/bin
+   ```
+
+4. **Specify library location explicitly** - If you cannot move the library, point tq to it:
+   ```bash
+   tq --driver-lib-dir /path/to/library query "SELECT 1"
+   ```
+
+---
 
 ## Troubleshooting
 

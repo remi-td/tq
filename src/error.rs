@@ -40,7 +40,11 @@ pub enum TqError {
 
     /// Failed to load the Teradata driver
     #[error("Failed to load Teradata driver from '{path}': {message}")]
-    DriverLoad { path: String, message: String },
+    DriverLoad {
+        path: String,
+        searched_paths: Vec<String>,
+        message: String,
+    },
 
     // ========================================================================
     // Query Errors
@@ -187,8 +191,12 @@ pub enum TqError {
     // Internal Errors
     // ========================================================================
     /// SQL parse error (unterminated string, block comment, etc.)
-    #[error("SQL parse error: {0}")]
-    SqlParseError(String),
+    #[error("SQL parse error at line {line}, column {column}: {message}")]
+    SqlParseError {
+        message: String,
+        line: usize,
+        column: usize,
+    },
 
     /// Internal error (bug)
     #[error("Internal error: {0}\n\nThis is a bug. Please report it!")]
@@ -266,16 +274,31 @@ impl TqError {
                 )
             }
 
-            TqError::DriverLoad { path, message } => {
+            TqError::DriverLoad {
+                path,
+                searched_paths,
+                message,
+            } => {
+                let searched_list = if searched_paths.is_empty() {
+                    format!("  {}", path)
+                } else {
+                    searched_paths
+                        .iter()
+                        .map(|p| format!("  - {}", p))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                };
                 format!(
                     "Error: Failed to load Teradata driver\n\n\
                      Path: {}\n\
                      Cause: {}\n\n\
+                     Searched directories:\n{}\n\n\
                      Troubleshooting:\n  \
-                     - Ensure teradatasql library is installed\n  \
-                     - Check library path: --driver-lib-dir /path/to/lib\n  \
-                     - Verify library permissions",
-                    path, message
+                     - Ensure the teradatasql library is in the same directory as the tq binary\n  \
+                     - Override with: --driver-lib-dir /path/to/lib\n  \
+                     - Or set: TERADATA_LIB_DIR=/path/to/lib\n  \
+                     - Verify library file permissions",
+                    path, message, searched_list
                 )
             }
 
@@ -406,6 +429,16 @@ pub fn string_to_error(s: String) -> Box<dyn std::error::Error + Send + Sync> {
     Box::new(std::io::Error::other(s))
 }
 
+impl From<crate::sql::ParseError> for TqError {
+    fn from(e: crate::sql::ParseError) -> Self {
+        TqError::SqlParseError {
+            message: e.message,
+            line: e.line,
+            column: e.column,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -485,6 +518,42 @@ mod tests {
 
         // Should still contain troubleshooting
         assert!(msg.contains("Troubleshooting"));
+    }
+
+    #[test]
+    fn test_sql_parse_error_struct_variant() {
+        let err = TqError::SqlParseError {
+            message: "unterminated string".to_string(),
+            line: 3,
+            column: 7,
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("line 3"));
+        assert!(display.contains("column 7"));
+        assert!(display.contains("unterminated string"));
+        assert_eq!(err.exit_code(), 1);
+    }
+
+    #[test]
+    fn test_sql_parse_error_from_parse_error() {
+        let parse_err = crate::sql::ParseError {
+            message: "unterminated block comment".to_string(),
+            line: 5,
+            column: 12,
+        };
+        let tq_err: TqError = parse_err.into();
+        match tq_err {
+            TqError::SqlParseError {
+                message,
+                line,
+                column,
+            } => {
+                assert_eq!(message, "unterminated block comment");
+                assert_eq!(line, 5);
+                assert_eq!(column, 12);
+            }
+            other => panic!("Expected SqlParseError, got: {:?}", other),
+        }
     }
 
     #[test]

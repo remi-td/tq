@@ -2,7 +2,7 @@
 # install.sh - Install tq (Teradata Query) CLI tool
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh
+#   curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh -s -- --accept-license
 #
 # Environment variables:
 #   TQ_INSTALL_DIR  - Override install directory (default: ~/.local/bin)
@@ -27,6 +27,71 @@ err() {
 
 warn() {
     say "WARNING: $1" >&2
+}
+
+# --- License acceptance ---
+
+ACCEPT_LICENSE=false
+
+parse_args() {
+    for arg in "$@"; do
+        case "$arg" in
+            --accept-license)
+                ACCEPT_LICENSE=true
+                ;;
+        esac
+    done
+}
+
+display_license_notice() {
+    cat <<'NOTICE'
+
+=======================================================================
+  TERADATA DRIVER LICENSE NOTICE
+=======================================================================
+
+  tq bundles the Teradata SQL Driver, which is proprietary software
+  owned by Teradata Corporation.
+
+  By installing tq, you agree to the following:
+
+  1. The Teradata SQL Driver is copyright Teradata Corporation.
+  2. The driver is subject to the Teradata License Agreement.
+  3. The driver is provided "AS IS", without warranty of any kind.
+
+  Full license: https://github.com/Teradata/teradatasql/blob/master/LICENSE
+  tq license:   https://github.com/remi-td/tq/blob/master/LICENSE.teradata
+
+=======================================================================
+
+NOTICE
+}
+
+check_license_acceptance() {
+    if [ "${ACCEPT_LICENSE}" = true ]; then
+        say "License accepted via --accept-license flag."
+        return
+    fi
+
+    display_license_notice
+
+    if [ -t 0 ]; then
+        # Interactive mode: prompt for acceptance
+        printf "Do you accept the license terms? [y/N] "
+        read -r answer
+        case "$answer" in
+            y|Y)
+                say "License accepted."
+                ;;
+            *)
+                err "License not accepted. Installation aborted."
+                ;;
+        esac
+    else
+        # Non-interactive mode (piped input): require --accept-license
+        err "Non-interactive mode detected. Pass --accept-license to accept the license terms.
+  Example: curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh -s -- --accept-license"
+    fi
 }
 
 # --- Platform detection ---
@@ -71,10 +136,15 @@ detect_platform() {
 # --- Main ---
 
 main() {
+    parse_args "$@"
+
     # Check for required tools
     if ! command -v curl >/dev/null 2>&1; then
         err "curl is required but not found. Install curl and try again."
     fi
+
+    # License acceptance must happen before any download
+    check_license_acceptance
 
     detect_platform
     say "Detected: ${PLATFORM_DISPLAY}"
@@ -168,4 +238,4 @@ main() {
     say "Installation complete! Run 'tq --version' to verify."
 }
 
-main
+main "$@"

@@ -418,7 +418,7 @@ Deliberately minimal: no async runtime (synchronous sufficient), no heavy parsin
 
 ### Native Library Management
 
-tq depends on `teradatarustapi`, which provides pre-built native libraries (Go-based, loaded via `libloading` at runtime). The `build.rs` script handles copying the correct library to the target directory at build time.
+tq depends on `teradatarustapi`, which provides pre-built native libraries (Go-based, loaded via `libloading` at runtime). The `build.rs` script handles copying the correct library to the target directory at build time. At runtime, the binary resolves the library location dynamically using a fallback chain (CLI flag, environment variable, executable directory, CWD) rather than a compile-time baked path. See `docs/design/connection-management.md` for the full driver resolution design.
 
 **Cross-compilation support**: `build.rs` uses `CARGO_CFG_TARGET_OS` and `CARGO_CFG_TARGET_ARCH` (not `cfg!()`) to select the correct library for the target platform. See `docs/design/release.md` for the full mapping table.
 

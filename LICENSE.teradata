@@ -1,0 +1,36 @@
+Teradata Driver License Notice
+===============================
+
+tq bundles the Teradata SQL Driver for the Go Programming Language
+("teradatasql"), which is proprietary software owned by Teradata Corporation.
+
+By downloading and using tq, you acknowledge and agree to the following:
+
+1. The Teradata SQL Driver is copyright Teradata Corporation, all rights
+   reserved.
+
+2. The driver is provided under the Teradata License Agreement, which governs
+   your use of the driver software. Use of the driver is subject to Teradata's
+   terms and conditions.
+
+3. The driver is distributed in binary form only. No source code for the
+   driver is included or available through this project.
+
+4. Redistribution of the driver is permitted only as part of applications
+   that connect to Teradata databases, in accordance with Teradata's
+   licensing terms.
+
+5. THE DRIVER IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+For the full Teradata license terms, visit:
+  https://github.com/Teradata/teradatasql/blob/master/LICENSE
+
+For questions about Teradata licensing:
+  https://www.teradata.com/Legal/Legal-Notices
+
+---
+
+tq itself (excluding the bundled Teradata driver) is licensed under the
+MIT License. See the LICENSE file for details.

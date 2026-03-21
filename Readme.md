@@ -18,7 +18,7 @@ with Teradata from the command line.
 
 ```bash
 # Install (Linux / macOS)
-curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh
+curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh -s -- --accept-license
 
 # Set connection
 export TQ_LOGON="user:pass@host:1025/database"
@@ -70,21 +70,38 @@ platform, verifies the checksum, and installs to `~/.local/bin`:
 curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh
 ```
 
-The script will show you exactly what it is doing:
+The installer will display the Teradata driver license notice and ask for your
+acceptance before proceeding. In a terminal you will see an interactive prompt:
 
 ```
+  TERADATA DRIVER LICENSE NOTICE
+  ...
+  Full license: https://github.com/Teradata/teradatasql/blob/master/LICENSE
+
+Do you accept the license terms? [y/N] y
+tq-install: License accepted.
 tq-install: Detected: Linux (x86_64)
-tq-install: Latest version: v1.22.0
-tq-install: Downloading tq-v1.22.0-x86_64-unknown-linux-gnu.tar.gz...
+tq-install: Latest version: v1.25.0
+tq-install: Downloading tq-v1.25.0-x86_64-unknown-linux-gnu.tar.gz...
 tq-install: Checksum verified.
 tq-install: Installed tq to /home/user/.local/bin/tq
 tq-install: Installation complete! Run 'tq --version' to verify.
 ```
 
+**Non-interactive install** (CI/CD pipelines or piped installs):
+
+When stdin is not a terminal (e.g. `curl ... | sh`), the installer cannot
+prompt interactively. Use `--accept-license` to accept the license terms
+non-interactively:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh -s -- --accept-license
+```
+
 To install to a custom location, set `TQ_INSTALL_DIR` before running:
 
 ```bash
-TQ_INSTALL_DIR=/usr/local/bin curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh
+TQ_INSTALL_DIR=/usr/local/bin curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh -s -- --accept-license
 ```
 
 ### Manual Download
@@ -109,6 +126,11 @@ all artifacts. Verify your download before use:
 sha256sum -c checksums.txt --ignore-missing
 ```
 
+**Important:** Each release archive contains both the `tq` binary and the
+Teradata native driver library (`teradatasql.so` on Linux, `teradatasql.dylib`
+on macOS). Copy **both files** to the same directory in your `PATH`. tq looks
+for the driver in the same directory as the binary by default.
+
 ### Build from Source
 
 Requires Rust 1.70 or later ([rustup.rs](https://rustup.rs)):
@@ -126,8 +148,11 @@ tq --version
 # tq 1.22.0
 ```
 
-**License Notice:** By installing tq, you accept the license terms for bundled
-dependencies (Teradata drivers, Go runtime). See [LICENSE](LICENSE) for details.
+**License Notice:** The install script displays the Teradata driver license
+summary and requires acceptance before installation. By proceeding with the
+install (or passing `--accept-license`), you accept the license terms for
+bundled dependencies (Teradata drivers, Go runtime). See [LICENSE.teradata](LICENSE.teradata)
+for Teradata driver terms and [LICENSE](LICENSE) for tq itself.
 
 ---
 

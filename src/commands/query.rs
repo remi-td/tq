@@ -306,7 +306,7 @@ fn execute_batch<W: Write>(
 ) -> Result<()> {
     // Parse statements
     let statements = parse_statements(sql)
-        .map_err(|e| TqError::SqlParseError(e.to_string()))?;
+        .map_err(TqError::from)?;
     let total_count = statements.len();
 
     if verbose {
@@ -514,7 +514,7 @@ pub fn execute_to_file<W: Write>(
     let row_count = if use_batch {
         // Execute batch and write to file
         let statements = parse_statements(&sql)
-            .map_err(|e| TqError::SqlParseError(e.to_string()))?;
+            .map_err(TqError::from)?;
         let total_count = statements.len();
         let mut total_rows = 0;
 

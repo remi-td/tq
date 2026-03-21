@@ -5,7 +5,8 @@
 1. [Design Philosophy](#design-philosophy)
 2. [Command Structure](#command-structure)
 3. [Global Options](#global-options)
-4. [Commands](#commands)
+4. [Driver Library Resolution](#driver-library-resolution)
+5. [Commands](#commands)
    - [help - Display Help Information](#help---display-help-information)
    - [ping - Test Connectivity](#ping---test-connectivity)
    - [query - Execute SQL](#query---execute-sql)
@@ -16,11 +17,11 @@
    - [query-inspect - Inspect Session Query Text](#query-inspect---inspect-session-query-text)
    - [profiles - List Connection Profiles](#profiles---list-connection-profiles)
    - [profile - Manage Connection Profiles](#profile---manage-connection-profiles)
-5. [Input/Output Behavior](#inputoutput-behavior)
-6. [Flag Design Guidelines](#flag-design-guidelines)
-7. [Help Text Design](#help-text-design)
-8. [Version Information](#version-information)
-9. [Installation Experience](#installation-experience)
+6. [Input/Output Behavior](#inputoutput-behavior)
+7. [Flag Design Guidelines](#flag-design-guidelines)
+8. [Help Text Design](#help-text-design)
+9. [Version Information](#version-information)
+10. [Installation Experience](#installation-experience)
 
 ---
 
@@ -58,7 +59,7 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 | `--logon` | `-l` | string | `$TQ_LOGON` | Connection string: `user:password@host:port/database` |
 | `--password-file` | - | path | - | Read password from file |
 | `--logmech` | - | enum | `TD2` | Authentication: `TD2`, `LDAP`, `KRB5`, `TDNEGO` |
-| `--driver-lib-dir` | - | path | bundled | Teradata driver library directory |
+| `--driver-lib-dir` | - | path | see below | Override Teradata driver library search path |
 | `--timeout` | `-t` | duration | `30s` | Connection timeout |
 | `--verbose` | `-v` | flag | false | Verbose output (repeatable: `-vv`, `-vvv`) |
 | `--quiet` | `-q` | flag | false | Suppress non-essential output |
@@ -67,6 +68,90 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 | `--profile` | - | string | - | Select connection profile from config file |
 | `--help` | `-h` | flag | - | Show help |
 | `--version` | `-V` | flag | - | Show version |
+
+## Driver Library Resolution
+
+The `tq` binary requires the Teradata SQL driver shared library (`teradatasql` or equivalent) to be present at runtime. Because the library cannot be statically linked, its location is resolved at startup using a well-defined search order.
+
+### REQ-DRIVER-001: Runtime Search Order
+
+The binary SHALL locate the driver library by checking the following locations in order, stopping at the first location where the library file is found:
+
+1. **Executable-adjacent directory** - The directory that contains the `tq` binary itself (resolved via the OS-provided executable path at runtime, not a compile-time path).
+2. **`--driver-lib-dir` flag** - The path supplied by the user on the command line.
+3. **`TERADATA_LIB_DIR` environment variable** - The directory specified by this environment variable.
+4. **Current working directory** - The directory from which `tq` was invoked.
+
+**Rationale for this order:**
+- Placing the executable-adjacent directory first ensures that the library distributed alongside the binary in a release archive is always found without any user configuration.
+- The CLI flag comes before the environment variable so that one-off overrides always win over persistent settings.
+- The current working directory serves as a developer convenience for local builds and ad-hoc testing.
+
+### REQ-DRIVER-002: Executable-Adjacent Resolution
+
+The executable-adjacent path SHALL be resolved at runtime using the operating system's mechanism for locating the current executable (e.g., `std::env::current_exe()` on Linux/macOS). It MUST NOT use a path that was baked in at compile time. If the OS cannot resolve the executable path, this step is silently skipped and the search continues with the next location.
+
+### REQ-DRIVER-003: Error When Library Not Found
+
+When none of the four locations yields a valid library file, `tq` SHALL exit with code `1` and print a diagnostic message that:
+- States the library was not found.
+- Lists every path that was searched, in the order they were checked.
+- Tells the user how to fix the problem.
+
+**Required error format:**
+
+```
+Error: Teradata driver library not found.
+
+Searched the following locations (in order):
+  1. Executable directory:   /home/alice/.local/bin            [not found]
+  2. --driver-lib-dir flag:  (not provided)
+  3. TERADATA_LIB_DIR env:   (not set)
+  4. Current directory:      /home/alice/projects              [not found]
+
+Fix: Place the driver library alongside the tq binary, or set TERADATA_LIB_DIR:
+  export TERADATA_LIB_DIR=/path/to/driver
+  tq ...
+
+Download the Teradata SQL driver from:
+  https://pypi.org/project/teradatasql/
+```
+
+Requirements:
+1. **REQ-DRIVER-003.1** - Every search location SHALL be listed, even if it was not explicitly provided (show `(not provided)` or `(not set)` for absent flag/variable).
+2. **REQ-DRIVER-003.2** - Each location SHALL include the resolved path (expanded tilde, resolved symlinks) or the placeholder for unset values.
+3. **REQ-DRIVER-003.3** - Each entry SHALL include a `[not found]` or `[not set]` / `(not provided)` annotation.
+4. **REQ-DRIVER-003.4** - The fix section SHALL always include both the environment variable approach and the reference to where the driver can be downloaded.
+
+### REQ-DRIVER-004: `--driver-lib-dir` Flag Behaviour
+
+When `--driver-lib-dir <path>` is provided:
+- The path is used as search location 2 in the resolution order above.
+- The path is treated as a directory, not a file. `tq` looks for the driver library file inside that directory.
+- If the directory does not exist or the library is not found inside it, the search continues to the next location (no early exit).
+- In verbose mode (`-v`), the resolved path and outcome for each search step SHALL be printed to stderr.
+
+**Example verbose output:**
+```
+[debug] Driver search:
+  [1] exe dir /home/alice/.local/bin: libteradatasql.so -> found
+```
+
+### REQ-DRIVER-005: Environment Variable (`TERADATA_LIB_DIR`)
+
+The `TERADATA_LIB_DIR` environment variable, when set, specifies a directory to search as location 3. Its value is treated identically to `--driver-lib-dir` but at lower precedence. If the variable is set but the directory does not contain the library, the search continues to location 4.
+
+### REQ-DRIVER-006: Release Archive Packaging
+
+The release tar.gz archive SHALL include the driver library file in the same directory as the `tq` binary so that users who install via the archive or the install script get a working setup with no additional configuration.
+
+```
+tq-1.0.0-x86_64-unknown-linux-gnu.tar.gz
+├── tq                          (binary)
+└── libteradatasql.so           (driver library, same directory)
+```
+
+---
 
 ## Commands
 
@@ -2028,5 +2113,118 @@ Requirements:
    platform error (REQ-INSTALL-004) with a pointer to the `.zip` release artifact.
 4. **REQ-INSTALL-009.4** - Any other platform (musl, armv7, FreeBSD, etc.) SHALL
    produce the unsupported platform error (REQ-INSTALL-004).
+
+---
+
+### REQ-INSTALL-010: Teradata License Acceptance
+
+The `tq` binary bundles the Teradata SQL driver library, which is subject to a separate Teradata license agreement. The install script MUST present this license and obtain explicit acceptance before downloading or installing any files.
+
+**Rationale:** The Teradata driver is not open-source software. Redistribution and use require the end-user to accept Teradata's license terms. Acceptance must be recorded before installation to avoid silent redistribution of proprietary software.
+
+#### REQ-INSTALL-010.1: License Display
+
+Before initiating any download, the script SHALL display a concise license notice:
+
+```
+Teradata SQL Driver License Notice
+====================================
+The tq binary includes the Teradata SQL Driver for Python/Rust
+(teradatasql), which is proprietary software subject to Teradata's
+license agreement.
+
+By installing tq you agree to the Teradata license terms available at:
+  https://github.com/Teradata/python-driver/blob/master/LICENSE
+
+The full license text is also included in the downloaded archive as:
+  LICENSE.teradata
+```
+
+Requirements:
+- The notice SHALL appear before any download begins.
+- The URL to the full Teradata license SHALL be included in the notice.
+- The location of the bundled license file within the archive SHALL be stated.
+
+#### REQ-INSTALL-010.2: Interactive Acceptance Prompt (TTY)
+
+When stdin is a terminal (TTY), the script SHALL display an acceptance prompt immediately after the license notice and wait for user input:
+
+```
+Do you accept the Teradata license terms? [y/N] _
+```
+
+- Pressing `y` or `Y` followed by Enter proceeds with installation.
+- Any other input (including Enter alone, `n`, `N`, or any other character) aborts with the message below and exit code `1`:
+
+```
+Installation aborted. You must accept the license terms to install tq.
+
+To accept the license and install, run:
+  curl -sSL https://github.com/remi-td/tq/install.sh | sh
+
+Or to accept non-interactively (scripts, CI/CD):
+  curl -sSL https://github.com/remi-td/tq/install.sh | sh -s -- --accept-license
+```
+
+- The default response is `N` (reject), shown in uppercase in the prompt.
+- Input is read from `/dev/tty` directly, not from stdin, to handle piped installations correctly.
+
+#### REQ-INSTALL-010.3: Non-Interactive Acceptance Flag
+
+The `--accept-license` flag allows non-interactive installations to proceed without a TTY prompt:
+
+```bash
+# Scripted installation
+curl -sSL https://github.com/remi-td/tq/install.sh | sh -s -- --accept-license
+
+# With custom install directory
+curl -sSL https://github.com/remi-td/tq/install.sh | sh -s -- --accept-license TQ_INSTALL_DIR=/usr/local/bin
+```
+
+When `--accept-license` is provided:
+1. The license notice SHALL still be displayed (REQ-INSTALL-010.1).
+2. The interactive prompt SHALL be skipped.
+3. A confirmation line SHALL be printed to indicate acceptance was provided via flag:
+
+```
+License accepted via --accept-license flag.
+```
+
+#### REQ-INSTALL-010.4: Piped Installation Without `--accept-license`
+
+When the script detects that stdin is not a TTY (i.e., the script is piped, e.g., `curl | sh`) and `--accept-license` is not provided, the script SHALL exit with code `1` and display:
+
+```
+Error: License acceptance required.
+
+This script is running non-interactively (stdin is not a terminal).
+To accept the Teradata license terms non-interactively, use:
+
+  curl -sSL https://github.com/remi-td/tq/install.sh | sh -s -- --accept-license
+
+Review the license at:
+  https://github.com/Teradata/python-driver/blob/master/LICENSE
+```
+
+Requirements:
+1. **REQ-INSTALL-010.4.1** - The error SHALL be printed before any download begins.
+2. **REQ-INSTALL-010.4.2** - The exact flag syntax for non-interactive acceptance SHALL be shown in the error message.
+3. **REQ-INSTALL-010.4.3** - The Teradata license URL SHALL be included so the user can review before re-running.
+4. **REQ-INSTALL-010.4.4** - The script SHALL exit with code `1`.
+
+#### REQ-INSTALL-010.5: License File in Archive
+
+The release tar.gz archive SHALL include the Teradata license as a file named `LICENSE.teradata` alongside the binary and driver library:
+
+```
+tq-1.0.0-x86_64-unknown-linux-gnu.tar.gz
+├── tq                          (binary)
+├── libteradatasql.so           (driver library)
+└── LICENSE.teradata            (Teradata driver license text)
+```
+
+Requirements:
+1. **REQ-INSTALL-010.5.1** - `LICENSE.teradata` SHALL contain the full Teradata driver license text, stored in the repository (not fetched remotely).
+2. **REQ-INSTALL-010.5.2** - The license file SHALL be included in every release archive for every supported platform.
 
 ---

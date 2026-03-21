@@ -272,7 +272,7 @@ fn handle_profiles(config: &Config) -> Result<()> {
         );
         for name in &user_only {
             if let Some(profile) = config.profiles.get(name) {
-                print_profile(name, profile, None);
+                commands::profile::display_profile(name, profile, None);
             }
         }
     }
@@ -283,7 +283,7 @@ fn handle_profiles(config: &Config) -> Result<()> {
             println!("From project config ({}):", path.display());
             for name in &project_only {
                 if let Some(profile) = config.profiles.get(name) {
-                    print_profile(name, profile, None);
+                    commands::profile::display_profile(name, profile, None);
                 }
             }
         }
@@ -304,32 +304,6 @@ fn handle_profiles(config: &Config) -> Result<()> {
 
     println!("Use: tq --profile <name> <command>");
     Ok(())
-}
-
-/// Print a single profile (not merged)
-fn print_profile(
-    name: &str,
-    profile: &tq::config::ConnectionSettings,
-    source_tag: Option<&str>,
-) {
-    let host = profile.host.as_deref().unwrap_or("<not set>");
-    let database = profile.database.as_deref().unwrap_or("<not set>");
-    let user = profile.user.as_deref().unwrap_or("<not set>");
-
-    let tag = source_tag.map(|t| format!(" {}", t)).unwrap_or_default();
-
-    println!("  {}", name);
-    println!("    Host:     {}{}", host, tag);
-    println!("    Database: {}{}", database, tag);
-    println!("    User:     {}{}", user, tag);
-
-    // Show logmech if not default
-    if let Some(ref logmech) = profile.logmech {
-        if logmech.to_uppercase() != "TD2" {
-            println!("    Logmech:  {}{}", logmech, tag);
-        }
-    }
-    println!();
 }
 
 /// Print a merged profile with source indicators for each field

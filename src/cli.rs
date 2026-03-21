@@ -105,7 +105,9 @@ pub struct GlobalOpts {
     /// hostname:port:database:username:password
     ///
     /// File should have permissions 0600.
-    #[arg(long, value_name = "FILE", global = true)]
+    ///
+    /// Place before the subcommand: tq --password-file pw.txt query "SELECT 1"
+    #[arg(long, value_name = "FILE")]
     pub password_file: Option<PathBuf>,
 
     /// Authentication mechanism
@@ -114,12 +116,13 @@ pub struct GlobalOpts {
     /// LDAP: LDAP directory authentication
     /// KRB5: Kerberos authentication
     /// TDNEGO: Teradata negotiating mechanism
+    ///
+    /// Place before the subcommand: tq --logmech LDAP query "SELECT 1"
     #[arg(
         long,
         env = "TQ_LOGMECH",
         default_value = "TD2",
-        value_name = "MECH",
-        global = true
+        value_name = "MECH"
     )]
     pub logmech: LogonMechanism,
 
@@ -304,11 +307,11 @@ pub enum ProfileAction {
         user: Option<String>,
 
         /// Authentication mechanism (TD2, LDAP, KRB5, TDNEGO)
-        #[arg(long = "auth", id = "profile_add_logmech", value_name = "MECH")]
+        #[arg(long = "logmech", id = "profile_add_logmech", value_name = "MECH")]
         logmech: Option<String>,
 
         /// Path to password file
-        #[arg(long = "pass-file", id = "profile_add_password_file", value_name = "FILE")]
+        #[arg(long = "password-file", id = "profile_add_password_file", value_name = "FILE")]
         password_file: Option<PathBuf>,
     },
 
@@ -340,11 +343,11 @@ pub enum ProfileAction {
         user: Option<String>,
 
         /// Authentication mechanism (TD2, LDAP, KRB5, TDNEGO)
-        #[arg(long = "auth", id = "profile_edit_logmech", value_name = "MECH")]
+        #[arg(long = "logmech", id = "profile_edit_logmech", value_name = "MECH")]
         logmech: Option<String>,
 
         /// Path to password file
-        #[arg(long = "pass-file", id = "profile_edit_password_file", value_name = "FILE")]
+        #[arg(long = "password-file", id = "profile_edit_password_file", value_name = "FILE")]
         password_file: Option<PathBuf>,
     },
 

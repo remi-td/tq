@@ -1,15 +1,27 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.24.0 (Sprint 43 - Profile Management & Parser Polish)
+**Version:** 1.25.0 (Sprint 44 - Driver Distribution Fix & Profile Polish)
 **Last Updated:** 2026-03-21
-**Base Commit:** [Sprint 43 - In Progress]
+**Base Commit:** [Sprint 44 - In Progress]
 
 ## Overview
 
 This directory contains comprehensive test case definitions for the tq CLI tool. These test cases cover all implemented MVP features (FR-001 through FR-010) and provide detailed procedures for validating functionality, usability, error handling, and security.
 
 ## Test Case Categories
+
+### Sprint 44: Driver Distribution Fix & Profile Polish
+
+- **TC-044-001**: Driver Path Resolution - Fallback Chain Order (Unit, no-DB, no-binary)
+- **TC-044-002**: Driver Resolution Error Message Lists All Searched Paths (Unit, no-DB, no-binary)
+- **TC-044-003**: build.rs Does Not Hardcode Absolute Build Path (Unit/Code Inspection, no-DB)
+- **TC-044-004**: Install Script License Gate - shellcheck + Behavioral Tests (Shell, no-DB)
+- **TC-044-005**: License File Stored in Repository, Not Network-Fetched (File Existence + Code Inspection)
+- **TC-044-006**: Profile Flag Naming - --logmech and --password-file Work on Profile Subcommands (CLI Integration + Unit, no-DB)
+- **TC-044-007**: Profile Delete Confirmation - --force Bypass and Non-TTY Behavior (Unit + Injection/expectrl, no-DB)
+- **TC-044-008**: SqlParseError Struct Variant with Line and Column (Unit, no-DB)
+- **TC-044-009**: display_profiles() Helper Produces Correct Output (Unit, no-DB)
 
 ### Sprint 43: Profile Management & Parser Polish
 
