@@ -328,6 +328,23 @@ pub enum Command {
     ///
     /// Example: tq priority 1234 rush
     Priority(PriorityArgs),
+
+    /// Show execution plan for a SQL statement
+    ///
+    /// Displays the Teradata EXPLAIN plan for a SQL statement,
+    /// showing step-by-step execution strategy.
+    ///
+    /// Example: tq explain "SELECT * FROM employees"
+    Explain(ExplainArgs),
+
+    /// Analyze AMP-level resource skew
+    ///
+    /// Shows CPU and I/O distribution across AMPs for a session
+    /// or top sessions by skew factor.
+    ///
+    /// Example: tq skew 1234
+    ///          tq skew
+    Skew(SkewArgs),
 }
 
 /// Profile management subcommands
@@ -824,6 +841,64 @@ pub struct PriorityArgs {
     /// table: Human-readable message (default)
     /// json: JSON result object
     /// csv: Comma-separated result
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for the explain command (Sprint 50)
+#[derive(Parser, Debug)]
+pub struct ExplainArgs {
+    /// SQL statement to explain
+    ///
+    /// The SQL query whose execution plan should be displayed.
+    /// Do not include the EXPLAIN keyword — it will be added automatically.
+    #[arg(value_name = "SQL")]
+    pub sql: String,
+
+    /// Output format
+    ///
+    /// table: Formatted explain output (default)
+    /// json: JSON object with steps array
+    /// csv: Step number and text as CSV
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for the skew command (Sprint 50)
+#[derive(Parser, Debug)]
+pub struct SkewArgs {
+    /// Session ID to analyze (omit for top sessions by skew)
+    ///
+    /// If provided, shows detailed AMP skew for that session.
+    /// If omitted, shows top 10 sessions ranked by CPU skew.
+    #[arg(value_name = "SESSION_ID")]
+    pub session_id: Option<i64>,
+
+    /// Output format
+    ///
+    /// table: Formatted skew analysis (default)
+    /// json: JSON array of session objects
+    /// csv: Comma-separated values
     #[arg(
         short,
         long,

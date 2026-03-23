@@ -234,6 +234,20 @@ pub fn handle_metacommand<W: Write>(
             )?;
         }
 
+        // Sprint 50: Explain and skew (basic handler - no client available)
+        "explain" => {
+            writeln!(
+                writer,
+                "The /explain command requires full REPL mode with database connection."
+            )?;
+        }
+        "skew" => {
+            writeln!(
+                writer,
+                "The /skew command requires full REPL mode with database connection."
+            )?;
+        }
+
         // Sprint 49: Session control (basic handler - no client available)
         "abort" => {
             writeln!(
@@ -680,6 +694,49 @@ pub fn handle_metacommand_with_state<W: Write>(
             }
         }
 
+        // Sprint 50: Explain plan command
+        "explain" => {
+            let sql = args.join(" ");
+            crate::commands::explain::execute_for_repl(
+                completion_state.client(),
+                &sql,
+                writer,
+            )?;
+        }
+
+        // Sprint 50: Skew analysis command
+        "skew" => {
+            if args.is_empty() {
+                // Show top sessions by skew
+                crate::commands::skew::execute_for_repl(
+                    completion_state.client(),
+                    None,
+                    writer,
+                )?;
+            } else {
+                match args[0].parse::<i64>() {
+                    Ok(session_id) => {
+                        crate::commands::skew::execute_for_repl(
+                            completion_state.client(),
+                            Some(session_id),
+                            writer,
+                        )?;
+                    }
+                    Err(_) => {
+                        writeln!(
+                            writer,
+                            "Error: '{}' is not a valid session ID. Expected a number.",
+                            args[0]
+                        )?;
+                        writeln!(writer)?;
+                        writeln!(writer, "Usage: /skew [session_id]")?;
+                        writeln!(writer, "       /skew           Show top sessions by skew")?;
+                        writeln!(writer, "       /skew 1234      Analyze specific session")?;
+                    }
+                }
+            }
+        }
+
         // Sprint 49: Priority change command
         "priority" => {
             if args.len() < 2 {
@@ -828,6 +885,14 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(
         writer,
         "  /priority <id> <level> Change session priority (RUSH/MEDIUM/LOW)"
+    )?;
+    writeln!(
+        writer,
+        "  /explain <sql>         Show execution plan for a SQL statement"
+    )?;
+    writeln!(
+        writer,
+        "  /skew [session_id]     Analyze AMP-level resource skew"
     )?;
     writeln!(writer)?;
     writeln!(writer, "Variable Substitution:")?;

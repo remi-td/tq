@@ -357,6 +357,17 @@ const METACOMMANDS: &[MetacommandDef] = &[
         aliases: &[],
         description: "Change session priority (RUSH/MEDIUM/LOW)",
     },
+    // Sprint 50: Query drill-down commands
+    MetacommandDef {
+        name: "explain",
+        aliases: &[],
+        description: "Show execution plan for a SQL statement",
+    },
+    MetacommandDef {
+        name: "skew",
+        aliases: &[],
+        description: "Analyze AMP-level resource skew",
+    },
 ];
 
 /// Test helper: returns metacommand names matching a prefix
