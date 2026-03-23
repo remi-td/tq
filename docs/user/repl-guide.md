@@ -116,18 +116,15 @@ See all databases you have access to:
 ```sql
 tq> /list databases
 
-Databases:
-┌─────────────────────┬──────────────┬─────────────┐
-│ Database            │ Owner        │ Type        │
-├─────────────────────┼──────────────┼─────────────┤
-│ dbc                 │ DBC          │ System      │
-│ production          │ dba_user     │ User        │
-│ staging             │ dba_user     │ User        │
-│ development         │ dev_user     │ User        │
-│ analytics           │ analytics    │ User        │
-└─────────────────────┴──────────────┴─────────────┘
+Databases (4):
+Name                           Owner                Type
+------------------------------------------------------------
+analytics                      analytics            Database
+development                    dev_user             User
+production                     dba_user             User
+staging                        dba_user             User
 
-5 databases found
+4 database(s)
 ```
 
 **Short alias:** `\l`
@@ -143,17 +140,15 @@ List all tables in your current database:
 ```sql
 tq> /list tables
 
-Tables in 'production':
-┌─────────────────────┬──────────┬──────────────┬───────────────┐
-│ Table               │ Type     │ Rows (Est.)  │ Size          │
-├─────────────────────┼──────────┼──────────────┼───────────────┤
-│ customers           │ Table    │ 1,234,567    │ 45.2 MB       │
-│ employees           │ Table    │ 42,573       │ 2.1 MB        │
-│ orders              │ Table    │ 9,876,543    │ 320.5 MB      │
-│ products            │ Table    │ 15,432       │ 890 KB        │
-└─────────────────────┴──────────┴──────────────┴───────────────┘
+Tables in (current):
+Name                                Type       Rows (Est.)       Size
+-----------------------------------------------------------------
+customers                           TABLE        1234567      45.2 MB
+employees                           TABLE          42573       2.1 MB
+orders                              TABLE        9876543     320.5 MB
+products                            TABLE          15432     890.0 KB
 
-4 tables found in database 'production'
+4 table(s)
 ```
 
 **Short alias:** `\dt`
@@ -164,48 +159,45 @@ tq> \dt
 
 #### Filter Tables by Pattern
 
-Use SQL LIKE patterns to filter tables:
+Use glob patterns to filter tables:
 
 ```sql
 # Find tables starting with "emp"
-tq> /list tables emp%
+tq> /list tables emp*
 
-Tables in 'production' matching 'emp%':
-┌─────────────────────┬──────────┬──────────────┬───────────────┐
-│ Table               │ Type     │ Rows (Est.)  │ Size          │
-├─────────────────────┼──────────┼──────────────┼───────────────┤
-│ employees           │ Table    │ 42,573       │ 2.1 MB        │
-│ emp_archive         │ Table    │ 8,123        │ 512 KB        │
-└─────────────────────┴──────────┴──────────────┴───────────────┘
+Tables in (current) matching 'emp*':
+Name                                Type       Rows (Est.)       Size
+-----------------------------------------------------------------
+employees                           TABLE          42573       2.1 MB
+emp_archive                         TABLE           8123     512.0 KB
 
-2 tables found matching 'emp%'
+2 table(s)
 ```
 
 **Pattern syntax:**
-- `%` matches any characters (like `*` in shell)
-- `_` matches a single character (like `?` in shell)
+- `*` matches any sequence of characters
+- `?` matches a single character
+- Matching is case-insensitive
 
 **Examples:**
 ```sql
-/list tables test_%       # Tables starting with "test_"
-/list tables %_temp       # Tables ending with "_temp"
-/list tables sales_2024_% # Tables starting with "sales_2024_"
+/list tables test_*       # Tables starting with "test_"
+/list tables *_temp       # Tables ending with "_temp"
+/list tables sales_2024_* # Tables starting with "sales_2024_"
 ```
 
-You can also specify a database:
+You can also specify a database using a qualified prefix:
 
 ```sql
-tq> /list tables staging.test_%
+tq> /list tables staging.test_*
 
-Tables in 'staging' matching 'test_%':
-┌─────────────────────┬──────────┬──────────────┬───────────────┐
-│ Table               │ Type     │ Rows (Est.)  │ Size          │
-├─────────────────────┼──────────┼──────────────┼───────────────┤
-│ test_customers      │ Table    │ 100          │ 8 KB          │
-│ test_orders         │ Table    │ 250          │ 12 KB         │
-└─────────────────────┴──────────┴──────────────┴───────────────┘
+Tables in staging matching 'test_*':
+Name                                Type       Rows (Est.)       Size
+-----------------------------------------------------------------
+test_customers                      TABLE            100       8.0 KB
+test_orders                         TABLE            250      12.0 KB
 
-2 tables found in 'staging' matching 'test_%'
+2 table(s)
 ```
 
 #### List Views
@@ -215,16 +207,13 @@ List all views in your current database:
 ```sql
 tq> /list views
 
-Views in 'production':
-┌─────────────────────────┬──────────────┬─────────────────────────┐
-│ View                    │ Owner        │ Definition (truncated)  │
-├─────────────────────────┼──────────────┼─────────────────────────┤
-│ active_employees        │ dba_user     │ SELECT * FROM employe...│
-│ sales_summary           │ analytics    │ SELECT dept, SUM(sal... │
-│ customer_orders_view    │ dba_user     │ SELECT c.*, o.* FROM ... │
-└─────────────────────────┴──────────────┴─────────────────────────┘
+Views in (current):
+----------------------------------------
+  active_employees
+  customer_orders_view
+  sales_summary
 
-3 views found in database 'production'
+3 view(s)
 ```
 
 **Short alias:** `\dv`
@@ -1151,22 +1140,27 @@ See the structure of a table:
 ```sql
 tq> /describe employees
 
-Table: PRODUCTION.employees
-Type: Table
-Approximate Rows: 42,573
+── Object ──
+  Type:      Table
+  Database:  PRODUCTION
+  Name:      employees
 
-Columns:
-┌───────────────┬──────────────┬──────────┬─────────┬──────────┐
-│ Column        │ Type         │ Nullable │ Default │ Comments │
-├───────────────┼──────────────┼──────────┼─────────┼──────────┤
-│ employee_id   │ INTEGER      │ NO       │ -       │ PK       │
-│ first_name    │ VARCHAR(50)  │ YES      │ -       │          │
-│ last_name     │ VARCHAR(50)  │ YES      │ -       │          │
-│ email         │ VARCHAR(100) │ YES      │ -       │          │
-│ hire_date     │ DATE         │ YES      │ -       │          │
-│ salary        │ DECIMAL(10,2)│ YES      │ -       │          │
-│ department_id │ INTEGER      │ YES      │ -       │ FK       │
-└───────────────┴──────────────┴──────────┴─────────┴──────────┘
+── Columns (7) ──
+  Column                   Type                 Nullable   Default
+  ----------------------------------------------------------------------
+  employee_id              INTEGER              NO         -
+  first_name               VARCHAR(50)          YES        -
+  last_name                VARCHAR(50)          YES        -
+  email                    VARCHAR(100)         YES        -
+  hire_date                DATE                 YES        -
+  salary                   DECIMAL(10,2)        YES        -
+  department_id            INTEGER              YES        -
+  7 column(s)
+
+── Indexes ──
+  Primary Index (UPI): employee_id
+  Secondary Index (NUSI) "idx_dept": department_id
+
 ```
 
 **Short alias:** `\d`
@@ -1182,18 +1176,17 @@ View index information for a table to understand query optimization and performa
 ```sql
 tq> /show indexes employees
 
-Indexes on PRODUCTION.employees:
-┌────────────────┬─────────────┬─────────────┬────────────────┐
-│ IndexName      │ IndexType   │ ColumnName  │ ColumnPosition │
-├────────────────┼─────────────┼─────────────┼────────────────┤
-│ PK_employees   │ Primary Key │ employee_id │ 1              │
-│ idx_dept       │ Secondary   │ department  │ 1              │
-│ idx_dept       │ Secondary   │ hire_date   │ 2              │
-│ idx_name       │ Secondary   │ last_name   │ 1              │
-│ idx_name       │ Secondary   │ first_name  │ 2              │
-└────────────────┴─────────────┴─────────────┴────────────────┘
+Indexes on employees:
 
-5 index columns across 3 indexes
+── Primary Index ──
+  Primary Index (UPI): employee_id
+
+── Secondary Indexes ──
+  Secondary Index (NUSI) "idx_dept": department_id, hire_date
+  Secondary Index (USI) "idx_email": email
+
+3 index(es), 4 index column(s)
+
 ```
 
 **Qualified table names:**
@@ -1203,14 +1196,13 @@ You can specify the database explicitly:
 ```sql
 tq> /show indexes staging.employees
 
-Indexes on STAGING.employees:
-┌────────────────┬─────────────┬─────────────┬────────────────┐
-│ IndexName      │ IndexType   │ ColumnName  │ ColumnPosition │
-├────────────────┼─────────────┼─────────────┼────────────────┤
-│ PK_employees   │ Primary Key │ employee_id │ 1              │
-└────────────────┴─────────────┴─────────────┴────────────────┘
+Indexes on staging.employees:
 
-1 index column across 1 index
+── Primary Index ──
+  Primary Index (NUPI): employee_id
+
+1 index(es), 1 index column(s)
+
 ```
 
 **Short alias:** `\di`
@@ -1221,19 +1213,19 @@ tq> \di employees
 
 **Understanding the output:**
 
-- **IndexName**: Name of the index in the database
-- **IndexType**: Type of index (Primary Key, Secondary, Unique)
-- **ColumnName**: Column included in the index
-- **ColumnPosition**: Position of the column within a multi-column index
-  - For composite indexes, position shows the order of columns
-  - Position 1 is the leading column, position 2 is second, etc.
+Output is organized into two sections:
 
-**Common index types:**
+- **Primary Index** — shows the Teradata primary index with its type label (UPI, NUPI, PPI) and the column(s) it covers
+- **Secondary Indexes** — shows each secondary index with its type label (USI, NUSI), optional name in quotes, and covered columns
 
-- **Primary Key**: Unique identifier for table rows
-- **Secondary**: Non-unique index for faster lookups
-- **Unique**: Enforces uniqueness constraint
-- **Join Index**: Specialized Teradata index for join optimization
+Index labels:
+- **UPI** — Unique Primary Index
+- **NUPI** — Non-Unique Primary Index
+- **PPI** — Partitioned Primary Index
+- **USI** — Unique Secondary Index
+- **NUSI** — Non-Unique Secondary Index
+
+Named indexes appear as `Type (label) "name": columns`. Unnamed indexes (common for primary indexes) appear as `Type (label): columns`.
 
 **When to use:**
 
@@ -1244,26 +1236,17 @@ tq> \di employees
 
 **Error handling:**
 
-If the table doesn't exist:
+If the table doesn't exist or has no index entries:
 
 ```sql
 tq> /show indexes nonexistent_table
 
-Error: Table not found
+Error: No indexes found for table 'nonexistent_table'.
 
-Table 'nonexistent_table' does not exist in database 'production'.
-Use /list tables to see available tables.
-```
-
-If you don't have permission to view index information:
-
-```sql
-tq> /show indexes secure_table
-
-Error: Permission denied
-
-You do not have permission to view index information for 'secure_table'.
-Contact your database administrator if you need access.
+Suggestions:
+  - Check the table name spelling
+  - Try using qualified name: show-indexes database.table
+  - Verify you have SELECT permission on DBC.IndicesV
 ```
 
 ### Inspect a Database Object
@@ -1284,82 +1267,65 @@ The `/inspect` command gives you a single, comprehensive view of any object — 
 ```sql
 tq> /inspect employees
 
-── Object Info ───────────────────────────────────────────
-
+── Object Info ──
   Type:      Table
   Database:  PRODUCTION
   Name:      employees
   Created:   2023-04-15 09:12:33
 
-── Columns ───────────────────────────────────────────────
-
-┌───────────────┬──────────────┬──────────┬─────────┐
-│ Column        │ Type         │ Nullable │ Default │
-├───────────────┼──────────────┼──────────┼─────────┤
-│ employee_id   │ INTEGER      │ NO       │ -       │
-│ first_name    │ VARCHAR(50)  │ YES      │ -       │
-│ last_name     │ VARCHAR(50)  │ YES      │ -       │
-│ email         │ VARCHAR(100) │ YES      │ -       │
-│ hire_date     │ DATE         │ YES      │ -       │
-│ salary        │ DECIMAL(10,2)│ YES      │ -       │
-│ department_id │ INTEGER      │ YES      │ -       │
-└───────────────┴──────────────┴──────────┴─────────┘
-
+── Columns (7) ──
+  Column                   Type                 Nullable   Default
+  ──────────────────────── ────────────────────  ──────── ───────────────
+  employee_id              INTEGER              NO         -
+  first_name               VARCHAR(50)          YES        -
+  last_name                VARCHAR(50)          YES        -
+  email                    VARCHAR(100)         YES        -
+  hire_date                DATE                 YES        -
+  salary                   DECIMAL(10,2)        YES        -
+  department_id            INTEGER              YES        -
 7 columns
 
-── Index Structure ───────────────────────────────────────
+── Indexes ──
+  Primary Index (UPI): employee_id
+  Secondary Index (NUSI) "idx_dept": department_id
+  Secondary Index (USI) "idx_email": email
 
-  Primary Index
-    Type:     Unique Primary Index (UPI)
-    Columns:  employee_id
+── Storage ──
+  Current Size:  1.40 GB
+  Peak Size:     1.80 GB
+  Skew Factor:   8.2% (low)
+  AMP Count:     32
 
-  Secondary Indexes
-    #1  Non-Unique Secondary Index (NUSI)  (department_id)
-    #2  Unique Secondary Index (USI)       (email)
-
-── Storage ───────────────────────────────────────────────
-
-  Current Size:  1.4 GB
-  Peak Size:     1.8 GB
-  Skew Factor:   8.2%  (low skew)
-  AMPs:          32
 ```
 
 #### Inspect a View
 
-Views show a **Dependencies** section instead of Index Structure and Storage, so you can trace what the view reads from and what objects depend on it.
+Views show a **Definition** section instead of Indexes and Storage, displaying the full DDL returned by Teradata's `SHOW VIEW` statement.
 
 ```sql
 tq> /inspect active_employees_view
 
-── Object Info ───────────────────────────────────────────
-
+── Object Info ──
   Type:      View
   Database:  PRODUCTION
   Name:      active_employees_view
   Created:   2024-01-10 14:22:07
 
-── Columns ───────────────────────────────────────────────
-
-┌───────────────┬──────────────┬──────────┬─────────┐
-│ Column        │ Type         │ Nullable │ Default │
-├───────────────┼──────────────┼──────────┼─────────┤
-│ employee_id   │ INTEGER      │ NO       │ -       │
-│ first_name    │ VARCHAR(50)  │ YES      │ -       │
-│ last_name     │ VARCHAR(50)  │ YES      │ -       │
-│ department_id │ INTEGER      │ YES      │ -       │
-└───────────────┴──────────────┴──────────┴─────────┘
-
+── Columns (4) ──
+  Column                   Type                 Nullable   Default
+  ──────────────────────── ────────────────────  ──────── ───────────────
+  employee_id              INTEGER              NO         -
+  first_name               VARCHAR(50)          YES        -
+  last_name                VARCHAR(50)          YES        -
+  department_id            INTEGER              YES        -
 4 columns
 
-── Dependencies ──────────────────────────────────────────
+── Definition ──
+  REPLACE VIEW "PRODUCTION"."active_employees_view" AS
+  SELECT employee_id, first_name, last_name, department_id
+  FROM employees
+  WHERE status = 'A'
 
-  Uses (upstream)
-    PRODUCTION.employees          (Table)
-    PRODUCTION.departments        (Table)
-
-  Used By (downstream)
-    ANALYTICS.employee_report_v   (View)
 ```
 
 #### Using a Qualified Name
@@ -1376,9 +1342,8 @@ tq> \i dbc.tables
 `/inspect` fetches each section independently. If your account lacks access to a specific DBC system view, that section shows an informative note instead of failing the entire command:
 
 ```
-── Storage ───────────────────────────────────────────────
-
-  (Access denied — requires SELECT on DBC.TableSizeV)
+── Storage ──
+  (Storage information unavailable: ...)
 ```
 
 All other sections are still displayed normally.
@@ -1387,9 +1352,9 @@ All other sections are still displayed normally.
 
 | Command | Best for |
 |---------|----------|
-| `/describe` | Quick column lookup |
-| `/show indexes` | Index details only |
-| `/inspect` | Full picture — type, columns, indexes, size, and dependencies in one shot |
+| `/describe` | Quick column lookup with index summary |
+| `/show indexes` | Detailed index structure only |
+| `/inspect` | Full picture — type, columns, indexes, storage, and view definition in one shot |
 
 **Cross-reference:** For batch and scripting use, see `tq inspect` in the Batch Mode Guide.
 

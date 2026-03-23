@@ -587,6 +587,438 @@ impl From<crate::sql::ParseError> for TqError {
 }
 ```
 
+## Shared Format Helpers Module
+
+### Problem
+
+Four command modules (`describe.rs`, `list.rs`, `show_indexes.rs`, `inspect.rs`) each contain private copies of `json_escape()`, `csv_escape()`, `parse_table_name()` (or `parse_object_name()`), and `truncate_str()`. Additionally, `monitoring_utils.rs` has its own `escape_csv()`. This creates maintenance risk and a UTF-8 safety bug in `truncate_str()` (which slices on byte boundaries rather than character boundaries).
+
+### Solution: `src/commands/format_helpers.rs`
+
+Extract shared formatting utilities into a single module, following the pattern established by `monitoring_utils.rs`.
+
+```rust
+// src/commands/format_helpers.rs
+
+/// Escape a string for JSON output.
+///
+/// Escapes backslashes, double quotes, newlines, carriage returns, and tabs.
+pub fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
+
+/// Escape a string for CSV output (RFC 4180).
+///
+/// Wraps in double quotes if the string contains a comma, double quote,
+/// or newline. Internal double quotes are escaped by doubling.
+pub fn csv_escape(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+/// Parse a qualified object name into (optional database, object) parts.
+///
+/// Handles `database.object` and plain `object` forms.
+pub fn parse_table_name(name: &str) -> (Option<&str>, &str) {
+    if let Some(dot_pos) = name.find('.') {
+        (Some(&name[..dot_pos]), &name[dot_pos + 1..])
+    } else {
+        (None, name)
+    }
+}
+
+/// Truncate a string to a maximum display length with ellipsis.
+///
+/// Uses `char_indices()` for UTF-8 safety -- never splits a multi-byte
+/// character boundary. Returns the original string if it fits.
+pub fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.chars().count() <= max_len {
+        return s.to_string();
+    }
+    if max_len <= 3 {
+        return ".".repeat(max_len);
+    }
+    let end = s
+        .char_indices()
+        .nth(max_len - 3)
+        .map(|(i, _)| i)
+        .unwrap_or(s.len());
+    format!("{}...", &s[..end])
+}
+
+/// Format a nullable indicator from DBC.ColumnsV consistently.
+///
+/// Normalizes various Teradata representations (Y/N, YES/NO, TRUE/FALSE, 1/0)
+/// to YES or NO.
+pub fn format_nullable(s: &str) -> String {
+    match s.trim().to_uppercase().as_str() {
+        "Y" | "YES" | "TRUE" | "1" => "YES".to_string(),
+        "N" | "NO" | "FALSE" | "0" => "NO".to_string(),
+        _ => s.to_string(),
+    }
+}
+```
+
+### Module Registration
+
+```rust
+// src/commands/mod.rs
+pub mod format_helpers;
+```
+
+### Call Site Updates
+
+Each consuming module replaces its private copy with a `use crate::commands::format_helpers::{...}`:
+
+| Module | Functions Replaced |
+|--------|--------------------|
+| `inspect.rs` | `json_escape`, `csv_escape`, `parse_object_name` (renamed to `parse_table_name`), `truncate_str`, `format_nullable` |
+| `describe.rs` | `json_escape`, `csv_escape`, `parse_table_name`, `truncate_str`, `format_nullable` |
+| `list.rs` | `json_escape`, `csv_escape` |
+| `show_indexes.rs` | `json_escape`, `csv_escape`, `parse_table_name`, `truncate_str` |
+| `repl/metacommands.rs` | `format_nullable`, `truncate_string` (renamed to `truncate_str`) |
+
+The `monitoring_utils.rs` module retains its own `escape_csv()` since it serves a different domain (PMON monitoring commands) and already has comprehensive tests. Consolidating it would create an unnecessary cross-domain coupling.
+
+### Unit Tests
+
+The `format_helpers.rs` module includes comprehensive tests for all functions, including:
+- UTF-8 multi-byte truncation (e.g., CJK characters, emoji)
+- Edge cases for `truncate_str` with `max_len` of 0, 1, 2, 3
+- CSV escaping with commas, quotes, newlines, and combined special characters
+- JSON escaping with all escapable characters
+- `parse_table_name` with unqualified, qualified, and multi-dot names
+
+## Bug #36 Fix: /inspect DDL and Column Types for Views
+
+### Root Cause Analysis
+
+**Problem 1: Garbled DDL for views**
+
+The `query_definition()` function in `inspect.rs` uses `SHOW VIEW "db"."obj"` to retrieve view definitions. The Teradata `SHOW` command returns its result as a multi-row result set where the DDL text is split across multiple rows in `RequestText` column. The current implementation concatenates all rows, which is correct. However, the `ColumnType` field from `DBC.ColumnsV` returns a single-character type code (e.g., `CV`, `DA`, `I`, `D1`) rather than a human-readable type string for views.
+
+The actual root cause of "garbled" DDL is that `val.display()` may return the raw bytes of the SHOW result including padding/trailing spaces, and the concatenation may not handle line breaks properly. The fix should:
+1. Trim each row's text before concatenation
+2. Handle the case where Teradata returns the definition across multiple result rows
+
+**Problem 2: [NULL] column types for views**
+
+The `query_columns()` function queries `SELECT TRIM(ColumnName), ColumnType, Nullable, DefaultValue FROM DBC.ColumnsV`. The `ColumnType` column in `DBC.ColumnsV` is a CHAR(2) type code (e.g., `CV` for VARCHAR, `DA` for DATE, `I` for INTEGER). This is not the human-readable type name.
+
+For tables, a Teradata driver or the display logic may translate these codes. For views, the `ColumnType` value may be returning as-is (the raw type code) or as `[NULL]` if the view's column metadata is not fully populated in `DBC.ColumnsV`.
+
+### Fix Approach
+
+**DDL Fix**: The `query_definition()` function is likely working correctly for simple views. The "garbled" text may be caused by:
+1. Extra whitespace/padding in each row -- already handled by `.trim()` on the final result
+2. The SHOW command returning result in a format that splits mid-word across rows
+
+The fix ensures proper concatenation with a single newline-based join rather than direct string concatenation:
+
+```rust
+fn query_definition(
+    client: &DatabaseClient,
+    db: &str,
+    obj: &str,
+    kind: &str,
+) -> Result<String> {
+    let show_cmd = match kind {
+        "V" => format!("SHOW VIEW \"{}\".\"{}\"", db, obj),
+        "M" => format!("SHOW MACRO \"{}\".\"{}\"", db, obj),
+        _ => return Ok(String::new()),
+    };
+
+    let result = client.execute(&show_cmd)?;
+
+    // Teradata SHOW returns DDL split across multiple rows.
+    // Concatenate all rows -- the text is a continuous stream,
+    // NOT separate lines. Trim each row to remove padding.
+    let mut definition = String::new();
+    for row in &result.rows {
+        if let Some(val) = row.first() {
+            let text = val.display();
+            if text != "[NULL]" {
+                definition.push_str(text.trim_end());
+            }
+        }
+    }
+
+    Ok(definition.trim().to_string())
+}
+```
+
+**Column Type Fix**: Replace the raw `ColumnType` (CHAR(2) code) with a human-readable type string built from `ColumnType` plus `ColumnLength`/`DecimalTotalDigits`/`DecimalFractionalDigits` from `DBC.ColumnsV`. This produces type strings like `VARCHAR(100)`, `DECIMAL(10,2)`, `INTEGER`, etc.
+
+Updated SQL:
+
+```sql
+SELECT TRIM(ColumnName),
+       CASE TRIM(ColumnType)
+           WHEN 'BF' THEN 'BYTE(' || TRIM(CAST(ColumnLength AS VARCHAR(20))) || ')'
+           WHEN 'BV' THEN 'VARBYTE(' || TRIM(CAST(ColumnLength AS VARCHAR(20))) || ')'
+           WHEN 'CF' THEN 'CHAR(' || TRIM(CAST(ColumnLength AS VARCHAR(20))) || ')'
+           WHEN 'CV' THEN 'VARCHAR(' || TRIM(CAST(ColumnLength AS VARCHAR(20))) || ')'
+           WHEN 'D'  THEN 'DECIMAL(' || TRIM(CAST(DecimalTotalDigits AS VARCHAR(10))) || ',' || TRIM(CAST(DecimalFractionalDigits AS VARCHAR(10))) || ')'
+           WHEN 'DA' THEN 'DATE'
+           WHEN 'F'  THEN 'FLOAT'
+           WHEN 'I'  THEN 'INTEGER'
+           WHEN 'I1' THEN 'BYTEINT'
+           WHEN 'I2' THEN 'SMALLINT'
+           WHEN 'I8' THEN 'BIGINT'
+           WHEN 'AT' THEN 'TIME'
+           WHEN 'TS' THEN 'TIMESTAMP'
+           WHEN 'TZ' THEN 'TIME WITH TIME ZONE'
+           WHEN 'SZ' THEN 'TIMESTAMP WITH TIME ZONE'
+           WHEN 'CO' THEN 'CLOB'
+           WHEN 'BO' THEN 'BLOB'
+           WHEN 'N'  THEN 'NUMBER'
+           ELSE TRIM(ColumnType)
+       END AS TypeName,
+       Nullable,
+       DefaultValue
+FROM DBC.ColumnsV
+WHERE DatabaseName = '{db}' AND TableName = '{obj}'
+ORDER BY ColumnId
+```
+
+This CASE expression translates the raw type codes into human-readable names, matching the behavior users expect for both tables and views. The `inspect.rs`, `describe.rs`, and `repl/metacommands.rs` modules all need this updated query.
+
+### Code Changes
+
+| File | Change |
+|------|--------|
+| `src/commands/inspect.rs` | Update `query_columns()` SQL with CASE expression for ColumnType |
+| `src/commands/inspect.rs` | Verify `query_definition()` concatenation logic |
+| `src/commands/describe.rs` | Update `query_columns()` SQL with same CASE expression |
+| `src/commands/repl/metacommands.rs` | Update `execute_describe()` SQL with same CASE expression |
+
+The CASE expression can be extracted as a constant string in `format_helpers.rs`:
+
+```rust
+/// SQL CASE expression that translates DBC.ColumnsV.ColumnType codes
+/// to human-readable type names.
+pub const COLUMN_TYPE_CASE_EXPR: &str = "\
+    CASE TRIM(ColumnType) \
+        WHEN 'BF' THEN 'BYTE(' || TRIM(CAST(ColumnLength AS VARCHAR(20))) || ')' \
+        WHEN 'BV' THEN 'VARBYTE(' || TRIM(CAST(ColumnLength AS VARCHAR(20))) || ')' \
+        WHEN 'CF' THEN 'CHAR(' || TRIM(CAST(ColumnLength AS VARCHAR(20))) || ')' \
+        WHEN 'CV' THEN 'VARCHAR(' || TRIM(CAST(ColumnLength AS VARCHAR(20))) || ')' \
+        WHEN 'D'  THEN 'DECIMAL(' || TRIM(CAST(DecimalTotalDigits AS VARCHAR(10))) || ',' || TRIM(CAST(DecimalFractionalDigits AS VARCHAR(10))) || ')' \
+        WHEN 'DA' THEN 'DATE' \
+        WHEN 'F'  THEN 'FLOAT' \
+        WHEN 'I'  THEN 'INTEGER' \
+        WHEN 'I1' THEN 'BYTEINT' \
+        WHEN 'I2' THEN 'SMALLINT' \
+        WHEN 'I8' THEN 'BIGINT' \
+        WHEN 'AT' THEN 'TIME' \
+        WHEN 'TS' THEN 'TIMESTAMP' \
+        WHEN 'TZ' THEN 'TIME WITH TIME ZONE' \
+        WHEN 'SZ' THEN 'TIMESTAMP WITH TIME ZONE' \
+        WHEN 'CO' THEN 'CLOB' \
+        WHEN 'BO' THEN 'BLOB' \
+        WHEN 'N'  THEN 'NUMBER' \
+        ELSE TRIM(ColumnType) \
+    END";
+```
+
+## Enriched Command Output Design
+
+### `tq describe` Enrichment
+
+**Current state**: Shows columns only (name, type, nullable, default) with no object header metadata and no indexes section.
+
+**Target state** (per specification `REQ-DESCRIBE-001` through `REQ-DESCRIBE-012`):
+
+1. **Object header**: Query `DBC.TablesV` for `TableKind`, estimated row count (`CAST(RowCount AS BIGINT)`).
+2. **Columns table**: Add `CommentString` column from `DBC.ColumnsV`.
+3. **Indexes section**: Query `DBC.IndicesV`, same pattern as `inspect.rs::query_indexes()` but with UPI/NUPI/USI/NUSI labels.
+4. **JSON output**: Structured `{object, type, estimated_rows, columns[], indexes[]}` wrapper.
+5. **CSV output**: Object metadata row followed by column data rows.
+
+**Implementation approach**:
+
+```rust
+// src/commands/describe.rs
+
+struct ObjectHeader {
+    qualified_name: String,
+    object_type: String,
+    estimated_rows: Option<i64>,
+}
+
+fn query_object_header(client: &DatabaseClient, table_name: &str) -> Result<Option<ObjectHeader>> {
+    let (database, table) = format_helpers::parse_table_name(table_name);
+    // Query DBC.TablesV for TableKind and RowCount
+    // Map TableKind using same map_table_kind() as inspect.rs
+    // Return None if not found
+}
+```
+
+The `describe_table()` function becomes:
+1. Query object header (with graceful fallback if TablesV is not accessible)
+2. Query columns (existing, enriched with CommentString)
+3. Query indexes (from DBC.IndicesV, with UPI/NUPI/USI/NUSI labels)
+4. Render all sections
+
+### `tq list` Enrichment
+
+**Current state**:
+- `list databases`: Shows database names only (3-column layout)
+- `list tables`: Shows name and kind (TABLE/NoPI)
+- `list views`: Shows view names only
+
+**Target state** (per specification):
+
+**`list databases`** (REQ-LIST-002, REQ-LIST-003, REQ-LIST-004):
+- Query: `SELECT TRIM(DatabaseName), TRIM(OwnerName), CASE WHEN OwnerName = 'DBC' THEN 'System' ELSE 'User' END AS DbType FROM DBC.DatabasesV`
+- Table format: Database, Owner, Type columns
+- JSON format: Array of `{database, owner, type}` objects
+- Sort: System first, then User, each alphabetical
+
+**`list tables`** (REQ-LIST-005, REQ-LIST-009):
+- Query: Add `RowCount` and `CurrentPerm` from joining `DBC.TablesV` with `DBC.TableSizeV`
+- Table format: Table, Type, Rows (Est.), Size columns
+- JSON format: Array of `{table, type, estimated_rows, size_bytes}` objects
+- Size display: Human-readable in table format, raw bytes in JSON/CSV
+
+**`list views`** (REQ-LIST-010, REQ-LIST-011):
+- Query: Add `OwnerName` from `DBC.TablesV` and `RequestText` from `DBC.TablesV` (or SHOW VIEW)
+- Table format: View, Owner, Definition (truncated to 50 chars)
+- JSON/CSV format: Full definition text
+
+**New `execute_for_repl()` function**: `list.rs` currently lacks this. It needs one:
+
+```rust
+/// Execute /list in REPL mode with subcommand dispatch.
+///
+/// This function provides the REPL delegation entry point.
+/// The REPL metacommand handler calls this instead of its own implementation.
+pub fn execute_for_repl<W: Write>(
+    client: &DatabaseClient,
+    subcommand: &str,
+    pattern: Option<&str>,
+    database: Option<&str>,
+    writer: &mut W,
+) -> Result<()> {
+    writeln!(writer)?;
+    match subcommand {
+        "databases" | "db" | "dbs" => list_databases(client, OutputFormat::Table, writer)?,
+        "tables" | "table" | "t" => {
+            list_tables(client, pattern, database, OutputFormat::Table, writer)?
+        }
+        "views" | "view" | "v" => list_views(client, database, OutputFormat::Table, writer)?,
+        _ => writeln!(writer, "Unknown list subcommand: {}", subcommand)?,
+    }
+    writeln!(writer)?;
+    Ok(())
+}
+```
+
+### `tq show-indexes` Enrichment
+
+**Current state**: Flat table with IndexName, IndexType, ColumnName, Position columns.
+
+**Target state** (per specification REQ-SHOW-IDX-004 through REQ-SHOW-IDX-009):
+
+1. **Two-section layout**: Separate "Primary Index" and "Secondary Indexes" sections
+2. **Type labels**: UPI, NUPI, USI, NUSI (derived from IndexType + UniqueFlag)
+3. **Grouped columns**: Composite indexes shown as comma-separated column lists
+4. **JSON output**: Structured `{object, primary_index, secondary_indexes[]}` wrapper
+5. **CSV output**: `kind,index_no,type,columns` format with one row per index
+
+**Implementation approach**: Reuse the grouping logic from `inspect.rs::query_indexes()` but adapt the output format. The query needs `UniqueFlag` in addition to `IndexType`:
+
+```sql
+SELECT TRIM(IndexName), IndexType, UniqueFlag,
+       TRIM(ColumnName), IndexNumber, ColumnPosition
+FROM DBC.IndicesV
+WHERE DatabaseName = '{db}' AND TableName = '{table}'
+ORDER BY IndexNumber, ColumnPosition
+```
+
+Then group by `IndexNumber`, classify primary (IndexType='P' or 'Q') vs secondary (IndexType='S','K','U','V','H'), and label with UPI/NUPI/USI/NUSI based on UniqueFlag.
+
+## REPL Delegation Design
+
+### Current State
+
+The `/describe` and `/list` metacommand handlers in `metacommands.rs` contain their own SQL queries and formatting logic, duplicating the batch module implementations. This creates two code paths that can diverge.
+
+### Target State
+
+REPL metacommand handlers delegate to the batch module `execute_for_repl()` functions.
+
+### `/describe` Delegation
+
+```rust
+// In metacommands.rs, replace execute_describe() body:
+fn execute_describe<W: Write>(
+    client: &DatabaseClient,
+    table_name: &str,
+    writer: &mut W,
+) -> Result<()> {
+    crate::commands::describe::execute_for_repl(client, table_name, writer)
+}
+```
+
+The existing `describe::execute_for_repl()` already has the correct signature. The only concern is output format consistency -- the batch module's table format must produce output equivalent to what the REPL currently shows.
+
+### `/list` Delegation
+
+```rust
+// In metacommands.rs, replace execute_list() dispatch:
+fn execute_list<W: Write>(
+    completion_state: &mut CompletionState,
+    args: &[&str],
+    writer: &mut W,
+) -> Result<()> {
+    if args.is_empty() {
+        writeln!(writer, "Error: Missing subcommand.")?;
+        writeln!(writer, "Usage: /list <databases|tables|views>")?;
+        return Ok(());
+    }
+
+    let subcommand = args[0].to_lowercase();
+    let pattern = args.get(1).copied();
+    let current_db = completion_state.current_database().to_string();
+
+    crate::commands::list::execute_for_repl(
+        completion_state.client(),
+        &subcommand,
+        pattern,
+        Some(&current_db),
+        writer,
+    )
+}
+```
+
+**Key consideration**: The current REPL `/list databases` handler uses `CompletionState`'s cached database list for performance. After delegation, the batch module queries `DBC.DatabasesV` directly. This is acceptable because:
+1. The cache is a performance optimization, not a correctness requirement
+2. The batch query produces authoritative results
+3. The REPL can still pre-load the cache for tab completion separately
+
+### `/show indexes` -- Already Delegated
+
+The `/show indexes` REPL handler already calls `show_indexes::execute_for_repl()`, so no changes are needed there.
+
+## Error Message Consistency
+
+All not-found error messages across commands will be updated to use the `Error:` prefix consistently:
+
+| Current | Updated |
+|---------|---------|
+| `Table 'X' not found or no columns available.` | `Error: Table 'X' not found or no columns available.` |
+| `No indexes found for table 'X'.` | `Error: No indexes found for table 'X'.` |
+
+CLI help text will use `<OBJECT>` instead of `<TABLE>` where the argument accepts any database object (not just tables).
+
 ### Code Linkage
 
 | Change | File | Description |

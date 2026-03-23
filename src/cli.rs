@@ -652,8 +652,8 @@ pub struct InspectArgs {
 /// Arguments for the describe command (Sprint 46)
 #[derive(Parser, Debug)]
 pub struct DescribeArgs {
-    /// Table or view to describe (unqualified or database.table)
-    #[arg(value_name = "TABLE")]
+    /// Table or view to describe (unqualified or database.object)
+    #[arg(value_name = "OBJECT")]
     pub table: String,
 
     /// Output format

@@ -6717,25 +6717,55 @@ Commands that already follow this pattern:
 - `/sysconfig` -> `crate::commands::sysconfig::execute_for_repl()` / `tq sysconfig`
 - `/locks` -> `crate::commands::locks::execute_for_repl()` / `tq locks`
 
-### Migration Plan for Sprint 46
+### Migration Status
 
-The following metacommands currently have inline logic in `metacommands.rs` and need
-extraction to dedicated command modules:
+**Already delegating** (completed in prior sprints):
+- `/show indexes` -> `crate::commands::show_indexes::execute_for_repl()`
+
+**Sprint 47 delegation targets:**
 
 1. `/describe` -> `crate::commands::describe::execute_for_repl()`
-2. `/list` -> `crate::commands::list::execute_for_repl()`
-3. `/show indexes` -> `crate::commands::show_indexes::execute_for_repl()`
+2. `/list` -> `crate::commands::list::execute_for_repl()` (new function)
 
-Each extraction follows the same steps:
-1. Move query building and result rendering from `metacommands.rs` to the new module
-2. Provide `execute()` (batch, format-aware) and `execute_for_repl()` (REPL, table-only)
-3. Update the metacommand handler to delegate: `crate::commands::describe::execute_for_repl(client, table_name, writer)?`
-4. The REPL handler retains argument parsing and usage help; only the execution is delegated
+Each delegation follows the same steps:
+1. The batch module provides `execute_for_repl()` that accepts `&DatabaseClient` and `&mut W`
+2. The REPL metacommand handler delegates execution: `crate::commands::describe::execute_for_repl(client, table_name, writer)?`
+3. The REPL handler retains argument parsing, usage help, and error wrapping
+4. Output format is always `Table` for REPL mode
+
+### `/describe` Delegation Detail
+
+The existing `describe::execute_for_repl()` already has the correct signature:
+```rust
+pub fn execute_for_repl<W: Write>(client: &DatabaseClient, table_name: &str, writer: &mut W) -> Result<()>
+```
+
+The REPL handler `execute_describe()` (approximately 130 lines of inline SQL and formatting)
+is replaced with a single delegation call. The batch module handles all SQL queries,
+column type translation, and output formatting.
+
+### `/list` Delegation Detail
+
+The `list.rs` module currently lacks `execute_for_repl()`. A new function is added:
+```rust
+pub fn execute_for_repl<W: Write>(
+    client: &DatabaseClient,
+    subcommand: &str,
+    pattern: Option<&str>,
+    database: Option<&str>,
+    writer: &mut W,
+) -> Result<()>
+```
+
+The REPL handler `execute_list()` dispatches to subcommand aliases (databases/db/dbs,
+tables/table/t, views/view/v) and then delegates to the batch module. The `CompletionState`
+cache lookup for `/list databases` is removed -- the batch module queries `DBC.DatabasesV`
+directly. This simplifies the code at the cost of a database round-trip, which is acceptable
+for an interactive command.
 
 ### Note on CompletionState
 
 The REPL metacommand handlers receive `CompletionState` which wraps the `DatabaseClient`.
 The extracted modules accept `&DatabaseClient` directly (obtained via `completion_state.client()`).
-For `/list`, the REPL handler currently also updates metadata caches in `CompletionState`
-after listing. This cache-update logic remains in the REPL handler; only the query/render
-logic is extracted.
+The `/list databases` cache optimization in `CompletionState` is preserved for tab completion
+but is no longer used for the `/list databases` command output itself.

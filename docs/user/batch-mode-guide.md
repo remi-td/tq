@@ -1385,23 +1385,20 @@ tq query "SELECT id, name, status FROM customers WHERE region='US' SAMPLE 50" --
 
 #### Object Inspection with `tq inspect`
 
-Use `tq inspect` to get a comprehensive view of any database object — its type, column definitions, index structure, storage metrics, and dependency relationships. This is the batch equivalent of the REPL `/inspect` command.
+Use `tq inspect` to get a comprehensive view of any database object — its type, column definitions, index structure, storage metrics, and view definitions. This is the batch equivalent of the REPL `/inspect` command.
 
 ```bash
 # Full inspection of a table
 tq inspect employees
 
 # Inspect a table in another database
-tq inspect dbc.tables
+tq inspect production.orders
 
 # JSON output for programmatic use
 tq inspect --format json employees
 
-# Show only storage metrics (great for capacity scripts)
-tq inspect --section storage employees
-
-# Show only columns (equivalent to a structured DESCRIBE)
-tq inspect --section columns orders
+# CSV output (column list is the tabular representation)
+tq inspect --format csv employees > employees-schema.csv
 
 # Write a full inspection report to a file
 tq inspect --output employees-report.txt employees
@@ -1410,48 +1407,62 @@ tq inspect --output employees-report.txt employees
 tq --profile prod inspect employees
 ```
 
-**Example output:**
+**Example output — table:**
 
 ```
-── Object Info ───────────────────────────────────────────
-
+── Object Info ──
   Type:      Table
   Database:  PRODUCTION
   Name:      employees
   Created:   2023-04-15 09:12:33
 
-── Columns ───────────────────────────────────────────────
-
-┌───────────────┬──────────────┬──────────┬─────────┐
-│ Column        │ Type         │ Nullable │ Default │
-├───────────────┼──────────────┼──────────┼─────────┤
-│ employee_id   │ INTEGER      │ NO       │ -       │
-│ first_name    │ VARCHAR(50)  │ YES      │ -       │
-│ last_name     │ VARCHAR(50)  │ YES      │ -       │
-│ email         │ VARCHAR(100) │ YES      │ -       │
-│ hire_date     │ DATE         │ YES      │ -       │
-│ salary        │ DECIMAL(10,2)│ YES      │ -       │
-│ department_id │ INTEGER      │ YES      │ -       │
-└───────────────┴──────────────┴──────────┴─────────┘
-
+── Columns (7) ──
+  Column                   Type                 Nullable   Default
+  ──────────────────────── ────────────────────  ──────── ───────────────
+  employee_id              INTEGER              NO         -
+  first_name               VARCHAR(50)          YES        -
+  last_name                VARCHAR(50)          YES        -
+  email                    VARCHAR(100)         YES        -
+  hire_date                DATE                 YES        -
+  salary                   DECIMAL(10,2)        YES        -
+  department_id            INTEGER              YES        -
 7 columns
 
-── Index Structure ───────────────────────────────────────
+── Indexes ──
+  Primary Index (UPI): employee_id
+  Secondary Index (NUSI) "idx_dept": department_id
+  Secondary Index (USI) "idx_email": email
 
-  Primary Index
-    Type:     Unique Primary Index (UPI)
-    Columns:  employee_id
+── Storage ──
+  Current Size:  1.40 GB
+  Peak Size:     1.80 GB
+  Skew Factor:   8.2% (low)
+  AMP Count:     32
+```
 
-  Secondary Indexes
-    #1  Non-Unique Secondary Index (NUSI)  (department_id)
-    #2  Unique Secondary Index (USI)       (email)
+**Example output — view:**
 
-── Storage ───────────────────────────────────────────────
+```
+── Object Info ──
+  Type:      View
+  Database:  PRODUCTION
+  Name:      active_employees_view
+  Created:   2024-01-10 14:22:07
 
-  Current Size:  1.4 GB
-  Peak Size:     1.8 GB
-  Skew Factor:   8.2%  (low skew)
-  AMPs:          32
+── Columns (4) ──
+  Column                   Type                 Nullable   Default
+  ──────────────────────── ────────────────────  ──────── ───────────────
+  employee_id              INTEGER              NO         -
+  first_name               VARCHAR(50)          YES        -
+  last_name                VARCHAR(50)          YES        -
+  department_id            INTEGER              YES        -
+4 columns
+
+── Definition ──
+  REPLACE VIEW "PRODUCTION"."active_employees_view" AS
+  SELECT employee_id, first_name, last_name, department_id
+  FROM employees
+  WHERE status = 'A'
 ```
 
 **Options:**
@@ -1460,18 +1471,17 @@ tq --profile prod inspect employees
 |--------|-------|---------|-------------|
 | `--format` | `-f` | `table` | Output format: `table`, `json`, `csv` |
 | `--output` | `-o` | stdout | Write output to file |
-| `--section` | - | all | Show only one section: `info`, `columns`, `indexes`, `storage`, `dependencies` |
 
 **Scripting examples:**
 
 ```bash
 # Extract column list as CSV for documentation
-tq inspect --format csv --section columns employees > employees-columns.csv
+tq inspect --format csv employees > employees-columns.csv
 
 # Check table size across environments
 for env in dev staging prod; do
   echo "=== $env ==="
-  tq --profile $env inspect --section storage orders
+  tq --profile $env inspect orders
 done
 
 # Audit all tables for skew (pipe JSON through jq)
@@ -1516,33 +1526,54 @@ tq --profile prod describe employees
 
 **Object names are case-insensitive:** `tq describe DBC.TABLES` and `tq describe dbc.tables` return the same result.
 
-**Example output:**
+**Example output (table without column comments):**
 
 ```
-Table: PRODUCTION.employees
-Type:  Table
-Rows (Est.): 42,573
+── Object ──
+  Type:      Table
+  Database:  PRODUCTION
+  Name:      employees
 
-Columns:
-┌───────────────┬──────────────┬──────────┬─────────┬──────────┐
-│ Column        │ Type         │ Nullable │ Default │ Comments │
-├───────────────┼──────────────┼──────────┼─────────┼──────────┤
-│ employee_id   │ INTEGER      │ NO       │ -       │          │
-│ first_name    │ VARCHAR(50)  │ YES      │ -       │          │
-│ last_name     │ VARCHAR(50)  │ YES      │ -       │          │
-│ email         │ VARCHAR(100) │ YES      │ -       │          │
-│ hire_date     │ DATE         │ YES      │ -       │          │
-│ salary        │ DECIMAL(10,2)│ YES      │ -       │          │
-│ department_id │ INTEGER      │ YES      │ -       │          │
-└───────────────┴──────────────┴──────────┴─────────┴──────────┘
+── Columns (7) ──
+  Column                   Type                 Nullable   Default
+  ----------------------------------------------------------------------
+  employee_id              INTEGER              NO         -
+  first_name               VARCHAR(50)          YES        -
+  last_name                VARCHAR(50)          YES        -
+  email                    VARCHAR(100)         YES        -
+  hire_date                DATE                 YES        -
+  salary                   DECIMAL(10,2)        YES        -
+  department_id            INTEGER              YES        -
+  7 column(s)
 
-Indexes:
+── Indexes ──
   Primary Index (UPI): employee_id
-  Secondary Index (NUSI): department_id
-  Secondary Index (USI):  email
+  Secondary Index (NUSI) "idx_dept": department_id
+  Secondary Index (USI) "idx_email": email
 ```
 
-The `Default` column shows `-` when no default is defined, and the actual default value otherwise. The `Indexes` section is omitted for views (views have no indexes).
+**Example output (table with column comments):**
+
+```
+── Object ──
+  Type:      Table
+  Database:  PRODUCTION
+  Name:      orders
+
+── Columns (4) ──
+  Column                   Type                 Nullable   Default         Comment
+  ------------------------------------------------------------------------------------------
+  order_id                 INTEGER              NO         -               Primary key
+  customer_id              INTEGER              NO         -               FK to customers
+  order_date               DATE                 YES        -
+  total_amount             DECIMAL(12,2)        YES        0
+  4 column(s)
+
+── Indexes ──
+  Primary Index (UPI): order_id
+```
+
+The `Comment` column is included in the header only when at least one column has a comment string defined. The `Default` column shows `-` when no default is defined. The `Indexes` section is omitted for views (views have no indexes).
 
 **Options:**
 
@@ -1553,18 +1584,24 @@ The `Default` column shows `-` when no default is defined, and the actual defaul
 
 **Scripting examples:**
 
+The JSON output has the structure `{"object":{...}, "columns":[...], "indexes":[...]}`. Each column entry has fields: `name`, `type`, `nullable`, `default`, and optionally `comment`.
+
 ```bash
-# List all column names as JSON
-tq describe --format json employees | jq '.columns[].column'
+# List all column names
+tq describe --format json employees | jq -r '.columns[].name'
 
 # Find nullable columns
 tq describe --format json employees | \
-  jq -r '.columns[] | select(.nullable) | [.column, .type] | @csv'
+  jq -r '.columns[] | select(.nullable == "YES") | [.name, .type] | @csv'
 
 # Check if a column exists before querying
 tq describe --format json employees | \
-  jq -e '.columns[] | select(.column == "salary")' > /dev/null && \
+  jq -e '.columns[] | select(.name == "salary")' > /dev/null && \
   echo "salary column exists"
+
+# Get the primary index type
+tq describe --format json employees | \
+  jq -r '.indexes[] | select(.type == "UPI") | .columns[]'
 ```
 
 **Cross-reference:** For interactive use, see `/describe` in the REPL Guide.
@@ -1582,14 +1619,14 @@ tq list databases
 # List tables in the current (logon) database
 tq list tables
 
-# List tables matching a pattern (SQL LIKE: % and _ wildcards)
-tq list tables emp%
+# List tables matching a glob pattern (* and ? wildcards, case-insensitive)
+tq list tables emp*
 
 # List tables in a specific database
 tq list tables --database staging
 
 # List tables in a specific database with a pattern
-tq list tables --database staging test_%
+tq list tables --database staging test_*
 
 # List views
 tq list views
@@ -1615,66 +1652,60 @@ tq --profile prod list databases
 **`tq list databases` — example output:**
 
 ```
-Databases on prod-td01.company.com:
-┌─────────────────────┬──────────────┬─────────┐
-│ Database            │ Owner        │ Type    │
-├─────────────────────┼──────────────┼─────────┤
-│ DBC                 │ DBC          │ System  │
-│ analytics           │ analytics    │ User    │
-│ development         │ dev_user     │ User    │
-│ production          │ dba_user     │ User    │
-│ staging             │ dba_user     │ User    │
-└─────────────────────┴──────────────┴─────────┘
+Databases (4):
+Name                           Owner                Type
+------------------------------------------------------------
+analytics                      analytics            Database
+development                    dev_user             User
+production                     dba_user             User
+staging                        dba_user             User
 
-5 databases found
+4 database(s)
 ```
 
-System databases (owned by DBC) are listed first, then user databases, both groups sorted alphabetically.
+Results are sorted alphabetically by name. The `Type` column shows `Database` or `User` (Teradata distinguishes these as `DBKind` D and U). Common system databases (DBC, SYSLIB, etc.) are excluded from the listing to reduce noise.
 
 **`tq list tables` — example output:**
 
 ```
-Tables in 'production':
-┌─────────────────────┬──────────┬──────────────┬───────────┐
-│ Table               │ Type     │ Rows (Est.)  │ Size      │
-├─────────────────────┼──────────┼──────────────┼───────────┤
-│ customers           │ Table    │ 1,234,567    │ 45.2 MB   │
-│ employees           │ Table    │ 42,573       │ 2.1 MB    │
-│ orders              │ Table    │ 9,876,543    │ 320.5 MB  │
-│ products            │ Table    │ 15,432       │ 890 KB    │
-└─────────────────────┴──────────┴──────────────┴───────────┘
+Tables in (current):
+Name                                Type       Rows (Est.)       Size
+-----------------------------------------------------------------
+customers                           TABLE        1234567      45.2 MB
+employees                           TABLE          42573       2.1 MB
+orders                              TABLE        9876543     320.5 MB
+fact_sales                          NoPI               -           -
 
-4 tables found in database 'production'
+4 table(s)
 ```
 
-Pattern filtering uses SQL LIKE syntax: `%` matches any characters, `_` matches a single character. When no results match, an informative message is shown and the command exits with code 0 (not an error).
+The `Type` column shows `TABLE` for standard tables and `NoPI` for tables with no primary index. The `Rows (Est.)` and `Size` columns show `-` when statistics have not been collected. Rows and Size values are right-aligned. Pattern filtering uses glob syntax: `*` matches any sequence, `?` matches a single character (case-insensitive).
 
 **`tq list views` — example output:**
 
 ```
-Views in 'production':
-┌─────────────────────────┬──────────────┬─────────────────────────────────────┐
-│ View                    │ Owner        │ Definition (truncated)              │
-├─────────────────────────┼──────────────┼─────────────────────────────────────┤
-│ active_employees        │ dba_user     │ SELECT * FROM employees WHERE...    │
-│ customer_orders_view    │ dba_user     │ SELECT c.*, o.* FROM customers c... │
-│ sales_summary           │ analytics    │ SELECT dept, SUM(salary) FROM...    │
-└─────────────────────────┴──────────────┴─────────────────────────────────────┘
+Views in (current):
+----------------------------------------
+  active_employees
+  customer_orders_view
+  sales_summary
 
-3 views found in database 'production'
+3 view(s)
 ```
 
-In table format, the view definition is truncated to 50 characters. JSON and CSV output include the full definition text.
+The view list shows names only. To see a view's columns or definition, use `tq describe <view>` or `tq inspect <view>`.
 
 **Scripting examples:**
+
+The JSON output for databases has the structure `[{"name":"...","owner":"...","type":"..."}]`. For tables: `[{"name":"...","type":"...","rows_est":"...","size":"..."}]`. For views: `["view1","view2"]`.
 
 ```bash
 # Find all staging-related databases
 tq list databases --format json | \
-  jq -r '.[] | select(.database | test("staging";"i")) | .database'
+  jq -r '.[] | select(.name | test("staging";"i")) | .name'
 
 # Count tables per database
-for db in $(tq list databases --format json | jq -r '.[].database'); do
+for db in $(tq list databases --format json | jq -r '.[].name'); do
   count=$(tq list tables --database "$db" --format json | jq 'length')
   echo "$db: $count tables"
 done
@@ -1716,40 +1747,44 @@ tq --profile prod show-indexes employees
 **Example output (table with primary and secondary indexes):**
 
 ```
-Index structure for PRODUCTION.employees:
+Indexes on production.employees:
 
-  Primary Index
-    Type:     Unique Primary Index (UPI)
-    Columns:  employee_id
+── Primary Index ──
+  Primary Index (UPI): employee_id
 
-  Secondary Indexes
-    #1  Non-Unique Secondary Index (NUSI)  (department_id)
-    #2  Unique Secondary Index (USI)       (email)
+── Secondary Indexes ──
+  Secondary Index (NUSI) "idx_dept": department_id
+  Secondary Index (USI) "idx_email": email
+
+3 index(es), 3 index column(s)
 ```
 
-**Example output (NoPI table):**
+**Example output (composite primary index + named secondary index):**
 
 ```
-Index structure for PRODUCTION.fact_sales:
+Indexes on production.orders:
 
-  Primary Index
-    No Primary Index (NoPI)
+── Primary Index ──
+  Primary Index (NUPI) "pk_orders": order_id
 
-  Secondary Indexes
-    #1  Non-Unique Secondary Index (NUSI)  (region_id, sale_date)
+── Secondary Indexes ──
+  Secondary Index (NUSI) "idx_customer": customer_id, order_date
+
+2 index(es), 3 index column(s)
 ```
 
-**Example output (no secondary indexes):**
+**Example output (primary index only, no secondary indexes):**
 
 ```
-Index structure for PRODUCTION.config:
+Indexes on production.config:
 
-  Primary Index
-    Type:     Non-Unique Primary Index (NUPI)
-    Columns:  config_key
+── Primary Index ──
+  Primary Index (NUPI): config_key
 
-  No secondary indexes defined.
+1 index(es), 1 index column(s)
 ```
+
+When an index has no name in the catalog, the `"name"` segment is omitted and the format is `  <type> (<short>): <columns>`. Named indexes appear as `  <type> (<short>) "<name>": <columns>`.
 
 **Options:**
 

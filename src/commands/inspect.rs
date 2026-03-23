@@ -6,6 +6,10 @@
 //! Sprint 45: Initial implementation (Issue #33)
 
 use crate::cli::OutputFormat;
+use crate::commands::format_helpers::{
+    classify_index, column_type_case_sql, csv_escape, format_nullable, json_escape,
+    map_table_kind, parse_table_name, truncate_str,
+};
 use crate::db::{DatabaseClient, Value};
 use crate::error::Result;
 use crate::sql::escape_sql_string;
@@ -59,13 +63,13 @@ fn inspect_object<W: Write>(
     object_name: &str,
     writer: &mut W,
 ) -> Result<()> {
-    let (db_part, obj_part) = parse_object_name(object_name);
+    let (db_part, obj_part) = parse_table_name(object_name);
 
     // Resolve database name
     let database = match resolve_object_database(client, db_part) {
         Ok(db) => db,
         Err(e) => {
-            writeln!(writer, "Error resolving database: {}", e)?;
+            writeln!(writer, "Error: Could not resolve database: {}", e)?;
             return Ok(());
         }
     };
@@ -162,19 +166,18 @@ fn inspect_object<W: Write>(
                 if !indexes.is_empty() {
                     writeln!(writer, "── Indexes ──")?;
                     for idx in &indexes {
-                        let uniqueness = if idx.is_unique { "U" } else { "NU" };
                         let columns_str = idx.columns.join(", ");
                         if let Some(ref name) = idx.name {
                             writeln!(
                                 writer,
-                                "  {} ({}{}) \"{}\": {}",
-                                idx.index_type, uniqueness, idx.kind_suffix, name, columns_str
+                                "  {} ({}) \"{}\": {}",
+                                idx.index_type, idx.kind_suffix, name, columns_str
                             )?;
                         } else {
                             writeln!(
                                 writer,
-                                "  {} ({}{}): {}",
-                                idx.index_type, uniqueness, idx.kind_suffix, columns_str
+                                "  {} ({}): {}",
+                                idx.index_type, idx.kind_suffix, columns_str
                             )?;
                         }
                     }
@@ -256,7 +259,7 @@ fn inspect_object_json<W: Write>(
     object_name: &str,
     writer: &mut W,
 ) -> Result<()> {
-    let (db_part, obj_part) = parse_object_name(object_name);
+    let (db_part, obj_part) = parse_table_name(object_name);
     let database = resolve_object_database(client, db_part)?;
 
     let obj_info = match query_object_type(client, &database, obj_part)? {
@@ -323,7 +326,7 @@ fn inspect_object_csv<W: Write>(
     object_name: &str,
     writer: &mut W,
 ) -> Result<()> {
-    let (db_part, obj_part) = parse_object_name(object_name);
+    let (db_part, obj_part) = parse_table_name(object_name);
     let database = resolve_object_database(client, db_part)?;
 
     let obj_info = match query_object_type(client, &database, obj_part)? {
@@ -396,7 +399,6 @@ struct IndexInfo {
     name: Option<String>,
     index_type: String,
     kind_suffix: String,
-    is_unique: bool,
     columns: Vec<String>,
 }
 
@@ -412,19 +414,6 @@ struct StorageInfo {
 // =============================================================================
 // Query helpers
 // =============================================================================
-
-/// Parse an object name into optional database and object parts
-///
-/// Handles both `database.object` and `object` forms.
-fn parse_object_name(name: &str) -> (Option<&str>, &str) {
-    if let Some(dot_pos) = name.find('.') {
-        let db = &name[..dot_pos];
-        let obj = &name[dot_pos + 1..];
-        (Some(db), obj)
-    } else {
-        (None, name)
-    }
-}
 
 /// Resolve the database name, querying `SELECT DATABASE` if not specified
 fn resolve_object_database(
@@ -512,11 +501,15 @@ fn query_columns(
     db: &str,
     obj: &str,
 ) -> Result<Vec<ColumnInfo>> {
+    let type_expr = column_type_case_sql();
     let sql = format!(
-        "SELECT TRIM(ColumnName), ColumnType, Nullable, DefaultValue \
+        "SELECT TRIM(ColumnName), \
+         {} AS ColType, \
+         Nullable, DefaultValue \
          FROM DBC.ColumnsV \
          WHERE DatabaseName = '{}' AND TableName = '{}' \
          ORDER BY ColumnId",
+        type_expr,
         escape_sql_string(db),
         escape_sql_string(obj)
     );
@@ -531,7 +524,14 @@ fn query_columns(
             .unwrap_or_default();
         let col_type = row
             .get(1)
-            .map(|v| v.display().trim().to_string())
+            .map(|v| {
+                let s = v.display().trim().to_string();
+                if s == "[NULL]" {
+                    String::new()
+                } else {
+                    s
+                }
+            })
             .unwrap_or_default();
         let nullable = row
             .get(2)
@@ -610,8 +610,8 @@ fn query_indexes(
             None => 0,
         };
 
-        let (index_type_label, kind_suffix) = map_index_type(&index_type_raw);
         let is_unique = unique_flag == "Y" || unique_flag == "U";
+        let (index_type_label, kind_suffix) = classify_index(&index_type_raw, is_unique);
 
         // Find or create entry for this index number
         if let Some(pos) = index_numbers.iter().position(|n| *n == index_number) {
@@ -622,7 +622,6 @@ fn query_indexes(
                 name: index_name,
                 index_type: index_type_label.to_string(),
                 kind_suffix: kind_suffix.to_string(),
-                is_unique,
                 columns: vec![column_name],
             });
         }
@@ -696,7 +695,13 @@ fn query_definition(
         if let Some(val) = row.first() {
             let text = val.display();
             if text != "[NULL]" {
-                definition.push_str(&text);
+                // Trim trailing whitespace from each row fragment to avoid
+                // garbled output from fixed-width RequestText columns.
+                let trimmed = text.trim_end();
+                if !definition.is_empty() && !trimmed.is_empty() {
+                    definition.push('\n');
+                }
+                definition.push_str(trimmed);
             }
         }
     }
@@ -705,49 +710,8 @@ fn query_definition(
 }
 
 // =============================================================================
-// Formatting helpers
+// Formatting helpers (inspect-specific; shared helpers are in format_helpers.rs)
 // =============================================================================
-
-/// Map TableKind character to human-readable label
-fn map_table_kind(kind: &str) -> String {
-    match kind {
-        "T" => "Table".to_string(),
-        "O" => "Table (NoPI)".to_string(),
-        "V" => "View".to_string(),
-        "M" => "Macro".to_string(),
-        "P" => "Stored Procedure".to_string(),
-        "G" => "Trigger".to_string(),
-        "A" => "Aggregate".to_string(),
-        "E" => "External SP".to_string(),
-        "N" => "Hash Index".to_string(),
-        "I" => "Join Index".to_string(),
-        other => format!("Unknown ({})", other),
-    }
-}
-
-/// Map index type character to label and suffix
-fn map_index_type(raw: &str) -> (&'static str, &'static str) {
-    match raw.trim() {
-        "P" => ("Primary Index", "PI"),
-        "S" => ("Secondary Index", "SI"),
-        "Q" => ("Partitioned Primary Index", "PPI"),
-        "J" => ("Join Index", "JI"),
-        "K" => ("Primary Key", "PK"),
-        "U" => ("Unique Index", "UI"),
-        "V" => ("Value-Ordered Index", "VOSI"),
-        "H" => ("Hash Index", "HI"),
-        _ => ("Index", ""),
-    }
-}
-
-/// Format nullable indicator
-fn format_nullable(s: &str) -> String {
-    match s.trim().to_uppercase().as_str() {
-        "Y" | "YES" | "TRUE" | "1" => "YES".to_string(),
-        "N" | "NO" | "FALSE" | "0" => "NO".to_string(),
-        _ => s.to_string(),
-    }
-}
 
 /// Format byte count as human-readable size
 fn format_size(bytes: i64) -> String {
@@ -807,17 +771,6 @@ fn extract_i64(val: &Value) -> i64 {
     }
 }
 
-/// Truncate a string to a maximum length with ellipsis
-fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else if max_len <= 3 {
-        ".".repeat(max_len)
-    } else {
-        format!("{}...", &s[..max_len - 3])
-    }
-}
-
 /// Summarize an error message for inline display
 fn summarize_error(e: &crate::error::TqError) -> String {
     let msg = e.to_string();
@@ -825,24 +778,6 @@ fn summarize_error(e: &crate::error::TqError) -> String {
         format!("{}...", &msg[..77])
     } else {
         msg
-    }
-}
-
-/// Escape a string for JSON output
-fn json_escape(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
-}
-
-/// Escape a string for CSV output
-fn csv_escape(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
     }
 }
 
@@ -854,27 +789,8 @@ fn csv_escape(s: &str) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_parse_object_name_unqualified() {
-        let (db, obj) = parse_object_name("mytable");
-        assert!(db.is_none());
-        assert_eq!(obj, "mytable");
-    }
-
-    #[test]
-    fn test_parse_object_name_qualified() {
-        let (db, obj) = parse_object_name("mydb.mytable");
-        assert_eq!(db, Some("mydb"));
-        assert_eq!(obj, "mytable");
-    }
-
-    #[test]
-    fn test_parse_object_name_multiple_dots() {
-        // First dot is the separator
-        let (db, obj) = parse_object_name("a.b.c");
-        assert_eq!(db, Some("a"));
-        assert_eq!(obj, "b.c");
-    }
+    // parse_table_name, json_escape, csv_escape, truncate_str, format_nullable,
+    // map_table_kind tests are now in format_helpers::tests
 
     #[test]
     fn test_format_size_bytes() {
@@ -934,57 +850,6 @@ mod tests {
     }
 
     #[test]
-    fn test_map_table_kind_all_known() {
-        assert_eq!(map_table_kind("T"), "Table");
-        assert_eq!(map_table_kind("O"), "Table (NoPI)");
-        assert_eq!(map_table_kind("V"), "View");
-        assert_eq!(map_table_kind("M"), "Macro");
-        assert_eq!(map_table_kind("P"), "Stored Procedure");
-        assert_eq!(map_table_kind("G"), "Trigger");
-        assert_eq!(map_table_kind("A"), "Aggregate");
-        assert_eq!(map_table_kind("E"), "External SP");
-        assert_eq!(map_table_kind("N"), "Hash Index");
-        assert_eq!(map_table_kind("I"), "Join Index");
-    }
-
-    #[test]
-    fn test_map_table_kind_unknown() {
-        assert_eq!(map_table_kind("X"), "Unknown (X)");
-        assert_eq!(map_table_kind("Z"), "Unknown (Z)");
-    }
-
-    #[test]
-    fn test_format_nullable() {
-        assert_eq!(format_nullable("Y"), "YES");
-        assert_eq!(format_nullable("N"), "NO");
-        assert_eq!(format_nullable("YES"), "YES");
-        assert_eq!(format_nullable("NO"), "NO");
-        assert_eq!(format_nullable("1"), "YES");
-        assert_eq!(format_nullable("0"), "NO");
-    }
-
-    #[test]
-    fn test_json_escape() {
-        assert_eq!(json_escape("hello"), "hello");
-        assert_eq!(json_escape("he\"llo"), "he\\\"llo");
-        assert_eq!(json_escape("line\nnew"), "line\\nnew");
-    }
-
-    #[test]
-    fn test_csv_escape() {
-        assert_eq!(csv_escape("hello"), "hello");
-        assert_eq!(csv_escape("hello,world"), "\"hello,world\"");
-        assert_eq!(csv_escape("say \"hi\""), "\"say \"\"hi\"\"\"");
-    }
-
-    #[test]
-    fn test_truncate_str() {
-        assert_eq!(truncate_str("short", 10), "short");
-        assert_eq!(truncate_str("exactly10c", 10), "exactly10c");
-        assert_eq!(truncate_str("this is a long string", 10), "this is...");
-    }
-
-    #[test]
     fn test_interpret_skew() {
         assert_eq!(interpret_skew(0.0), "(low)");
         assert_eq!(interpret_skew(5.0), "(low)");
@@ -997,11 +862,9 @@ mod tests {
     }
 
     #[test]
-    fn test_map_index_type() {
-        assert_eq!(map_index_type("P"), ("Primary Index", "PI"));
-        assert_eq!(map_index_type("S"), ("Secondary Index", "SI"));
-        assert_eq!(map_index_type("Q"), ("Partitioned Primary Index", "PPI"));
-        assert_eq!(map_index_type("K"), ("Primary Key", "PK"));
-        assert_eq!(map_index_type("X"), ("Index", ""));
+    fn test_classify_index_via_format_helpers() {
+        let (label, short) = classify_index("P", true);
+        assert_eq!(label, "Primary Index");
+        assert_eq!(short, "UPI");
     }
 }

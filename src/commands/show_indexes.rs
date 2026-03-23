@@ -1,10 +1,14 @@
 //! Show-indexes command implementation
 //!
-//! Displays index information for a table from DBC.IndicesV.
+//! Displays index information for a table from DBC.IndicesV with two-section
+//! layout (Primary Index, Secondary Indexes) and UPI/NUPI/USI/NUSI labels.
 //! Used by `tq show-indexes <table>` (batch) and `/show indexes` (REPL delegation).
 
 use crate::cli::OutputFormat;
-use crate::db::DatabaseClient;
+use crate::commands::format_helpers::{
+    classify_index, csv_escape, json_escape, parse_table_name,
+};
+use crate::db::{DatabaseClient, Value};
 use crate::error::Result;
 use crate::sql::escape_sql_string;
 use std::io::Write;
@@ -44,47 +48,31 @@ pub fn execute_for_repl<W: Write>(
 // Data structures
 // =============================================================================
 
-struct IndexRow {
-    index_name: String,
-    index_type: String,
-    column_name: String,
-    position: String,
+/// An index group with all its columns
+struct IndexGroup {
+    name: String,
+    index_type_label: String,
+    short_label: String,
+    is_primary: bool,
+    columns: Vec<String>,
 }
 
 // =============================================================================
 // Query helper
 // =============================================================================
 
-fn parse_table_name(name: &str) -> (Option<&str>, &str) {
-    if let Some(dot_pos) = name.find('.') {
-        (Some(&name[..dot_pos]), &name[dot_pos + 1..])
-    } else {
-        (None, name)
-    }
-}
-
 fn query_indexes(
     client: &DatabaseClient,
     table_name: &str,
-) -> Result<(Vec<IndexRow>, String)> {
+) -> Result<(Vec<IndexGroup>, String)> {
     let (database, table) = parse_table_name(table_name);
 
     let sql = if let Some(db) = database {
         format!(
             "SELECT TRIM(IndexName) AS IndexName, \
-             CASE IndexType \
-                 WHEN 'P' THEN 'Primary' \
-                 WHEN 'S' THEN 'Secondary' \
-                 WHEN 'Q' THEN 'PPI' \
-                 WHEN 'J' THEN 'Join' \
-                 WHEN 'K' THEN 'Primary Key' \
-                 WHEN 'U' THEN 'Unique' \
-                 WHEN 'V' THEN 'Value-Ordered' \
-                 WHEN 'H' THEN 'Hash' \
-                 ELSE IndexType \
-             END AS IndexType, \
+             IndexType, UniqueFlag, \
              TRIM(ColumnName) AS ColumnName, \
-             ColumnPosition \
+             IndexNumber, ColumnPosition \
              FROM DBC.IndicesV \
              WHERE DatabaseName = '{}' AND TableName = '{}' \
              ORDER BY IndexNumber, ColumnPosition",
@@ -94,19 +82,9 @@ fn query_indexes(
     } else {
         format!(
             "SELECT TRIM(IndexName) AS IndexName, \
-             CASE IndexType \
-                 WHEN 'P' THEN 'Primary' \
-                 WHEN 'S' THEN 'Secondary' \
-                 WHEN 'Q' THEN 'PPI' \
-                 WHEN 'J' THEN 'Join' \
-                 WHEN 'K' THEN 'Primary Key' \
-                 WHEN 'U' THEN 'Unique' \
-                 WHEN 'V' THEN 'Value-Ordered' \
-                 WHEN 'H' THEN 'Hash' \
-                 ELSE IndexType \
-             END AS IndexType, \
+             IndexType, UniqueFlag, \
              TRIM(ColumnName) AS ColumnName, \
-             ColumnPosition \
+             IndexNumber, ColumnPosition \
              FROM DBC.IndicesV \
              WHERE TableName = '{}' AND DatabaseName = DATABASE \
              ORDER BY IndexNumber, ColumnPosition",
@@ -122,54 +100,60 @@ fn query_indexes(
         table.to_string()
     };
 
-    let rows: Vec<IndexRow> = result
-        .rows
-        .iter()
-        .map(|row| {
-            let index_name = row
-                .first()
-                .map(|v| {
-                    let s = v.display();
-                    if s == "[NULL]" {
-                        "(unnamed)".to_string()
-                    } else {
-                        s.trim().to_string()
-                    }
-                })
-                .unwrap_or_default();
-            let index_type = row
-                .get(1)
-                .map(|v| v.display().trim().to_string())
-                .unwrap_or_default();
-            let column_name = row
-                .get(2)
-                .map(|v| v.display().trim().to_string())
-                .unwrap_or_default();
-            let position = row
-                .get(3)
-                .map(|v| v.display().trim().to_string())
-                .unwrap_or_default();
+    let mut groups: Vec<IndexGroup> = Vec::new();
+    let mut index_numbers: Vec<i64> = Vec::new();
 
-            IndexRow {
-                index_name,
-                index_type,
-                column_name,
-                position,
-            }
-        })
-        .collect();
+    for row in &result.rows {
+        let index_name = row
+            .first()
+            .map(|v| {
+                let s = v.display().trim().to_string();
+                if s.is_empty() || s == "[NULL]" {
+                    "(unnamed)".to_string()
+                } else {
+                    s
+                }
+            })
+            .unwrap_or_else(|| "(unnamed)".to_string());
+        let index_type_raw = row
+            .get(1)
+            .map(|v| v.display().trim().to_string())
+            .unwrap_or_default();
+        let unique_flag = row
+            .get(2)
+            .map(|v| v.display().trim().to_string())
+            .unwrap_or_default();
+        let column_name = row
+            .get(3)
+            .map(|v| v.display().trim().to_string())
+            .unwrap_or_default();
+        let index_number = match row.get(4) {
+            Some(Value::Integer(n)) => *n,
+            Some(v) => v.display().trim().parse::<i64>().unwrap_or(0),
+            None => 0,
+        };
 
-    Ok((rows, qualified))
-}
+        let is_unique = unique_flag == "Y" || unique_flag == "U";
+        let (type_label, short_label) = classify_index(&index_type_raw, is_unique);
+        let is_primary = index_type_raw.trim() == "P"
+            || index_type_raw.trim() == "Q"
+            || index_type_raw.trim() == "K";
 
-fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else if max_len <= 3 {
-        ".".repeat(max_len)
-    } else {
-        format!("{}...", &s[..max_len - 3])
+        if let Some(pos) = index_numbers.iter().position(|n| *n == index_number) {
+            groups[pos].columns.push(column_name);
+        } else {
+            index_numbers.push(index_number);
+            groups.push(IndexGroup {
+                name: index_name,
+                index_type_label: type_label.to_string(),
+                short_label: short_label.to_string(),
+                is_primary,
+                columns: vec![column_name],
+            });
+        }
     }
+
+    Ok((groups, qualified))
 }
 
 // =============================================================================
@@ -181,10 +165,14 @@ fn show_indexes_table<W: Write>(
     table_name: &str,
     writer: &mut W,
 ) -> Result<()> {
-    let (rows, qualified) = query_indexes(client, table_name)?;
+    let (groups, qualified) = query_indexes(client, table_name)?;
 
-    if rows.is_empty() {
-        writeln!(writer, "No indexes found for table '{}'.", table_name)?;
+    if groups.is_empty() {
+        writeln!(
+            writer,
+            "Error: No indexes found for table '{}'.",
+            table_name
+        )?;
         writeln!(writer)?;
         writeln!(writer, "Suggestions:")?;
         writeln!(writer, "  - Check the table name spelling")?;
@@ -201,26 +189,61 @@ fn show_indexes_table<W: Write>(
 
     writeln!(writer, "Indexes on {}:", qualified)?;
     writeln!(writer)?;
-    writeln!(
-        writer,
-        "{:<30} {:<15} {:<25} {:<10}",
-        "IndexName", "IndexType", "ColumnName", "Position"
-    )?;
-    writeln!(writer, "{}", "-".repeat(80))?;
 
-    for row in &rows {
-        writeln!(
-            writer,
-            "{:<30} {:<15} {:<25} {:<10}",
-            truncate_str(&row.index_name, 29),
-            truncate_str(&row.index_type, 14),
-            truncate_str(&row.column_name, 24),
-            row.position
-        )?;
+    // Primary Index section
+    let primary: Vec<&IndexGroup> = groups.iter().filter(|g| g.is_primary).collect();
+    if !primary.is_empty() {
+        writeln!(writer, "── Primary Index ──")?;
+        for idx in &primary {
+            let cols = idx.columns.join(", ");
+            if idx.name != "(unnamed)" {
+                writeln!(
+                    writer,
+                    "  {} ({}) \"{}\": {}",
+                    idx.index_type_label, idx.short_label, idx.name, cols
+                )?;
+            } else {
+                writeln!(
+                    writer,
+                    "  {} ({}): {}",
+                    idx.index_type_label, idx.short_label, cols
+                )?;
+            }
+        }
+        writeln!(writer)?;
     }
 
-    writeln!(writer)?;
-    writeln!(writer, "{} index column(s)", rows.len())?;
+    // Secondary Indexes section
+    let secondary: Vec<&IndexGroup> = groups.iter().filter(|g| !g.is_primary).collect();
+    if !secondary.is_empty() {
+        writeln!(writer, "── Secondary Indexes ──")?;
+        for idx in &secondary {
+            let cols = idx.columns.join(", ");
+            if idx.name != "(unnamed)" {
+                writeln!(
+                    writer,
+                    "  {} ({}) \"{}\": {}",
+                    idx.index_type_label, idx.short_label, idx.name, cols
+                )?;
+            } else {
+                writeln!(
+                    writer,
+                    "  {} ({}): {}",
+                    idx.index_type_label, idx.short_label, cols
+                )?;
+            }
+        }
+        writeln!(writer)?;
+    }
+
+    // Summary
+    let total_cols: usize = groups.iter().map(|g| g.columns.len()).sum();
+    writeln!(
+        writer,
+        "{} index(es), {} index column(s)",
+        groups.len(),
+        total_cols
+    )?;
     Ok(())
 }
 
@@ -229,23 +252,54 @@ fn show_indexes_json<W: Write>(
     table_name: &str,
     writer: &mut W,
 ) -> Result<()> {
-    let (rows, _qualified) = query_indexes(client, table_name)?;
+    let (groups, qualified) = query_indexes(client, table_name)?;
 
-    write!(writer, "[")?;
-    for (i, row) in rows.iter().enumerate() {
+    // Structured JSON: {object, primary_index, secondary_indexes}
+    write!(writer, "{{\"object\":\"{}\"", json_escape(&qualified))?;
+
+    // Primary index
+    let primary: Vec<&IndexGroup> = groups.iter().filter(|g| g.is_primary).collect();
+    if let Some(pi) = primary.first() {
+        write!(
+            writer,
+            ",\"primary_index\":{{\"type\":\"{}\",\"columns\":[",
+            json_escape(&pi.short_label)
+        )?;
+        for (j, col) in pi.columns.iter().enumerate() {
+            if j > 0 {
+                write!(writer, ",")?;
+            }
+            write!(writer, "\"{}\"", json_escape(col))?;
+        }
+        write!(writer, "]}}")?;
+    } else {
+        write!(writer, ",\"primary_index\":null")?;
+    }
+
+    // Secondary indexes
+    let secondary: Vec<&IndexGroup> = groups.iter().filter(|g| !g.is_primary).collect();
+    write!(writer, ",\"secondary_indexes\":[")?;
+    for (i, idx) in secondary.iter().enumerate() {
         if i > 0 {
             write!(writer, ",")?;
         }
         write!(
             writer,
-            "{{\"index_name\":\"{}\",\"index_type\":\"{}\",\"column_name\":\"{}\",\"position\":\"{}\"}}",
-            json_escape(&row.index_name),
-            json_escape(&row.index_type),
-            json_escape(&row.column_name),
-            json_escape(&row.position)
+            "{{\"name\":\"{}\",\"type\":\"{}\",\"columns\":[",
+            json_escape(&idx.name),
+            json_escape(&idx.short_label)
         )?;
+        for (j, col) in idx.columns.iter().enumerate() {
+            if j > 0 {
+                write!(writer, ",")?;
+            }
+            write!(writer, "\"{}\"", json_escape(col))?;
+        }
+        write!(writer, "]}}")?;
     }
-    writeln!(writer, "]")?;
+    write!(writer, "]")?;
+
+    writeln!(writer, "}}")?;
     Ok(())
 }
 
@@ -254,34 +308,68 @@ fn show_indexes_csv<W: Write>(
     table_name: &str,
     writer: &mut W,
 ) -> Result<()> {
-    let (rows, _qualified) = query_indexes(client, table_name)?;
+    let (groups, _qualified) = query_indexes(client, table_name)?;
 
-    writeln!(writer, "IndexName,IndexType,ColumnName,Position")?;
-    for row in &rows {
+    writeln!(writer, "IndexName,IndexType,ShortType,IsPrimary,Columns")?;
+    for idx in &groups {
+        let cols = idx.columns.join(", ");
         writeln!(
             writer,
-            "{},{},{},{}",
-            csv_escape(&row.index_name),
-            csv_escape(&row.index_type),
-            csv_escape(&row.column_name),
-            csv_escape(&row.position)
+            "{},{},{},{},{}",
+            csv_escape(&idx.name),
+            csv_escape(&idx.index_type_label),
+            csv_escape(&idx.short_label),
+            if idx.is_primary { "Yes" } else { "No" },
+            csv_escape(&cols)
         )?;
     }
     Ok(())
 }
 
-fn json_escape(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
-}
+// =============================================================================
+// Unit tests
+// =============================================================================
 
-fn csv_escape(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_index_group_primary() {
+        let idx = IndexGroup {
+            name: "(unnamed)".to_string(),
+            index_type_label: "Primary Index".to_string(),
+            short_label: "UPI".to_string(),
+            is_primary: true,
+            columns: vec!["emp_id".to_string()],
+        };
+        assert!(idx.is_primary);
+        assert_eq!(idx.short_label, "UPI");
+    }
+
+    #[test]
+    fn test_index_group_secondary() {
+        let idx = IndexGroup {
+            name: "idx_name".to_string(),
+            index_type_label: "Secondary Index".to_string(),
+            short_label: "NUSI".to_string(),
+            is_primary: false,
+            columns: vec!["last_name".to_string(), "first_name".to_string()],
+        };
+        assert!(!idx.is_primary);
+        assert_eq!(idx.short_label, "NUSI");
+        assert_eq!(idx.columns.len(), 2);
+    }
+
+    #[test]
+    fn test_index_group_composite() {
+        let idx = IndexGroup {
+            name: "pk_composite".to_string(),
+            index_type_label: "Primary Index".to_string(),
+            short_label: "NUPI".to_string(),
+            is_primary: true,
+            columns: vec!["col_a".to_string(), "col_b".to_string(), "col_c".to_string()],
+        };
+        assert_eq!(idx.columns.join(", "), "col_a, col_b, col_c");
     }
 }

@@ -25,6 +25,7 @@ use super::executor::execute_sql_with_state;
 use super::metadata_completer::CompletionState;
 use super::state::ReplState;
 use crate::cli::LogonMechanism;
+use crate::commands::format_helpers::{format_nullable, truncate_str};
 use crate::db::{ConnectionConfig, DatabaseClient};
 use crate::error::Result;
 use crate::sql::{escape_sql_string, quote_qualified_name};
@@ -73,13 +74,13 @@ pub fn handle_metacommand<W: Write>(
             execute_ping(client, state, writer)?;
         }
 
-        // Describe command (Sprint 4)
+        // Describe command — delegates to batch describe module
         "describe" | "d" => {
             if args.is_empty() {
                 writeln!(writer, "Usage: /describe <table_name>")?;
                 writeln!(writer, "       /describe <database>.<table_name>")?;
             } else {
-                execute_describe(client, args[0], writer)?;
+                crate::commands::describe::execute_for_repl(client, args[0], writer)?;
             }
         }
 
@@ -291,13 +292,17 @@ pub fn handle_metacommand_with_state<W: Write>(
             execute_ping(completion_state.client(), state, writer)?;
         }
 
-        // Describe command (Sprint 4)
+        // Describe command — delegates to batch describe module
         "describe" | "d" => {
             if args.is_empty() {
                 writeln!(writer, "Usage: /describe <table_name>")?;
                 writeln!(writer, "       /describe <database>.<table_name>")?;
             } else {
-                execute_describe(completion_state.client(), args[0], writer)?;
+                crate::commands::describe::execute_for_repl(
+                    completion_state.client(),
+                    args[0],
+                    writer,
+                )?;
             }
         }
 
@@ -498,8 +503,8 @@ pub fn handle_metacommand_with_state<W: Write>(
                                 "       /show indexes <database>.<table_name>"
                             )?;
                         } else {
-                            execute_show_indexes(
-                                completion_state,
+                            crate::commands::show_indexes::execute_for_repl(
+                                completion_state.client(),
                                 args[1],
                                 writer,
                             )?;
@@ -520,7 +525,11 @@ pub fn handle_metacommand_with_state<W: Write>(
                 writeln!(writer, "Usage: /di <table_name>")?;
                 writeln!(writer, "       /di <database>.<table_name>")?;
             } else {
-                execute_show_indexes(completion_state, args[0], writer)?;
+                crate::commands::show_indexes::execute_for_repl(
+                    completion_state.client(),
+                    args[0],
+                    writer,
+                )?;
             }
         }
 
@@ -861,7 +870,7 @@ fn execute_logon<W: Write>(
     Ok(())
 }
 
-/// Execute the /list metacommand (Sprint 22)
+/// Execute the /list metacommand — delegates to batch list module
 ///
 /// Provides schema inspection commands:
 /// - /list databases - List all accessible databases
@@ -881,337 +890,19 @@ fn execute_list<W: Write>(
     let subcommand = args[0].to_lowercase();
     let pattern = args.get(1).copied();
 
-    match subcommand.as_str() {
-        "databases" | "db" | "dbs" => {
-            execute_list_databases(completion_state, writer)?;
-        }
-        "tables" | "table" | "t" => {
-            execute_list_tables(completion_state, pattern, writer)?;
-        }
-        "views" | "view" | "v" => {
-            execute_list_views(completion_state, writer)?;
-        }
-        _ => {
-            writeln!(writer)?;
-            writeln!(writer, "Unknown list subcommand: {}", subcommand)?;
-            writeln!(writer, "Available: databases, tables, views")?;
-            writeln!(writer)?;
-        }
-    }
+    crate::commands::list::execute_for_repl(
+        completion_state.client(),
+        &subcommand,
+        pattern,
+        None,
+        writer,
+    )?;
 
     Ok(())
 }
 
-/// Execute /list databases
-///
-/// Lists all accessible databases from DBC.DatabasesV.
-fn execute_list_databases<W: Write>(
-    completion_state: &mut CompletionState,
-    writer: &mut W,
-) -> Result<()> {
-    writeln!(writer)?;
-
-    // First try to use cached databases (loaded at startup)
-    if completion_state.ensure_databases_loaded() {
-        let cache = completion_state.cache();
-        if let Some(databases) = cache.get_cached_databases() {
-            writeln!(writer, "Databases ({}):", databases.len())?;
-            writeln!(writer, "{}", "-".repeat(40))?;
-
-            // Display in columns for better readability
-            let col_width = 25;
-            let cols = 3;
-
-            for chunk in databases.chunks(cols) {
-                let line: Vec<String> = chunk
-                    .iter()
-                    .map(|db| format!("{:<width$}", db, width = col_width))
-                    .collect();
-                writeln!(writer, "{}", line.join(""))?;
-            }
-
-            writeln!(writer)?;
-            writeln!(writer, "{} database(s)", databases.len())?;
-            writeln!(writer)?;
-            return Ok(());
-        }
-    }
-
-    // Fallback: query directly
-    let client = completion_state.client();
-    let sql = r#"
-        SELECT TRIM(DatabaseName) AS database_name
-        FROM DBC.DatabasesV
-        WHERE DatabaseName NOT IN ('All', 'Console', 'Crashdumps',
-                                   'dbcmngr', 'Default', 'External_AP',
-                                   'EXTUSER', 'LockLogShredder', 'PUBLIC',
-                                   'SQLJ', 'Sys_Calendar', 'SysAdmin',
-                                   'SYSBAR', 'SYSJDBC', 'SYSLIB', 'SYSSPATIAL',
-                                   'SystemFe', 'SYSUDTLIB', 'TD_SERVER_DB',
-                                   'TD_SYSFNLIB', 'TD_SYSGPL', 'TD_SYSXML',
-                                   'TDMaps', 'TDPUSER', 'TDQCD', 'TDStats',
-                                   'tdwm', 'VIEWPOINT')
-        ORDER BY DatabaseName
-    "#;
-
-    match client.execute(sql) {
-        Ok(result) => {
-            writeln!(writer, "Databases ({}):", result.row_count)?;
-            writeln!(writer, "{}", "-".repeat(40))?;
-
-            let col_width = 25;
-            let cols = 3;
-            let databases: Vec<String> = result
-                .rows
-                .iter()
-                .filter_map(|row| {
-                    row.first().map(|v| {
-                        let s = v.display();
-                        if s == "[NULL]" {
-                            None
-                        } else {
-                            Some(s)
-                        }
-                    })
-                })
-                .flatten()
-                .collect();
-
-            for chunk in databases.chunks(cols) {
-                let line: Vec<String> = chunk
-                    .iter()
-                    .map(|db| format!("{:<width$}", db, width = col_width))
-                    .collect();
-                writeln!(writer, "{}", line.join(""))?;
-            }
-
-            writeln!(writer)?;
-            writeln!(writer, "{} database(s)", databases.len())?;
-        }
-        Err(e) => {
-            writeln!(writer, "Error listing databases: {}", e)?;
-            writeln!(writer)?;
-            writeln!(writer, "You may not have permission to query DBC.DatabasesV")?;
-        }
-    }
-
-    writeln!(writer)?;
-    Ok(())
-}
-
-/// Execute /list tables [pattern]
-///
-/// Lists tables in the current database, optionally filtered by a glob pattern.
-fn execute_list_tables<W: Write>(
-    completion_state: &mut CompletionState,
-    pattern: Option<&str>,
-    writer: &mut W,
-) -> Result<()> {
-    writeln!(writer)?;
-
-    let current_db = completion_state.current_database().to_string();
-
-    // Ensure tables are loaded for current database
-    if !completion_state.ensure_tables_loaded() {
-        writeln!(writer, "Warning: Could not load table metadata from cache")?;
-    }
-
-    // Query tables from DBC.TablesV
-    let client = completion_state.client();
-    let sql = format!(
-        r#"
-        SELECT TRIM(TableName) AS table_name,
-               TableKind
-        FROM DBC.TablesV
-        WHERE DatabaseName = '{}'
-          AND TableKind IN ('T', 'O')
-        ORDER BY TableName
-        "#,
-        escape_sql_string(&current_db)
-    );
-
-    match client.execute(&sql) {
-        Ok(result) => {
-            // Apply pattern filter if provided
-            let tables: Vec<(String, &str)> = result
-                .rows
-                .iter()
-                .filter_map(|row| {
-                    let name = row.first().map(|v| v.display())?;
-                    let kind = row.get(1).map(|v| v.display()).unwrap_or_default();
-                    if name == "[NULL]" {
-                        return None;
-                    }
-
-                    // Apply glob pattern if provided
-                    if let Some(pat) = pattern {
-                        if !matches_glob(&name, pat) {
-                            return None;
-                        }
-                    }
-
-                    let kind_str = match kind.as_str() {
-                        "T" => "TABLE",
-                        "O" => "OBJECT",
-                        _ => "TABLE",
-                    };
-                    Some((name, kind_str))
-                })
-                .collect();
-
-            let pattern_str = pattern.map(|p| format!(" matching '{}'", p)).unwrap_or_default();
-            writeln!(
-                writer,
-                "Tables in {}{}:",
-                current_db,
-                pattern_str
-            )?;
-            writeln!(writer, "{:<40} {:<10}", "Name", "Type")?;
-            writeln!(writer, "{}", "-".repeat(50))?;
-
-            for (name, kind) in &tables {
-                writeln!(writer, "{:<40} {:<10}", name, kind)?;
-            }
-
-            writeln!(writer)?;
-            writeln!(writer, "{} table(s)", tables.len())?;
-        }
-        Err(e) => {
-            writeln!(writer, "Error listing tables: {}", e)?;
-            writeln!(writer)?;
-            writeln!(
-                writer,
-                "Verify you have SELECT permission on DBC.TablesV"
-            )?;
-        }
-    }
-
-    writeln!(writer)?;
-    Ok(())
-}
-
-/// Execute /list views
-///
-/// Lists views in the current database.
-fn execute_list_views<W: Write>(
-    completion_state: &mut CompletionState,
-    writer: &mut W,
-) -> Result<()> {
-    writeln!(writer)?;
-
-    let current_db = completion_state.current_database().to_string();
-    let client = completion_state.client();
-
-    let sql = format!(
-        r#"
-        SELECT TRIM(TableName) AS view_name
-        FROM DBC.TablesV
-        WHERE DatabaseName = '{}'
-          AND TableKind = 'V'
-        ORDER BY TableName
-        "#,
-        escape_sql_string(&current_db)
-    );
-
-    match client.execute(&sql) {
-        Ok(result) => {
-            let views: Vec<String> = result
-                .rows
-                .iter()
-                .filter_map(|row| {
-                    let name = row.first().map(|v| v.display())?;
-                    if name == "[NULL]" {
-                        None
-                    } else {
-                        Some(name)
-                    }
-                })
-                .collect();
-
-            writeln!(writer, "Views in {}:", current_db)?;
-            writeln!(writer, "{}", "-".repeat(40))?;
-
-            if views.is_empty() {
-                writeln!(writer, "(no views found)")?;
-            } else {
-                for view in &views {
-                    writeln!(writer, "  {}", view)?;
-                }
-            }
-
-            writeln!(writer)?;
-            writeln!(writer, "{} view(s)", views.len())?;
-        }
-        Err(e) => {
-            writeln!(writer, "Error listing views: {}", e)?;
-            writeln!(writer)?;
-            writeln!(
-                writer,
-                "Verify you have SELECT permission on DBC.TablesV"
-            )?;
-        }
-    }
-
-    writeln!(writer)?;
-    Ok(())
-}
-
-/// Simple glob pattern matching
-///
-/// Supports:
-/// - `*` matches any sequence of characters
-/// - `?` matches any single character
-/// - Case-insensitive matching
-fn matches_glob(text: &str, pattern: &str) -> bool {
-    let text_lower = text.to_lowercase();
-    let pattern_lower = pattern.to_lowercase();
-
-    // Convert glob pattern to regex-like matching
-    let mut pattern_chars = pattern_lower.chars().peekable();
-    let mut text_chars = text_lower.chars().peekable();
-
-    fn match_recursive(
-        pattern: &mut std::iter::Peekable<std::str::Chars>,
-        text: &mut std::iter::Peekable<std::str::Chars>,
-    ) -> bool {
-        loop {
-            match (pattern.peek().copied(), text.peek().copied()) {
-                (None, None) => return true,
-                (None, Some(_)) => return false,
-                (Some('*'), _) => {
-                    pattern.next();
-                    // Try matching rest of pattern at each position
-                    if pattern.peek().is_none() {
-                        return true; // Trailing * matches everything
-                    }
-                    // Try matching at current position and all subsequent positions
-                    let mut text_clone = text.clone();
-                    loop {
-                        let mut pattern_clone = pattern.clone();
-                        let mut text_try = text_clone.clone();
-                        if match_recursive(&mut pattern_clone, &mut text_try) {
-                            return true;
-                        }
-                        if text_clone.next().is_none() {
-                            return false;
-                        }
-                    }
-                }
-                (Some('?'), Some(_)) => {
-                    pattern.next();
-                    text.next();
-                }
-                (Some(p), Some(t)) if p == t => {
-                    pattern.next();
-                    text.next();
-                }
-                _ => return false,
-            }
-        }
-    }
-
-    match_recursive(&mut pattern_chars, &mut text_chars)
-}
+// Old execute_list_databases, execute_list_tables, execute_list_views, matches_glob
+// removed — REPL now delegates to crate::commands::list::execute_for_repl.
 
 /// Print help text
 fn print_help<W: Write>(writer: &mut W) -> Result<()> {
@@ -1365,157 +1056,8 @@ fn execute_ping<W: Write>(
     Ok(())
 }
 
-/// Execute the /describe metacommand
-///
-/// Shows table structure including columns, types, and nullable status.
-fn execute_describe<W: Write>(
-    client: &DatabaseClient,
-    table_name: &str,
-    writer: &mut W,
-) -> Result<()> {
-    writeln!(writer)?;
-
-    // Parse table name - may be qualified (database.table) or unqualified
-    let (database, table) = if let Some(dot_pos) = table_name.find('.') {
-        let db = &table_name[..dot_pos];
-        let tbl = &table_name[dot_pos + 1..];
-        (Some(db), tbl)
-    } else {
-        (None, table_name)
-    };
-
-    // Build the query to fetch column information from DBC.ColumnsV
-    let sql = if let Some(db) = database {
-        format!(
-            r#"SELECT ColumnName, ColumnType, Nullable, DefaultValue, CommentString
-               FROM DBC.ColumnsV
-               WHERE DatabaseName = '{}'
-                 AND TableName = '{}'
-               ORDER BY ColumnId"#,
-            escape_sql_string(db),
-            escape_sql_string(table)
-        )
-    } else {
-        format!(
-            r#"SELECT ColumnName, ColumnType, Nullable, DefaultValue, CommentString
-               FROM DBC.ColumnsV
-               WHERE TableName = '{}'
-                 AND DatabaseName = DATABASE
-               ORDER BY ColumnId"#,
-            escape_sql_string(table)
-        )
-    };
-
-    // Execute the query
-    match client.execute(&sql) {
-        Ok(result) => {
-            if result.row_count == 0 {
-                writeln!(
-                    writer,
-                    "Table '{}' not found or no columns available.",
-                    table_name
-                )?;
-                writeln!(writer)?;
-                writeln!(writer, "Suggestions:")?;
-                writeln!(writer, "  - Check the table name spelling")?;
-                writeln!(
-                    writer,
-                    "  - Try using qualified name: /describe database.table"
-                )?;
-                writeln!(
-                    writer,
-                    "  - Verify you have SELECT permission on DBC.ColumnsV"
-                )?;
-            } else {
-                // Display table header
-                let qualified_name = if let Some(db) = database {
-                    format!("{}.{}", db, table)
-                } else {
-                    table.to_string()
-                };
-                writeln!(writer, "Table: {}", qualified_name)?;
-                writeln!(writer)?;
-
-                // Display columns header
-                writeln!(writer, "Columns:")?;
-                writeln!(
-                    writer,
-                    "{:<25} {:<20} {:<10} {:<15}",
-                    "Column", "Type", "Nullable", "Default"
-                )?;
-                writeln!(writer, "{}", "-".repeat(70))?;
-
-                // Display each column
-                for row in &result.rows {
-                    let col_name = row.first().map(|v| v.display()).unwrap_or_default();
-                    let col_type = row.get(1).map(|v| v.display()).unwrap_or_default();
-                    let nullable = row
-                        .get(2)
-                        .map(|v| format_nullable(&v.display()))
-                        .unwrap_or_else(|| "YES".to_string());
-                    let default = row
-                        .get(3)
-                        .map(|v| {
-                            let s = v.display();
-                            if s == "[NULL]" {
-                                "-".to_string()
-                            } else {
-                                s
-                            }
-                        })
-                        .unwrap_or_else(|| "-".to_string());
-
-                    writeln!(
-                        writer,
-                        "{:<25} {:<20} {:<10} {:<15}",
-                        truncate_string(&col_name, 24),
-                        truncate_string(&col_type, 19),
-                        nullable,
-                        truncate_string(&default, 14)
-                    )?;
-                }
-
-                writeln!(writer)?;
-                writeln!(writer, "{} column(s)", result.row_count)?;
-            }
-        }
-        Err(e) => {
-            writeln!(writer, "Error describing table '{}': {}", table_name, e)?;
-            writeln!(writer)?;
-            writeln!(writer, "Suggestions:")?;
-            writeln!(writer, "  - Check table name spelling")?;
-            writeln!(
-                writer,
-                "  - Verify you have permission to access DBC.ColumnsV"
-            )?;
-        }
-    }
-
-    writeln!(writer)?;
-    Ok(())
-}
-
-// Note: escape_sql_string is imported from crate::sql::escape_sql_string
-
-/// Format nullable indicator
-fn format_nullable(s: &str) -> String {
-    match s.trim().to_uppercase().as_str() {
-        "Y" | "YES" | "TRUE" | "1" => "YES".to_string(),
-        "N" | "NO" | "FALSE" | "0" => "NO".to_string(),
-        _ => s.to_string(),
-    }
-}
-
-/// Truncate string to a maximum length with ellipsis
-fn truncate_string(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else if max_len <= 3 {
-        ".".repeat(max_len)
-    } else {
-        format!("{}...", &s[..max_len - 3])
-    }
-}
+// Old execute_describe, format_nullable, truncate_string removed —
+// REPL /describe now delegates to crate::commands::describe::execute_for_repl.
 
 /// Execute the /export metacommand (Sprint 6, Sprint 12, Sprint 13)
 ///
@@ -2308,10 +1850,10 @@ fn execute_peek<W: Write>(
                     writeln!(
                         writer,
                         "{:<25} {:<20} {:<10} {:<15}",
-                        truncate_string(&col_name, 24),
-                        truncate_string(&col_type, 19),
+                        truncate_str(&col_name, 24),
+                        truncate_str(&col_type, 19),
                         nullable,
-                        truncate_string(&size_str, 14)
+                        truncate_str(&size_str, 14)
                     )?;
                 }
             }
@@ -2554,191 +2096,8 @@ fn execute_edit<W: Write>(
     Ok(())
 }
 
-// =============================================================================
-// Sprint 36: /show indexes Command
-// =============================================================================
-
-/// Build the SQL query for fetching index information from DBC.IndicesV
-///
-/// Returns the SQL query string for the given database and table.
-/// Uses `escape_sql_string()` for safe string interpolation.
-fn build_show_indexes_sql(database: Option<&str>, table: &str) -> String {
-    if let Some(db) = database {
-        format!(
-            r#"SELECT TRIM(IndexName) AS IndexName,
-                   CASE IndexType
-                       WHEN 'P' THEN 'Primary'
-                       WHEN 'S' THEN 'Secondary'
-                       WHEN 'Q' THEN 'PPI'
-                       WHEN 'J' THEN 'Join'
-                       WHEN 'K' THEN 'Primary Key'
-                       WHEN 'U' THEN 'Unique'
-                       WHEN 'V' THEN 'Value-Ordered'
-                       WHEN 'H' THEN 'Hash'
-                       ELSE IndexType
-                   END AS IndexType,
-                   TRIM(ColumnName) AS ColumnName,
-                   ColumnPosition
-            FROM DBC.IndicesV
-            WHERE DatabaseName = '{}'
-              AND TableName = '{}'
-            ORDER BY IndexNumber, ColumnPosition"#,
-            escape_sql_string(db),
-            escape_sql_string(table)
-        )
-    } else {
-        format!(
-            r#"SELECT TRIM(IndexName) AS IndexName,
-                   CASE IndexType
-                       WHEN 'P' THEN 'Primary'
-                       WHEN 'S' THEN 'Secondary'
-                       WHEN 'Q' THEN 'PPI'
-                       WHEN 'J' THEN 'Join'
-                       WHEN 'K' THEN 'Primary Key'
-                       WHEN 'U' THEN 'Unique'
-                       WHEN 'V' THEN 'Value-Ordered'
-                       WHEN 'H' THEN 'Hash'
-                       ELSE IndexType
-                   END AS IndexType,
-                   TRIM(ColumnName) AS ColumnName,
-                   ColumnPosition
-            FROM DBC.IndicesV
-            WHERE TableName = '{}'
-              AND DatabaseName = DATABASE
-            ORDER BY IndexNumber, ColumnPosition"#,
-            escape_sql_string(table)
-        )
-    }
-}
-
-/// Execute the /show indexes metacommand (Sprint 36)
-///
-/// Displays index information for a table from DBC.IndicesV.
-/// Shows IndexName, IndexType, ColumnName, and ColumnPosition.
-fn execute_show_indexes<W: Write>(
-    completion_state: &mut CompletionState,
-    table_name: &str,
-    writer: &mut W,
-) -> Result<()> {
-    writeln!(writer)?;
-
-    // Parse table name - may be qualified (database.table) or unqualified
-    let (database, table) = parse_qualified_name(table_name);
-
-    // Build the query
-    let sql = build_show_indexes_sql(database, table);
-
-    // Execute the query
-    let client = completion_state.client();
-    match client.execute(&sql) {
-        Ok(result) => {
-            if result.row_count == 0 {
-                writeln!(
-                    writer,
-                    "No indexes found for table '{}'.",
-                    table_name
-                )?;
-                writeln!(writer)?;
-                writeln!(writer, "Suggestions:")?;
-                writeln!(writer, "  - Check the table name spelling")?;
-                writeln!(
-                    writer,
-                    "  - Try using qualified name: /show indexes database.table"
-                )?;
-                writeln!(
-                    writer,
-                    "  - Verify you have SELECT permission on DBC.IndicesV"
-                )?;
-            } else {
-                // Display header
-                let qualified_name = if let Some(db) = database {
-                    format!("{}.{}", db, table)
-                } else {
-                    table.to_string()
-                };
-                writeln!(writer, "Indexes on {}:", qualified_name)?;
-                writeln!(writer)?;
-
-                // Display column headers
-                writeln!(
-                    writer,
-                    "{:<30} {:<15} {:<25} {:<10}",
-                    "IndexName", "IndexType", "ColumnName", "Position"
-                )?;
-                writeln!(writer, "{}", "-".repeat(80))?;
-
-                // Display each row
-                for row in &result.rows {
-                    let index_name = row
-                        .first()
-                        .map(|v| {
-                            let s = v.display();
-                            if s == "[NULL]" {
-                                "(unnamed)".to_string()
-                            } else {
-                                s
-                            }
-                        })
-                        .unwrap_or_default();
-                    let index_type = row.get(1).map(|v| v.display()).unwrap_or_default();
-                    let column_name = row.get(2).map(|v| v.display()).unwrap_or_default();
-                    let position = row.get(3).map(|v| v.display()).unwrap_or_default();
-
-                    writeln!(
-                        writer,
-                        "{:<30} {:<15} {:<25} {:<10}",
-                        truncate_string(&index_name, 29),
-                        truncate_string(&index_type, 14),
-                        truncate_string(&column_name, 24),
-                        position
-                    )?;
-                }
-
-                writeln!(writer)?;
-                writeln!(writer, "{} index column(s)", result.row_count)?;
-            }
-        }
-        Err(e) => {
-            let error_msg = e.to_string();
-            let error_upper = error_msg.to_uppercase();
-
-            if error_upper.contains("3807")
-                || (error_upper.contains("OBJECT") && error_upper.contains("NOT EXIST"))
-            {
-                writeln!(writer, "Error: Table '{}' not found.", table_name)?;
-                writeln!(writer)?;
-                writeln!(writer, "Suggestions:")?;
-                writeln!(writer, "  - Check the table name spelling")?;
-                writeln!(writer, "  - Use /list tables to see available tables")?;
-                writeln!(
-                    writer,
-                    "  - Try using qualified name: /show indexes database.{}",
-                    table_name
-                        .split('.')
-                        .next_back()
-                        .unwrap_or(table_name)
-                )?;
-            } else if error_upper.contains("3523") || error_upper.contains("PRIVILEGE") {
-                writeln!(
-                    writer,
-                    "Error: Permission denied on table '{}'.",
-                    table_name
-                )?;
-                writeln!(writer)?;
-                writeln!(
-                    writer,
-                    "You need SELECT privilege on DBC.IndicesV to view index information."
-                )?;
-                writeln!(writer, "Contact your DBA for access.")?;
-            } else {
-                writeln!(writer, "Error: {}", error_msg)?;
-            }
-        }
-    }
-
-    writeln!(writer)?;
-    Ok(())
-}
+// Old build_show_indexes_sql and execute_show_indexes removed —
+// REPL /show indexes now delegates to crate::commands::show_indexes::execute_for_repl.
 
 /// Resolve a table name to fully qualified form (database.table)
 ///
@@ -3017,12 +2376,12 @@ mod tests {
     }
 
     #[test]
-    fn test_truncate_string() {
-        assert_eq!(truncate_string("short", 10), "short");
-        assert_eq!(truncate_string("exactly10c", 10), "exactly10c");
-        assert_eq!(truncate_string("this is a long string", 10), "this is...");
-        assert_eq!(truncate_string("test", 3), "...");
-        assert_eq!(truncate_string("ab", 2), "ab");
+    fn test_truncate_str() {
+        assert_eq!(truncate_str("short", 10), "short");
+        assert_eq!(truncate_str("exactly10c", 10), "exactly10c");
+        assert_eq!(truncate_str("this is a long string", 10), "this is...");
+        assert_eq!(truncate_str("test", 3), "...");
+        assert_eq!(truncate_str("ab", 2), "ab");
     }
 
     // Sprint 34: Quote table reference tests (updated Sprint 46 for uppercase)
@@ -3178,61 +2537,7 @@ mod tests {
         assert!(json.contains("42"));
     }
 
-    // Sprint 22: Tests for glob pattern matching
-
-    #[test]
-    fn test_matches_glob_exact() {
-        assert!(matches_glob("orders", "orders"));
-        assert!(!matches_glob("orders", "customers"));
-    }
-
-    #[test]
-    fn test_matches_glob_case_insensitive() {
-        assert!(matches_glob("ORDERS", "orders"));
-        assert!(matches_glob("orders", "ORDERS"));
-        assert!(matches_glob("Orders", "orders"));
-    }
-
-    #[test]
-    fn test_matches_glob_star_prefix() {
-        assert!(matches_glob("order_items", "*items"));
-        assert!(matches_glob("line_items", "*items"));
-        assert!(!matches_glob("items_archive", "*items"));
-    }
-
-    #[test]
-    fn test_matches_glob_star_suffix() {
-        assert!(matches_glob("order_items", "order*"));
-        assert!(matches_glob("orders", "order*"));
-        assert!(!matches_glob("new_orders", "order*"));
-    }
-
-    #[test]
-    fn test_matches_glob_star_middle() {
-        assert!(matches_glob("order_items", "order*items"));
-        assert!(matches_glob("order_line_items", "order*items"));
-        assert!(!matches_glob("orders_archive", "order*items"));
-    }
-
-    #[test]
-    fn test_matches_glob_star_only() {
-        assert!(matches_glob("anything", "*"));
-        assert!(matches_glob("", "*"));
-    }
-
-    #[test]
-    fn test_matches_glob_question_mark() {
-        assert!(matches_glob("order1", "order?"));
-        assert!(matches_glob("orders", "order?"));
-        assert!(!matches_glob("orders123", "order?"));
-    }
-
-    #[test]
-    fn test_matches_glob_complex() {
-        assert!(matches_glob("order_items_2024", "order*items*"));
-        assert!(matches_glob("customer_orders", "*order*"));
-        assert!(matches_glob("t1", "t?"));
-    }
+    // matches_glob tests moved to list.rs tests
 
     #[test]
     fn test_help_extended_includes_list_commands() {
@@ -3389,43 +2694,7 @@ mod tests {
         assert_eq!(state.default_limit(), 500);
     }
 
-    // =========================================================================
-    // Sprint 36: /show indexes command tests
-    // =========================================================================
-
-    #[test]
-    fn test_build_show_indexes_sql_unqualified() {
-        let sql = build_show_indexes_sql(None, "employees");
-        assert!(sql.contains("FROM DBC.IndicesV"));
-        assert!(sql.contains("TableName = 'employees'"));
-        assert!(sql.contains("DatabaseName = DATABASE"));
-        assert!(sql.contains("ORDER BY IndexNumber, ColumnPosition"));
-    }
-
-    #[test]
-    fn test_build_show_indexes_sql_qualified() {
-        let sql = build_show_indexes_sql(Some("prod"), "orders");
-        assert!(sql.contains("FROM DBC.IndicesV"));
-        assert!(sql.contains("DatabaseName = 'prod'"));
-        assert!(sql.contains("TableName = 'orders'"));
-        assert!(sql.contains("ORDER BY IndexNumber, ColumnPosition"));
-    }
-
-    #[test]
-    fn test_build_show_indexes_sql_escapes_quotes() {
-        let sql = build_show_indexes_sql(Some("my'db"), "my'table");
-        assert!(sql.contains("DatabaseName = 'my''db'"));
-        assert!(sql.contains("TableName = 'my''table'"));
-    }
-
-    #[test]
-    fn test_build_show_indexes_sql_contains_index_type_mapping() {
-        let sql = build_show_indexes_sql(None, "test");
-        assert!(sql.contains("'P' THEN 'Primary'"));
-        assert!(sql.contains("'S' THEN 'Secondary'"));
-        assert!(sql.contains("'U' THEN 'Unique'"));
-        assert!(sql.contains("'K' THEN 'Primary Key'"));
-    }
+    // build_show_indexes_sql tests removed — show_indexes now in batch module
 
     #[test]
     fn test_parse_qualified_name_simple() {

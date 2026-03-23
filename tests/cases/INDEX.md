@@ -1,15 +1,32 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.27.0 (Sprint 46 - Bug Fixes & /inspect Polish)
+**Version:** 1.28.0 (Sprint 47 - Tech Debt Elimination & Command Enrichment)
 **Last Updated:** 2026-03-23
-**Base Commit:** [Sprint 46 - In Progress]
+**Base Commit:** [Sprint 47 - In Progress]
 
 ## Overview
 
 This directory contains comprehensive test case definitions for the tq CLI tool. These test cases cover all implemented MVP features (FR-001 through FR-010) and provide detailed procedures for validating functionality, usability, error handling, and security.
 
 ## Test Case Categories
+
+### Sprint 47: Tech Debt Elimination & Command Enrichment
+
+- **TC-047-001**: Bug #36 — /inspect DDL & Column Type Fix for Views (Unit + Integration, DB required for integration) — `TC-047-001.md`
+- **TC-047-002**: Shared Helpers Extraction — `json_escape`, `csv_escape`, `parse_table_name`, `truncate_str` with UTF-8 safety (Unit + Structural grep, no-DB) — `TC-047-002.md`
+- **TC-047-003**: REPL Delegation — `/describe` and `/list` delegate to batch modules (Interactive, DB required, `#[ignore]`) — `TC-047-003.md`
+- **TC-047-004**: Enrich `tq describe` — object header, Comments column, Indexes section, structured JSON (Unit + Integration, DB required for integration) — `TC-047-004.md`
+- **TC-047-005**: Enrich `tq list` — Owner/Type for databases, Rows/Size for tables, structured JSON (Unit + Integration, DB required for integration) — `TC-047-005.md`
+- **TC-047-006**: Enrich `tq show-indexes` — Primary/Secondary sections, UPI/NUPI/USI/NUSI labels, structured JSON (Unit + Integration, DB required for integration) — `TC-047-006.md`
+
+**Sprint 47 test case summary:**
+- Unit tests (no DB): TC-047-001 (6 tests), TC-047-002 (20 tests + 1 structural grep), TC-047-004 (18 tests), TC-047-005 (16 tests), TC-047-006 (15 tests) = 75 unit tests
+- Interactive (DB required, `#[ignore]`): TC-047-003 (5 tests) = 5 tests
+- Integration (DB required, `#[ignore]`): TC-047-001 (4 tests), TC-047-004 (5 tests), TC-047-005 (6 tests), TC-047-006 (4 tests) = 19 tests
+- Total: ~99 test cases across 6 files
+
+---
 
 ### Sprint 46: Bug Fixes & /inspect Polish
 

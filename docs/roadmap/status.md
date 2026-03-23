@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-03-23
-**Current Version:** 1.27.0
-**Latest Sprint:** Sprint 46 Complete (Bug Fixes & /inspect Polish)
+**Current Version:** 1.28.0
+**Latest Sprint:** Sprint 47 Complete (Tech Debt Elimination & Command Enrichment)
 
 ---
 
@@ -383,6 +383,17 @@ All core features are complete and tested.
 - **/inspect formatting polish**: Section headers use `──` format, default column `-`, column count footer, skew interpretation hints, `O`→"Table (NoPI)", Error: prefix, usage examples, safe row indexing
 - 765 unit tests + 191 integration tests (100% pass rate), zero clippy warnings
 
+**Sprint 47 Tech Debt Elimination & Command Enrichment (v1.28.0):**
+- **Bug #36 fix**: `/inspect` now shows full DDL for views/macros (was garbled/truncated) and resolves column types from type codes (was [NULL])
+- **Shared helpers extraction**: `format_helpers.rs` module eliminates 4x duplication of json_escape, csv_escape, parse_table_name, truncate_str across command modules
+- **UTF-8 safety**: `truncate_str()` uses `char_indices()` for proper Unicode boundary handling (was byte-slicing)
+- **REPL delegation**: `/describe`, `/list`, `/show indexes` now delegate to batch modules (~400 lines of duplicated code removed)
+- **`tq describe` enrichment**: Object header block, Comments column, Indexes section, structured JSON output
+- **`tq list` enrichment**: Owner/Type columns for databases, Rows/Size for tables, structured JSON objects
+- **`tq show-indexes` enrichment**: Two-section Primary/Secondary layout, UPI/NUPI/USI/NUSI labels, structured JSON
+- **Error consistency**: `Error:` prefix on all error messages, `<OBJECT>` in help text
+- 799 unit tests + 178 integration tests (100% pass rate), zero clippy warnings
+
 ---
 
 ## Summary Statistics
@@ -390,9 +401,9 @@ All core features are complete and tested.
 - **Total Features**: 88
 - **Implemented**: 86 (98%)
 - **Planned**: 2 (2%)
-- **Test Pass Rate**: 100% (956/956 executed, 57 ignored database-dependent)
+- **Test Pass Rate**: 100% (977/977 executed, 57 ignored database-dependent)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 46 - Bug Fixes & /inspect Polish
+- **Latest Sprint**: Sprint 47 - Tech Debt Elimination & Command Enrichment
 
 ---
 

@@ -1358,9 +1358,9 @@ current_size_bytes,current_size_human,peak_size_bytes,peak_size_human,skew_facto
 1. **REQ-INSPECT-BATCH-001**: The command SHALL require exactly one object argument; missing argument exits with code 2
 2. **REQ-INSPECT-BATCH-002**: When `--section` is specified, only that section is rendered (other sections are fetched but not displayed)
 3. **REQ-INSPECT-BATCH-003**: The `--section` flag is valid with all `--format` values
-4. **REQ-INSPECT-BATCH-004**: In JSON format, section keys use snake_case (`object_info`, `columns`, `index_structure`, `storage`, `dependencies`)
+4. **REQ-INSPECT-BATCH-004**: In JSON format, section keys use snake_case (`object_info`, `columns`, `index_structure`, `storage`, `definition`, `dependencies`)
 5. **REQ-INSPECT-BATCH-005**: In JSON format, size values SHALL be expressed both as raw bytes (integer) and human-readable string, to support both machine processing and human review
-6. **REQ-INSPECT-BATCH-006**: Section applicability rules are identical to REPL mode (see `docs/specifications/repl.md` REQ-INSPECT-013)
+6. **REQ-INSPECT-BATCH-006**: Section applicability rules are identical to REPL mode (see `docs/specifications/repl.md` REQ-INSPECT-014)
 7. **REQ-INSPECT-BATCH-007**: Graceful degradation on DBC permission errors applies identically to REPL mode (see REQ-INSPECT-003.2 and REQ-INSPECT-007.4)
 8. **REQ-INSPECT-BATCH-008**: In table format, section separator lines (`── Section Name ─────...`) SHALL be included in `--output` file output but SHALL be omitted when stdout is piped to another process (TTY detection)
 9. **REQ-INSPECT-BATCH-009**: In CSV and JSON formats, section separator lines SHALL never be included
@@ -2731,6 +2731,61 @@ tq query --format=json "SELECT 1"
 # Short flag with value
 tq query -f json "SELECT 1"
 ```
+
+---
+
+## Global Error Message Standards
+
+All error messages across every `tq` command and metacommand SHALL conform to the following rules. These rules apply to both batch mode (CLI commands) and REPL mode metacommands.
+
+### REQ-ERR-001: Error Prefix
+
+Every user-visible error message SHALL begin with `Error:` (capital E, followed by a colon and a space). No command SHALL emit an error without this prefix. This applies to:
+- Object not found errors
+- Permission denied errors
+- Usage errors (missing arguments, invalid flags)
+- Connection failures
+- Any other failure condition that produces a non-zero exit code or an inline error display in REPL mode
+
+**Correct:**
+```
+Error: Object 'employees' not found.
+Error: Missing required argument <object>
+Error: Cannot describe 'employees'.
+```
+
+**Incorrect:**
+```
+employees not found.
+Missing argument
+Cannot describe employees.
+```
+
+### REQ-ERR-002: Object Placeholder in Usage Text
+
+All command help text and usage-error messages SHALL use `<OBJECT>` (not `<TABLE>`) when referring to a generic database object argument, because these commands operate on tables, views, macros, and other object types equally.
+
+**Correct:**
+```
+Usage: tq describe <object>
+Usage: tq show-indexes <object>
+Usage: tq inspect <object>
+```
+
+**Incorrect:**
+```
+Usage: tq describe <table>
+Usage: tq show-indexes <table>
+```
+
+**Rationale:** Using `<TABLE>` implies the command only works on tables, which misleads users trying to describe or inspect views, macros, or other Teradata object types.
+
+### REQ-ERR-003: Error Message Structure
+
+Non-trivial errors (not simple usage errors) SHALL follow a three-part structure:
+1. **What went wrong** — `Error: <concise description>`
+2. **Why** — `Reason: <technical detail>` (when the cause is known and actionable)
+3. **How to fix** — A specific, actionable suggestion or contact instruction
 
 ---
 
