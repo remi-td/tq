@@ -451,7 +451,7 @@ fn query_object_type(
     let sql = format!(
         "SELECT TRIM(TableKind) AS TableKind, \
          CAST(CreateTimeStamp AS VARCHAR(26)) AS Created, \
-         COALESCE(TRIM(CommentString), '') AS Comment \
+         COALESCE(TRIM(CommentString), '') AS CommentStr \
          FROM DBC.TablesV \
          WHERE DatabaseName = '{}' AND TableName = '{}'",
         escape_sql_string(db),
