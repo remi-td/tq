@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-03-23
-**Current Version:** 1.26.0
-**Latest Sprint:** Sprint 45 Complete (Helper Bug Fix & Object Inspection)
+**Current Version:** 1.27.0
+**Latest Sprint:** Sprint 46 Complete (Bug Fixes & /inspect Polish)
 
 ---
 
@@ -290,6 +290,9 @@ All core features are complete and tested.
 | `/show indexes <table>` | ✅ | [REPL Mode](../specifications/repl.md#schema-inspection) | v1.17.0 (Sprint 36) |
 | `/inspect <object>` | ✅ | [REPL Mode](../specifications/repl.md#object-inspection) | v1.26.0 (Sprint 45) |
 | `tq inspect` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#inspect-command) | v1.26.0 (Sprint 45) |
+| `tq describe` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#describe-command) | v1.27.0 (Sprint 46) |
+| `tq list` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#list-command) | v1.27.0 (Sprint 46) |
+| `tq show-indexes` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#show-indexes-command) | v1.27.0 (Sprint 46) |
 
 ---
 
@@ -374,16 +377,22 @@ All core features are complete and tested.
 - **Sprint 44 deferred**: `--force` help text, abort message with profile name, debug logging in driver resolution, design doc drift fix
 - 742 unit tests + 191 integration tests (100% pass rate), zero clippy warnings
 
+**Sprint 46 Bug Fixes & Polish (v1.27.0):**
+- **Bug #35 fix**: Identifier quoting now uppercases before quoting, matching Teradata case-insensitive behavior. Also fixed `extract_table_name()` word boundary matching.
+- **Bug #34 fix**: New batch CLI commands: `tq describe`, `tq list databases|tables|views`, `tq show-indexes` with table/CSV/JSON output
+- **/inspect formatting polish**: Section headers use `──` format, default column `-`, column count footer, skew interpretation hints, `O`→"Table (NoPI)", Error: prefix, usage examples, safe row indexing
+- 765 unit tests + 191 integration tests (100% pass rate), zero clippy warnings
+
 ---
 
 ## Summary Statistics
 
-- **Total Features**: 85
-- **Implemented**: 83 (98%)
+- **Total Features**: 88
+- **Implemented**: 86 (98%)
 - **Planned**: 2 (2%)
-- **Test Pass Rate**: 100% (933/933 executed, 58 ignored database-dependent)
+- **Test Pass Rate**: 100% (956/956 executed, 57 ignored database-dependent)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 45 - Helper Bug Fix & Object Inspection
+- **Latest Sprint**: Sprint 46 - Bug Fixes & /inspect Polish
 
 ---
 
