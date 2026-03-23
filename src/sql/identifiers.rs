@@ -21,17 +21,17 @@
 //! ```
 //! use tq::sql::identifiers::{quote_identifier, quote_qualified_name, escape_sql_string};
 //!
-//! // Quote a simple identifier
-//! assert_eq!(quote_identifier("employees"), "\"employees\"");
+//! // Quote a simple identifier (uppercased to match Teradata catalog)
+//! assert_eq!(quote_identifier("employees"), "\"EMPLOYEES\"");
 //!
 //! // Quote an identifier with special characters
-//! assert_eq!(quote_identifier("my table"), "\"my table\"");
+//! assert_eq!(quote_identifier("my table"), "\"MY TABLE\"");
 //!
 //! // Quote an identifier with embedded quotes
-//! assert_eq!(quote_identifier("user\"name"), "\"user\"\"name\"");
+//! assert_eq!(quote_identifier("user\"name"), "\"USER\"\"NAME\"");
 //!
 //! // Quote a qualified name (database.table)
-//! assert_eq!(quote_qualified_name("prod", "employees"), "\"prod\".\"employees\"");
+//! assert_eq!(quote_qualified_name("prod", "employees"), "\"PROD\".\"EMPLOYEES\"");
 //!
 //! // Escape a string literal for use in WHERE clause
 //! assert_eq!(escape_sql_string("O'Brien"), "O''Brien");
@@ -58,18 +58,22 @@
 /// ```
 /// use tq::sql::identifiers::quote_identifier;
 ///
-/// // Simple identifier
-/// assert_eq!(quote_identifier("employees"), "\"employees\"");
+/// // Simple identifier (uppercased to match Teradata catalog)
+/// assert_eq!(quote_identifier("employees"), "\"EMPLOYEES\"");
 ///
 /// // Identifier with space
-/// assert_eq!(quote_identifier("my table"), "\"my table\"");
+/// assert_eq!(quote_identifier("my table"), "\"MY TABLE\"");
 ///
 /// // Identifier with embedded quote
-/// assert_eq!(quote_identifier("user\"name"), "\"user\"\"name\"");
+/// assert_eq!(quote_identifier("user\"name"), "\"USER\"\"NAME\"");
 /// ```
 pub fn quote_identifier(identifier: &str) -> String {
+    // Uppercase the identifier to match Teradata's internal storage format.
+    // Teradata stores unquoted identifiers as uppercase; quoting preserves case.
+    // By uppercasing before quoting, user-typed lowercase names match the catalog.
+    let uppercased = identifier.to_uppercase();
     // Escape embedded double quotes by doubling them
-    let escaped = identifier.replace('"', "\"\"");
+    let escaped = uppercased.replace('"', "\"\"");
     format!("\"{}\"", escaped)
 }
 
@@ -92,14 +96,14 @@ pub fn quote_identifier(identifier: &str) -> String {
 /// ```
 /// use tq::sql::identifiers::quote_qualified_name;
 ///
-/// // Simple qualified name
-/// assert_eq!(quote_qualified_name("prod", "employees"), "\"prod\".\"employees\"");
+/// // Simple qualified name (uppercased to match Teradata catalog)
+/// assert_eq!(quote_qualified_name("prod", "employees"), "\"PROD\".\"EMPLOYEES\"");
 ///
 /// // Database with special characters
-/// assert_eq!(quote_qualified_name("my db", "my table"), "\"my db\".\"my table\"");
+/// assert_eq!(quote_qualified_name("my db", "my table"), "\"MY DB\".\"MY TABLE\"");
 ///
 /// // Names with embedded quotes
-/// assert_eq!(quote_qualified_name("db\"1", "tbl\"2"), "\"db\"\"1\".\"tbl\"\"2\"");
+/// assert_eq!(quote_qualified_name("db\"1", "tbl\"2"), "\"DB\"\"1\".\"TBL\"\"2\"");
 /// ```
 pub fn quote_qualified_name(database: &str, table: &str) -> String {
     format!("{}.{}", quote_identifier(database), quote_identifier(table))
@@ -149,41 +153,41 @@ mod tests {
 
     #[test]
     fn test_quote_identifier_simple() {
-        assert_eq!(quote_identifier("employees"), "\"employees\"");
+        assert_eq!(quote_identifier("employees"), "\"EMPLOYEES\"");
     }
 
     #[test]
     fn test_quote_identifier_with_space() {
-        assert_eq!(quote_identifier("my table"), "\"my table\"");
+        assert_eq!(quote_identifier("my table"), "\"MY TABLE\"");
     }
 
     #[test]
     fn test_quote_identifier_with_multiple_spaces() {
-        assert_eq!(quote_identifier("my  big  table"), "\"my  big  table\"");
+        assert_eq!(quote_identifier("my  big  table"), "\"MY  BIG  TABLE\"");
     }
 
     #[test]
     fn test_quote_identifier_with_embedded_quote() {
-        assert_eq!(quote_identifier("user\"name"), "\"user\"\"name\"");
+        assert_eq!(quote_identifier("user\"name"), "\"USER\"\"NAME\"");
     }
 
     #[test]
     fn test_quote_identifier_with_multiple_quotes() {
-        assert_eq!(quote_identifier("a\"b\"c"), "\"a\"\"b\"\"c\"");
+        assert_eq!(quote_identifier("a\"b\"c"), "\"A\"\"B\"\"C\"");
     }
 
     #[test]
     fn test_quote_identifier_with_special_characters() {
-        assert_eq!(quote_identifier("table-name"), "\"table-name\"");
-        assert_eq!(quote_identifier("table.name"), "\"table.name\"");
-        assert_eq!(quote_identifier("table@name"), "\"table@name\"");
-        assert_eq!(quote_identifier("table#name"), "\"table#name\"");
-        assert_eq!(quote_identifier("table$name"), "\"table$name\"");
+        assert_eq!(quote_identifier("table-name"), "\"TABLE-NAME\"");
+        assert_eq!(quote_identifier("table.name"), "\"TABLE.NAME\"");
+        assert_eq!(quote_identifier("table@name"), "\"TABLE@NAME\"");
+        assert_eq!(quote_identifier("table#name"), "\"TABLE#NAME\"");
+        assert_eq!(quote_identifier("table$name"), "\"TABLE$NAME\"");
     }
 
     #[test]
     fn test_quote_identifier_with_leading_number() {
-        assert_eq!(quote_identifier("123table"), "\"123table\"");
+        assert_eq!(quote_identifier("123table"), "\"123TABLE\"");
     }
 
     #[test]
@@ -210,70 +214,80 @@ mod tests {
 
     #[test]
     fn test_quote_identifier_unicode() {
-        assert_eq!(quote_identifier("tabl_"), "\"tabl_\"");
+        assert_eq!(quote_identifier("tabl_"), "\"TABL_\"");
         // Note: Teradata may have limitations on Unicode characters
     }
 
     #[test]
     fn test_quote_identifier_unicode_actual() {
-        // Test Chinese characters
+        // Unicode characters are uppercased where possible by .to_uppercase()
+        // CJK characters have no uppercase form, so they pass through unchanged
+
+        // Test Chinese characters (no case change)
         assert_eq!(quote_identifier("表名"), "\"表名\"");
         assert_eq!(quote_identifier("用户数据"), "\"用户数据\"");
 
-        // Test Arabic characters
+        // Test Arabic characters (no case change)
         assert_eq!(quote_identifier("جدول"), "\"جدول\"");
 
-        // Test Japanese characters (Hiragana, Katakana, Kanji)
+        // Test Japanese characters (no case change)
         assert_eq!(quote_identifier("テーブル"), "\"テーブル\"");
         assert_eq!(quote_identifier("顧客名簿"), "\"顧客名簿\"");
 
-        // Test Cyrillic characters
-        assert_eq!(quote_identifier("таблица"), "\"таблица\"");
+        // Test Cyrillic characters (uppercased)
+        assert_eq!(quote_identifier("таблица"), "\"ТАБЛИЦА\"");
 
-        // Test emoji
-        assert_eq!(quote_identifier("data_📊"), "\"data_📊\"");
-        assert_eq!(quote_identifier("users_👤"), "\"users_👤\"");
+        // Test emoji (no case change, ASCII portion uppercased)
+        assert_eq!(quote_identifier("data_📊"), "\"DATA_📊\"");
+        assert_eq!(quote_identifier("users_👤"), "\"USERS_👤\"");
 
         // Test Unicode with embedded double quotes (must be escaped)
         assert_eq!(quote_identifier("表\"名"), "\"表\"\"名\"");
-        assert_eq!(quote_identifier("данные\"база"), "\"данные\"\"база\"");
+        assert_eq!(quote_identifier("данные\"база"), "\"ДАННЫЕ\"\"БАЗА\"");
 
         // Test mixed ASCII and Unicode
-        assert_eq!(quote_identifier("user_数据_table"), "\"user_数据_table\"");
-        assert_eq!(quote_identifier("col1_表_col2"), "\"col1_表_col2\"");
+        assert_eq!(quote_identifier("user_数据_table"), "\"USER_数据_TABLE\"");
+        assert_eq!(quote_identifier("col1_表_col2"), "\"COL1_表_COL2\"");
 
-        // Test accented Latin characters
-        assert_eq!(quote_identifier("café"), "\"café\"");
-        assert_eq!(quote_identifier("naïve"), "\"naïve\"");
-        assert_eq!(quote_identifier("résumé"), "\"résumé\"");
+        // Test accented Latin characters (uppercased)
+        assert_eq!(quote_identifier("café"), "\"CAFÉ\"");
+        assert_eq!(quote_identifier("naïve"), "\"NAÏVE\"");
+        assert_eq!(quote_identifier("résumé"), "\"RÉSUMÉ\"");
 
-        // Test Greek characters
-        assert_eq!(quote_identifier("πίνακας"), "\"πίνακας\"");
+        // Test Greek characters (uppercased)
+        assert_eq!(quote_identifier("πίνακας"), "\"ΠΊΝΑΚΑΣ\"");
 
-        // Test Hebrew characters
+        // Test Hebrew characters (no case change)
         assert_eq!(quote_identifier("טבלה"), "\"טבלה\"");
     }
 
     #[test]
     fn test_quote_identifier_tab_and_newline() {
-        // These are unusual but should be handled
-        assert_eq!(quote_identifier("col\ttab"), "\"col\ttab\"");
-        assert_eq!(quote_identifier("col\nnewline"), "\"col\nnewline\"");
+        assert_eq!(quote_identifier("col\ttab"), "\"COL\tTAB\"");
+        assert_eq!(quote_identifier("col\nnewline"), "\"COL\nNEWLINE\"");
     }
 
     #[test]
     fn test_quote_identifier_consecutive_quotes() {
-        assert_eq!(quote_identifier("a\"\"b"), "\"a\"\"\"\"b\"");
+        assert_eq!(quote_identifier("a\"\"b"), "\"A\"\"\"\"B\"");
     }
 
     #[test]
     fn test_quote_identifier_starts_with_quote() {
-        assert_eq!(quote_identifier("\"table"), "\"\"\"table\"");
+        assert_eq!(quote_identifier("\"table"), "\"\"\"TABLE\"");
     }
 
     #[test]
     fn test_quote_identifier_ends_with_quote() {
-        assert_eq!(quote_identifier("table\""), "\"table\"\"\"");
+        assert_eq!(quote_identifier("table\""), "\"TABLE\"\"\"");
+    }
+
+    #[test]
+    fn test_quote_identifier_lowercase_to_uppercase() {
+        // Verify that lowercase identifiers are uppercased (Teradata convention)
+        assert_eq!(quote_identifier("dbc"), "\"DBC\"");
+        assert_eq!(quote_identifier("tables"), "\"TABLES\"");
+        assert_eq!(quote_identifier("myDatabase"), "\"MYDATABASE\"");
     }
 
     // =========================================================================
@@ -284,7 +298,7 @@ mod tests {
     fn test_quote_qualified_name_simple() {
         assert_eq!(
             quote_qualified_name("prod", "employees"),
-            "\"prod\".\"employees\""
+            "\"PROD\".\"EMPLOYEES\""
         );
     }
 
@@ -292,7 +306,7 @@ mod tests {
     fn test_quote_qualified_name_with_spaces() {
         assert_eq!(
             quote_qualified_name("my database", "my table"),
-            "\"my database\".\"my table\""
+            "\"MY DATABASE\".\"MY TABLE\""
         );
     }
 
@@ -300,7 +314,7 @@ mod tests {
     fn test_quote_qualified_name_with_quotes() {
         assert_eq!(
             quote_qualified_name("db\"1", "tbl\"2"),
-            "\"db\"\"1\".\"tbl\"\"2\""
+            "\"DB\"\"1\".\"TBL\"\"2\""
         );
     }
 
@@ -308,7 +322,7 @@ mod tests {
     fn test_quote_qualified_name_special_characters() {
         assert_eq!(
             quote_qualified_name("db-test", "table@prod"),
-            "\"db-test\".\"table@prod\""
+            "\"DB-TEST\".\"TABLE@PROD\""
         );
     }
 
@@ -329,7 +343,7 @@ mod tests {
     fn test_quote_qualified_name_mixed_complexity() {
         assert_eq!(
             quote_qualified_name("simple", "complex \"name"),
-            "\"simple\".\"complex \"\"name\""
+            "\"SIMPLE\".\"COMPLEX \"\"NAME\""
         );
     }
 
@@ -422,7 +436,7 @@ mod tests {
         let malicious = "employees; DROP TABLE users; --";
         let quoted = quote_identifier(malicious);
         // The result should be a safely quoted identifier, not executable SQL
-        assert_eq!(quoted, "\"employees; DROP TABLE users; --\"");
+        assert_eq!(quoted, "\"EMPLOYEES; DROP TABLE USERS; --\"");
     }
 
     #[test]
@@ -440,10 +454,10 @@ mod tests {
         let malicious_db = "db\".\"evil";
         let malicious_table = "table\"; DROP TABLE users; --";
         let quoted = quote_qualified_name(malicious_db, malicious_table);
-        // Embedded quotes should be escaped
+        // Embedded quotes should be escaped, text uppercased
         assert_eq!(
             quoted,
-            "\"db\"\".\"\"evil\".\"table\"\"; DROP TABLE users; --\""
+            "\"DB\"\".\"\"EVIL\".\"TABLE\"\"; DROP TABLE USERS; --\""
         );
     }
 }

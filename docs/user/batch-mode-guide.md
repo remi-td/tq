@@ -1295,6 +1295,7 @@ tq sample products 25 --format json
 - Default: 10 rows if count not specified
 - Maximum: 1000 rows per sample
 - Fast even on huge tables (no full table scan)
+- Table names are resolved case-insensitively: `tq sample Employees` and `tq sample EMPLOYEES` are equivalent
 
 **Common use cases:**
 - Quick data inspection during development
@@ -1363,6 +1364,8 @@ First 5 rows:
 - Quick validation of table contents
 - Scripting data exploration workflows
 
+**Note:** Table names are resolved case-insensitively: `tq peek Products` and `tq peek PRODUCTS` are equivalent.
+
 #### Advanced: Using Teradata SAMPLE Clause in SQL
 
 For more complex sampling scenarios, you can use Teradata's SAMPLE clause directly:
@@ -1423,12 +1426,12 @@ tq --profile prod inspect employees
 │ Column        │ Type         │ Nullable │ Default │
 ├───────────────┼──────────────┼──────────┼─────────┤
 │ employee_id   │ INTEGER      │ NO       │ -       │
-│ first_name    │ VARCHAR(50)  │ YES      │ NULL    │
-│ last_name     │ VARCHAR(50)  │ YES      │ NULL    │
-│ email         │ VARCHAR(100) │ YES      │ NULL    │
-│ hire_date     │ DATE         │ YES      │ NULL    │
-│ salary        │ DECIMAL(10,2)│ YES      │ NULL    │
-│ department_id │ INTEGER      │ YES      │ NULL    │
+│ first_name    │ VARCHAR(50)  │ YES      │ -       │
+│ last_name     │ VARCHAR(50)  │ YES      │ -       │
+│ email         │ VARCHAR(100) │ YES      │ -       │
+│ hire_date     │ DATE         │ YES      │ -       │
+│ salary        │ DECIMAL(10,2)│ YES      │ -       │
+│ department_id │ INTEGER      │ YES      │ -       │
 └───────────────┴──────────────┴──────────┴─────────┘
 
 7 columns
@@ -1480,6 +1483,315 @@ tq inspect --format json orders | jq '.storage.skew_factor'
 - Use `tq query` when you want to execute ad-hoc SQL and return rows of data
 
 **Cross-reference:** For interactive use, see `/inspect` in the REPL Guide.
+
+#### Schema Commands: `tq describe`, `tq list`, `tq show-indexes`
+
+Three focused schema commands give you fast, scriptable access to object structure without writing SQL. These are the batch equivalents of the `/describe`, `/list`, and `/show indexes` REPL metacommands.
+
+---
+
+##### `tq describe` — Table and View Structure
+
+Show column definitions and index structure for any table or view:
+
+```bash
+# Describe a table in the current database
+tq describe employees
+
+# Describe using a qualified name
+tq describe production.orders
+
+# JSON output for scripting
+tq describe --format json employees
+
+# CSV output for documentation generation
+tq describe --format csv production.orders > orders-schema.csv
+
+# Write report to file
+tq describe --output employees-schema.txt employees
+
+# Using a connection profile
+tq --profile prod describe employees
+```
+
+**Object names are case-insensitive:** `tq describe DBC.TABLES` and `tq describe dbc.tables` return the same result.
+
+**Example output:**
+
+```
+Table: PRODUCTION.employees
+Type:  Table
+Rows (Est.): 42,573
+
+Columns:
+┌───────────────┬──────────────┬──────────┬─────────┬──────────┐
+│ Column        │ Type         │ Nullable │ Default │ Comments │
+├───────────────┼──────────────┼──────────┼─────────┼──────────┤
+│ employee_id   │ INTEGER      │ NO       │ -       │          │
+│ first_name    │ VARCHAR(50)  │ YES      │ -       │          │
+│ last_name     │ VARCHAR(50)  │ YES      │ -       │          │
+│ email         │ VARCHAR(100) │ YES      │ -       │          │
+│ hire_date     │ DATE         │ YES      │ -       │          │
+│ salary        │ DECIMAL(10,2)│ YES      │ -       │          │
+│ department_id │ INTEGER      │ YES      │ -       │          │
+└───────────────┴──────────────┴──────────┴─────────┴──────────┘
+
+Indexes:
+  Primary Index (UPI): employee_id
+  Secondary Index (NUSI): department_id
+  Secondary Index (USI):  email
+```
+
+The `Default` column shows `-` when no default is defined, and the actual default value otherwise. The `Indexes` section is omitted for views (views have no indexes).
+
+**Options:**
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--format` | `-f` | `table` | Output format: `table`, `json`, `csv` |
+| `--output` | `-o` | stdout | Write output to file |
+
+**Scripting examples:**
+
+```bash
+# List all column names as JSON
+tq describe --format json employees | jq '.columns[].column'
+
+# Find nullable columns
+tq describe --format json employees | \
+  jq -r '.columns[] | select(.nullable) | [.column, .type] | @csv'
+
+# Check if a column exists before querying
+tq describe --format json employees | \
+  jq -e '.columns[] | select(.column == "salary")' > /dev/null && \
+  echo "salary column exists"
+```
+
+**Cross-reference:** For interactive use, see `/describe` in the REPL Guide.
+
+---
+
+##### `tq list` — List Databases, Tables, and Views
+
+List database objects accessible to the connected user:
+
+```bash
+# List all accessible databases
+tq list databases
+
+# List tables in the current (logon) database
+tq list tables
+
+# List tables matching a pattern (SQL LIKE: % and _ wildcards)
+tq list tables emp%
+
+# List tables in a specific database
+tq list tables --database staging
+
+# List tables in a specific database with a pattern
+tq list tables --database staging test_%
+
+# List views
+tq list views
+
+# JSON output for scripting
+tq list databases --format json
+
+# CSV export to file
+tq list tables --format csv --output tables.csv
+
+# Using a connection profile
+tq --profile prod list databases
+```
+
+**Shared options (all subcommands):**
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--format` | `-f` | `table` | Output format: `table`, `json`, `csv` |
+| `--output` | `-o` | stdout | Write output to file |
+| `--database` | `-d` | (from logon string) | Target database for `tables` and `views` |
+
+**`tq list databases` — example output:**
+
+```
+Databases on prod-td01.company.com:
+┌─────────────────────┬──────────────┬─────────┐
+│ Database            │ Owner        │ Type    │
+├─────────────────────┼──────────────┼─────────┤
+│ DBC                 │ DBC          │ System  │
+│ analytics           │ analytics    │ User    │
+│ development         │ dev_user     │ User    │
+│ production          │ dba_user     │ User    │
+│ staging             │ dba_user     │ User    │
+└─────────────────────┴──────────────┴─────────┘
+
+5 databases found
+```
+
+System databases (owned by DBC) are listed first, then user databases, both groups sorted alphabetically.
+
+**`tq list tables` — example output:**
+
+```
+Tables in 'production':
+┌─────────────────────┬──────────┬──────────────┬───────────┐
+│ Table               │ Type     │ Rows (Est.)  │ Size      │
+├─────────────────────┼──────────┼──────────────┼───────────┤
+│ customers           │ Table    │ 1,234,567    │ 45.2 MB   │
+│ employees           │ Table    │ 42,573       │ 2.1 MB    │
+│ orders              │ Table    │ 9,876,543    │ 320.5 MB  │
+│ products            │ Table    │ 15,432       │ 890 KB    │
+└─────────────────────┴──────────┴──────────────┴───────────┘
+
+4 tables found in database 'production'
+```
+
+Pattern filtering uses SQL LIKE syntax: `%` matches any characters, `_` matches a single character. When no results match, an informative message is shown and the command exits with code 0 (not an error).
+
+**`tq list views` — example output:**
+
+```
+Views in 'production':
+┌─────────────────────────┬──────────────┬─────────────────────────────────────┐
+│ View                    │ Owner        │ Definition (truncated)              │
+├─────────────────────────┼──────────────┼─────────────────────────────────────┤
+│ active_employees        │ dba_user     │ SELECT * FROM employees WHERE...    │
+│ customer_orders_view    │ dba_user     │ SELECT c.*, o.* FROM customers c... │
+│ sales_summary           │ analytics    │ SELECT dept, SUM(salary) FROM...    │
+└─────────────────────────┴──────────────┴─────────────────────────────────────┘
+
+3 views found in database 'production'
+```
+
+In table format, the view definition is truncated to 50 characters. JSON and CSV output include the full definition text.
+
+**Scripting examples:**
+
+```bash
+# Find all staging-related databases
+tq list databases --format json | \
+  jq -r '.[] | select(.database | test("staging";"i")) | .database'
+
+# Count tables per database
+for db in $(tq list databases --format json | jq -r '.[].database'); do
+  count=$(tq list tables --database "$db" --format json | jq 'length')
+  echo "$db: $count tables"
+done
+
+# Export full table inventory to CSV
+tq --profile prod list tables --format csv --output tables-$(date +%Y%m%d).csv
+```
+
+**Cross-reference:** For interactive use, see `/list` in the REPL Guide.
+
+---
+
+##### `tq show-indexes` — Table Index Structure
+
+Display the complete index structure for a table — primary index type and columns, plus all secondary indexes:
+
+```bash
+# Show indexes for a table in the current database
+tq show-indexes employees
+
+# Show indexes using a qualified name
+tq show-indexes production.orders
+
+# JSON output for scripting
+tq show-indexes --format json employees
+
+# CSV output for documentation
+tq show-indexes --format csv production.orders > orders-indexes.csv
+
+# Write to file
+tq show-indexes --output indexes.txt employees
+
+# Using a connection profile
+tq --profile prod show-indexes employees
+```
+
+**Object names are case-insensitive.** This command applies only to tables — invoking it against a view shows an informative message and exits with code 0.
+
+**Example output (table with primary and secondary indexes):**
+
+```
+Index structure for PRODUCTION.employees:
+
+  Primary Index
+    Type:     Unique Primary Index (UPI)
+    Columns:  employee_id
+
+  Secondary Indexes
+    #1  Non-Unique Secondary Index (NUSI)  (department_id)
+    #2  Unique Secondary Index (USI)       (email)
+```
+
+**Example output (NoPI table):**
+
+```
+Index structure for PRODUCTION.fact_sales:
+
+  Primary Index
+    No Primary Index (NoPI)
+
+  Secondary Indexes
+    #1  Non-Unique Secondary Index (NUSI)  (region_id, sale_date)
+```
+
+**Example output (no secondary indexes):**
+
+```
+Index structure for PRODUCTION.config:
+
+  Primary Index
+    Type:     Non-Unique Primary Index (NUPI)
+    Columns:  config_key
+
+  No secondary indexes defined.
+```
+
+**Options:**
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--format` | `-f` | `table` | Output format: `table`, `json`, `csv` |
+| `--output` | `-o` | stdout | Write output to file |
+
+**Scripting examples:**
+
+```bash
+# Check primary index type (UPI vs NUPI)
+tq show-indexes --format json employees | \
+  jq -r '.primary_index.type'
+
+# Find all USI columns on a table
+tq show-indexes --format json employees | \
+  jq -r '.secondary_indexes[] | select(.type == "USI") | .columns[]'
+
+# Audit tables for non-unique primary indexes (potential skew risk)
+for tbl in customers orders products; do
+  pi_type=$(tq show-indexes --format json "$tbl" | jq -r '.primary_index.type')
+  echo "$tbl: $pi_type"
+done
+```
+
+**When to use `tq show-indexes` vs `tq inspect`:**
+- Use `tq show-indexes` for focused index auditing and scripting (clean, single-purpose output)
+- Use `tq inspect` when you also want columns, storage metrics, and dependencies in one view
+
+**Cross-reference:** For interactive use, see `/show indexes` in the REPL Guide.
+
+---
+
+##### Schema Command Comparison
+
+| Command | Shows | Use When |
+|---------|-------|----------|
+| `tq describe <table>` | Columns + indexes | You need column definitions |
+| `tq list tables` | Table inventory + sizes | You need a database inventory |
+| `tq show-indexes <table>` | Index structure only | You are auditing indexes |
+| `tq inspect <object>` | Everything (type, columns, indexes, storage, deps) | You want the full picture |
 
 ---
 

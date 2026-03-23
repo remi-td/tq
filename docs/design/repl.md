@@ -6700,3 +6700,42 @@ let sql = trimmed.trim_end_matches(';').trim();
 The fix must be applied in both functions to keep them consistent:
 - `handle_metacommand()` at approximately line 46
 - `handle_metacommand_with_state()` at approximately line 255
+
+## REPL-Batch Shared Logic Pattern
+
+Several metacommands have batch-mode equivalents (CLI subcommands). To avoid code duplication,
+the shared logic pattern extracts the core query and rendering code into dedicated command modules
+that both REPL and batch modes call.
+
+### Established Pattern
+
+Commands that already follow this pattern:
+- `/sessions` -> `crate::commands::sessions::execute_for_repl()` / `tq sessions`
+- `/inspect` -> `crate::commands::inspect::execute_for_repl()` / `tq inspect`
+- `/sample` -> `crate::commands::sample::execute_sample()` / `tq sample`
+- `/peek` -> `crate::commands::sample::execute_peek()` / `tq peek`
+- `/sysconfig` -> `crate::commands::sysconfig::execute_for_repl()` / `tq sysconfig`
+- `/locks` -> `crate::commands::locks::execute_for_repl()` / `tq locks`
+
+### Migration Plan for Sprint 46
+
+The following metacommands currently have inline logic in `metacommands.rs` and need
+extraction to dedicated command modules:
+
+1. `/describe` -> `crate::commands::describe::execute_for_repl()`
+2. `/list` -> `crate::commands::list::execute_for_repl()`
+3. `/show indexes` -> `crate::commands::show_indexes::execute_for_repl()`
+
+Each extraction follows the same steps:
+1. Move query building and result rendering from `metacommands.rs` to the new module
+2. Provide `execute()` (batch, format-aware) and `execute_for_repl()` (REPL, table-only)
+3. Update the metacommand handler to delegate: `crate::commands::describe::execute_for_repl(client, table_name, writer)?`
+4. The REPL handler retains argument parsing and usage help; only the execution is delegated
+
+### Note on CompletionState
+
+The REPL metacommand handlers receive `CompletionState` which wraps the `DatabaseClient`.
+The extracted modules accept `&DatabaseClient` directly (obtained via `completion_state.client()`).
+For `/list`, the REPL handler currently also updates metadata caches in `CompletionState`
+after listing. This cache-update logic remains in the REPL handler; only the query/render
+logic is extracted.

@@ -76,8 +76,9 @@ pub mod sql;
 
 // Re-export commonly used types for convenience
 pub use cli::{
-    Cli, Command, GlobalOpts, HelpArgs, HelpTopic, InspectArgs, LogonMechanism, OutputFormat,
-    PeekArgs, PingArgs, ProfileAction, QueryArgs, ReplArgs, SampleArgs,
+    Cli, Command, DescribeArgs, GlobalOpts, HelpArgs, HelpTopic, InspectArgs, ListArgs,
+    ListObjectType, LogonMechanism, OutputFormat, PeekArgs, PingArgs, ProfileAction, QueryArgs,
+    ReplArgs, SampleArgs, ShowIndexesArgs,
 };
 pub use config::{Config, ConnectionSettings};
 pub use db::{

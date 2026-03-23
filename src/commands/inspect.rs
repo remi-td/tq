@@ -74,7 +74,7 @@ fn inspect_object<W: Write>(
     let obj_info = match query_object_type(client, &database, obj_part) {
         Ok(Some(info)) => info,
         Ok(None) => {
-            writeln!(writer, "Object '{}' not found.", object_name)?;
+            writeln!(writer, "Error: Object '{}' not found.", object_name)?;
             writeln!(writer)?;
             writeln!(writer, "Suggestions:")?;
             writeln!(writer, "  - Check the object name spelling")?;
@@ -99,7 +99,7 @@ fn inspect_object<W: Write>(
     };
 
     // Display Object Info section
-    writeln!(writer, "=== Object Info ===")?;
+    writeln!(writer, "── Object Info ──")?;
     writeln!(writer, "  Type:      {}", obj_info.kind_label)?;
     writeln!(writer, "  Database:  {}", database)?;
     writeln!(writer, "  Name:      {}", obj_part)?;
@@ -115,7 +115,7 @@ fn inspect_object<W: Write>(
     match query_columns(client, &database, obj_part) {
         Ok(columns) => {
             if !columns.is_empty() {
-                writeln!(writer, "=== Columns ({}) ===", columns.len())?;
+                writeln!(writer, "── Columns ({}) ──", columns.len())?;
                 let header_default = "Default";
                 writeln!(
                     writer,
@@ -138,9 +138,10 @@ fn inspect_object<W: Write>(
                         truncate_str(&col.name, 22),
                         truncate_str(&col.col_type, 18),
                         &col.nullable,
-                        col.default.as_deref().unwrap_or("")
+                        col.default.as_deref().unwrap_or("-")
                     )?;
                 }
+                writeln!(writer, "{} columns", columns.len())?;
                 writeln!(writer)?;
             }
         }
@@ -159,7 +160,7 @@ fn inspect_object<W: Write>(
         match query_indexes(client, &database, obj_part) {
             Ok(indexes) => {
                 if !indexes.is_empty() {
-                    writeln!(writer, "=== Indexes ===")?;
+                    writeln!(writer, "── Indexes ──")?;
                     for idx in &indexes {
                         let uniqueness = if idx.is_unique { "U" } else { "NU" };
                         let columns_str = idx.columns.join(", ");
@@ -193,7 +194,7 @@ fn inspect_object<W: Write>(
         // Section 4: Storage (only for tables)
         match query_storage(client, &database, obj_part) {
             Ok(storage) => {
-                writeln!(writer, "=== Storage ===")?;
+                writeln!(writer, "── Storage ──")?;
                 writeln!(
                     writer,
                     "  Current Size:  {}",
@@ -205,7 +206,12 @@ fn inspect_object<W: Write>(
                     format_size(storage.peak_size)
                 )?;
                 let skew = calculate_skew(storage.max_amp_size, storage.avg_amp_size);
-                writeln!(writer, "  Skew Factor:   {:.1}%", skew)?;
+                writeln!(
+                    writer,
+                    "  Skew Factor:   {:.1}% {}",
+                    skew,
+                    interpret_skew(skew)
+                )?;
                 writeln!(writer, "  AMP Count:     {}", storage.amp_count)?;
                 writeln!(writer)?;
             }
@@ -224,7 +230,7 @@ fn inspect_object<W: Write>(
     if obj_info.table_kind == "V" || obj_info.table_kind == "M" {
         match query_definition(client, &database, obj_part, &obj_info.table_kind) {
             Ok(definition) => {
-                writeln!(writer, "=== Definition ===")?;
+                writeln!(writer, "── Definition ──")?;
                 for line in definition.lines() {
                     writeln!(writer, "  {}", line)?;
                 }
@@ -646,11 +652,11 @@ fn query_storage(
     let result = client.execute(&sql)?;
 
     if let Some(row) = result.rows.first() {
-        let total_size = extract_i64(&row[0]);
-        let peak_size = extract_i64(&row[1]);
-        let max_amp_size = extract_i64(&row[2]);
-        let avg_amp_size = extract_i64(&row[3]);
-        let amp_count = extract_i64(&row[4]);
+        let total_size = row.first().map(extract_i64).unwrap_or(0);
+        let peak_size = row.get(1).map(extract_i64).unwrap_or(0);
+        let max_amp_size = row.get(2).map(extract_i64).unwrap_or(0);
+        let avg_amp_size = row.get(3).map(extract_i64).unwrap_or(0);
+        let amp_count = row.get(4).map(extract_i64).unwrap_or(0);
 
         Ok(StorageInfo {
             total_size,
@@ -705,7 +711,8 @@ fn query_definition(
 /// Map TableKind character to human-readable label
 fn map_table_kind(kind: &str) -> String {
     match kind {
-        "T" | "O" => "Table".to_string(),
+        "T" => "Table".to_string(),
+        "O" => "Table (NoPI)".to_string(),
         "V" => "View".to_string(),
         "M" => "Macro".to_string(),
         "P" => "Stored Procedure".to_string(),
@@ -775,6 +782,17 @@ fn calculate_skew(max_amp: i64, avg_amp: i64) -> f64 {
         return 0.0;
     }
     ((max_amp as f64 / avg_amp as f64) - 1.0) * 100.0
+}
+
+/// Interpret skew percentage as a human-readable hint
+fn interpret_skew(skew: f64) -> &'static str {
+    if skew < 10.0 {
+        "(low)"
+    } else if skew <= 30.0 {
+        "(moderate)"
+    } else {
+        "(high)"
+    }
 }
 
 /// Extract an i64 from a Value, handling various representations
@@ -918,7 +936,7 @@ mod tests {
     #[test]
     fn test_map_table_kind_all_known() {
         assert_eq!(map_table_kind("T"), "Table");
-        assert_eq!(map_table_kind("O"), "Table");
+        assert_eq!(map_table_kind("O"), "Table (NoPI)");
         assert_eq!(map_table_kind("V"), "View");
         assert_eq!(map_table_kind("M"), "Macro");
         assert_eq!(map_table_kind("P"), "Stored Procedure");
@@ -964,6 +982,18 @@ mod tests {
         assert_eq!(truncate_str("short", 10), "short");
         assert_eq!(truncate_str("exactly10c", 10), "exactly10c");
         assert_eq!(truncate_str("this is a long string", 10), "this is...");
+    }
+
+    #[test]
+    fn test_interpret_skew() {
+        assert_eq!(interpret_skew(0.0), "(low)");
+        assert_eq!(interpret_skew(5.0), "(low)");
+        assert_eq!(interpret_skew(9.9), "(low)");
+        assert_eq!(interpret_skew(10.0), "(moderate)");
+        assert_eq!(interpret_skew(20.0), "(moderate)");
+        assert_eq!(interpret_skew(30.0), "(moderate)");
+        assert_eq!(interpret_skew(30.1), "(high)");
+        assert_eq!(interpret_skew(100.0), "(high)");
     }
 
     #[test]

@@ -1,15 +1,32 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.26.0 (Sprint 45 - Helper Bug Fix & Object Inspection)
+**Version:** 1.27.0 (Sprint 46 - Bug Fixes & /inspect Polish)
 **Last Updated:** 2026-03-23
-**Base Commit:** [Sprint 45 - In Progress]
+**Base Commit:** [Sprint 46 - In Progress]
 
 ## Overview
 
 This directory contains comprehensive test case definitions for the tq CLI tool. These test cases cover all implemented MVP features (FR-001 through FR-010) and provide detailed procedures for validating functionality, usability, error handling, and security.
 
 ## Test Case Categories
+
+### Sprint 46: Bug Fixes & /inspect Polish
+
+- **TC-046-001**: Bug #35 — `quote_identifier()` uppercase behavior (Unit, no-DB) — `TC-046-001.md`
+- **TC-046-002**: Bug #35 — `extract_table_name()` word boundary matching (Unit, no-DB) — `TC-046-002.md`
+- **TC-046-003**: Bug #35 — End-to-end sample/peek with identifier fix (Integration, DB required, `#[ignore]`) — `TC-046-003.md`
+- **TC-046-004**: Bug #34 — Clap argument parsing for describe/list/show-indexes (Unit, no-DB) — `TC-046-004.md`
+- **TC-046-005**: Bug #34 — CLI help text and error messages (CLI integration, no-DB) — `TC-046-005.md`
+- **TC-046-006**: Bug #34 — End-to-end describe/list/show-indexes (Integration, DB required, `#[ignore]`) — `TC-046-006.md`
+- **TC-046-007**: /inspect formatting compliance — all 8 ACs (Unit, no-DB) — `TC-046-007.md`
+- **TC-046-INSPECT-INTEGRATION**: /inspect end-to-end formatting (Integration, DB required, `#[ignore]`) — `TC-046-INSPECT-INTEGRATION.md`
+
+**Sprint 46 test case summary:**
+- Unit tests (no DB): TC-046-001 (10 tests), TC-046-002 (8 tests), TC-046-004 (10 tests), TC-046-007 (15 tests) = 43 unit tests
+- CLI integration (no DB, binary spawn): TC-046-005 (6 tests) = 6 tests
+- Integration (DB required, `#[ignore]`): TC-046-003 (4 tests), TC-046-006 (5 tests), TC-046-INSPECT-INTEGRATION (3 tests) = 12 tests
+- Total: 61 test cases across 8 files
 
 ### Sprint 45: Helper Bug Fix & Object Inspection
 

@@ -284,6 +284,33 @@ pub enum Command {
     /// Example: tq inspect employees
     ///          tq inspect mydb.employees
     Inspect(InspectArgs),
+
+    /// Describe table structure (columns, types, nullable, defaults)
+    ///
+    /// Shows column information for a table or view from DBC.ColumnsV.
+    ///
+    /// Example: tq describe employees
+    ///          tq describe mydb.employees
+    Describe(DescribeArgs),
+
+    /// List database objects (databases, tables, or views)
+    ///
+    /// Lists objects of the specified type. For tables, an optional
+    /// glob pattern can filter results (e.g., "emp*").
+    ///
+    /// Example: tq list databases
+    ///          tq list tables "emp*"
+    ///          tq list views --database mydb
+    List(ListArgs),
+
+    /// Show index information for a table
+    ///
+    /// Displays index names, types, columns, and positions from DBC.IndicesV.
+    ///
+    /// Example: tq show-indexes employees
+    ///          tq show-indexes mydb.employees
+    #[command(name = "show-indexes")]
+    ShowIndexes(ShowIndexesArgs),
 }
 
 /// Profile management subcommands
@@ -618,6 +645,103 @@ pub struct InspectArgs {
     /// Write output to file instead of stdout
     ///
     /// If the file exists, it will be overwritten.
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for the describe command (Sprint 46)
+#[derive(Parser, Debug)]
+pub struct DescribeArgs {
+    /// Table or view to describe (unqualified or database.table)
+    #[arg(value_name = "TABLE")]
+    pub table: String,
+
+    /// Output format
+    ///
+    /// table: Human-readable column listing (default)
+    /// json: JSON array of column objects
+    /// csv: Comma-separated column information
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for the list command (Sprint 46)
+#[derive(Parser, Debug)]
+pub struct ListArgs {
+    /// Type of objects to list
+    #[arg(value_name = "TYPE")]
+    pub object_type: ListObjectType,
+
+    /// Optional glob pattern to filter results (tables only)
+    #[arg(value_name = "PATTERN")]
+    pub pattern: Option<String>,
+
+    /// Database to list from (defaults to current database)
+    #[arg(short, long, value_name = "DB")]
+    pub database: Option<String>,
+
+    /// Output format
+    ///
+    /// table: Human-readable listing (default)
+    /// json: JSON array of objects
+    /// csv: Comma-separated values
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Types of objects that can be listed
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ListObjectType {
+    /// List accessible databases
+    Databases,
+    /// List tables in a database
+    Tables,
+    /// List views in a database
+    Views,
+}
+
+/// Arguments for the show-indexes command (Sprint 46)
+#[derive(Parser, Debug)]
+pub struct ShowIndexesArgs {
+    /// Table to show indexes for (unqualified or database.table)
+    #[arg(value_name = "TABLE")]
+    pub table: String,
+
+    /// Output format
+    ///
+    /// table: Human-readable index listing (default)
+    /// json: JSON array of index objects
+    /// csv: Comma-separated index information
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
 }
@@ -1511,5 +1635,152 @@ mod tests {
         } else {
             panic!("Expected Help command");
         }
+    }
+
+    // Sprint 46: Tests for describe command
+    #[test]
+    fn test_cli_describe_default() {
+        let args = vec!["tq", "describe", "employees"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Describe(args) = cli.command {
+            assert_eq!(args.table, "employees");
+            assert_eq!(args.format, OutputFormat::Table);
+            assert!(args.output.is_none());
+        } else {
+            panic!("Expected Describe command");
+        }
+    }
+
+    #[test]
+    fn test_cli_describe_qualified() {
+        let args = vec!["tq", "describe", "mydb.employees"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Describe(args) = cli.command {
+            assert_eq!(args.table, "mydb.employees");
+        } else {
+            panic!("Expected Describe command");
+        }
+    }
+
+    #[test]
+    fn test_cli_describe_with_format() {
+        let args = vec!["tq", "describe", "--format", "json", "employees"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Describe(args) = cli.command {
+            assert_eq!(args.format, OutputFormat::Json);
+        } else {
+            panic!("Expected Describe command");
+        }
+    }
+
+    #[test]
+    fn test_cli_describe_with_output() {
+        let args = vec!["tq", "describe", "--output", "desc.csv", "employees"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Describe(args) = cli.command {
+            assert_eq!(args.output, Some(PathBuf::from("desc.csv")));
+        } else {
+            panic!("Expected Describe command");
+        }
+    }
+
+    // Sprint 46: Tests for list command
+    #[test]
+    fn test_cli_list_databases() {
+        let args = vec!["tq", "list", "databases"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::List(args) = cli.command {
+            assert_eq!(args.object_type, ListObjectType::Databases);
+            assert!(args.pattern.is_none());
+            assert!(args.database.is_none());
+            assert_eq!(args.format, OutputFormat::Table);
+        } else {
+            panic!("Expected List command");
+        }
+    }
+
+    #[test]
+    fn test_cli_list_tables_with_pattern() {
+        let args = vec!["tq", "list", "tables", "emp*"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::List(args) = cli.command {
+            assert_eq!(args.object_type, ListObjectType::Tables);
+            assert_eq!(args.pattern, Some("emp*".to_string()));
+        } else {
+            panic!("Expected List command");
+        }
+    }
+
+    #[test]
+    fn test_cli_list_views_with_database() {
+        let args = vec!["tq", "list", "views", "--database", "mydb"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::List(args) = cli.command {
+            assert_eq!(args.object_type, ListObjectType::Views);
+            assert_eq!(args.database, Some("mydb".to_string()));
+        } else {
+            panic!("Expected List command");
+        }
+    }
+
+    #[test]
+    fn test_cli_list_with_format() {
+        let args = vec!["tq", "list", "--format", "json", "databases"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::List(args) = cli.command {
+            assert_eq!(args.format, OutputFormat::Json);
+        } else {
+            panic!("Expected List command");
+        }
+    }
+
+    #[test]
+    fn test_cli_list_missing_type() {
+        let args = vec!["tq", "list"];
+        let result = Cli::try_parse_from(args);
+        assert!(result.is_err());
+    }
+
+    // Sprint 46: Tests for show-indexes command
+    #[test]
+    fn test_cli_show_indexes_default() {
+        let args = vec!["tq", "show-indexes", "employees"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::ShowIndexes(args) = cli.command {
+            assert_eq!(args.table, "employees");
+            assert_eq!(args.format, OutputFormat::Table);
+            assert!(args.output.is_none());
+        } else {
+            panic!("Expected ShowIndexes command");
+        }
+    }
+
+    #[test]
+    fn test_cli_show_indexes_qualified() {
+        let args = vec!["tq", "show-indexes", "mydb.employees"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::ShowIndexes(args) = cli.command {
+            assert_eq!(args.table, "mydb.employees");
+        } else {
+            panic!("Expected ShowIndexes command");
+        }
+    }
+
+    #[test]
+    fn test_cli_show_indexes_with_format() {
+        let args = vec!["tq", "show-indexes", "--format", "csv", "employees"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::ShowIndexes(args) = cli.command {
+            assert_eq!(args.format, OutputFormat::Csv);
+        } else {
+            panic!("Expected ShowIndexes command");
+        }
+    }
+
+    #[test]
+    fn test_cli_show_indexes_missing_table() {
+        let args = vec!["tq", "show-indexes"];
+        let result = Cli::try_parse_from(args);
+        assert!(result.is_err());
     }
 }

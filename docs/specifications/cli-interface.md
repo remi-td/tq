@@ -16,6 +16,9 @@
    - [locks - Lock and Blocking Information](#locks---lock-and-blocking-information)
    - [query-inspect - Inspect Session Query Text](#query-inspect---inspect-session-query-text)
    - [inspect - Inspect a Database Object](#inspect---inspect-a-database-object)
+   - [describe - Describe Table Structure](#describe---describe-table-structure)
+   - [list - List Database Objects](#list---list-database-objects)
+   - [show-indexes - Show Table Index Structure](#show-indexes---show-table-index-structure)
    - [profiles - List Connection Profiles](#profiles---list-connection-profiles)
    - [profile - Manage Connection Profiles](#profile---manage-connection-profiles)
 6. [Input/Output Behavior](#inputoutput-behavior)
@@ -51,6 +54,9 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 - `locks` - Display current lock contention and blocking chains
 - `query-inspect` - Show SQL text for a specific session
 - `inspect` - Comprehensive inspection of a database object (type, columns, indexes, size, dependencies)
+- `describe` - Show column structure and indexes for a table or view
+- `list` - List database objects: `databases`, `tables [pattern]`, `views`
+- `show-indexes` - Show index structure for a table
 - `profiles` - List connection profiles
 - `profile` - Manage connection profiles (add, edit, delete, list)
 
@@ -1257,12 +1263,12 @@ tq inspect --output employees-report.txt employees
 │ Column        │ Type         │ Nullable │ Default │
 ├───────────────┼──────────────┼──────────┼─────────┤
 │ employee_id   │ INTEGER      │ NO       │ -       │
-│ first_name    │ VARCHAR(50)  │ YES      │ NULL    │
-│ last_name     │ VARCHAR(50)  │ YES      │ NULL    │
-│ email         │ VARCHAR(100) │ YES      │ NULL    │
-│ hire_date     │ DATE         │ YES      │ NULL    │
-│ salary        │ DECIMAL(10,2)│ YES      │ NULL    │
-│ department_id │ INTEGER      │ YES      │ NULL    │
+│ first_name    │ VARCHAR(50)  │ YES      │ -       │
+│ last_name     │ VARCHAR(50)  │ YES      │ -       │
+│ email         │ VARCHAR(100) │ YES      │ -       │
+│ hire_date     │ DATE         │ YES      │ -       │
+│ salary        │ DECIMAL(10,2)│ YES      │ -       │
+│ department_id │ INTEGER      │ YES      │ -       │
 └───────────────┴──────────────┴──────────┴─────────┘
 
 7 columns
@@ -1440,6 +1446,802 @@ fi
 - Execute `tq inspect --section invalid <table>` and verify invalid section error (exit code 2)
 - Trigger `DBC.TableSizeV` permission error and verify graceful degradation: other sections render, storage section shows inline note, exit code 0
 - Execute `tq inspect --output report.txt <table>` and verify file is created with correct content
+
+---
+
+### describe - Describe Table Structure
+
+**Purpose**: Display the column structure and index information for a table or view. This is the batch-mode equivalent of the REPL `/describe` command, optimized for scripting, documentation, and quick schema lookups without entering the interactive session.
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] describe [OPTIONS] <OBJECT>
+```
+
+**Arguments**:
+- `<OBJECT>`: Required. An object name (`employees`) or a fully qualified name (`database.employees`). Object names are case-insensitive (Teradata convention).
+
+**Options**:
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv` |
+| `--output` | `-o` | path | stdout | Write output to file |
+
+**Examples**:
+```bash
+# Describe a table in the current database
+tq describe employees
+
+# Describe using a qualified name
+tq describe production.orders
+
+# JSON output for scripting
+tq describe --format json employees
+
+# CSV output for documentation generation
+tq describe --format csv production.orders > orders-schema.csv
+
+# Using a connection profile
+tq --profile prod describe employees
+
+# Write report to file
+tq describe --output employees-schema.txt employees
+```
+
+**Output — Table Format**:
+```
+Table: PRODUCTION.employees
+Type:  Table
+Rows (Est.): 42,573
+
+Columns:
+┌───────────────┬──────────────┬──────────┬─────────┬──────────┐
+│ Column        │ Type         │ Nullable │ Default │ Comments │
+├───────────────┼──────────────┼──────────┼─────────┼──────────┤
+│ employee_id   │ INTEGER      │ NO       │ -       │          │
+│ first_name    │ VARCHAR(50)  │ YES      │ -       │          │
+│ last_name     │ VARCHAR(50)  │ YES      │ -       │          │
+│ email         │ VARCHAR(100) │ YES      │ -       │          │
+│ hire_date     │ DATE         │ YES      │ -       │          │
+│ salary        │ DECIMAL(10,2)│ YES      │ -       │          │
+│ department_id │ INTEGER      │ YES      │ -       │          │
+└───────────────┴──────────────┴──────────┴─────────┴──────────┘
+
+Indexes:
+  Primary Index (UPI): employee_id
+  Secondary Index (NUSI): department_id
+  Secondary Index (USI):  email
+```
+
+**Output — CSV Format**:
+```csv
+object,type,estimated_rows
+PRODUCTION.employees,Table,42573
+column,type,nullable,default,comments
+employee_id,INTEGER,NO,,
+first_name,VARCHAR(50),YES,,
+last_name,VARCHAR(50),YES,,
+email,VARCHAR(100),YES,,
+hire_date,DATE,YES,,
+salary,DECIMAL(10,2),YES,,
+department_id,INTEGER,YES,,
+```
+
+**Output — JSON Format**:
+```json
+{
+  "object": "PRODUCTION.employees",
+  "type": "Table",
+  "estimated_rows": 42573,
+  "columns": [
+    { "column": "employee_id",   "type": "INTEGER",        "nullable": false, "default": null, "comments": null },
+    { "column": "first_name",    "type": "VARCHAR(50)",    "nullable": true,  "default": null, "comments": null },
+    { "column": "last_name",     "type": "VARCHAR(50)",    "nullable": true,  "default": null, "comments": null },
+    { "column": "email",         "type": "VARCHAR(100)",   "nullable": true,  "default": null, "comments": null },
+    { "column": "hire_date",     "type": "DATE",           "nullable": true,  "default": null, "comments": null },
+    { "column": "salary",        "type": "DECIMAL(10,2)",  "nullable": true,  "default": null, "comments": null },
+    { "column": "department_id", "type": "INTEGER",        "nullable": true,  "default": null, "comments": null }
+  ],
+  "indexes": [
+    { "kind": "Primary Index", "type": "UPI", "columns": ["employee_id"] },
+    { "kind": "Secondary Index", "type": "NUSI", "columns": ["department_id"] },
+    { "kind": "Secondary Index", "type": "USI",  "columns": ["email"] }
+  ]
+}
+```
+
+**Behavior Requirements**:
+
+1. **REQ-DESCRIBE-001**: The command SHALL require exactly one object argument; invoking without an argument SHALL exit with code 2 and print the usage error.
+2. **REQ-DESCRIBE-002**: Object names SHALL be treated case-insensitively (Teradata convention). `tq describe DBC.TABLES`, `tq describe dbc.tables`, and `tq describe Dbc.Tables` SHALL all resolve to the same object.
+3. **REQ-DESCRIBE-003**: Data sources:
+   - Object type and estimated row count: `DBC.TablesV`
+   - Column definitions (in ordinal order): `DBC.ColumnsV`
+   - Index structure: `DBC.IndicesV`
+4. **REQ-DESCRIBE-004**: The `Default` column SHALL display `-` when no column default is defined, and the actual default value (as stored in the catalog) when one is present.
+5. **REQ-DESCRIBE-005**: The `Comments` column SHALL display column-level comments from the Teradata catalog when available, and an empty string when absent.
+6. **REQ-DESCRIBE-006**: Columns SHALL be displayed in ordinal position order (`ColumnId` ascending), matching the table definition order.
+7. **REQ-DESCRIBE-007**: The `Indexes` section SHALL be omitted for views (views have no indexes). For tables, the section SHALL always be shown; if no indexes exist, display `No indexes defined`.
+8. **REQ-DESCRIBE-008**: The `Rows (Est.)` header line SHALL be omitted for views (row count is not meaningful for views).
+9. **REQ-DESCRIBE-009**: In JSON output, `nullable` SHALL be a boolean (`true`/`false`), `default` SHALL be `null` when no default is set, and `comments` SHALL be `null` when absent.
+10. **REQ-DESCRIBE-010**: In CSV output, a section header row (using the `column,type,nullable,...` row) SHALL separate object metadata from column data to enable downstream filtering by section.
+11. **REQ-DESCRIBE-011**: The `--format` and `--output` flags follow the same semantics as all other tq commands (see [Flag Design Guidelines](#flag-design-guidelines)).
+12. **REQ-DESCRIBE-012**: For object type reporting, the same `TableKind` mapping used by `tq inspect` (see `docs/specifications/repl.md` REQ-INSPECT-002.2) SHALL be applied.
+
+**Relationship to `tq inspect`**: `tq describe` is a focused schema command — it shows columns and index structure only. Use `tq inspect` when storage metrics, object dependencies, or a full consolidated view are needed.
+
+**Error Handling**:
+
+**Object Not Found**:
+```
+Error: Object 'PRODUCTION.employeees' not found.
+
+Did you mean: employees
+
+Exit code: 1
+```
+
+**Missing Argument**:
+```
+Error: Missing required argument <object>
+Usage: tq describe <object>
+
+Examples:
+  tq describe employees
+  tq describe production.orders
+
+Exit code: 2
+```
+
+**Insufficient Privileges**:
+```
+Error: Cannot describe 'employees'.
+Reason: SELECT permission denied on DBC.TablesV.
+
+Contact your DBA to request access:
+  GRANT SELECT ON DBC.TablesV TO <your_username>;
+
+Exit code: 1
+```
+
+**Connection Failed**:
+```
+Error: Failed to connect to prod-td01.company.com:1025
+Reason: Connection refused
+
+Troubleshooting:
+  - Check that the hostname and port are correct
+  - Verify the database is running
+  - Check firewall settings
+
+Exit code: 1
+```
+
+**Exit Codes**:
+- `0`: Object described successfully
+- `1`: Object not found, permission error, or connection failure
+- `2`: Usage error (missing argument, invalid flag value)
+
+**Integration with Scripting**:
+```bash
+# List all columns for a table in JSON
+tq describe --format json employees | jq '.columns[].column'
+
+# Extract nullable columns to CSV
+tq describe --format json employees | \
+  jq -r '.columns[] | select(.nullable) | [.column, .type] | @csv'
+
+# Generate schema documentation
+tq --profile prod describe --format csv production.orders > orders-schema.csv
+
+# Check if a column exists before running a query
+tq describe --format json employees | \
+  jq -e '.columns[] | select(.column == "salary")' > /dev/null && \
+  echo "salary column exists"
+```
+
+**Acceptance Tests**:
+- Execute `tq describe <table>` and verify object header, columns table with all 5 columns, and indexes section are displayed
+- Execute `tq describe <view>` and verify columns are shown, indexes section is absent, rows count is absent
+- Execute `tq describe <database>.<object>` (qualified name) and verify correct database resolution
+- Execute `tq describe --format json <table>` and verify valid JSON with `object`, `type`, `estimated_rows`, `columns`, `indexes` keys; `nullable` is boolean, `default` is `null` when absent
+- Execute `tq describe --format csv <table>` and verify CSV with object metadata row and column data rows
+- Execute `tq describe <nonexistent>` and verify not-found error (exit code 1)
+- Execute `tq describe` with no argument and verify usage error (exit code 2)
+- Execute `tq describe --output schema.txt <table>` and verify file is created with correct content
+- Verify column `Default` shows `-` (table format) or `null` (JSON) when no default is defined
+- Verify object names are treated case-insensitively: `tq describe DBC.TABLES` and `tq describe dbc.tables` return the same result
+
+---
+
+### list - List Database Objects
+
+**Purpose**: List database objects (databases, tables, or views) accessible to the connected user. This is the batch-mode equivalent of the REPL `/list` family of commands, designed for scripting, auditing, and pipeline use.
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] list <SUBCOMMAND> [OPTIONS] [ARGS]
+```
+
+**Subcommands**:
+| Subcommand | Arguments | Description |
+|------------|-----------|-------------|
+| `databases` | (none) | List all accessible databases |
+| `tables` | `[pattern]` | List tables in the current or specified database, with optional name filter |
+| `views` | (none) | List views in the current or specified database |
+
+**Options** (shared across all subcommands):
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv` |
+| `--output` | `-o` | path | stdout | Write output to file |
+| `--database` | `-d` | string | (from logon string) | Target database for `tables` and `views` subcommands |
+
+**Examples**:
+```bash
+# List all accessible databases
+tq list databases
+
+# List tables in the current (logon) database
+tq list tables
+
+# List tables matching a pattern (SQL LIKE syntax: % and _ wildcards)
+tq list tables emp%
+
+# List tables in a specific database
+tq list tables --database staging
+
+# List tables in a specific database with a pattern
+tq list tables --database staging test_%
+
+# List views
+tq list views
+
+# JSON output for scripting
+tq list databases --format json
+
+# CSV export to file
+tq list tables --format csv --output tables.csv
+
+# Using a connection profile
+tq --profile prod list databases
+
+# Pipe to jq for filtering
+tq list databases --format json | jq '.[] | select(.type == "User") | .database'
+```
+
+---
+
+#### list databases
+
+**Purpose**: List all databases accessible to the current user.
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] list databases [OPTIONS]
+```
+
+**Output — Table Format**:
+```
+Databases on prod-td01.company.com:
+┌─────────────────────┬──────────────┬─────────┐
+│ Database            │ Owner        │ Type    │
+├─────────────────────┼──────────────┼─────────┤
+│ DBC                 │ DBC          │ System  │
+│ analytics           │ analytics    │ User    │
+│ development         │ dev_user     │ User    │
+│ production          │ dba_user     │ User    │
+│ staging             │ dba_user     │ User    │
+└─────────────────────┴──────────────┴─────────┘
+
+5 databases found
+```
+
+**Output — CSV Format**:
+```csv
+database,owner,type
+DBC,DBC,System
+analytics,analytics,User
+development,dev_user,User
+production,dba_user,User
+staging,dba_user,User
+```
+
+**Output — JSON Format**:
+```json
+[
+  { "database": "DBC",        "owner": "DBC",        "type": "System" },
+  { "database": "analytics",  "owner": "analytics",  "type": "User"   },
+  { "database": "development","owner": "dev_user",   "type": "User"   },
+  { "database": "production", "owner": "dba_user",   "type": "User"   },
+  { "database": "staging",    "owner": "dba_user",   "type": "User"   }
+]
+```
+
+**Output — No Databases Found**:
+```
+No databases found.
+```
+
+---
+
+#### list tables
+
+**Purpose**: List tables in the current or specified database, with optional name-pattern filtering.
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] list tables [OPTIONS] [PATTERN]
+```
+
+**Arguments**:
+- `[PATTERN]`: Optional. A SQL LIKE pattern to filter table names. Uses `%` (any characters) and `_` (single character) as wildcards. Case-insensitive. If omitted, all tables are listed.
+
+**Pattern examples**:
+- `emp%` — all tables whose name starts with `emp`
+- `%_archive` — all tables ending with `_archive`
+- `sales_2024_%` — all tables starting with `sales_2024_`
+
+**Output — Table Format (all tables)**:
+```
+Tables in 'production':
+┌─────────────────────┬──────────┬──────────────┬───────────┐
+│ Table               │ Type     │ Rows (Est.)  │ Size      │
+├─────────────────────┼──────────┼──────────────┼───────────┤
+│ customers           │ Table    │ 1,234,567    │ 45.2 MB   │
+│ employees           │ Table    │ 42,573       │ 2.1 MB    │
+│ orders              │ Table    │ 9,876,543    │ 320.5 MB  │
+│ products            │ Table    │ 15,432       │ 890 KB    │
+└─────────────────────┴──────────┴──────────────┴───────────┘
+
+4 tables found in database 'production'
+```
+
+**Output — Table Format (with pattern)**:
+```
+Tables in 'production' matching 'emp%':
+┌─────────────────────┬──────────┬──────────────┬───────────┐
+│ Table               │ Type     │ Rows (Est.)  │ Size      │
+├─────────────────────┼──────────┼──────────────┼───────────┤
+│ employees           │ Table    │ 42,573       │ 2.1 MB    │
+│ emp_archive         │ Table    │ 8,123        │ 512 KB    │
+└─────────────────────┴──────────┴──────────────┴───────────┘
+
+2 tables found matching 'emp%'
+```
+
+**Output — No Tables Found**:
+```
+No tables found in database 'production' matching 'xyz%'
+```
+
+**Output — CSV Format**:
+```csv
+table,type,estimated_rows,size_bytes
+customers,Table,1234567,47395274
+employees,Table,42573,2201783
+orders,Table,9876543,336062873
+products,Table,15432,911974
+```
+
+**Output — JSON Format**:
+```json
+[
+  { "table": "customers",  "type": "Table", "estimated_rows": 1234567, "size_bytes": 47395274  },
+  { "table": "employees",  "type": "Table", "estimated_rows": 42573,   "size_bytes": 2201783   },
+  { "table": "orders",     "type": "Table", "estimated_rows": 9876543,  "size_bytes": 336062873 },
+  { "table": "products",   "type": "Table", "estimated_rows": 15432,   "size_bytes": 911974    }
+]
+```
+
+---
+
+#### list views
+
+**Purpose**: List views in the current or specified database.
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] list views [OPTIONS]
+```
+
+**Output — Table Format**:
+```
+Views in 'production':
+┌─────────────────────────┬──────────────┬─────────────────────────────────────┐
+│ View                    │ Owner        │ Definition (truncated)              │
+├─────────────────────────┼──────────────┼─────────────────────────────────────┤
+│ active_employees        │ dba_user     │ SELECT * FROM employees WHERE...    │
+│ customer_orders_view    │ dba_user     │ SELECT c.*, o.* FROM customers c... │
+│ sales_summary           │ analytics    │ SELECT dept, SUM(salary) FROM...    │
+└─────────────────────────┴──────────────┴─────────────────────────────────────┘
+
+3 views found in database 'production'
+```
+
+**Output — No Views Found**:
+```
+No views found in database 'development'
+```
+
+**Output — CSV Format**:
+```csv
+view,owner,definition
+active_employees,dba_user,"SELECT * FROM employees WHERE status = 'ACTIVE'"
+customer_orders_view,dba_user,"SELECT c.*, o.* FROM customers c JOIN orders o ON c.id = o.cust_id"
+sales_summary,analytics,"SELECT dept, SUM(salary) FROM employees GROUP BY dept"
+```
+
+**Output — JSON Format**:
+```json
+[
+  {
+    "view": "active_employees",
+    "owner": "dba_user",
+    "definition": "SELECT * FROM employees WHERE status = 'ACTIVE'"
+  },
+  {
+    "view": "customer_orders_view",
+    "owner": "dba_user",
+    "definition": "SELECT c.*, o.* FROM customers c JOIN orders o ON c.id = o.cust_id"
+  },
+  {
+    "view": "sales_summary",
+    "owner": "analytics",
+    "definition": "SELECT dept, SUM(salary) FROM employees GROUP BY dept"
+  }
+]
+```
+
+---
+
+#### list — Behavior Requirements
+
+1. **REQ-LIST-001**: The `list` command SHALL require a subcommand (`databases`, `tables`, `views`); invoking `tq list` with no subcommand SHALL print subcommand help and exit with code 2.
+2. **REQ-LIST-002**: `list databases` data source: `DBC.DatabasesV` (or platform equivalent). Columns displayed: Database, Owner, Type.
+3. **REQ-LIST-003**: `list databases` type classification: databases owned by `DBC` SHALL be shown as type `System`; all others SHALL be shown as type `User`.
+4. **REQ-LIST-004**: `list databases` sorting: System databases first (alphabetical), then User databases (alphabetical).
+5. **REQ-LIST-005**: `list tables` data source: `DBC.TablesV WHERE TableKind = 'T'`. Columns displayed: Table, Type (always `Table`), Rows (Est.), Size.
+6. **REQ-LIST-006**: `list tables` with `--database <db>` SHALL list tables in the specified database, regardless of the database in the logon string. Without `--database`, the command targets the database from the logon connection string.
+7. **REQ-LIST-007**: `list tables [PATTERN]` filter: the pattern is applied as a SQL LIKE clause against `TableName` (case-insensitive). `%` matches any sequence of characters; `_` matches any single character.
+8. **REQ-LIST-008**: `list tables` sorting: alphabetical by table name.
+9. **REQ-LIST-009**: `list tables` size values: in table format, size SHALL be displayed as a human-readable string (`890 KB`, `2.1 MB`, `320.5 MB`). In CSV and JSON formats, size SHALL be expressed as raw bytes (`size_bytes` integer).
+10. **REQ-LIST-010**: `list views` data source: `DBC.TablesV WHERE TableKind = 'V'`. Columns displayed: View, Owner, Definition (truncated).
+11. **REQ-LIST-011**: `list views` view definition: in table format, the definition SHALL be truncated to 50 characters with `...` appended. In CSV and JSON formats, the full view definition text SHALL be included.
+12. **REQ-LIST-012**: `list views` with `--database <db>` SHALL list views in the specified database. Without `--database`, the command targets the database from the logon connection string.
+13. **REQ-LIST-013**: `list views` sorting: alphabetical by view name.
+14. **REQ-LIST-014**: When a subcommand returns no results, an informative "No X found" message SHALL be displayed and the command SHALL exit with code 0 (not an error).
+15. **REQ-LIST-015**: The `--format` and `--output` flags follow the same semantics as all other tq commands (see [Flag Design Guidelines](#flag-design-guidelines)).
+16. **REQ-LIST-016**: In JSON format, all list subcommands return a JSON array (`[]`). An empty result set returns an empty array `[]`, not `null` or an error.
+
+**Error Handling**:
+
+**Unknown Subcommand**:
+```
+Error: Unknown subcommand 'schema'
+Usage: tq list <databases|tables|views> [OPTIONS] [ARGS]
+
+Available subcommands:
+  databases   List all accessible databases
+  tables      List tables in the current or specified database
+  views       List views in the current or specified database
+
+Exit code: 2
+```
+
+**Missing Subcommand**:
+```
+Usage: tq list <databases|tables|views> [OPTIONS] [ARGS]
+
+Available subcommands:
+  databases   List all accessible databases
+  tables      List tables in the current or specified database
+  views       List views in the current or specified database
+
+Exit code: 2
+```
+
+**No Current Database (tables and views subcommands)**:
+```
+Error: No database specified.
+The --database flag or the /database component of --logon is required for 'tq list tables'.
+
+Examples:
+  tq -l user:pass@host/mydb list tables
+  tq list tables --database mydb
+
+Exit code: 2
+```
+
+**Insufficient Privileges**:
+```
+Error: Unable to list tables in database 'production'.
+Reason: SELECT permission denied on DBC.TablesV.
+
+Contact your DBA to request access:
+  GRANT SELECT ON DBC.TablesV TO <your_username>;
+
+Exit code: 1
+```
+
+**Connection Failed**:
+```
+Error: Failed to connect to prod-td01.company.com:1025
+Reason: Connection refused
+
+Troubleshooting:
+  - Check that the hostname and port are correct
+  - Verify the database is running
+  - Check firewall settings
+
+Exit code: 1
+```
+
+**Exit Codes**:
+- `0`: Objects listed successfully (including the case of zero results)
+- `1`: Query error (privilege denied, connection failed, view not available)
+- `2`: Usage error (missing or unknown subcommand, missing database, invalid flag value)
+
+**Integration with Scripting**:
+```bash
+# Find all databases with "staging" in the name
+tq list databases --format json | jq -r '.[] | select(.database | test("staging";"i")) | .database'
+
+# Count tables per database (using --database flag)
+for db in $(tq list databases --format json | jq -r '.[].database'); do
+  count=$(tq list tables --database "$db" --format json | jq 'length')
+  echo "$db: $count tables"
+done
+
+# Find all views matching a pattern across staging
+tq list views --database staging --format json | jq '.[].view'
+
+# Export table inventory to CSV
+tq --profile prod list tables --format csv --output tables-$(date +%Y%m%d).csv
+```
+
+**Acceptance Tests**:
+- Execute `tq list databases` and verify table output with Database, Owner, Type columns; system databases appear before user databases
+- Execute `tq list databases --format json` and verify JSON array with `database`, `owner`, `type` keys; empty result is `[]`
+- Execute `tq list databases --format csv` and verify CSV with `database,owner,type` header row
+- Execute `tq list tables` with a valid database in logon string and verify table output with Table, Type, Rows (Est.), Size columns
+- Execute `tq list tables emp%` and verify only tables matching the pattern are shown
+- Execute `tq list tables --database staging` and verify tables from the `staging` database are listed
+- Execute `tq list tables xyz_nonexistent%` and verify "No tables found" message with exit code 0
+- Execute `tq list views` and verify view output with View, Owner, Definition columns; definition is truncated in table format
+- Execute `tq list views --format json` and verify JSON array with full `definition` field (not truncated)
+- Execute `tq list views --format csv` and verify CSV with full `definition` field (not truncated)
+- Execute `tq list` with no subcommand and verify usage help is shown with exit code 2
+- Execute `tq list databases --output db-list.txt` and verify file is created
+
+---
+
+### show-indexes - Show Table Index Structure
+
+**Purpose**: Display the complete index structure for a table, including primary index type and columns, and all secondary indexes. This is the batch-mode equivalent of the REPL `/show indexes` command.
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] show-indexes [OPTIONS] <OBJECT>
+```
+
+**Arguments**:
+- `<OBJECT>`: Required. A table name (`employees`) or a fully qualified name (`database.employees`). Object names are case-insensitive (Teradata convention).
+
+**Options**:
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv` |
+| `--output` | `-o` | path | stdout | Write output to file |
+
+**Examples**:
+```bash
+# Show indexes for a table in the current database
+tq show-indexes employees
+
+# Show indexes using a qualified name
+tq show-indexes production.orders
+
+# JSON output for scripting
+tq show-indexes --format json employees
+
+# CSV output for documentation
+tq show-indexes --format csv production.orders > orders-indexes.csv
+
+# Using a connection profile
+tq --profile prod show-indexes employees
+
+# Write to file
+tq show-indexes --output indexes.txt employees
+```
+
+**Output — Table Format (table with primary and secondary indexes)**:
+```
+Index structure for PRODUCTION.employees:
+
+  Primary Index
+    Type:     Unique Primary Index (UPI)
+    Columns:  employee_id
+
+  Secondary Indexes
+    #1  Non-Unique Secondary Index (NUSI)  (department_id)
+    #2  Unique Secondary Index (USI)       (email)
+```
+
+**Output — Table Format (NoPI table)**:
+```
+Index structure for PRODUCTION.fact_sales:
+
+  Primary Index
+    No Primary Index (NoPI)
+
+  Secondary Indexes
+    #1  Non-Unique Secondary Index (NUSI)  (region_id, sale_date)
+```
+
+**Output — Table Format (primary index only, no secondary indexes)**:
+```
+Index structure for PRODUCTION.config:
+
+  Primary Index
+    Type:     Non-Unique Primary Index (NUPI)
+    Columns:  config_key
+
+  No secondary indexes defined.
+```
+
+**Output — CSV Format**:
+```csv
+kind,index_no,type,columns
+Primary Index,,UPI,employee_id
+Secondary Index,1,NUSI,department_id
+Secondary Index,2,USI,email
+```
+
+**Output — JSON Format**:
+```json
+{
+  "object": "PRODUCTION.employees",
+  "primary_index": {
+    "type": "UPI",
+    "type_label": "Unique Primary Index (UPI)",
+    "columns": ["employee_id"],
+    "no_pi": false
+  },
+  "secondary_indexes": [
+    { "index_no": 1, "type": "NUSI", "type_label": "Non-Unique Secondary Index (NUSI)", "columns": ["department_id"] },
+    { "index_no": 2, "type": "USI",  "type_label": "Unique Secondary Index (USI)",      "columns": ["email"] }
+  ]
+}
+```
+
+**Output — JSON Format (NoPI table)**:
+```json
+{
+  "object": "PRODUCTION.fact_sales",
+  "primary_index": {
+    "no_pi": true,
+    "type": null,
+    "type_label": "No Primary Index (NoPI)",
+    "columns": []
+  },
+  "secondary_indexes": [
+    { "index_no": 1, "type": "NUSI", "type_label": "Non-Unique Secondary Index (NUSI)", "columns": ["region_id", "sale_date"] }
+  ]
+}
+```
+
+**Behavior Requirements**:
+
+1. **REQ-SHOW-IDX-001**: The command SHALL require exactly one object argument; invoking without an argument SHALL exit with code 2 and print the usage error.
+2. **REQ-SHOW-IDX-002**: Object names SHALL be treated case-insensitively (Teradata convention).
+3. **REQ-SHOW-IDX-003**: Data source: `DBC.IndicesV`. The command fetches all index records for the specified object.
+4. **REQ-SHOW-IDX-004**: Primary index type labels SHALL follow the Teradata index naming convention:
+   | IndexType value | Display Label |
+   |-----------------|---------------|
+   | `UPI` | Unique Primary Index (UPI) |
+   | `NUPI` | Non-Unique Primary Index (NUPI) |
+   | NoPI (TableKind = `O`) | No Primary Index (NoPI) |
+5. **REQ-SHOW-IDX-005**: Secondary index type labels:
+   | IndexType value | Display Label |
+   |-----------------|---------------|
+   | `USI` | Unique Secondary Index (USI) |
+   | `NUSI` | Non-Unique Secondary Index (NUSI) |
+6. **REQ-SHOW-IDX-006**: When no secondary indexes exist, the secondary indexes subsection SHALL display `No secondary indexes defined.` in table format; the `secondary_indexes` key SHALL be an empty array `[]` in JSON format; no secondary index rows SHALL appear in CSV format.
+7. **REQ-SHOW-IDX-007**: When the table has no primary index (`TableKind = 'O'` in `DBC.TablesV`), the primary index subsection SHALL display `No Primary Index (NoPI)` in table format, and `"no_pi": true` with `"columns": []` in JSON format.
+8. **REQ-SHOW-IDX-008**: When multiple columns form a composite index, all columns SHALL be listed in index column order, separated by `, ` in table and CSV formats, and as a JSON array in JSON format.
+9. **REQ-SHOW-IDX-009**: Secondary indexes SHALL be displayed in index number order (ascending `IndexNumber` from `DBC.IndicesV`).
+10. **REQ-SHOW-IDX-010**: The `--format` and `--output` flags follow the same semantics as all other tq commands (see [Flag Design Guidelines](#flag-design-guidelines)).
+11. **REQ-SHOW-IDX-011**: This command applies only to tables. Invoking `tq show-indexes` against a view SHALL display an informative message (views have no indexes) and exit with code 0.
+
+**View Target**:
+```
+No indexes: 'PRODUCTION.active_employees' is a View.
+Views do not have indexes. Use 'tq describe' to see the view's column structure.
+```
+
+**Error Handling**:
+
+**Object Not Found**:
+```
+Error: Object 'PRODUCTION.employeees' not found.
+
+Did you mean: employees
+
+Exit code: 1
+```
+
+**Missing Argument**:
+```
+Error: Missing required argument <object>
+Usage: tq show-indexes <object>
+
+Examples:
+  tq show-indexes employees
+  tq show-indexes production.orders
+
+Exit code: 2
+```
+
+**Insufficient Privileges**:
+```
+Error: Cannot retrieve index information for 'employees'.
+Reason: SELECT permission denied on DBC.IndicesV.
+
+Contact your DBA to request access:
+  GRANT SELECT ON DBC.IndicesV TO <your_username>;
+
+Exit code: 1
+```
+
+**Connection Failed**:
+```
+Error: Failed to connect to prod-td01.company.com:1025
+Reason: Connection refused
+
+Troubleshooting:
+  - Check that the hostname and port are correct
+  - Verify the database is running
+  - Check firewall settings
+
+Exit code: 1
+```
+
+**Exit Codes**:
+- `0`: Index information displayed successfully (including the case of a view target — informative message)
+- `1`: Object not found, permission error, or connection failure
+- `2`: Usage error (missing argument, invalid flag value)
+
+**Integration with Scripting**:
+```bash
+# Check if a table has a UPI (ideal for distribution)
+tq show-indexes --format json employees | \
+  jq -r '.primary_index.type'
+
+# Find all USI columns on a table
+tq show-indexes --format json employees | \
+  jq -r '.secondary_indexes[] | select(.type == "USI") | .columns[]'
+
+# Export index definitions for documentation
+tq --profile prod show-indexes --format csv --output employees-indexes.csv employees
+
+# Identify NUSI indexes (candidates for review in large tables)
+tq show-indexes --format json production.orders | \
+  jq '[.secondary_indexes[] | select(.type == "NUSI")]'
+```
+
+**Acceptance Tests**:
+- Execute `tq show-indexes <table>` with a UPI and secondary indexes and verify table output showing primary and secondary sections
+- Execute `tq show-indexes <nopi_table>` and verify "No Primary Index (NoPI)" is displayed in the primary index section
+- Execute `tq show-indexes <table_without_secondary_indexes>` and verify "No secondary indexes defined." is displayed
+- Execute `tq show-indexes <view>` and verify informative "not applicable to views" message is shown with exit code 0
+- Execute `tq show-indexes <database>.<table>` (qualified name) and verify correct database resolution
+- Execute `tq show-indexes --format json <table>` and verify valid JSON with `object`, `primary_index`, `secondary_indexes` keys; `no_pi` is boolean; `columns` is an array
+- Execute `tq show-indexes --format csv <table>` and verify CSV with `kind,index_no,type,columns` header and one row per index
+- Execute `tq show-indexes` with no argument and verify usage error (exit code 2)
+- Execute `tq show-indexes <nonexistent>` and verify not-found error (exit code 1)
+- Verify composite index columns are listed in correct order in all output formats
+- Execute `tq show-indexes --output indexes.txt <table>` and verify file is created with correct content
 
 ---
 

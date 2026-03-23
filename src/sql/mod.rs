@@ -35,11 +35,12 @@
 //! ```
 //! use tq::sql::identifiers::{quote_identifier, quote_qualified_name, escape_sql_string};
 //!
+//! // Identifiers are uppercased to match Teradata's internal storage format
 //! let quoted = quote_identifier("my table");
-//! assert_eq!(quoted, "\"my table\"");
+//! assert_eq!(quoted, "\"MY TABLE\"");
 //!
 //! let qualified = quote_qualified_name("prod", "employees");
-//! assert_eq!(qualified, "\"prod\".\"employees\"");
+//! assert_eq!(qualified, "\"PROD\".\"EMPLOYEES\"");
 //!
 //! let escaped = escape_sql_string("O'Brien");
 //! assert_eq!(escaped, "O''Brien");

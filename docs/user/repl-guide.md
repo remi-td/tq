@@ -1111,14 +1111,16 @@ First 10 rows:
 - Verifying table has expected columns and data
 - Use custom row count for larger or smaller previews
 
-**Qualified names:**
+**Qualified names and case-insensitivity:**
 
-Both commands support database.table syntax:
+Both commands support database.table syntax, and table names are resolved case-insensitively:
 
 ```sql
 tq> /sample staging.test_data 20
 tq> /peek development.customers
 tq> /peek development.customers 10
+tq> /sample EMPLOYEES         -- same as /sample employees
+tq> /peek Production.Orders   -- same as /peek production.orders
 ```
 
 **Error handling:**
@@ -1158,12 +1160,12 @@ Columns:
 │ Column        │ Type         │ Nullable │ Default │ Comments │
 ├───────────────┼──────────────┼──────────┼─────────┼──────────┤
 │ employee_id   │ INTEGER      │ NO       │ -       │ PK       │
-│ first_name    │ VARCHAR(50)  │ YES      │ NULL    │          │
-│ last_name     │ VARCHAR(50)  │ YES      │ NULL    │          │
-│ email         │ VARCHAR(100) │ YES      │ NULL    │          │
-│ hire_date     │ DATE         │ YES      │ NULL    │          │
-│ salary        │ DECIMAL(10,2)│ YES      │ NULL    │          │
-│ department_id │ INTEGER      │ YES      │ NULL    │ FK       │
+│ first_name    │ VARCHAR(50)  │ YES      │ -       │          │
+│ last_name     │ VARCHAR(50)  │ YES      │ -       │          │
+│ email         │ VARCHAR(100) │ YES      │ -       │          │
+│ hire_date     │ DATE         │ YES      │ -       │          │
+│ salary        │ DECIMAL(10,2)│ YES      │ -       │          │
+│ department_id │ INTEGER      │ YES      │ -       │ FK       │
 └───────────────┴──────────────┴──────────┴─────────┴──────────┘
 ```
 
@@ -1295,12 +1297,12 @@ tq> /inspect employees
 │ Column        │ Type         │ Nullable │ Default │
 ├───────────────┼──────────────┼──────────┼─────────┤
 │ employee_id   │ INTEGER      │ NO       │ -       │
-│ first_name    │ VARCHAR(50)  │ YES      │ NULL    │
-│ last_name     │ VARCHAR(50)  │ YES      │ NULL    │
-│ email         │ VARCHAR(100) │ YES      │ NULL    │
-│ hire_date     │ DATE         │ YES      │ NULL    │
-│ salary        │ DECIMAL(10,2)│ YES      │ NULL    │
-│ department_id │ INTEGER      │ YES      │ NULL    │
+│ first_name    │ VARCHAR(50)  │ YES      │ -       │
+│ last_name     │ VARCHAR(50)  │ YES      │ -       │
+│ email         │ VARCHAR(100) │ YES      │ -       │
+│ hire_date     │ DATE         │ YES      │ -       │
+│ salary        │ DECIMAL(10,2)│ YES      │ -       │
+│ department_id │ INTEGER      │ YES      │ -       │
 └───────────────┴──────────────┴──────────┴─────────┘
 
 7 columns
@@ -1343,9 +1345,9 @@ tq> /inspect active_employees_view
 │ Column        │ Type         │ Nullable │ Default │
 ├───────────────┼──────────────┼──────────┼─────────┤
 │ employee_id   │ INTEGER      │ NO       │ -       │
-│ first_name    │ VARCHAR(50)  │ YES      │ NULL    │
-│ last_name     │ VARCHAR(50)  │ YES      │ NULL    │
-│ department_id │ INTEGER      │ YES      │ NULL    │
+│ first_name    │ VARCHAR(50)  │ YES      │ -       │
+│ last_name     │ VARCHAR(50)  │ YES      │ -       │
+│ department_id │ INTEGER      │ YES      │ -       │
 └───────────────┴──────────────┴──────────┴─────────┘
 
 4 columns

@@ -1,6 +1,6 @@
 [package]
 name = "tq"
-version = "1.26.0"
+version = "1.27.0"
 edition = "2021"
 authors = ["Teradata Query Contributors"]
 description = "A fast, lightweight command-line client for Teradata databases"

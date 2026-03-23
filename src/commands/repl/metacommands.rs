@@ -577,6 +577,11 @@ pub fn handle_metacommand_with_state<W: Write>(
                 writeln!(writer, "Usage: /inspect <table_or_view>")?;
                 writeln!(writer, "       /inspect <database>.<object>")?;
                 writeln!(writer)?;
+                writeln!(writer, "Examples:")?;
+                writeln!(writer, "  /inspect employees")?;
+                writeln!(writer, "  /inspect mydb.orders")?;
+                writeln!(writer, "  /inspect DBC.TablesV")?;
+                writeln!(writer)?;
             } else {
                 let object_name = args.join(" ");
                 crate::commands::inspect::execute_for_repl(
@@ -3020,17 +3025,17 @@ mod tests {
         assert_eq!(truncate_string("ab", 2), "ab");
     }
 
-    // Sprint 34: Quote table reference tests
+    // Sprint 34: Quote table reference tests (updated Sprint 46 for uppercase)
     #[test]
     fn test_quote_table_reference_simple() {
-        assert_eq!(quote_table_reference("employees"), "\"employees\"");
+        assert_eq!(quote_table_reference("employees"), "\"EMPLOYEES\"");
     }
 
     #[test]
     fn test_quote_table_reference_qualified() {
         assert_eq!(
             quote_table_reference("prod.employees"),
-            "\"prod\".\"employees\""
+            "\"PROD\".\"EMPLOYEES\""
         );
     }
 
@@ -3038,7 +3043,7 @@ mod tests {
     fn test_quote_table_reference_with_spaces() {
         assert_eq!(
             quote_table_reference("my database.my table"),
-            "\"my database\".\"my table\""
+            "\"MY DATABASE\".\"MY TABLE\""
         );
     }
 
@@ -3047,7 +3052,7 @@ mod tests {
         // Edge case: embedded quotes should be escaped
         assert_eq!(
             quote_table_reference("db\"x.tbl\"y"),
-            "\"db\"\"x\".\"tbl\"\"y\""
+            "\"DB\"\"X\".\"TBL\"\"Y\""
         );
     }
 

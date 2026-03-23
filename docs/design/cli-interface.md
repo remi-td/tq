@@ -712,6 +712,378 @@ CSV/JSON output (where each section would be a separate JSON object) is a future
 | REPL integration | `src/commands/repl/metacommands.rs` | `handle_metacommand_with_state()` |
 | Tab completion | `src/commands/repl/metadata_completer.rs` | `METACOMMAND_REGISTRY` |
 
+## tq describe Command
+
+The `tq describe` batch command exposes the `/describe` REPL metacommand in one-shot mode.
+It queries `DBC.ColumnsV` to show column metadata for a table, view, or other object.
+
+### Architecture: Shared Logic Pattern
+
+The REPL `/describe` handler in `metacommands.rs` contains inline SQL and rendering logic.
+Rather than duplicating this in a new batch module, the approach is:
+
+1. Create `src/commands/describe.rs` with the core query and rendering logic
+2. The batch `execute()` function accepts `DescribeArgs` and writes output in table/csv/json format
+3. The `execute_for_repl()` function provides REPL-friendly output (same content, no format flag)
+4. The REPL metacommand handler delegates to `execute_for_repl()` instead of inlining the logic
+
+This follows the established pattern from `src/commands/sessions.rs` and `src/commands/inspect.rs`
+where both batch and REPL modes share the same underlying query and rendering code.
+
+### CLI Argument Definition
+
+```rust
+// src/cli.rs -- add to Command enum
+
+/// Describe a table's columns (name, type, nullable, default)
+///
+/// Shows column metadata from DBC.ColumnsV for the specified table.
+///
+/// Example: tq describe employees
+///          tq describe mydb.employees
+Describe(DescribeArgs),
+```
+
+```rust
+// src/cli.rs -- DescribeArgs struct
+
+#[derive(Parser, Debug)]
+pub struct DescribeArgs {
+    /// Table name to describe (qualified: database.table or unqualified)
+    #[arg(value_name = "TABLE")]
+    pub table: String,
+
+    /// Output format
+    #[arg(short = 'f', long, default_value = "table", value_name = "FORMAT")]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short = 'o', long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+```
+
+### Command Dispatch
+
+```rust
+// src/main.rs -- add to match block in run()
+
+Command::Describe(args) => {
+    if let Some(ref output_path) = args.output {
+        let file = std::fs::File::create(output_path)?;
+        let mut writer = std::io::BufWriter::new(file);
+        commands::describe::execute(&client, &args, &mut writer, use_color)?;
+    } else {
+        let mut stdout = io::stdout();
+        commands::describe::execute(&client, &args, &mut stdout, use_color)?;
+    }
+}
+```
+
+### Implementation Module
+
+```rust
+// src/commands/describe.rs
+
+pub fn execute<W: Write>(
+    client: &DatabaseClient,
+    args: &DescribeArgs,
+    writer: &mut W,
+    _use_color: bool,
+) -> Result<()> {
+    match args.format {
+        OutputFormat::Table => describe_table(client, &args.table, writer)?,
+        OutputFormat::Csv => describe_csv(client, &args.table, writer)?,
+        OutputFormat::Json => describe_json(client, &args.table, writer)?,
+    }
+    Ok(())
+}
+
+pub fn execute_for_repl<W: Write>(
+    client: &DatabaseClient,
+    table_name: &str,
+    writer: &mut W,
+) -> Result<()> {
+    writeln!(writer)?;
+    describe_table(client, table_name, writer)?;
+    writeln!(writer)?;
+    Ok(())
+}
+```
+
+### Code Linkage
+
+| Component | File | Key Types / Functions |
+|-----------|------|-----------------------|
+| CLI args | `src/cli.rs` | `DescribeArgs`, `Command::Describe` |
+| Command dispatch | `src/main.rs` | `run()` match arm |
+| Module export | `src/commands/mod.rs` | `pub mod describe` |
+| Implementation | `src/commands/describe.rs` | `execute()`, `execute_for_repl()` |
+| REPL delegation | `src/commands/repl/metacommands.rs` | Calls `describe::execute_for_repl()` |
+
+## tq list Command
+
+The `tq list` batch command exposes the `/list` REPL metacommand in one-shot mode.
+It supports three subcommands: `databases`, `tables`, and `views`.
+
+### CLI Argument Definition
+
+```rust
+// src/cli.rs -- add to Command enum
+
+/// List database objects (databases, tables, views)
+///
+/// Example: tq list databases
+///          tq list tables order*
+///          tq list views
+#[command(name = "list")]
+List(ListArgs),
+```
+
+```rust
+// src/cli.rs -- ListArgs struct
+
+#[derive(Parser, Debug)]
+pub struct ListArgs {
+    /// What to list: databases, tables, or views
+    #[arg(value_name = "TYPE")]
+    pub object_type: ListObjectType,
+
+    /// Optional glob pattern to filter results (tables only)
+    #[arg(value_name = "PATTERN")]
+    pub pattern: Option<String>,
+
+    /// Output format
+    #[arg(short = 'f', long, default_value = "table", value_name = "FORMAT")]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short = 'o', long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+pub enum ListObjectType {
+    Databases,
+    Tables,
+    Views,
+}
+```
+
+Using `ValueEnum` for `ListObjectType` provides type-safe parsing with automatic help text
+and case-insensitive matching, consistent with the existing `OutputFormat` and `LogonMechanism` enums.
+
+### Implementation Module
+
+```rust
+// src/commands/list.rs
+
+pub fn execute<W: Write>(
+    client: &DatabaseClient,
+    args: &ListArgs,
+    writer: &mut W,
+    _use_color: bool,
+) -> Result<()> {
+    match args.object_type {
+        ListObjectType::Databases => list_databases(client, args.format, writer)?,
+        ListObjectType::Tables => list_tables(client, args.pattern.as_deref(), args.format, writer)?,
+        ListObjectType::Views => list_views(client, args.format, writer)?,
+    }
+    Ok(())
+}
+
+pub fn execute_for_repl<W: Write>(
+    client: &DatabaseClient,
+    object_type: &str,
+    pattern: Option<&str>,
+    writer: &mut W,
+) -> Result<()> {
+    // Delegates to shared query/render functions
+}
+```
+
+### Code Linkage
+
+| Component | File | Key Types / Functions |
+|-----------|------|-----------------------|
+| CLI args | `src/cli.rs` | `ListArgs`, `ListObjectType`, `Command::List` |
+| Command dispatch | `src/main.rs` | `run()` match arm |
+| Module export | `src/commands/mod.rs` | `pub mod list` |
+| Implementation | `src/commands/list.rs` | `execute()`, `execute_for_repl()` |
+| REPL delegation | `src/commands/repl/metacommands.rs` | Calls `list::execute_for_repl()` |
+
+## tq show-indexes Command
+
+The `tq show-indexes` batch command exposes the `/show indexes` REPL metacommand in one-shot mode.
+
+### CLI Argument Definition
+
+```rust
+// src/cli.rs -- add to Command enum
+
+/// Show index information for a table
+///
+/// Displays index names, types, uniqueness, and columns from DBC.IndicesV.
+///
+/// Example: tq show-indexes employees
+///          tq show-indexes mydb.orders
+#[command(name = "show-indexes")]
+ShowIndexes(ShowIndexesArgs),
+```
+
+```rust
+// src/cli.rs -- ShowIndexesArgs struct
+
+#[derive(Parser, Debug)]
+pub struct ShowIndexesArgs {
+    /// Table name (qualified: database.table or unqualified)
+    #[arg(value_name = "TABLE")]
+    pub table: String,
+
+    /// Output format
+    #[arg(short = 'f', long, default_value = "table", value_name = "FORMAT")]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short = 'o', long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+```
+
+### Implementation Module
+
+```rust
+// src/commands/show_indexes.rs
+
+pub fn execute<W: Write>(
+    client: &DatabaseClient,
+    args: &ShowIndexesArgs,
+    writer: &mut W,
+    _use_color: bool,
+) -> Result<()> {
+    match args.format {
+        OutputFormat::Table => show_indexes_table(client, &args.table, writer)?,
+        OutputFormat::Csv => show_indexes_csv(client, &args.table, writer)?,
+        OutputFormat::Json => show_indexes_json(client, &args.table, writer)?,
+    }
+    Ok(())
+}
+
+pub fn execute_for_repl<W: Write>(
+    client: &DatabaseClient,
+    table_name: &str,
+    writer: &mut W,
+) -> Result<()> {
+    writeln!(writer)?;
+    show_indexes_table(client, table_name, writer)?;
+    writeln!(writer)?;
+    Ok(())
+}
+```
+
+### Code Linkage
+
+| Component | File | Key Types / Functions |
+|-----------|------|-----------------------|
+| CLI args | `src/cli.rs` | `ShowIndexesArgs`, `Command::ShowIndexes` |
+| Command dispatch | `src/main.rs` | `run()` match arm |
+| Module export | `src/commands/mod.rs` | `pub mod show_indexes` |
+| Implementation | `src/commands/show_indexes.rs` | `execute()`, `execute_for_repl()` |
+| REPL delegation | `src/commands/repl/metacommands.rs` | Calls `show_indexes::execute_for_repl()` |
+
+## Identifier Quoting Fix (Bug #35)
+
+### Problem
+
+`quote_identifier()` in `src/sql/identifiers.rs` wraps identifiers in double quotes while
+preserving the original case. In Teradata, quoted identifiers are case-sensitive, while
+unquoted identifiers are case-insensitive (stored internally as uppercase). When a user types
+`dbc.tables`, the quoting produces `"dbc"."tables"` which fails because Teradata stores
+the identifier as `DBC` and the table name includes mixed case (`Tables`).
+
+A secondary bug: `extract_table_name()` in `src/db/client.rs` uses `str::find("FROM")` which
+is a substring search. Searching for `"TABLE"` within `"SELECT * FROM DBC.TABLES SAMPLE 10"`
+finds `TABLE` as a substring of `TABLES`, then extracts `"S"` (the characters after `TABLE`
+up to the next delimiter) as the table name.
+
+### Fix Approach
+
+**Fix 1: Uppercase identifiers before quoting**
+
+Change `quote_identifier()` to uppercase the identifier before wrapping in double quotes:
+
+```rust
+pub fn quote_identifier(identifier: &str) -> String {
+    let upper = identifier.to_uppercase();
+    let escaped = upper.replace('"', "\"\"");
+    format!("\"{}\"", escaped)
+}
+```
+
+This preserves SQL injection protection (double-quote escaping) while matching Teradata's
+native storage format. All callers of `quote_identifier()` and `quote_qualified_name()`
+benefit automatically. The `sample.rs` and `inspect.rs` modules that use these functions
+will produce correct SQL for case-insensitive user input.
+
+**Important consideration**: This change means that identifiers that were intentionally
+mixed-case (e.g., a table actually created with `CREATE TABLE "MyTable"`) will now be
+uppercased. However, this is the correct Teradata behavior: users who need exact-case
+identifiers should quote them explicitly in their SQL. The `quote_identifier()` function
+is used internally for user-provided names (from CLI arguments and metacommands), where
+case-insensitive matching is the expected behavior.
+
+**Fix 2: Word-boundary matching in extract_table_name()**
+
+Replace the simple `str::find(keyword)` with word-boundary-aware matching. After finding
+a keyword match position, verify it is preceded by a word boundary (whitespace or start of
+string) and followed by a word boundary (whitespace):
+
+```rust
+fn extract_table_name(sql: &str) -> Option<String> {
+    let sql_upper = sql.to_uppercase();
+    let keywords = ["FROM", "INTO", "UPDATE", "TABLE"];
+
+    for keyword in keywords {
+        let mut search_from = 0;
+        while let Some(pos) = sql_upper[search_from..].find(keyword) {
+            let abs_pos = search_from + pos;
+            let before_ok = abs_pos == 0
+                || !sql_upper.as_bytes()[abs_pos - 1].is_ascii_alphanumeric();
+            let after_pos = abs_pos + keyword.len();
+            let after_ok = after_pos >= sql_upper.len()
+                || !sql_upper.as_bytes()[after_pos].is_ascii_alphanumeric();
+
+            if before_ok && after_ok {
+                let after = &sql[after_pos..].trim_start();
+                // Handle quoted identifiers: "DB"."TABLE"
+                let end = if after.starts_with('"') {
+                    // Find the full quoted identifier (may include dots)
+                    find_quoted_identifier_end(after)
+                } else {
+                    after.find(|c: char| !c.is_alphanumeric() && c != '_' && c != '.' && c != '"')
+                        .unwrap_or(after.len())
+                };
+                if end > 0 {
+                    return Some(after[..end].to_string());
+                }
+            }
+            search_from = abs_pos + keyword.len();
+        }
+    }
+    None
+}
+```
+
+### Code Linkage
+
+| Change | File | Description |
+|--------|------|-------------|
+| Uppercase quoting | `src/sql/identifiers.rs:70` | `quote_identifier()` uppercases before quoting |
+| Cascading fix | `src/sql/identifiers.rs:104` | `quote_qualified_name()` inherits fix |
+| Word boundary | `src/db/client.rs:719` | `extract_table_name()` uses word-boundary matching |
+| Test updates | `src/sql/identifiers.rs` (tests) | Update expected values to uppercase |
+| New tests | `src/db/client.rs` (tests) | Add `TABLES` vs `TABLE` word boundary test |
+
 ## Future Enhancements
 
 - **Config file flag**: `--config <path>` to override default config location

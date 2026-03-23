@@ -3,7 +3,9 @@
 //! Each command has a dedicated implementation with proper error handling
 //! and output formatting.
 
+pub mod describe;
 pub mod inspect;
+pub mod list;
 pub mod locks;
 pub mod monitoring_utils;
 pub mod ping;
@@ -13,6 +15,7 @@ pub mod query_inspect;
 pub mod repl;
 pub mod sample;
 pub mod sessions;
+pub mod show_indexes;
 pub mod sysconfig;
 
 pub use locks::execute as locks;

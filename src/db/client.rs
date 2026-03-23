@@ -716,22 +716,119 @@ fn map_type_name_to_teradata_type(type_name: &str) -> TeradataType {
 }
 
 /// Try to extract table name from SQL for error messages
+///
+/// Handles both unquoted identifiers (`FROM dbc.tables`) and quoted
+/// identifiers (`FROM "DBC"."TABLES"`). Uses word-boundary checks to
+/// avoid matching keywords embedded in longer words (e.g., "TABLE"
+/// inside "TABLES").
 fn extract_table_name(sql: &str) -> Option<String> {
     let sql_upper = sql.to_uppercase();
     let keywords = ["FROM", "INTO", "UPDATE", "TABLE"];
 
     for keyword in keywords {
-        if let Some(pos) = sql_upper.find(keyword) {
-            let after = &sql[pos + keyword.len()..].trim_start();
-            let end = after
+        let mut search_from = 0;
+        while let Some(rel_pos) = sql_upper[search_from..].find(keyword) {
+            let pos = search_from + rel_pos;
+            search_from = pos + keyword.len();
+
+            // Check word boundary before keyword
+            if pos > 0 {
+                let prev = sql.as_bytes()[pos - 1];
+                if prev.is_ascii_alphanumeric() || prev == b'_' {
+                    continue;
+                }
+            }
+
+            // Check word boundary after keyword
+            let after_pos = pos + keyword.len();
+            if after_pos < sql.len() {
+                let next = sql.as_bytes()[after_pos];
+                if next.is_ascii_alphanumeric() || next == b'_' {
+                    continue;
+                }
+            }
+
+            // We have a valid keyword match; extract the table name after it
+            let remainder = &sql[after_pos..].trim_start();
+            if remainder.is_empty() {
+                continue;
+            }
+
+            // Handle quoted identifiers: "db"."table" or "table"
+            if remainder.starts_with('"') {
+                return extract_quoted_table_name(remainder);
+            }
+
+            // Unquoted identifier: alphanumeric, underscore, dot
+            let end = remainder
                 .find(|c: char| !c.is_alphanumeric() && c != '_' && c != '.')
-                .unwrap_or(after.len());
+                .unwrap_or(remainder.len());
             if end > 0 {
-                return Some(after[..end].to_string());
+                return Some(remainder[..end].to_string());
             }
         }
     }
     None
+}
+
+/// Extract a quoted table name from a string starting with `"`.
+///
+/// Handles `"table"`, `"db"."table"`, and embedded escaped quotes (`""`).
+fn extract_quoted_table_name(s: &str) -> Option<String> {
+    let bytes = s.as_bytes();
+    let mut result = String::new();
+    let mut i = 0;
+
+    // We may have up to two quoted segments separated by a dot
+    for segment in 0..2 {
+        if i >= bytes.len() || bytes[i] != b'"' {
+            break;
+        }
+        if segment > 0 {
+            result.push('.');
+        }
+        result.push('"');
+        i += 1; // skip opening quote
+
+        // Read until closing (non-escaped) quote
+        loop {
+            if i >= bytes.len() {
+                // Unterminated quote; return what we have
+                return if result.len() > 1 {
+                    Some(result)
+                } else {
+                    None
+                };
+            }
+            if bytes[i] == b'"' {
+                result.push('"');
+                i += 1;
+                // Check for escaped quote ("")
+                if i < bytes.len() && bytes[i] == b'"' {
+                    result.push('"');
+                    i += 1;
+                    continue;
+                }
+                // End of this quoted segment
+                break;
+            }
+            result.push(bytes[i] as char);
+            i += 1;
+        }
+
+        // Check for dot separator to continue to next segment
+        if i < bytes.len() && bytes[i] == b'.' {
+            i += 1;
+        } else {
+            break;
+        }
+    }
+
+    if result.is_empty() {
+        None
+    } else {
+        Some(result)
+    }
 }
 
 /// Strip Go stack traces from Teradata driver error messages
@@ -839,6 +936,45 @@ mod tests {
             extract_table_name("UPDATE orders SET status = 'done'"),
             Some("orders".to_string())
         );
+    }
+
+    #[test]
+    fn test_extract_table_name_word_boundaries() {
+        // "TABLE" should not match the "TABLE" substring inside "TABLES"
+        assert_eq!(
+            extract_table_name("SELECT * FROM dbc.tables SAMPLE 10"),
+            Some("dbc.tables".to_string())
+        );
+        // UPDATE should not match embedded in other words
+        assert_eq!(
+            extract_table_name("SELECT * FROM UPDATELOG WHERE id = 1"),
+            Some("UPDATELOG".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_table_name_quoted_identifiers() {
+        assert_eq!(
+            extract_table_name("SELECT * FROM \"DBC\".\"TABLES\" SAMPLE 10"),
+            Some("\"DBC\".\"TABLES\"".to_string())
+        );
+        assert_eq!(
+            extract_table_name("SELECT * FROM \"MyTable\" WHERE id = 1"),
+            Some("\"MyTable\"".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_table_name_qualified() {
+        assert_eq!(
+            extract_table_name("SELECT * FROM dbc.TablesV WHERE 1=1"),
+            Some("dbc.TablesV".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_table_name_no_match() {
+        assert_eq!(extract_table_name("SELECT 1"), None);
     }
 
     #[test]

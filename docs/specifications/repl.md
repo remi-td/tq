@@ -3207,13 +3207,13 @@ Columns:
 │ Column        │ Type         │ Nullable │ Default │ Comments │
 ├───────────────┼──────────────┼──────────┼─────────┼──────────┤
 │ employee_id   │ INTEGER      │ NO       │ -       │ PK       │
-│ first_name    │ VARCHAR(50)  │ YES      │ NULL    │          │
-│ last_name     │ VARCHAR(50)  │ YES      │ NULL    │          │
-│ email         │ VARCHAR(100) │ YES      │ NULL    │          │
-│ hire_date     │ DATE         │ YES      │ NULL    │          │
-│ salary        │ DECIMAL(10,2)│ YES      │ NULL    │          │
-│ department_id │ INTEGER      │ YES      │ NULL    │ FK       │
-│ manager_id    │ INTEGER      │ YES      │ NULL    │ FK       │
+│ first_name    │ VARCHAR(50)  │ YES      │ -       │          │
+│ last_name     │ VARCHAR(50)  │ YES      │ -       │          │
+│ email         │ VARCHAR(100) │ YES      │ -       │          │
+│ hire_date     │ DATE         │ YES      │ -       │          │
+│ salary        │ DECIMAL(10,2)│ YES      │ -       │          │
+│ department_id │ INTEGER      │ YES      │ -       │ FK       │
+│ manager_id    │ INTEGER      │ YES      │ -       │ FK       │
 └───────────────┴──────────────┴──────────┴─────────┴──────────┘
 
 Indexes:
@@ -3340,12 +3340,12 @@ Displayed for: Tables, Views, Macros, Queue Tables, Global Temporary Tables, Joi
 │ Column        │ Type         │ Nullable │ Default │
 ├───────────────┼──────────────┼──────────┼─────────┤
 │ employee_id   │ INTEGER      │ NO       │ -       │
-│ first_name    │ VARCHAR(50)  │ YES      │ NULL    │
-│ last_name     │ VARCHAR(50)  │ YES      │ NULL    │
-│ email         │ VARCHAR(100) │ YES      │ NULL    │
-│ hire_date     │ DATE         │ YES      │ NULL    │
-│ salary        │ DECIMAL(10,2)│ YES      │ NULL    │
-│ department_id │ INTEGER      │ YES      │ NULL    │
+│ first_name    │ VARCHAR(50)  │ YES      │ -       │
+│ last_name     │ VARCHAR(50)  │ YES      │ -       │
+│ email         │ VARCHAR(100) │ YES      │ -       │
+│ hire_date     │ DATE         │ YES      │ -       │
+│ salary        │ DECIMAL(10,2)│ YES      │ -       │
+│ department_id │ INTEGER      │ YES      │ -       │
 └───────────────┴──────────────┴──────────┴─────────┘
 
 7 columns
@@ -3479,12 +3479,12 @@ tq> /inspect employees
 │ Column        │ Type         │ Nullable │ Default │
 ├───────────────┼──────────────┼──────────┼─────────┤
 │ employee_id   │ INTEGER      │ NO       │ -       │
-│ first_name    │ VARCHAR(50)  │ YES      │ NULL    │
-│ last_name     │ VARCHAR(50)  │ YES      │ NULL    │
-│ email         │ VARCHAR(100) │ YES      │ NULL    │
-│ hire_date     │ DATE         │ YES      │ NULL    │
-│ salary        │ DECIMAL(10,2)│ YES      │ NULL    │
-│ department_id │ INTEGER      │ YES      │ NULL    │
+│ first_name    │ VARCHAR(50)  │ YES      │ -       │
+│ last_name     │ VARCHAR(50)  │ YES      │ -       │
+│ email         │ VARCHAR(100) │ YES      │ -       │
+│ hire_date     │ DATE         │ YES      │ -       │
+│ salary        │ DECIMAL(10,2)│ YES      │ -       │
+│ department_id │ INTEGER      │ YES      │ -       │
 └───────────────┴──────────────┴──────────┴─────────┘
 
 7 columns
@@ -3524,8 +3524,8 @@ tq> /inspect active_employees_view
 │ Column        │ Type         │ Nullable │ Default │
 ├───────────────┼──────────────┼──────────┼─────────┤
 │ employee_id   │ INTEGER      │ NO       │ -       │
-│ full_name     │ VARCHAR(101) │ YES      │ NULL    │
-│ department    │ VARCHAR(50)  │ YES      │ NULL    │
+│ full_name     │ VARCHAR(101) │ YES      │ -       │
+│ department    │ VARCHAR(50)  │ YES      │ -       │
 └───────────────┴──────────────┴──────────┴─────────┘
 
 3 columns

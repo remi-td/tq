@@ -186,6 +186,45 @@ fn run(cli: Cli) -> Result<()> {
                 commands::inspect::execute(&client, &args.object, args.format, &mut stdout, use_color)?;
             }
         }
+        // Sprint 46: Describe command
+        Command::Describe(args) => {
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::describe::execute(&client, &args.table, args.format, &mut writer, use_color)?;
+            } else {
+                let mut stdout = io::stdout();
+                commands::describe::execute(&client, &args.table, args.format, &mut stdout, use_color)?;
+            }
+        }
+        // Sprint 46: List command
+        Command::List(args) => {
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::list::execute(
+                    &client, args.object_type, args.pattern.as_deref(),
+                    args.database.as_deref(), args.format, &mut writer, use_color,
+                )?;
+            } else {
+                let mut stdout = io::stdout();
+                commands::list::execute(
+                    &client, args.object_type, args.pattern.as_deref(),
+                    args.database.as_deref(), args.format, &mut stdout, use_color,
+                )?;
+            }
+        }
+        // Sprint 46: Show-indexes command
+        Command::ShowIndexes(args) => {
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::show_indexes::execute(&client, &args.table, args.format, &mut writer, use_color)?;
+            } else {
+                let mut stdout = io::stdout();
+                commands::show_indexes::execute(&client, &args.table, args.format, &mut stdout, use_color)?;
+            }
+        }
         // Help, Profiles, and Profile already handled above
         Command::Help(_) | Command::Profiles | Command::Profile(_) => unreachable!(),
     }
