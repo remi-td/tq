@@ -7,6 +7,7 @@ pub mod abort;
 pub mod describe;
 pub mod explain;
 pub mod format_helpers;
+pub mod history;
 pub mod inspect;
 pub mod list;
 pub mod query_helpers;
@@ -26,6 +27,7 @@ pub mod sysconfig;
 
 pub use abort::execute as abort;
 pub use explain::execute as explain;
+pub use history::execute as history;
 pub use locks::execute as locks;
 pub use ping::execute as ping;
 pub use priority::execute as priority;

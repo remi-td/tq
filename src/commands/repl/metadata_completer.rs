@@ -368,6 +368,12 @@ const METACOMMANDS: &[MetacommandDef] = &[
         aliases: &[],
         description: "Analyze AMP-level resource skew",
     },
+    // Sprint 51: Session history command
+    MetacommandDef {
+        name: "history",
+        aliases: &[],
+        description: "View session logon/logoff history and trends",
+    },
 ];
 
 /// Test helper: returns metacommand names matching a prefix

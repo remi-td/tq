@@ -345,6 +345,15 @@ pub enum Command {
     /// Example: tq skew 1234
     ///          tq skew
     Skew(SkewArgs),
+
+    /// View session logon/logoff history and trends
+    ///
+    /// Shows recent session activity from DBC.LogOnOffV including logon,
+    /// logoff, and authentication failure events with summary statistics.
+    ///
+    /// Example: tq history --last 24h
+    ///          tq history --last 7d --user alice
+    History(HistoryArgs),
 }
 
 /// Profile management subcommands
@@ -899,6 +908,41 @@ pub struct SkewArgs {
     /// table: Formatted skew analysis (default)
     /// json: JSON array of session objects
     /// csv: Comma-separated values
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for the history command (Sprint 51)
+#[derive(Parser, Debug)]
+pub struct HistoryArgs {
+    /// Time range to query (e.g., 1h, 24h, 7d, 30m)
+    ///
+    /// Specifies how far back to look for session events.
+    /// Default: 1h (one hour).
+    #[arg(long, value_name = "DURATION")]
+    pub last: Option<String>,
+
+    /// Filter by username
+    ///
+    /// Show only events for a specific user.
+    #[arg(long, value_name = "USERNAME")]
+    pub user: Option<String>,
+
+    /// Output format
+    ///
+    /// table: Summary header + event table (default)
+    /// json: JSON object with summary and events
+    /// csv: Comma-separated event records
     #[arg(
         short,
         long,

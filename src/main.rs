@@ -258,6 +258,17 @@ fn run(cli: Cli) -> Result<()> {
                 commands::explain(&client, &args, &mut stdout, use_color)?;
             }
         }
+        // Sprint 51: Session history command
+        Command::History(args) => {
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::history(&client, &args, &mut writer, use_color)?;
+            } else {
+                let mut stdout = io::stdout();
+                commands::history(&client, &args, &mut stdout, use_color)?;
+            }
+        }
         // Sprint 50: Skew command for AMP resource analysis
         Command::Skew(args) => {
             if let Some(ref output_path) = args.output {

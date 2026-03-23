@@ -234,6 +234,14 @@ pub fn handle_metacommand<W: Write>(
             )?;
         }
 
+        // Sprint 51: Session history (basic handler - no client available)
+        "history" => {
+            writeln!(
+                writer,
+                "The /history command requires full REPL mode with database connection."
+            )?;
+        }
+
         // Sprint 50: Explain and skew (basic handler - no client available)
         "explain" => {
             writeln!(
@@ -629,6 +637,16 @@ pub fn handle_metacommand_with_state<W: Write>(
             }
         }
 
+        // Sprint 51: Session history command
+        "history" => {
+            let args_strs: Vec<&str> = args.iter().map(|s| s.as_ref()).collect();
+            crate::commands::history::execute_for_repl(
+                completion_state.client(),
+                &args_strs,
+                writer,
+            )?;
+        }
+
         // Sprint 49: Abort session/query command
         "abort" => {
             if args.is_empty() {
@@ -893,6 +911,10 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(
         writer,
         "  /skew [session_id]     Analyze AMP-level resource skew"
+    )?;
+    writeln!(
+        writer,
+        "  /history [--last <dur>] Session logon/logoff history"
     )?;
     writeln!(writer)?;
     writeln!(writer, "Variable Substitution:")?;
