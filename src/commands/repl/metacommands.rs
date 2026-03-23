@@ -1807,25 +1807,18 @@ fn export_to_clipboard<W: Write>(
     Ok(())
 }
 
-/// Format result as table string
+/// Format result as table string using terminal-aware column selection
+///
+/// Uses the format::table module which calculates content-based column widths,
+/// detects terminal width, and hides columns that don't fit (with a "+N cols" indicator).
+/// This prevents wide tables from rendering unreadable 2-char columns.
 fn format_as_table(result: &crate::db::QueryResult) -> Result<String> {
-    use comfy_table::{presets, ContentArrangement, Table};
-
-    let mut table = Table::new();
-    table.load_preset(presets::UTF8_FULL);
-    table.set_content_arrangement(ContentArrangement::Dynamic);
-
-    // Add header
-    let headers: Vec<String> = result.columns.iter().map(|c| c.name.clone()).collect();
-    table.set_header(&headers);
-
-    // Add rows
-    for row in &result.rows {
-        let values: Vec<String> = row.iter().map(|v| v.display().to_string()).collect();
-        table.add_row(values);
-    }
-
-    Ok(table.to_string())
+    let options = crate::format::table::TableOptions {
+        show_header: true,
+        use_color: true,
+        max_column_width: None,
+    };
+    crate::format::table::format_string(result, &options)
 }
 
 /// Format result as CSV string
