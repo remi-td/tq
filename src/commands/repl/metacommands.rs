@@ -234,6 +234,20 @@ pub fn handle_metacommand<W: Write>(
             )?;
         }
 
+        // Sprint 49: Session control (basic handler - no client available)
+        "abort" => {
+            writeln!(
+                writer,
+                "The /abort command requires full REPL mode with database connection."
+            )?;
+        }
+        "priority" => {
+            writeln!(
+                writer,
+                "The /priority command requires full REPL mode with database connection."
+            )?;
+        }
+
         // Sprint 40: Params command (basic handler)
         "params" | "p" => {
             handle_params_basic(&args, state, writer)?;
@@ -601,6 +615,107 @@ pub fn handle_metacommand_with_state<W: Write>(
             }
         }
 
+        // Sprint 49: Abort session/query command
+        "abort" => {
+            if args.is_empty() {
+                writeln!(writer)?;
+                writeln!(writer, "Usage: /abort <session_id> [yes]")?;
+                writeln!(writer, "       /abort query <session_id> [yes]")?;
+                writeln!(writer)?;
+                writeln!(writer, "Abort a session or its running query.")?;
+                writeln!(writer, "Append 'yes' to confirm the operation.")?;
+                writeln!(writer)?;
+                writeln!(writer, "Examples:")?;
+                writeln!(writer, "  /abort 1234 yes       Abort session 1234")?;
+                writeln!(writer, "  /abort query 1234 yes Abort running query on session 1234")?;
+                writeln!(writer)?;
+                writeln!(writer, "Use /sessions to list active session IDs.")?;
+                writeln!(writer)?;
+            } else if args[0].eq_ignore_ascii_case("query") {
+                // /abort query <session_id> [yes]
+                if args.len() < 2 {
+                    writeln!(writer, "Usage: /abort query <session_id> [yes]")?;
+                } else {
+                    match args[1].parse::<i64>() {
+                        Ok(session_id) => {
+                            let confirmed = args.len() > 2 && args[2].eq_ignore_ascii_case("yes");
+                            crate::commands::abort::execute_for_repl(
+                                completion_state.client(),
+                                session_id,
+                                true,
+                                confirmed,
+                                writer,
+                            )?;
+                        }
+                        Err(_) => {
+                            writeln!(
+                                writer,
+                                "Error: '{}' is not a valid session ID. Expected a number.",
+                                args[1]
+                            )?;
+                        }
+                    }
+                }
+            } else {
+                // /abort <session_id> [yes]
+                match args[0].parse::<i64>() {
+                    Ok(session_id) => {
+                        let confirmed = args.len() > 1 && args[1].eq_ignore_ascii_case("yes");
+                        crate::commands::abort::execute_for_repl(
+                            completion_state.client(),
+                            session_id,
+                            false,
+                            confirmed,
+                            writer,
+                        )?;
+                    }
+                    Err(_) => {
+                        writeln!(
+                            writer,
+                            "Error: '{}' is not a valid session ID. Expected a number.",
+                            args[0]
+                        )?;
+                    }
+                }
+            }
+        }
+
+        // Sprint 49: Priority change command
+        "priority" => {
+            if args.len() < 2 {
+                writeln!(writer)?;
+                writeln!(writer, "Usage: /priority <session_id> <level>")?;
+                writeln!(writer)?;
+                writeln!(writer, "Change the priority of a Teradata session.")?;
+                writeln!(writer, "Valid levels: RUSH, MEDIUM, LOW")?;
+                writeln!(writer)?;
+                writeln!(writer, "Examples:")?;
+                writeln!(writer, "  /priority 1234 rush")?;
+                writeln!(writer, "  /priority 1234 low")?;
+                writeln!(writer)?;
+                writeln!(writer, "Use /sessions to list active session IDs.")?;
+                writeln!(writer)?;
+            } else {
+                match args[0].parse::<i64>() {
+                    Ok(session_id) => {
+                        crate::commands::priority::execute_for_repl(
+                            completion_state.client(),
+                            session_id,
+                            args[1],
+                            writer,
+                        )?;
+                    }
+                    Err(_) => {
+                        writeln!(
+                            writer,
+                            "Error: '{}' is not a valid session ID. Expected a number.",
+                            args[0]
+                        )?;
+                    }
+                }
+            }
+        }
+
         // Sprint 40: Params command (full handler)
         "params" | "p" => {
             handle_params_basic(&args, state, writer)?;
@@ -701,6 +816,18 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(
         writer,
         "  /query <id>, /qi <id>  Show recent SQL queries for a session"
+    )?;
+    writeln!(
+        writer,
+        "  /abort <id> [yes]      Abort a session (append 'yes' to confirm)"
+    )?;
+    writeln!(
+        writer,
+        "  /abort query <id> [yes] Abort running query on a session"
+    )?;
+    writeln!(
+        writer,
+        "  /priority <id> <level> Change session priority (RUSH/MEDIUM/LOW)"
     )?;
     writeln!(writer)?;
     writeln!(writer, "Variable Substitution:")?;

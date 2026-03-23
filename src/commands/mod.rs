@@ -3,6 +3,7 @@
 //! Each command has a dedicated implementation with proper error handling
 //! and output formatting.
 
+pub mod abort;
 pub mod describe;
 pub mod format_helpers;
 pub mod inspect;
@@ -11,6 +12,7 @@ pub mod query_helpers;
 pub mod locks;
 pub mod monitoring_utils;
 pub mod ping;
+pub mod priority;
 pub mod profile;
 pub mod query;
 pub mod query_inspect;
@@ -20,8 +22,10 @@ pub mod sessions;
 pub mod show_indexes;
 pub mod sysconfig;
 
+pub use abort::execute as abort;
 pub use locks::execute as locks;
 pub use ping::execute as ping;
+pub use priority::execute as priority;
 pub use query::execute as query;
 pub use query_inspect::execute as query_inspect;
 pub use repl::execute as repl;

@@ -346,6 +346,17 @@ const METACOMMANDS: &[MetacommandDef] = &[
         aliases: &["i"],
         description: "Inspect database object (type, columns, indexes, size)",
     },
+    // Sprint 49: Session control commands
+    MetacommandDef {
+        name: "abort",
+        aliases: &[],
+        description: "Abort a session or running query",
+    },
+    MetacommandDef {
+        name: "priority",
+        aliases: &[],
+        description: "Change session priority (RUSH/MEDIUM/LOW)",
+    },
 ];
 
 /// Test helper: returns metacommand names matching a prefix

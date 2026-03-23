@@ -225,6 +225,28 @@ fn run(cli: Cli) -> Result<()> {
                 commands::show_indexes::execute(&client, &args.table, args.format, &mut stdout, use_color)?;
             }
         }
+        // Sprint 49: Abort command for session control
+        Command::Abort(args) => {
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::abort(&client, &args, &mut writer, use_color)?;
+            } else {
+                let mut stdout = io::stdout();
+                commands::abort(&client, &args, &mut stdout, use_color)?;
+            }
+        }
+        // Sprint 49: Priority command for session control
+        Command::Priority(args) => {
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::priority(&client, &args, &mut writer, use_color)?;
+            } else {
+                let mut stdout = io::stdout();
+                commands::priority(&client, &args, &mut stdout, use_color)?;
+            }
+        }
         // Help, Profiles, and Profile already handled above
         Command::Help(_) | Command::Profiles | Command::Profile(_) => unreachable!(),
     }

@@ -311,6 +311,23 @@ pub enum Command {
     ///          tq show-indexes mydb.employees
     #[command(name = "show-indexes")]
     ShowIndexes(ShowIndexesArgs),
+
+    /// Abort a session or running query
+    ///
+    /// Terminates a Teradata session or cancels its running query.
+    /// Requires --force flag in batch mode (safety guard).
+    ///
+    /// Example: tq abort --force 1234
+    ///          tq abort --force --query 1234
+    Abort(AbortArgs),
+
+    /// Change session priority
+    ///
+    /// Changes the execution priority of a Teradata session.
+    /// Valid levels: RUSH, MEDIUM, LOW.
+    ///
+    /// Example: tq priority 1234 rush
+    Priority(PriorityArgs),
 }
 
 /// Profile management subcommands
@@ -732,6 +749,81 @@ pub struct ShowIndexesArgs {
     /// table: Human-readable index listing (default)
     /// json: JSON array of index objects
     /// csv: Comma-separated index information
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for the abort command (Sprint 49)
+#[derive(Parser, Debug)]
+pub struct AbortArgs {
+    /// Session ID to abort
+    ///
+    /// The Teradata session number to terminate.
+    #[arg(value_name = "SESSION_ID")]
+    pub session_id: i64,
+
+    /// Abort only the running query, not the entire session
+    ///
+    /// Cancels the currently executing query while keeping the session alive.
+    #[arg(long)]
+    pub query: bool,
+
+    /// Confirm the abort operation (required in batch mode)
+    ///
+    /// Abort is a destructive operation. This flag is required to prevent
+    /// accidental session termination.
+    #[arg(long)]
+    pub force: bool,
+
+    /// Output format
+    ///
+    /// table: Human-readable message (default)
+    /// json: JSON result object
+    /// csv: Comma-separated result
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for the priority command (Sprint 49)
+#[derive(Parser, Debug)]
+pub struct PriorityArgs {
+    /// Session ID to change priority for
+    ///
+    /// The Teradata session number whose priority should be changed.
+    #[arg(value_name = "SESSION_ID")]
+    pub session_id: i64,
+
+    /// Priority level to set
+    ///
+    /// Valid levels: RUSH, MEDIUM, LOW (case-insensitive).
+    #[arg(value_name = "LEVEL")]
+    pub level: String,
+
+    /// Output format
+    ///
+    /// table: Human-readable message (default)
+    /// json: JSON result object
+    /// csv: Comma-separated result
     #[arg(
         short,
         long,
