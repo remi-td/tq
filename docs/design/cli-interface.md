@@ -687,6 +687,301 @@ Each consuming module replaces its private copy with a `use crate::commands::for
 
 The `monitoring_utils.rs` module retains its own `escape_csv()` since it serves a different domain (PMON monitoring commands) and already has comprehensive tests. Consolidating it would create an unnecessary cross-domain coupling.
 
+## Shared Query Helpers Module
+
+### Problem
+
+Three command modules contain near-identical query functions that hit the same DBC system views:
+
+| Function | inspect.rs | describe.rs | show_indexes.rs |
+|----------|-----------|-------------|-----------------|
+| `query_indexes()` | Yes (returns `Vec<IndexInfo>`) | Yes (returns `Vec<IndexGroup>`) | Yes (returns `Vec<IndexGroup>`) |
+| `query_columns()` | Yes (returns `Vec<ColumnInfo>`, no comments) | Yes (returns `Vec<ColumnRow>`, with comments) | No |
+| `resolve_database()` | Yes (`resolve_object_database`) | Yes (`resolve_database`) | No (inline in `query_indexes`) |
+| `format_size()` | Yes (2 decimal places) | No | No |
+| `format_size_short()` | No | No | No (in `list.rs`, 1 decimal place) |
+
+Each copy uses slightly different struct names and field names for the same data. The SQL queries are identical except for the column list (describe includes `CommentString`). This duplication was created incrementally as commands were added across sprints 42-46.
+
+### Solution: `src/commands/query_helpers.rs`
+
+Create a new module separate from `format_helpers.rs`. The distinction is clear:
+- `format_helpers.rs`: Pure functions with no I/O (string escaping, name parsing, type mapping)
+- `query_helpers.rs`: Functions that require `DatabaseClient` access (database queries)
+
+This separation preserves the testability advantage of `format_helpers.rs` (unit-testable without mocks) while centralizing all DBC query logic.
+
+### Shared Types
+
+```rust
+// src/commands/query_helpers.rs
+
+/// Column metadata from DBC.ColumnsV.
+///
+/// Contains all fields needed by any consumer. Commands that do not
+/// need `comment` simply ignore it.
+pub struct ColumnInfo {
+    pub name: String,
+    pub col_type: String,
+    pub nullable: String,
+    /// `None` when no default is defined (DBC returns NULL).
+    pub default: Option<String>,
+    /// Column comment from CommentString. Empty string when absent.
+    pub comment: String,
+}
+
+/// Index metadata grouped by IndexNumber from DBC.IndicesV.
+///
+/// A single struct replaces the three private variants (`IndexInfo`,
+/// `IndexGroup` x2) that existed across inspect.rs, describe.rs,
+/// and show_indexes.rs.
+pub struct IndexGroup {
+    /// Index name, or `None` for unnamed system indexes.
+    pub name: Option<String>,
+    /// Human-readable type label (e.g., "Primary Index").
+    pub index_type_label: String,
+    /// Short classification suffix (e.g., "UPI", "NUSI").
+    pub short_label: String,
+    /// Whether this is a primary-class index (P, Q, or K type).
+    pub is_primary: bool,
+    /// Ordered list of column names in this index.
+    pub columns: Vec<String>,
+}
+```
+
+**Design decisions on the shared types:**
+
+1. **`ColumnInfo.default` is `Option<String>`**: inspect.rs already uses `Option<String>` (with `None` for absent defaults). describe.rs currently uses `"-"` as a sentinel string. The shared type uses `Option` because it correctly models the domain (a default either exists or does not). The describe formatters convert `None` to `"-"` at display time.
+
+2. **`ColumnInfo.comment` is always present**: The SQL always selects `CommentString`. inspect.rs currently omits it from its query, but adding the column costs nothing (it is already in DBC.ColumnsV) and simplifies to a single query function. Consumers that do not display comments simply ignore the field.
+
+3. **`IndexGroup.name` is `Option<String>`**: inspect.rs uses `Option<String>` (semantically correct for unnamed indexes). describe.rs and show_indexes.rs use `"(unnamed)"` as a display sentinel. The shared type uses `Option`; display code maps `None` to `"(unnamed)"` where needed.
+
+4. **`IndexGroup.is_primary`**: Only show_indexes.rs currently uses this field (to separate primary vs secondary sections). Adding it to the shared type is zero-cost and avoids show_indexes.rs needing to re-derive it from `index_type_label`.
+
+### Shared Query Functions
+
+```rust
+/// Resolve the database name for an unqualified object reference.
+///
+/// If `db` is `Some`, returns it directly. Otherwise queries
+/// `SELECT DATABASE` and falls back to the connection config default.
+pub fn resolve_database(
+    client: &DatabaseClient,
+    db: Option<&str>,
+) -> Result<String>
+```
+
+This merges the two variants:
+- inspect.rs `resolve_object_database(client, db: Option<&str>)` -- accepts optional db
+- describe.rs `resolve_database(client)` -- always queries
+
+The merged signature takes `Option<&str>`, which subsumes both use cases. describe.rs callers pass `None` when unqualified.
+
+```rust
+/// Query DBC.ColumnsV for column metadata.
+///
+/// Returns all standard column fields including comments.
+/// The SQL uses `column_type_case_sql()` for type translation.
+pub fn query_columns(
+    client: &DatabaseClient,
+    db: &str,
+    object: &str,
+) -> Result<Vec<ColumnInfo>>
+```
+
+Single implementation that always selects `CommentString`. This replaces:
+- inspect.rs `query_columns` (4 columns, no comment)
+- describe.rs `query_columns` (5 columns, with comment)
+
+```rust
+/// Query DBC.IndicesV for index metadata, grouped by IndexNumber.
+///
+/// Returns groups ordered by IndexNumber, with columns ordered
+/// by ColumnPosition within each group.
+pub fn query_indexes(
+    client: &DatabaseClient,
+    db: &str,
+    object: &str,
+) -> Result<Vec<IndexGroup>>
+```
+
+Single implementation that replaces all three copies. All three use identical SQL and identical grouping logic. The only differences were:
+- inspect.rs uses `Option<String>` for name, no `is_primary`
+- describe.rs uses `String` for name (with "(unnamed)" sentinel), no `is_primary`
+- show_indexes.rs uses `String` for name, has `is_primary`
+
+The shared version computes all fields. Callers use what they need.
+
+### `format_size` Consolidation
+
+```rust
+// Added to format_helpers.rs (pure function, no I/O)
+
+/// Format a byte count as a human-readable size string.
+///
+/// `precision` controls decimal places: 2 for inspect (detailed),
+/// 1 for list (compact).
+pub fn format_size(bytes: i64, precision: usize) -> String
+```
+
+This replaces:
+- inspect.rs `format_size(bytes)` -- uses 2 decimal places
+- list.rs `format_size_short(bytes)` -- uses 1 decimal place
+
+Call sites change to `format_size(bytes, 2)` and `format_size(bytes, 1)` respectively.
+
+### `summarize_error` UTF-8 Fix
+
+The current implementation in inspect.rs slices on byte boundaries:
+
+```rust
+fn summarize_error(e: &TqError) -> String {
+    let msg = e.to_string();
+    if msg.len() > 80 {
+        format!("{}...", &msg[..77])  // BUG: may panic on multi-byte chars
+    } else {
+        msg
+    }
+}
+```
+
+This is the same class of bug as the `truncate_str` fix from Sprint 47. The fix uses `truncate_str` from format_helpers:
+
+```rust
+fn summarize_error(e: &TqError) -> String {
+    truncate_str(&e.to_string(), 80)
+}
+```
+
+This function stays private in inspect.rs (only used there) but now delegates to the shared UTF-8-safe truncation.
+
+### Module Registration
+
+```rust
+// src/commands/mod.rs
+pub mod query_helpers;  // NEW
+```
+
+### Migration Plan
+
+The migration is mechanical and low-risk:
+
+**Step 1: Create `query_helpers.rs` with shared types and functions**
+- Define `ColumnInfo`, `IndexGroup` structs
+- Implement `resolve_database`, `query_columns`, `query_indexes`
+- Add unit tests for `format_size` with precision parameter
+
+**Step 2: Add `format_size` to `format_helpers.rs`**
+- Add the unified `format_size(bytes, precision)` function
+- Add unit tests covering both precision=1 and precision=2 cases
+
+**Step 3: Migrate consumers one at a time**
+- `inspect.rs`: Remove private structs and query functions, import from `query_helpers`
+  - `ColumnInfo` field `default` stays `Option<String>` (no change)
+  - `IndexInfo` replaced by `IndexGroup` (map `name: Option<String>` directly)
+  - Remove private `format_size`, use `format_helpers::format_size(bytes, 2)`
+  - Fix `summarize_error` to use `truncate_str`
+- `describe.rs`: Remove private structs and query functions, import from `query_helpers`
+  - `ColumnRow` replaced by `ColumnInfo` (display code maps `default: None` to `"-"`)
+  - `IndexGroup` replaced by shared `IndexGroup` (display code maps `name: None` to `"(unnamed)"`)
+  - `ObjectHeader` stays private (only used by describe.rs, different fields from inspect's `ObjectInfo`)
+- `show_indexes.rs`: Remove private `IndexGroup` and `query_indexes`, import from `query_helpers`
+  - Inline database resolution replaced by `resolve_database(client, db)`
+- `list.rs`: Remove private `format_size_short`, use `format_helpers::format_size(bytes, 1)`
+
+**Step 4: Verify all existing tests pass**
+- `cargo test --lib` must show zero regressions
+
+### Code Linkage
+
+| Change | File | Description |
+|--------|------|-------------|
+| New module | `src/commands/query_helpers.rs` | Shared `ColumnInfo`, `IndexGroup`, query functions |
+| Registration | `src/commands/mod.rs` | Add `pub mod query_helpers` |
+| Format size | `src/commands/format_helpers.rs` | Add `format_size(bytes, precision)` |
+| Migrate inspect | `src/commands/inspect.rs` | Remove private copies, import shared |
+| Migrate describe | `src/commands/describe.rs` | Remove private copies, import shared |
+| Migrate show_indexes | `src/commands/show_indexes.rs` | Remove private copies, import shared |
+| Migrate list | `src/commands/list.rs` | Remove `format_size_short`, import shared |
+
+## JSON API Type Correctness
+
+### Problem
+
+Several JSON output functions emit values as quoted strings where the specification requires proper JSON types:
+
+1. **describe JSON `nullable`**: Emits `"nullable":"YES"` instead of `"nullable":true`
+2. **describe JSON `default`**: Emits `"default":"-"` instead of `"default":null`
+3. **list tables JSON `rows_est`**: Emits `"rows_est":"1000"` instead of `"estimated_rows":1000`
+4. **list tables JSON `size`**: Emits `"size":"2.5 MB"` instead of `"size_bytes":2621440`
+5. **list databases JSON `name`**: Emits `"name":"mydb"` instead of `"database":"mydb"`
+
+### Solution
+
+**describe JSON** (`describe.rs` `describe_json()`):
+
+```rust
+// Before:
+"\"nullable\":\"{}\",\"default\":\"{}\"",
+json_escape(&col.nullable),
+json_escape(&col.default)
+
+// After:
+"\"nullable\":{},\"default\":{}",
+if col.nullable == "YES" { "true" } else { "false" },
+match &col.default {
+    Some(val) => format!("\"{}\"", json_escape(val)),
+    None => "null".to_string(),
+}
+```
+
+**list tables JSON** (`list.rs`):
+
+The `TableEntry` struct currently stores `row_count: String` and `size: String` (pre-formatted display strings). To emit raw integers in JSON, the struct needs raw numeric fields or the JSON formatter needs access to the raw values.
+
+Recommended approach: Add `row_count_raw: i64` and `size_bytes: i64` fields to `TableEntry`. The table formatter uses the string fields; the JSON formatter uses the integer fields.
+
+```rust
+struct TableEntry {
+    name: String,
+    kind: String,
+    row_count: String,      // display: "1,000"
+    row_count_raw: i64,     // JSON: 1000
+    size: String,           // display: "2.5 MB"
+    size_bytes: i64,        // JSON: 2621440
+}
+
+// JSON output:
+"{{\"name\":\"{}\",\"type\":\"{}\",\"estimated_rows\":{},\"size_bytes\":{}}}",
+json_escape(&t.name),
+json_escape(&t.kind),
+t.row_count_raw,
+t.size_bytes
+```
+
+**list databases JSON** (`list.rs`):
+
+Simple key rename from `"name"` to `"database"`:
+
+```rust
+// Before:
+"{{\"name\":\"{}\",\"owner\":\"{}\",\"type\":\"{}\"}}",
+
+// After:
+"{{\"database\":\"{}\",\"owner\":\"{}\",\"type\":\"{}\"}}",
+```
+
+### Code Linkage
+
+| Change | File | Description |
+|--------|------|-------------|
+| Nullable as boolean | `src/commands/describe.rs` | `describe_json()`: emit `true`/`false` unquoted |
+| Default as null | `src/commands/describe.rs` | `describe_json()`: emit `null` for `None` |
+| Table entry raw fields | `src/commands/list.rs` | Add `row_count_raw`, `size_bytes` to `TableEntry` |
+| Tables JSON integers | `src/commands/list.rs` | JSON formatter uses raw integer fields |
+| Database key rename | `src/commands/list.rs` | JSON `"name"` to `"database"` |
+
 ### Unit Tests
 
 The `format_helpers.rs` module includes comprehensive tests for all functions, including:

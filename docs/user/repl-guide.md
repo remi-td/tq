@@ -119,10 +119,10 @@ tq> /list databases
 Databases (4):
 Name                           Owner                Type
 ------------------------------------------------------------
-analytics                      analytics            Database
+analytics                      analytics            User
 development                    dev_user             User
 production                     dba_user             User
-staging                        dba_user             User
+DBC                            DBC                  System
 
 4 database(s)
 ```
@@ -141,12 +141,12 @@ List all tables in your current database:
 tq> /list tables
 
 Tables in (current):
-Name                                Type       Rows (Est.)       Size
------------------------------------------------------------------
-customers                           TABLE        1234567      45.2 MB
-employees                           TABLE          42573       2.1 MB
-orders                              TABLE        9876543     320.5 MB
-products                            TABLE          15432     890.0 KB
+Name                           Type       Rows (Est.)       Size Owner
+------------------------------------------------------------------------------
+customers                      TABLE        1234567      45.2 MB alice
+employees                      TABLE          42573       2.1 MB alice
+orders                         TABLE        9876543     320.5 MB bob
+products                       TABLE          15432     890.0 KB alice
 
 4 table(s)
 ```
@@ -166,10 +166,10 @@ Use glob patterns to filter tables:
 tq> /list tables emp*
 
 Tables in (current) matching 'emp*':
-Name                                Type       Rows (Est.)       Size
------------------------------------------------------------------
-employees                           TABLE          42573       2.1 MB
-emp_archive                         TABLE           8123     512.0 KB
+Name                           Type       Rows (Est.)       Size Owner
+------------------------------------------------------------------------------
+employees                      TABLE          42573       2.1 MB alice
+emp_archive                    TABLE           8123     512.0 KB alice
 
 2 table(s)
 ```
@@ -192,10 +192,10 @@ You can also specify a database using a qualified prefix:
 tq> /list tables staging.test_*
 
 Tables in staging matching 'test_*':
-Name                                Type       Rows (Est.)       Size
------------------------------------------------------------------
-test_customers                      TABLE            100       8.0 KB
-test_orders                         TABLE            250      12.0 KB
+Name                           Type       Rows (Est.)       Size Owner
+------------------------------------------------------------------------------
+test_customers                 TABLE            100       8.0 KB alice
+test_orders                    TABLE            250      12.0 KB alice
 
 2 table(s)
 ```
@@ -208,10 +208,11 @@ List all views in your current database:
 tq> /list views
 
 Views in (current):
-----------------------------------------
-  active_employees
-  customer_orders_view
-  sales_summary
+Name                                Owner
+--------------------------------------------------
+active_employees                    alice
+customer_orders_view                alice
+sales_summary                       bob
 
 3 view(s)
 ```
@@ -1144,6 +1145,7 @@ tq> /describe employees
   Type:      Table
   Database:  PRODUCTION
   Name:      employees
+  Rows (Est.): 42573
 
 ── Columns (7) ──
   Column                   Type                 Nullable   Default
@@ -1201,6 +1203,24 @@ Indexes on staging.employees:
 ── Primary Index ──
   Primary Index (NUPI): employee_id
 
+No secondary indexes.
+
+1 index(es), 1 index column(s)
+
+```
+
+**NoPI table (no primary index):**
+
+```sql
+tq> /show indexes fact_sales
+
+Indexes on fact_sales:
+
+No Primary Index (NoPI)
+
+── Secondary Indexes ──
+  Secondary Index (NUSI) "idx_region": region_code
+
 1 index(es), 1 index column(s)
 
 ```
@@ -1215,8 +1235,8 @@ tq> \di employees
 
 Output is organized into two sections:
 
-- **Primary Index** — shows the Teradata primary index with its type label (UPI, NUPI, PPI) and the column(s) it covers
-- **Secondary Indexes** — shows each secondary index with its type label (USI, NUSI), optional name in quotes, and covered columns
+- **Primary Index** — shows the Teradata primary index with its type label (UPI, NUPI, PPI) and the column(s) it covers. Tables with no primary index show `No Primary Index (NoPI)`.
+- **Secondary Indexes** — shows each secondary index with its type label (USI, NUSI), optional name in quotes, and covered columns. Tables with no secondary indexes show `No secondary indexes.`
 
 Index labels:
 - **UPI** — Unique Primary Index

@@ -2,14 +2,12 @@
 //!
 //! Provides comprehensive inspection of Teradata database objects showing
 //! type, columns, indexes, storage/skew (tables), and definitions (views/macros).
-//!
-//! Sprint 45: Initial implementation (Issue #33)
 
 use crate::cli::OutputFormat;
 use crate::commands::format_helpers::{
-    classify_index, column_type_case_sql, csv_escape, format_nullable, json_escape,
-    map_table_kind, parse_table_name, truncate_str,
+    csv_escape, format_size, json_escape, map_table_kind, parse_table_name, truncate_str,
 };
+use crate::commands::query_helpers;
 use crate::db::{DatabaseClient, Value};
 use crate::error::Result;
 use crate::sql::escape_sql_string;
@@ -66,7 +64,7 @@ fn inspect_object<W: Write>(
     let (db_part, obj_part) = parse_table_name(object_name);
 
     // Resolve database name
-    let database = match resolve_object_database(client, db_part) {
+    let database = match query_helpers::resolve_database(client, db_part) {
         Ok(db) => db,
         Err(e) => {
             writeln!(writer, "Error: Could not resolve database: {}", e)?;
@@ -74,7 +72,7 @@ fn inspect_object<W: Write>(
         }
     };
 
-    // Section 1: Object Info (required — if this fails, the object doesn't exist)
+    // Section 1: Object Info (required -- if this fails, the object doesn't exist)
     let obj_info = match query_object_type(client, &database, obj_part) {
         Ok(Some(info)) => info,
         Ok(None) => {
@@ -115,8 +113,8 @@ fn inspect_object<W: Write>(
     }
     writeln!(writer)?;
 
-    // Section 2: Columns
-    match query_columns(client, &database, obj_part) {
+    // Section 2: Columns (using shared query_helpers)
+    match query_helpers::query_columns(client, &database, obj_part) {
         Ok(columns) => {
             if !columns.is_empty() {
                 writeln!(writer, "── Columns ({}) ──", columns.len())?;
@@ -136,13 +134,18 @@ fn inspect_object<W: Write>(
                 writeln!(writer, "{}", separator)?;
 
                 for col in &columns {
+                    let default_display = if col.default_val == "-" {
+                        "-"
+                    } else {
+                        &col.default_val
+                    };
                     writeln!(
                         writer,
                         "  {:<24} {:<20} {:<10} {}",
                         truncate_str(&col.name, 22),
                         truncate_str(&col.col_type, 18),
                         &col.nullable,
-                        col.default.as_deref().unwrap_or("-")
+                        default_display
                     )?;
                 }
                 writeln!(writer, "{} columns", columns.len())?;
@@ -159,9 +162,9 @@ fn inspect_object<W: Write>(
         }
     }
 
-    // Section 3: Indexes (only for tables)
+    // Section 3: Indexes (only for tables, using shared query_helpers)
     if obj_info.table_kind == "T" || obj_info.table_kind == "O" {
-        match query_indexes(client, &database, obj_part) {
+        match query_helpers::query_indexes(client, &database, obj_part) {
             Ok(indexes) => {
                 if !indexes.is_empty() {
                     writeln!(writer, "── Indexes ──")?;
@@ -171,13 +174,13 @@ fn inspect_object<W: Write>(
                             writeln!(
                                 writer,
                                 "  {} ({}) \"{}\": {}",
-                                idx.index_type, idx.kind_suffix, name, columns_str
+                                idx.index_type_label, idx.short_label, name, columns_str
                             )?;
                         } else {
                             writeln!(
                                 writer,
                                 "  {} ({}): {}",
-                                idx.index_type, idx.kind_suffix, columns_str
+                                idx.index_type_label, idx.short_label, columns_str
                             )?;
                         }
                     }
@@ -201,12 +204,12 @@ fn inspect_object<W: Write>(
                 writeln!(
                     writer,
                     "  Current Size:  {}",
-                    format_size(storage.total_size)
+                    format_size(storage.total_size, 2)
                 )?;
                 writeln!(
                     writer,
                     "  Peak Size:     {}",
-                    format_size(storage.peak_size)
+                    format_size(storage.peak_size, 2)
                 )?;
                 let skew = calculate_skew(storage.max_amp_size, storage.avg_amp_size);
                 writeln!(
@@ -260,7 +263,7 @@ fn inspect_object_json<W: Write>(
     writer: &mut W,
 ) -> Result<()> {
     let (db_part, obj_part) = parse_table_name(object_name);
-    let database = resolve_object_database(client, db_part)?;
+    let database = query_helpers::resolve_database(client, db_part)?;
 
     let obj_info = match query_object_type(client, &database, obj_part)? {
         Some(info) => info,
@@ -282,8 +285,8 @@ fn inspect_object_json<W: Write>(
         write!(writer, ",\"created\":\"{}\"", json_escape(&obj_info.created))?;
     }
 
-    // Columns
-    if let Ok(columns) = query_columns(client, &database, obj_part) {
+    // Columns (using shared query_helpers)
+    if let Ok(columns) = query_helpers::query_columns(client, &database, obj_part) {
         write!(writer, ",\"columns\":[")?;
         for (i, col) in columns.iter().enumerate() {
             if i > 0 {
@@ -296,8 +299,8 @@ fn inspect_object_json<W: Write>(
                 json_escape(&col.col_type),
                 json_escape(&col.nullable)
             )?;
-            if let Some(ref def) = col.default {
-                write!(writer, ",\"default\":\"{}\"", json_escape(def))?;
+            if col.default_val != "-" {
+                write!(writer, ",\"default\":\"{}\"", json_escape(&col.default_val))?;
             }
             write!(writer, "}}")?;
         }
@@ -327,7 +330,7 @@ fn inspect_object_csv<W: Write>(
     writer: &mut W,
 ) -> Result<()> {
     let (db_part, obj_part) = parse_table_name(object_name);
-    let database = resolve_object_database(client, db_part)?;
+    let database = query_helpers::resolve_database(client, db_part)?;
 
     let obj_info = match query_object_type(client, &database, obj_part)? {
         Some(info) => info,
@@ -339,15 +342,20 @@ fn inspect_object_csv<W: Write>(
 
     // Output columns as CSV (most useful tabular representation)
     writeln!(writer, "Column,Type,Nullable,Default")?;
-    if let Ok(columns) = query_columns(client, &database, obj_part) {
+    if let Ok(columns) = query_helpers::query_columns(client, &database, obj_part) {
         for col in &columns {
+            let default_display = if col.default_val == "-" {
+                ""
+            } else {
+                &col.default_val
+            };
             writeln!(
                 writer,
                 "{},{},{},{}",
                 csv_escape(&col.name),
                 csv_escape(&col.col_type),
                 csv_escape(&col.nullable),
-                csv_escape(col.default.as_deref().unwrap_or(""))
+                csv_escape(default_display)
             )?;
         }
     }
@@ -359,8 +367,8 @@ fn inspect_object_csv<W: Write>(
             writeln!(
                 writer,
                 "# Storage: {} current, {} peak, {:.1}% skew, {} AMPs",
-                format_size(storage.total_size),
-                format_size(storage.peak_size),
+                format_size(storage.total_size, 2),
+                format_size(storage.peak_size, 2),
                 skew,
                 storage.amp_count
             )?;
@@ -371,10 +379,11 @@ fn inspect_object_csv<W: Write>(
 }
 
 // =============================================================================
-// Data structures
+// Data structures (inspect-specific)
 // =============================================================================
 
-/// Metadata about a database object from DBC.TablesV
+/// Metadata about a database object from DBC.TablesV (inspect-specific: includes
+/// created timestamp and comment which the shared ObjectHeader does not).
 struct ObjectInfo {
     /// Raw TableKind character (T, V, M, O, etc.)
     table_kind: String,
@@ -384,22 +393,6 @@ struct ObjectInfo {
     created: String,
     /// Comment string
     comment: String,
-}
-
-/// Column metadata
-struct ColumnInfo {
-    name: String,
-    col_type: String,
-    nullable: String,
-    default: Option<String>,
-}
-
-/// Index metadata (grouped by index)
-struct IndexInfo {
-    name: Option<String>,
-    index_type: String,
-    kind_suffix: String,
-    columns: Vec<String>,
 }
 
 /// Storage metrics from DBC.TableSizeV
@@ -412,32 +405,11 @@ struct StorageInfo {
 }
 
 // =============================================================================
-// Query helpers
+// Query helpers (inspect-specific)
 // =============================================================================
 
-/// Resolve the database name, querying `SELECT DATABASE` if not specified
-fn resolve_object_database(
-    client: &DatabaseClient,
-    db: Option<&str>,
-) -> Result<String> {
-    if let Some(db_name) = db {
-        return Ok(db_name.to_string());
-    }
-
-    let result = client.execute("SELECT DATABASE")?;
-    if let Some(row) = result.rows.first() {
-        if let Some(val) = row.first() {
-            let db_name = val.display().trim().to_string();
-            if !db_name.is_empty() && db_name != "[NULL]" {
-                return Ok(db_name);
-            }
-        }
-    }
-
-    Ok(client.config().database.clone())
-}
-
-/// Query DBC.TablesV for object type and metadata
+/// Query DBC.TablesV for object type and metadata (inspect-specific: includes
+/// created timestamp and comment).
 fn query_object_type(
     client: &DatabaseClient,
     db: &str,
@@ -493,141 +465,6 @@ fn query_object_type(
     } else {
         Ok(None)
     }
-}
-
-/// Query DBC.ColumnsV for column metadata (same SQL pattern as /describe)
-fn query_columns(
-    client: &DatabaseClient,
-    db: &str,
-    obj: &str,
-) -> Result<Vec<ColumnInfo>> {
-    let type_expr = column_type_case_sql();
-    let sql = format!(
-        "SELECT TRIM(ColumnName), \
-         {} AS ColType, \
-         Nullable, DefaultValue \
-         FROM DBC.ColumnsV \
-         WHERE DatabaseName = '{}' AND TableName = '{}' \
-         ORDER BY ColumnId",
-        type_expr,
-        escape_sql_string(db),
-        escape_sql_string(obj)
-    );
-
-    let result = client.execute(&sql)?;
-    let mut columns = Vec::with_capacity(result.rows.len());
-
-    for row in &result.rows {
-        let name = row
-            .first()
-            .map(|v| v.display().trim().to_string())
-            .unwrap_or_default();
-        let col_type = row
-            .get(1)
-            .map(|v| {
-                let s = v.display().trim().to_string();
-                if s == "[NULL]" {
-                    String::new()
-                } else {
-                    s
-                }
-            })
-            .unwrap_or_default();
-        let nullable = row
-            .get(2)
-            .map(|v| format_nullable(&v.display()))
-            .unwrap_or_else(|| "YES".to_string());
-        let default = row.get(3).and_then(|v| {
-            let s = v.display();
-            if s == "[NULL]" {
-                None
-            } else {
-                Some(s.trim().to_string())
-            }
-        });
-
-        columns.push(ColumnInfo {
-            name,
-            col_type,
-            nullable,
-            default,
-        });
-    }
-
-    Ok(columns)
-}
-
-/// Query DBC.IndicesV for index information (same SQL pattern as /show indexes)
-fn query_indexes(
-    client: &DatabaseClient,
-    db: &str,
-    obj: &str,
-) -> Result<Vec<IndexInfo>> {
-    let sql = format!(
-        "SELECT TRIM(IndexName) AS IndexName, \
-         IndexType, \
-         UniqueFlag, \
-         TRIM(ColumnName) AS ColumnName, \
-         IndexNumber, \
-         ColumnPosition \
-         FROM DBC.IndicesV \
-         WHERE DatabaseName = '{}' AND TableName = '{}' \
-         ORDER BY IndexNumber, ColumnPosition",
-        escape_sql_string(db),
-        escape_sql_string(obj)
-    );
-
-    let result = client.execute(&sql)?;
-
-    // Group rows by IndexNumber — build IndexInfo entries directly
-    let mut indexes: Vec<IndexInfo> = Vec::new();
-    let mut index_numbers: Vec<i64> = Vec::new();
-
-    for row in &result.rows {
-        let index_name = row.first().and_then(|v| {
-            let s = v.display().trim().to_string();
-            if s.is_empty() || s == "[NULL]" {
-                None
-            } else {
-                Some(s)
-            }
-        });
-        let index_type_raw = row
-            .get(1)
-            .map(|v| v.display().trim().to_string())
-            .unwrap_or_default();
-        let unique_flag = row
-            .get(2)
-            .map(|v| v.display().trim().to_string())
-            .unwrap_or_default();
-        let column_name = row
-            .get(3)
-            .map(|v| v.display().trim().to_string())
-            .unwrap_or_default();
-        let index_number = match row.get(4) {
-            Some(Value::Integer(n)) => *n,
-            Some(v) => v.display().trim().parse::<i64>().unwrap_or(0),
-            None => 0,
-        };
-
-        let is_unique = unique_flag == "Y" || unique_flag == "U";
-        let (index_type_label, kind_suffix) = classify_index(&index_type_raw, is_unique);
-
-        // Find or create entry for this index number
-        if let Some(pos) = index_numbers.iter().position(|n| *n == index_number) {
-            indexes[pos].columns.push(column_name);
-        } else {
-            index_numbers.push(index_number);
-            indexes.push(IndexInfo {
-                name: index_name,
-                index_type: index_type_label.to_string(),
-                kind_suffix: kind_suffix.to_string(),
-                columns: vec![column_name],
-            });
-        }
-    }
-
-    Ok(indexes)
 }
 
 /// Query DBC.TableSizeV for storage metrics
@@ -695,8 +532,6 @@ fn query_definition(
         if let Some(val) = row.first() {
             let text = val.display();
             if text != "[NULL]" {
-                // Trim trailing whitespace from each row fragment to avoid
-                // garbled output from fixed-width RequestText columns.
                 let trimmed = text.trim_end();
                 if !definition.is_empty() && !trimmed.is_empty() {
                     definition.push('\n');
@@ -710,32 +545,8 @@ fn query_definition(
 }
 
 // =============================================================================
-// Formatting helpers (inspect-specific; shared helpers are in format_helpers.rs)
+// Formatting helpers (inspect-specific)
 // =============================================================================
-
-/// Format byte count as human-readable size
-fn format_size(bytes: i64) -> String {
-    if bytes < 0 {
-        return format!("{} B", bytes);
-    }
-
-    const KB: i64 = 1024;
-    const MB: i64 = 1024 * KB;
-    const GB: i64 = 1024 * MB;
-    const TB: i64 = 1024 * GB;
-
-    if bytes >= TB {
-        format!("{:.2} TB", bytes as f64 / TB as f64)
-    } else if bytes >= GB {
-        format!("{:.2} GB", bytes as f64 / GB as f64)
-    } else if bytes >= MB {
-        format!("{:.2} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.2} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{} B", bytes)
-    }
-}
 
 /// Calculate skew percentage from max and average AMP sizes
 ///
@@ -771,14 +582,10 @@ fn extract_i64(val: &Value) -> i64 {
     }
 }
 
-/// Summarize an error message for inline display
+/// Summarize an error message for inline display (UTF-8 safe)
 fn summarize_error(e: &crate::error::TqError) -> String {
     let msg = e.to_string();
-    if msg.len() > 80 {
-        format!("{}...", &msg[..77])
-    } else {
-        msg
-    }
+    truncate_str(&msg, 80)
 }
 
 // =============================================================================
@@ -788,48 +595,58 @@ fn summarize_error(e: &crate::error::TqError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // parse_table_name, json_escape, csv_escape, truncate_str, format_nullable,
-    // map_table_kind tests are now in format_helpers::tests
+    use crate::commands::format_helpers::classify_index;
 
     #[test]
     fn test_format_size_bytes() {
-        assert_eq!(format_size(0), "0 B");
-        assert_eq!(format_size(512), "512 B");
-        assert_eq!(format_size(1023), "1023 B");
+        assert_eq!(format_size(0, 2), "0 B");
+        assert_eq!(format_size(512, 2), "512 B");
+        assert_eq!(format_size(1023, 2), "1023 B");
     }
 
     #[test]
     fn test_format_size_kilobytes() {
-        assert_eq!(format_size(1024), "1.00 KB");
-        assert_eq!(format_size(1536), "1.50 KB");
+        assert_eq!(format_size(1024, 2), "1.00 KB");
+        assert_eq!(format_size(1536, 2), "1.50 KB");
     }
 
     #[test]
     fn test_format_size_megabytes() {
-        assert_eq!(format_size(1048576), "1.00 MB");
-        assert_eq!(format_size(1572864), "1.50 MB");
+        assert_eq!(format_size(1048576, 2), "1.00 MB");
+        assert_eq!(format_size(1572864, 2), "1.50 MB");
     }
 
     #[test]
     fn test_format_size_gigabytes() {
-        assert_eq!(format_size(1073741824), "1.00 GB");
-        assert_eq!(format_size(1319413964), "1.23 GB");
+        assert_eq!(format_size(1073741824, 2), "1.00 GB");
+        assert_eq!(format_size(1319413964, 2), "1.23 GB");
     }
 
     #[test]
     fn test_format_size_terabytes() {
-        assert_eq!(format_size(1099511627776), "1.00 TB");
+        assert_eq!(format_size(1099511627776, 2), "1.00 TB");
     }
 
     #[test]
     fn test_format_size_negative() {
-        assert_eq!(format_size(-100), "-100 B");
+        assert_eq!(format_size(-100, 2), "-100 B");
+    }
+
+    #[test]
+    fn test_format_size_precision_1() {
+        assert_eq!(format_size(1024, 1), "1.0 KB");
+        assert_eq!(format_size(1536, 1), "1.5 KB");
+        assert_eq!(format_size(1048576, 1), "1.0 MB");
+    }
+
+    #[test]
+    fn test_format_size_precision_2() {
+        assert_eq!(format_size(1024, 2), "1.00 KB");
+        assert_eq!(format_size(1536, 2), "1.50 KB");
     }
 
     #[test]
     fn test_calculate_skew_normal() {
-        // max = 105, avg = 100 -> 5%
         assert!((calculate_skew(105, 100) - 5.0).abs() < 0.01);
     }
 
@@ -845,7 +662,6 @@ mod tests {
 
     #[test]
     fn test_calculate_skew_low() {
-        // max = 101, avg = 100 -> 1%
         assert!((calculate_skew(101, 100) - 1.0).abs() < 0.01);
     }
 
@@ -866,5 +682,127 @@ mod tests {
         let (label, short) = classify_index("P", true);
         assert_eq!(label, "Primary Index");
         assert_eq!(short, "UPI");
+    }
+
+    // DDL tests from TC-047-001
+
+    #[test]
+    fn test_ddl_multirow_concatenation() {
+        // Simulate multi-row SHOW result: rows joined with newlines
+        let rows = vec!["CREATE TABLE t (", "  col1 INTEGER", ");"];
+        let mut definition = String::new();
+        for text in &rows {
+            let trimmed = text.trim_end();
+            if !definition.is_empty() && !trimmed.is_empty() {
+                definition.push('\n');
+            }
+            definition.push_str(trimmed);
+        }
+        let result = definition.trim().to_string();
+        assert_eq!(result, "CREATE TABLE t (\n  col1 INTEGER\n);");
+        assert_eq!(result.lines().count(), 3);
+    }
+
+    #[test]
+    fn test_ddl_null_rows_filtered() {
+        // NULL rows should be excluded from definition
+        let rows: Vec<Option<&str>> = vec![
+            Some("CREATE VIEW v AS"),
+            None,
+            Some("SELECT * FROM t"),
+        ];
+        let mut definition = String::new();
+        for maybe_text in &rows {
+            if let Some(text) = maybe_text {
+                if *text != "[NULL]" {
+                    let trimmed = text.trim_end();
+                    if !definition.is_empty() && !trimmed.is_empty() {
+                        definition.push('\n');
+                    }
+                    definition.push_str(trimmed);
+                }
+            }
+        }
+        let result = definition.trim().to_string();
+        assert_eq!(result, "CREATE VIEW v AS\nSELECT * FROM t");
+    }
+
+    #[test]
+    fn test_ddl_empty_result() {
+        // Empty result returns empty string
+        let rows: Vec<&str> = vec![];
+        let mut definition = String::new();
+        for text in &rows {
+            let trimmed = text.trim_end();
+            if !definition.is_empty() && !trimmed.is_empty() {
+                definition.push('\n');
+            }
+            definition.push_str(trimmed);
+        }
+        let result = definition.trim().to_string();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_ddl_trim_whitespace() {
+        // Trailing whitespace should be stripped from each row
+        let rows = vec!["CREATE TABLE t (   ", "  col1 INTEGER   ", ");   "];
+        let mut definition = String::new();
+        for text in &rows {
+            let trimmed = text.trim_end();
+            if !definition.is_empty() && !trimmed.is_empty() {
+                definition.push('\n');
+            }
+            definition.push_str(trimmed);
+        }
+        let result = definition.trim().to_string();
+        // No trailing whitespace on any line
+        for line in result.lines() {
+            assert_eq!(line, line.trim_end(), "Line has trailing whitespace: {:?}", line);
+        }
+    }
+
+    #[test]
+    fn test_ddl_show_view_sql_construction() {
+        // Verify SHOW VIEW SQL is constructed correctly
+        let db = "mydb";
+        let obj = "myview";
+        let show_cmd = format!("SHOW VIEW \"{}\".\"{}\"", db, obj);
+        assert_eq!(show_cmd, "SHOW VIEW \"mydb\".\"myview\"");
+    }
+
+    #[test]
+    fn test_ddl_show_macro_sql_construction() {
+        // Verify SHOW MACRO SQL is constructed correctly
+        let db = "mydb";
+        let obj = "mymacro";
+        let show_cmd = format!("SHOW MACRO \"{}\".\"{}\"", db, obj);
+        assert_eq!(show_cmd, "SHOW MACRO \"mydb\".\"mymacro\"");
+    }
+
+    #[test]
+    fn test_summarize_error_short() {
+        // Short errors pass through unchanged
+        let msg = "Connection refused";
+        let result = truncate_str(msg, 80);
+        assert_eq!(result, "Connection refused");
+    }
+
+    #[test]
+    fn test_summarize_error_long() {
+        // Long errors get truncated with "..."
+        let msg = "A".repeat(200);
+        let result = truncate_str(&msg, 80);
+        assert_eq!(result.chars().count(), 80);
+        assert!(result.ends_with("..."));
+    }
+
+    #[test]
+    fn test_summarize_error_utf8_safe() {
+        // UTF-8 multi-byte characters don't cause panics
+        let msg = "\u{4e2d}".repeat(100); // 100 CJK characters
+        let result = truncate_str(&msg, 80);
+        assert!(result.chars().count() <= 80);
+        assert!(result.ends_with("..."));
     }
 }

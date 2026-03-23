@@ -140,6 +140,34 @@ pub fn column_type_case_sql() -> &'static str {
      END"
 }
 
+/// Format a byte count as a human-readable size string.
+///
+/// The `precision` parameter controls the number of decimal places (e.g., 1 for
+/// "1.5 MB", 2 for "1.50 MB"). Values below 1024 bytes are always displayed
+/// without decimals.
+pub fn format_size(bytes: i64, precision: usize) -> String {
+    if bytes < 0 {
+        return format!("{} B", bytes);
+    }
+
+    const KB: i64 = 1024;
+    const MB: i64 = 1024 * KB;
+    const GB: i64 = 1024 * MB;
+    const TB: i64 = 1024 * GB;
+
+    if bytes >= TB {
+        format!("{:.prec$} TB", bytes as f64 / TB as f64, prec = precision)
+    } else if bytes >= GB {
+        format!("{:.prec$} GB", bytes as f64 / GB as f64, prec = precision)
+    } else if bytes >= MB {
+        format!("{:.prec$} MB", bytes as f64 / MB as f64, prec = precision)
+    } else if bytes >= KB {
+        format!("{:.prec$} KB", bytes as f64 / KB as f64, prec = precision)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
 /// Map a TableKind character from DBC.TablesV to a human-readable label.
 pub fn map_table_kind(kind: &str) -> String {
     match kind {
@@ -524,5 +552,71 @@ mod tests {
         let (label, short) = classify_index("X", false);
         assert_eq!(label, "Index");
         assert_eq!(short, "I");
+    }
+
+    // =========================================================================
+    // format_size
+    // =========================================================================
+
+    #[test]
+    fn test_format_size_precision_1() {
+        assert_eq!(format_size(0, 1), "0 B");
+        assert_eq!(format_size(512, 1), "512 B");
+        assert_eq!(format_size(1024, 1), "1.0 KB");
+        assert_eq!(format_size(1536, 1), "1.5 KB");
+        assert_eq!(format_size(1048576, 1), "1.0 MB");
+        assert_eq!(format_size(1073741824, 1), "1.0 GB");
+        assert_eq!(format_size(1099511627776, 1), "1.0 TB");
+        assert_eq!(format_size(-100, 1), "-100 B");
+    }
+
+    #[test]
+    fn test_format_size_precision_2() {
+        assert_eq!(format_size(0, 2), "0 B");
+        assert_eq!(format_size(1024, 2), "1.00 KB");
+        assert_eq!(format_size(1536, 2), "1.50 KB");
+        assert_eq!(format_size(1048576, 2), "1.00 MB");
+        assert_eq!(format_size(1572864, 2), "1.50 MB");
+        assert_eq!(format_size(1073741824, 2), "1.00 GB");
+        assert_eq!(format_size(1319413964, 2), "1.23 GB");
+        assert_eq!(format_size(1099511627776, 2), "1.00 TB");
+        assert_eq!(format_size(-100, 2), "-100 B");
+    }
+
+    // =========================================================================
+    // column_type_case_sql completeness (all 21 WHEN branches)
+    // =========================================================================
+
+    #[test]
+    fn test_column_type_case_sql_all_21_when_branches() {
+        let sql = column_type_case_sql();
+        // All 21 type codes must be present
+        let expected_codes = vec![
+            "CV", "CF", "'I'", "I1", "I2", "I8", "DA", "TS", "'D'", "'F'",
+            "AT", "SZ", "BF", "BV", "CO", "BO", "'N'", "JN", "AN", "UT",
+            "PM", "PD", "PS", "PT",
+        ];
+        for code in &expected_codes {
+            assert!(
+                sql.contains(code),
+                "column_type_case_sql missing type code: {}",
+                code
+            );
+        }
+        // Verify human-readable type names
+        let expected_types = vec![
+            "VARCHAR", "CHAR", "INTEGER", "BYTEINT", "SMALLINT", "BIGINT",
+            "DATE", "TIMESTAMP", "DECIMAL", "FLOAT", "TIME",
+            "TIMESTAMP WITH TIME ZONE", "BYTE", "VARBYTE", "CLOB", "BLOB",
+            "NUMBER", "JSON", "ARRAY", "UDT", "PERIOD(TIMESTAMP)",
+            "PERIOD(DATE)", "PERIOD(TIMESTAMP WITH TIME ZONE)", "PERIOD(TIME)",
+        ];
+        for type_name in &expected_types {
+            assert!(
+                sql.contains(type_name),
+                "column_type_case_sql missing type name: {}",
+                type_name
+            );
+        }
     }
 }

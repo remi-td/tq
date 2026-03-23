@@ -7,6 +7,7 @@ pub mod describe;
 pub mod format_helpers;
 pub mod inspect;
 pub mod list;
+pub mod query_helpers;
 pub mod locks;
 pub mod monitoring_utils;
 pub mod ping;

@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-03-23
-**Current Version:** 1.28.0
-**Latest Sprint:** Sprint 47 Complete (Tech Debt Elimination & Command Enrichment)
+**Current Version:** 1.29.0
+**Latest Sprint:** Sprint 48 Complete (Query Layer Consolidation & Spec Alignment)
 
 ---
 
@@ -394,6 +394,18 @@ All core features are complete and tested.
 - **Error consistency**: `Error:` prefix on all error messages, `<OBJECT>` in help text
 - 799 unit tests + 178 integration tests (100% pass rate), zero clippy warnings
 
+**Sprint 48 Query Layer Consolidation & Spec Alignment (v1.29.0):**
+- **Shared query layer**: `query_helpers.rs` consolidates query_indexes (3→1), query_columns (2→1), resolve_database (2→1), query_object_header
+- **Shared types**: `ColumnInfo`, `IndexGroup`, `ObjectHeader` defined once, used by inspect/describe/show_indexes
+- **format_size unified**: Single parameterized function replaces 2 variants (inspect precision=2, list precision=1)
+- **JSON API types fixed**: describe nullable as boolean, default as null; list tables rows/size as integers
+- **Bug fixes**: summarize_error UTF-8 (uses truncate_str), show-indexes TABLE→OBJECT, list databases System/User labels, Error: prefix, DescribeArgs.object rename
+- **Edge cases**: "No indexes defined.", "No Primary Index (NoPI)", "No secondary indexes.", Rows (Est.) in describe header
+- **List views enriched**: Owner column added to display, CSV, and JSON output
+- **Missing tests delivered**: 6 DDL tests, writer-injection rendering tests, column_type_case_sql completeness
+- **Spec canonicalized**: `──` headers, glob patterns, inline index format, conditional Comment column
+- 833 unit tests + 178 integration tests (100% pass rate), zero clippy warnings
+
 ---
 
 ## Summary Statistics
@@ -401,9 +413,9 @@ All core features are complete and tested.
 - **Total Features**: 88
 - **Implemented**: 86 (98%)
 - **Planned**: 2 (2%)
-- **Test Pass Rate**: 100% (977/977 executed, 57 ignored database-dependent)
+- **Test Pass Rate**: 100% (1011/1011 executed, 57 ignored database-dependent)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 47 - Tech Debt Elimination & Command Enrichment
+- **Latest Sprint**: Sprint 48 - Query Layer Consolidation & Spec Alignment
 
 ---
 

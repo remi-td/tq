@@ -1533,6 +1533,7 @@ tq --profile prod describe employees
   Type:      Table
   Database:  PRODUCTION
   Name:      employees
+  Rows (Est.): 42573
 
 ── Columns (7) ──
   Column                   Type                 Nullable   Default
@@ -1559,6 +1560,7 @@ tq --profile prod describe employees
   Type:      Table
   Database:  PRODUCTION
   Name:      orders
+  Rows (Est.): 9876543
 
 ── Columns (4) ──
   Column                   Type                 Nullable   Default         Comment
@@ -1573,7 +1575,26 @@ tq --profile prod describe employees
   Primary Index (UPI): order_id
 ```
 
-The `Comment` column is included in the header only when at least one column has a comment string defined. The `Default` column shows `-` when no default is defined. The `Indexes` section is omitted for views (views have no indexes).
+**Example output (table with no indexes defined):**
+
+```
+── Object ──
+  Type:      Table
+  Database:  PRODUCTION
+  Name:      staging_load
+
+── Columns (3) ──
+  Column                   Type                 Nullable   Default
+  ----------------------------------------------------------------------
+  batch_id                 INTEGER              NO         -
+  load_ts                  TIMESTAMP            YES        -
+  payload                  VARCHAR(8000)        YES        -
+  3 column(s)
+
+No indexes defined.
+```
+
+The `Rows (Est.)` line appears in the Object header only for tables (not views). It is omitted when row statistics have not been collected. The `Comment` column is included in the header only when at least one column has a comment string defined. The `Default` column shows `-` when no default is defined. The `Indexes` section is omitted for views (views have no indexes). Tables with no indexes defined show `No indexes defined.` instead of an indexes section.
 
 **Options:**
 
@@ -1584,15 +1605,30 @@ The `Comment` column is included in the header only when at least one column has
 
 **Scripting examples:**
 
-The JSON output has the structure `{"object":{...}, "columns":[...], "indexes":[...]}`. Each column entry has fields: `name`, `type`, `nullable`, `default`, and optionally `comment`.
+The JSON output has the structure `{"object":{...}, "columns":[...], "indexes":[...]}`. Each column entry has fields: `name`, `type`, `nullable` (boolean), `default` (`null` when no default is set, a string otherwise), and optionally `comment`.
+
+```json
+{
+  "object": {"database": "PRODUCTION", "name": "employees", "type": "Table"},
+  "columns": [
+    {"name": "employee_id", "type": "INTEGER",      "nullable": false, "default": null},
+    {"name": "first_name",  "type": "VARCHAR(50)",  "nullable": true,  "default": null},
+    {"name": "salary",      "type": "DECIMAL(10,2)","nullable": true,  "default": null}
+  ],
+  "indexes": [
+    {"name": null,        "type": "UPI",  "columns": ["employee_id"]},
+    {"name": "idx_dept",  "type": "NUSI", "columns": ["department_id"]}
+  ]
+}
+```
 
 ```bash
 # List all column names
 tq describe --format json employees | jq -r '.columns[].name'
 
-# Find nullable columns
+# Find nullable columns (nullable is a boolean)
 tq describe --format json employees | \
-  jq -r '.columns[] | select(.nullable == "YES") | [.name, .type] | @csv'
+  jq -r '.columns[] | select(.nullable) | [.name, .type] | @csv'
 
 # Check if a column exists before querying
 tq describe --format json employees | \
@@ -1655,57 +1691,58 @@ tq --profile prod list databases
 Databases (4):
 Name                           Owner                Type
 ------------------------------------------------------------
-analytics                      analytics            Database
+analytics                      analytics            User
 development                    dev_user             User
 production                     dba_user             User
-staging                        dba_user             User
+DBC                            DBC                  System
 
 4 database(s)
 ```
 
-Results are sorted alphabetically by name. The `Type` column shows `Database` or `User` (Teradata distinguishes these as `DBKind` D and U). Common system databases (DBC, SYSLIB, etc.) are excluded from the listing to reduce noise.
+Results are sorted alphabetically by name. The `Type` column shows `System` for DBC-owned databases and `User` for all others. Common internal system databases (Console, Crashdumps, SYSLIB, etc.) are excluded from the listing to reduce noise.
 
 **`tq list tables` — example output:**
 
 ```
 Tables in (current):
-Name                                Type       Rows (Est.)       Size
------------------------------------------------------------------
-customers                           TABLE        1234567      45.2 MB
-employees                           TABLE          42573       2.1 MB
-orders                              TABLE        9876543     320.5 MB
-fact_sales                          NoPI               -           -
+Name                           Type       Rows (Est.)       Size Owner
+------------------------------------------------------------------------------
+customers                      TABLE        1234567      45.2 MB alice
+employees                      TABLE          42573       2.1 MB alice
+orders                         TABLE        9876543     320.5 MB bob
+fact_sales                     NoPI               -           -
 
 4 table(s)
 ```
 
-The `Type` column shows `TABLE` for standard tables and `NoPI` for tables with no primary index. The `Rows (Est.)` and `Size` columns show `-` when statistics have not been collected. Rows and Size values are right-aligned. Pattern filtering uses glob syntax: `*` matches any sequence, `?` matches a single character (case-insensitive).
+The `Type` column shows `TABLE` for standard tables and `NoPI` for tables with no primary index. The `Rows (Est.)` and `Size` columns show `-` when statistics have not been collected. Rows and Size values are right-aligned. The `Owner` column shows the creator name. Pattern filtering uses glob syntax: `*` matches any sequence, `?` matches a single character (case-insensitive).
 
 **`tq list views` — example output:**
 
 ```
 Views in (current):
-----------------------------------------
-  active_employees
-  customer_orders_view
-  sales_summary
+Name                                Owner
+--------------------------------------------------
+active_employees                    alice
+customer_orders_view                alice
+sales_summary                       bob
 
 3 view(s)
 ```
 
-The view list shows names only. To see a view's columns or definition, use `tq describe <view>` or `tq inspect <view>`.
+The view list shows names and their owner (creator). To see a view's columns or definition, use `tq describe <view>` or `tq inspect <view>`.
 
 **Scripting examples:**
 
-The JSON output for databases has the structure `[{"name":"...","owner":"...","type":"..."}]`. For tables: `[{"name":"...","type":"...","rows_est":"...","size":"..."}]`. For views: `["view1","view2"]`.
+The JSON output for databases has the structure `[{"database":"...","owner":"...","type":"..."}]` (note: the key is `"database"`, not `"name"`). For tables: `[{"name":"...","type":"...","estimated_rows":<integer|null>,"size_bytes":<integer|null>,"owner":"..."}]`. For views: `[{"name":"...","owner":"..."}]`.
 
 ```bash
 # Find all staging-related databases
 tq list databases --format json | \
-  jq -r '.[] | select(.name | test("staging";"i")) | .name'
+  jq -r '.[] | select(.database | test("staging";"i")) | .database'
 
 # Count tables per database
-for db in $(tq list databases --format json | jq -r '.[].name'); do
+for db in $(tq list databases --format json | jq -r '.[].database'); do
   count=$(tq list tables --database "$db" --format json | jq 'length')
   echo "$db: $count tables"
 done
@@ -1781,10 +1818,25 @@ Indexes on production.config:
 ── Primary Index ──
   Primary Index (NUPI): config_key
 
+No secondary indexes.
+
 1 index(es), 1 index column(s)
 ```
 
-When an index has no name in the catalog, the `"name"` segment is omitted and the format is `  <type> (<short>): <columns>`. Named indexes appear as `  <type> (<short>) "<name>": <columns>`.
+**Example output (NoPI table — no primary index, with secondary indexes):**
+
+```
+Indexes on production.fact_sales:
+
+No Primary Index (NoPI)
+
+── Secondary Indexes ──
+  Secondary Index (NUSI) "idx_region": region_code
+
+1 index(es), 1 index column(s)
+```
+
+When an index has no name in the catalog, the `"name"` segment is omitted and the format is `  <type> (<short>): <columns>`. Named indexes appear as `  <type> (<short>) "<name>": <columns>`. A table with no primary index shows `No Primary Index (NoPI)`. A table with no secondary indexes shows `No secondary indexes.`
 
 **Options:**
 

@@ -1,15 +1,32 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.28.0 (Sprint 47 - Tech Debt Elimination & Command Enrichment)
+**Version:** 1.29.0 (Sprint 48 - Query Layer Consolidation & Spec Alignment)
 **Last Updated:** 2026-03-23
-**Base Commit:** [Sprint 47 - In Progress]
+**Base Commit:** [Sprint 48 - In Progress]
 
 ## Overview
 
 This directory contains comprehensive test case definitions for the tq CLI tool. These test cases cover all implemented MVP features (FR-001 through FR-010) and provide detailed procedures for validating functionality, usability, error handling, and security.
 
 ## Test Case Categories
+
+### Sprint 48: Query Layer Consolidation & Spec Alignment
+
+- **TC-048-001**: Shared Query Layer Extraction — structural grep verifies each shared function/type defined once, regression run (Structural grep + cargo test --lib, no-DB) — `TC-048-001.md`
+- **TC-048-002**: JSON API Type Fixes — boolean nullable, null default, integer rows/size, "database" key (Unit writer-injection + Integration DB required `#[ignore]`) — `TC-048-002.md`
+- **TC-048-003**: Bug Fixes — summarize_error UTF-8 safety, TABLE→OBJECT structural grep, System/User type labels, Error: prefix, DescribeArgs.table→.object (Unit + Structural grep, no-DB) — `TC-048-003.md`
+- **TC-048-004**: Edge Case Messages — "No indexes defined.", "No Primary Index (NoPI)", "No secondary indexes." (Unit + Integration DB required `#[ignore]`) — `TC-048-004.md`
+- **TC-048-005**: Missing Unit Tests — 6 DDL tests from TC-047-001, writer-injection for describe/show_indexes/list_databases, column_type_case_sql 21-branch completeness (Unit, no-DB) — `TC-048-005.md`
+
+**Sprint 48 test case summary:**
+- Structural grep (no DB): TC-048-001 (6 checks), TC-048-003 (6 checks) = 12 structural checks
+- Unit tests (no DB): TC-048-002 (7 tests), TC-048-003 (9 tests), TC-048-004 (7 tests), TC-048-005 (19 tests) = 42 unit tests
+- Regression run: TC-048-001 (all ~130 lib tests must still pass)
+- Integration tests (DB required, `#[ignore]`): TC-048-002 (3 tests), TC-048-004 (2 tests) = 5 tests
+- Total: ~59 test cases across 5 files (plus regression baseline)
+
+---
 
 ### Sprint 47: Tech Debt Elimination & Command Enrichment
 

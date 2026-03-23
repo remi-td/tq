@@ -1488,85 +1488,124 @@ tq --profile prod describe employees
 tq describe --output employees-schema.txt employees
 ```
 
-**Output — Table Format**:
+**Output — Table Format (no column comments)**:
 ```
-Table: PRODUCTION.employees
-Type:  Table
-Rows (Est.): 42,573
+── Object ──
+  Type:      Table
+  Database:  PRODUCTION
+  Name:      employees
 
-Columns:
-┌───────────────┬──────────────┬──────────┬─────────┬──────────┐
-│ Column        │ Type         │ Nullable │ Default │ Comments │
-├───────────────┼──────────────┼──────────┼─────────┼──────────┤
-│ employee_id   │ INTEGER      │ NO       │ -       │          │
-│ first_name    │ VARCHAR(50)  │ YES      │ -       │          │
-│ last_name     │ VARCHAR(50)  │ YES      │ -       │          │
-│ email         │ VARCHAR(100) │ YES      │ -       │          │
-│ hire_date     │ DATE         │ YES      │ -       │          │
-│ salary        │ DECIMAL(10,2)│ YES      │ -       │          │
-│ department_id │ INTEGER      │ YES      │ -       │          │
-└───────────────┴──────────────┴──────────┴─────────┴──────────┘
+── Columns (7) ──
+  Column                   Type                 Nullable   Default
+  ----------------------------------------------------------------------
+  employee_id              INTEGER              NO         -
+  first_name               VARCHAR(50)          YES        -
+  last_name                VARCHAR(50)          YES        -
+  email                    VARCHAR(100)         YES        -
+  hire_date                DATE                 YES        -
+  salary                   DECIMAL(10,2)        YES        -
+  department_id            INTEGER              YES        -
+  7 column(s)
 
-Indexes:
+── Indexes ──
   Primary Index (UPI): employee_id
   Secondary Index (NUSI): department_id
-  Secondary Index (USI):  email
+  Secondary Index (USI): email
+
+```
+
+**Output — Table Format (with column comments)**:
+
+When any column has a comment, a `Comment` column is added to the right. The `Comment` column is omitted entirely when no columns have comments.
+
+```
+── Object ──
+  Type:      Table
+  Database:  PRODUCTION
+  Name:      employees
+
+── Columns (7) ──
+  Column                   Type                 Nullable   Default         Comment
+  ------------------------------------------------------------------------------------------
+  employee_id              INTEGER              NO         -               Primary key
+  first_name               VARCHAR(50)          YES        -
+  last_name                VARCHAR(50)          YES        -
+  email                    VARCHAR(100)         YES        -               Unique contact email
+  hire_date                DATE                 YES        -
+  salary                   DECIMAL(10,2)        YES        -
+  department_id            INTEGER              YES        -
+  7 column(s)
+
+── Indexes ──
+  Primary Index (UPI): employee_id
+  Secondary Index (NUSI): department_id
+  Secondary Index (USI): email
+
 ```
 
 **Output — CSV Format**:
 ```csv
-object,type,estimated_rows
-PRODUCTION.employees,Table,42573
-column,type,nullable,default,comments
-employee_id,INTEGER,NO,,
-first_name,VARCHAR(50),YES,,
-last_name,VARCHAR(50),YES,,
-email,VARCHAR(100),YES,,
-hire_date,DATE,YES,,
-salary,DECIMAL(10,2),YES,,
-department_id,INTEGER,YES,,
+# Object: PRODUCTION.employees (Table)
+Column,Type,Nullable,Default,Comment
+employee_id,INTEGER,NO,-,
+first_name,VARCHAR(50),YES,-,
+last_name,VARCHAR(50),YES,-,
+email,VARCHAR(100),YES,-,
+hire_date,DATE,YES,-,
+salary,DECIMAL(10,2),YES,-,
+department_id,INTEGER,YES,-,
 ```
 
 **Output — JSON Format**:
 ```json
 {
-  "object": "PRODUCTION.employees",
-  "type": "Table",
-  "estimated_rows": 42573,
+  "object": {
+    "database": "PRODUCTION",
+    "name": "employees",
+    "type": "Table"
+  },
   "columns": [
-    { "column": "employee_id",   "type": "INTEGER",        "nullable": false, "default": null, "comments": null },
-    { "column": "first_name",    "type": "VARCHAR(50)",    "nullable": true,  "default": null, "comments": null },
-    { "column": "last_name",     "type": "VARCHAR(50)",    "nullable": true,  "default": null, "comments": null },
-    { "column": "email",         "type": "VARCHAR(100)",   "nullable": true,  "default": null, "comments": null },
-    { "column": "hire_date",     "type": "DATE",           "nullable": true,  "default": null, "comments": null },
-    { "column": "salary",        "type": "DECIMAL(10,2)",  "nullable": true,  "default": null, "comments": null },
-    { "column": "department_id", "type": "INTEGER",        "nullable": true,  "default": null, "comments": null }
+    { "name": "employee_id",   "type": "INTEGER",        "nullable": false, "default": null },
+    { "name": "first_name",    "type": "VARCHAR(50)",    "nullable": true,  "default": null },
+    { "name": "last_name",     "type": "VARCHAR(50)",    "nullable": true,  "default": null },
+    { "name": "email",         "type": "VARCHAR(100)",   "nullable": true,  "default": null },
+    { "name": "hire_date",     "type": "DATE",           "nullable": true,  "default": null },
+    { "name": "salary",        "type": "DECIMAL(10,2)",  "nullable": true,  "default": null },
+    { "name": "department_id", "type": "INTEGER",        "nullable": true,  "default": null }
   ],
   "indexes": [
-    { "kind": "Primary Index", "type": "UPI", "columns": ["employee_id"] },
-    { "kind": "Secondary Index", "type": "NUSI", "columns": ["department_id"] },
-    { "kind": "Secondary Index", "type": "USI",  "columns": ["email"] }
+    { "name": "(unnamed)", "type": "UPI",  "columns": ["employee_id"] },
+    { "name": "(unnamed)", "type": "NUSI", "columns": ["department_id"] },
+    { "name": "(unnamed)", "type": "USI",  "columns": ["email"] }
   ]
 }
 ```
+
+When a column has a comment, a `"comment"` key is included on that column entry. When absent, the key is omitted entirely (not `null`). Example:
+```json
+{ "name": "employee_id", "type": "INTEGER", "nullable": false, "default": null, "comment": "Primary key" }
+```
+
+When an index has a name, the `"name"` field holds that name. Unnamed indexes use `"(unnamed)"`.
 
 **Behavior Requirements**:
 
 1. **REQ-DESCRIBE-001**: The command SHALL require exactly one object argument; invoking without an argument SHALL exit with code 2 and print the usage error.
 2. **REQ-DESCRIBE-002**: Object names SHALL be treated case-insensitively (Teradata convention). `tq describe DBC.TABLES`, `tq describe dbc.tables`, and `tq describe Dbc.Tables` SHALL all resolve to the same object.
 3. **REQ-DESCRIBE-003**: Data sources:
-   - Object type and estimated row count: `DBC.TablesV`
+   - Object type: `DBC.TablesV`
    - Column definitions (in ordinal order): `DBC.ColumnsV`
    - Index structure: `DBC.IndicesV`
-4. **REQ-DESCRIBE-004**: The `Default` column SHALL display `-` when no column default is defined, and the actual default value (as stored in the catalog) when one is present.
-5. **REQ-DESCRIBE-005**: The `Comments` column SHALL display column-level comments from the Teradata catalog when available, and an empty string when absent.
+4. **REQ-DESCRIBE-004**: The `Default` column SHALL display `-` (table/CSV format) when no column default is defined, and the actual default value (as stored in the catalog) when one is present.
+5. **REQ-DESCRIBE-005**: Column comments from the Teradata catalog SHALL be shown in a `Comment` column only when at least one column has a non-empty comment. When no columns have comments, the `Comment` column SHALL be omitted entirely from the output.
 6. **REQ-DESCRIBE-006**: Columns SHALL be displayed in ordinal position order (`ColumnId` ascending), matching the table definition order.
-7. **REQ-DESCRIBE-007**: The `Indexes` section SHALL be omitted for views (views have no indexes). For tables, the section SHALL always be shown; if no indexes exist, display `No indexes defined`.
-8. **REQ-DESCRIBE-008**: The `Rows (Est.)` header line SHALL be omitted for views (row count is not meaningful for views).
-9. **REQ-DESCRIBE-009**: In JSON output, `nullable` SHALL be a boolean (`true`/`false`), `default` SHALL be `null` when no default is set, and `comments` SHALL be `null` when absent.
-10. **REQ-DESCRIBE-010**: In CSV output, a section header row (using the `column,type,nullable,...` row) SHALL separate object metadata from column data to enable downstream filtering by section.
+7. **REQ-DESCRIBE-007**: The `── Indexes ──` section SHALL be shown only for tables (not views). For tables, if no indexes exist, display `No indexes defined.`. For views, the indexes section is omitted silently.
+8. **REQ-DESCRIBE-008**: Table format output uses `──` section headers (`── Object ──`, `── Columns (N) ──`, `── Indexes ──`) with two-space indented content below each header.
+9. **REQ-DESCRIBE-009**: In JSON output, `nullable` SHALL be a boolean (`true`/`false`, never a string), `default` SHALL be `null` when no default is set (never the string `"-"`), and `comment` SHALL be included as a string key only when a non-empty comment exists (not present when absent).
+10. **REQ-DESCRIBE-010**: In CSV output, a comment header (`# Object: database.name (Type)`) precedes the column rows, and column headers use `Column,Type,Nullable,Default,Comment`.
 11. **REQ-DESCRIBE-011**: The `--format` and `--output` flags follow the same semantics as all other tq commands (see [Flag Design Guidelines](#flag-design-guidelines)).
 12. **REQ-DESCRIBE-012**: For object type reporting, the same `TableKind` mapping used by `tq inspect` (see `docs/specifications/repl.md` REQ-INSPECT-002.2) SHALL be applied.
+13. **REQ-DESCRIBE-013**: In table format, the index display is inline, one line per index: `  <Full Label> (<Short>): col1, col2`. Named indexes include the name in quotes: `  <Full Label> (<Short>) "<name>": col1, col2`.
 
 **Relationship to `tq inspect`**: `tq describe` is a focused schema command — it shows columns and index structure only. Use `tq inspect` when storage metrics, object dependencies, or a full consolidated view are needed.
 
@@ -1624,32 +1663,34 @@ Exit code: 1
 
 **Integration with Scripting**:
 ```bash
-# List all columns for a table in JSON
-tq describe --format json employees | jq '.columns[].column'
+# List all column names for a table in JSON
+tq describe --format json employees | jq '.columns[].name'
 
 # Extract nullable columns to CSV
 tq describe --format json employees | \
-  jq -r '.columns[] | select(.nullable) | [.column, .type] | @csv'
+  jq -r '.columns[] | select(.nullable) | [.name, .type] | @csv'
 
 # Generate schema documentation
 tq --profile prod describe --format csv production.orders > orders-schema.csv
 
 # Check if a column exists before running a query
 tq describe --format json employees | \
-  jq -e '.columns[] | select(.column == "salary")' > /dev/null && \
+  jq -e '.columns[] | select(.name == "salary")' > /dev/null && \
   echo "salary column exists"
 ```
 
 **Acceptance Tests**:
-- Execute `tq describe <table>` and verify object header, columns table with all 5 columns, and indexes section are displayed
-- Execute `tq describe <view>` and verify columns are shown, indexes section is absent, rows count is absent
+- Execute `tq describe <table>` and verify `──` section headers for Object, Columns, and Indexes sections; columns shown as aligned plain-text rows (no box-drawing borders)
+- Execute `tq describe <table>` where no columns have comments and verify the `Comment` column is absent
+- Execute `tq describe <table>` where at least one column has a comment and verify the `Comment` column appears in the output
+- Execute `tq describe <view>` and verify columns are shown, the Indexes section is absent
 - Execute `tq describe <database>.<object>` (qualified name) and verify correct database resolution
-- Execute `tq describe --format json <table>` and verify valid JSON with `object`, `type`, `estimated_rows`, `columns`, `indexes` keys; `nullable` is boolean, `default` is `null` when absent
-- Execute `tq describe --format csv <table>` and verify CSV with object metadata row and column data rows
+- Execute `tq describe --format json <table>` and verify valid JSON with `object` (containing `database`, `name`, `type`), `columns`, and `indexes` keys; `nullable` is a boolean (`true`/`false`), `default` is `null` when absent (not the string `"-"`), and `comment` key appears only for columns that have comments
+- Execute `tq describe --format csv <table>` and verify comment header row followed by `Column,Type,Nullable,Default,Comment` header and data rows
 - Execute `tq describe <nonexistent>` and verify not-found error (exit code 1)
 - Execute `tq describe` with no argument and verify usage error (exit code 2)
 - Execute `tq describe --output schema.txt <table>` and verify file is created with correct content
-- Verify column `Default` shows `-` (table format) or `null` (JSON) when no default is defined
+- Verify column `Default` shows `-` in table/CSV format when no default is defined; `null` in JSON format
 - Verify object names are treated case-insensitively: `tq describe DBC.TABLES` and `tq describe dbc.tables` return the same result
 
 ---
@@ -1685,14 +1726,14 @@ tq list databases
 # List tables in the current (logon) database
 tq list tables
 
-# List tables matching a pattern (SQL LIKE syntax: % and _ wildcards)
-tq list tables emp%
+# List tables matching a glob pattern (* = any characters, ? = single character)
+tq list tables 'emp*'
 
 # List tables in a specific database
 tq list tables --database staging
 
 # List tables in a specific database with a pattern
-tq list tables --database staging test_%
+tq list tables --database staging 'test_*'
 
 # List views
 tq list views
@@ -1707,7 +1748,7 @@ tq list tables --format csv --output tables.csv
 tq --profile prod list databases
 
 # Pipe to jq for filtering
-tq list databases --format json | jq '.[] | select(.type == "User") | .database'
+tq list databases --format json | jq '.[] | select(.type == "User") | .name'
 ```
 
 ---
@@ -1723,23 +1764,21 @@ tq [GLOBAL_OPTIONS] list databases [OPTIONS]
 
 **Output — Table Format**:
 ```
-Databases on prod-td01.company.com:
-┌─────────────────────┬──────────────┬─────────┐
-│ Database            │ Owner        │ Type    │
-├─────────────────────┼──────────────┼─────────┤
-│ DBC                 │ DBC          │ System  │
-│ analytics           │ analytics    │ User    │
-│ development         │ dev_user     │ User    │
-│ production          │ dba_user     │ User    │
-│ staging             │ dba_user     │ User    │
-└─────────────────────┴──────────────┴─────────┘
+Databases (5):
+Name                           Owner                Type
+------------------------------------------------------------
+DBC                            DBC                  System
+analytics                      analytics            User
+development                    dev_user             User
+production                     dba_user             User
+staging                        dba_user             User
 
-5 databases found
+5 database(s)
 ```
 
 **Output — CSV Format**:
 ```csv
-database,owner,type
+DatabaseName,Owner,Type
 DBC,DBC,System
 analytics,analytics,User
 development,dev_user,User
@@ -1750,11 +1789,11 @@ staging,dba_user,User
 **Output — JSON Format**:
 ```json
 [
-  { "database": "DBC",        "owner": "DBC",        "type": "System" },
-  { "database": "analytics",  "owner": "analytics",  "type": "User"   },
-  { "database": "development","owner": "dev_user",   "type": "User"   },
-  { "database": "production", "owner": "dba_user",   "type": "User"   },
-  { "database": "staging",    "owner": "dba_user",   "type": "User"   }
+  { "name": "DBC",         "owner": "DBC",        "type": "System" },
+  { "name": "analytics",   "owner": "analytics",  "type": "User"   },
+  { "name": "development", "owner": "dev_user",   "type": "User"   },
+  { "name": "production",  "owner": "dba_user",   "type": "User"   },
+  { "name": "staging",     "owner": "dba_user",   "type": "User"   }
 ]
 ```
 
@@ -1775,62 +1814,62 @@ tq [GLOBAL_OPTIONS] list tables [OPTIONS] [PATTERN]
 ```
 
 **Arguments**:
-- `[PATTERN]`: Optional. A SQL LIKE pattern to filter table names. Uses `%` (any characters) and `_` (single character) as wildcards. Case-insensitive. If omitted, all tables are listed.
+- `[PATTERN]`: Optional. A glob pattern to filter table names. Uses `*` (any sequence of characters) and `?` (any single character) as wildcards. Case-insensitive. If omitted, all tables are listed. Glob syntax is more natural for CLI use than SQL LIKE patterns.
 
 **Pattern examples**:
-- `emp%` — all tables whose name starts with `emp`
-- `%_archive` — all tables ending with `_archive`
-- `sales_2024_%` — all tables starting with `sales_2024_`
+- `emp*` — all tables whose name starts with `emp`
+- `*_archive` — all tables ending with `_archive`
+- `sales_2024_*` — all tables starting with `sales_2024_`
+- `emp?oyees` — tables matching with any single character in the `?` position
 
 **Output — Table Format (all tables)**:
 ```
-Tables in 'production':
-┌─────────────────────┬──────────┬──────────────┬───────────┐
-│ Table               │ Type     │ Rows (Est.)  │ Size      │
-├─────────────────────┼──────────┼──────────────┼───────────┤
-│ customers           │ Table    │ 1,234,567    │ 45.2 MB   │
-│ employees           │ Table    │ 42,573       │ 2.1 MB    │
-│ orders              │ Table    │ 9,876,543    │ 320.5 MB  │
-│ products            │ Table    │ 15,432       │ 890 KB    │
-└─────────────────────┴──────────┴──────────────┴───────────┘
+Tables in (current):
+Name                                Type     Rows (Est.)     Size
+-----------------------------------------------------------------
+customers                           TABLE      1234567     45.2 MB
+employees                           TABLE        42573      2.1 MB
+orders                              TABLE      9876543    320.5 MB
+products                            TABLE        15432      890 KB
 
-4 tables found in database 'production'
+4 table(s)
 ```
 
 **Output — Table Format (with pattern)**:
 ```
-Tables in 'production' matching 'emp%':
-┌─────────────────────┬──────────┬──────────────┬───────────┐
-│ Table               │ Type     │ Rows (Est.)  │ Size      │
-├─────────────────────┼──────────┼──────────────┼───────────┤
-│ employees           │ Table    │ 42,573       │ 2.1 MB    │
-│ emp_archive         │ Table    │ 8,123        │ 512 KB    │
-└─────────────────────┴──────────┴──────────────┴───────────┘
+Tables in (current) matching 'emp*':
+Name                                Type     Rows (Est.)     Size
+-----------------------------------------------------------------
+employees                           TABLE        42573      2.1 MB
+emp_archive                         TABLE         8123    512.0 KB
 
-2 tables found matching 'emp%'
+2 table(s)
 ```
 
 **Output — No Tables Found**:
 ```
-No tables found in database 'production' matching 'xyz%'
+0 table(s)
 ```
 
 **Output — CSV Format**:
 ```csv
-table,type,estimated_rows,size_bytes
-customers,Table,1234567,47395274
-employees,Table,42573,2201783
-orders,Table,9876543,336062873
-products,Table,15432,911974
+TableName,Type,RowsEst,Size
+customers,TABLE,1234567,45.2 MB
+employees,TABLE,42573,2.1 MB
+orders,TABLE,9876543,320.5 MB
+products,TABLE,15432,890.0 KB
 ```
 
 **Output — JSON Format**:
+
+The JSON output uses string representations for rows and size as returned from the database. Integer conversion of raw row counts and byte values is handled by the caller. The `rows_est` and `size` fields are strings matching the table display format.
+
 ```json
 [
-  { "table": "customers",  "type": "Table", "estimated_rows": 1234567, "size_bytes": 47395274  },
-  { "table": "employees",  "type": "Table", "estimated_rows": 42573,   "size_bytes": 2201783   },
-  { "table": "orders",     "type": "Table", "estimated_rows": 9876543,  "size_bytes": 336062873 },
-  { "table": "products",   "type": "Table", "estimated_rows": 15432,   "size_bytes": 911974    }
+  { "name": "customers",  "type": "TABLE", "rows_est": "1234567", "size": "45.2 MB"   },
+  { "name": "employees",  "type": "TABLE", "rows_est": "42573",   "size": "2.1 MB"    },
+  { "name": "orders",     "type": "TABLE", "rows_est": "9876543", "size": "320.5 MB"  },
+  { "name": "products",   "type": "TABLE", "rows_est": "15432",   "size": "890.0 KB"  }
 ]
 ```
 
@@ -1847,49 +1886,35 @@ tq [GLOBAL_OPTIONS] list views [OPTIONS]
 
 **Output — Table Format**:
 ```
-Views in 'production':
-┌─────────────────────────┬──────────────┬─────────────────────────────────────┐
-│ View                    │ Owner        │ Definition (truncated)              │
-├─────────────────────────┼──────────────┼─────────────────────────────────────┤
-│ active_employees        │ dba_user     │ SELECT * FROM employees WHERE...    │
-│ customer_orders_view    │ dba_user     │ SELECT c.*, o.* FROM customers c... │
-│ sales_summary           │ analytics    │ SELECT dept, SUM(salary) FROM...    │
-└─────────────────────────┴──────────────┴─────────────────────────────────────┘
+Views in (current):
+Name                           Owner
+----------------------------------------
+active_employees               dba_user
+customer_orders_view           dba_user
+sales_summary                  analytics
 
-3 views found in database 'production'
+3 view(s)
 ```
 
 **Output — No Views Found**:
 ```
-No views found in database 'development'
+0 view(s)
 ```
 
 **Output — CSV Format**:
 ```csv
-view,owner,definition
-active_employees,dba_user,"SELECT * FROM employees WHERE status = 'ACTIVE'"
-customer_orders_view,dba_user,"SELECT c.*, o.* FROM customers c JOIN orders o ON c.id = o.cust_id"
-sales_summary,analytics,"SELECT dept, SUM(salary) FROM employees GROUP BY dept"
+ViewName,Owner
+active_employees,dba_user
+customer_orders_view,dba_user
+sales_summary,analytics
 ```
 
 **Output — JSON Format**:
 ```json
 [
-  {
-    "view": "active_employees",
-    "owner": "dba_user",
-    "definition": "SELECT * FROM employees WHERE status = 'ACTIVE'"
-  },
-  {
-    "view": "customer_orders_view",
-    "owner": "dba_user",
-    "definition": "SELECT c.*, o.* FROM customers c JOIN orders o ON c.id = o.cust_id"
-  },
-  {
-    "view": "sales_summary",
-    "owner": "analytics",
-    "definition": "SELECT dept, SUM(salary) FROM employees GROUP BY dept"
-  }
+  { "name": "active_employees",     "owner": "dba_user"  },
+  { "name": "customer_orders_view", "owner": "dba_user"  },
+  { "name": "sales_summary",        "owner": "analytics" }
 ]
 ```
 
@@ -1897,20 +1922,20 @@ sales_summary,analytics,"SELECT dept, SUM(salary) FROM employees GROUP BY dept"
 
 #### list — Behavior Requirements
 
-1. **REQ-LIST-001**: The `list` command SHALL require a subcommand (`databases`, `tables`, `views`); invoking `tq list` with no subcommand SHALL print subcommand help and exit with code 2.
-2. **REQ-LIST-002**: `list databases` data source: `DBC.DatabasesV` (or platform equivalent). Columns displayed: Database, Owner, Type.
+1. **REQ-LIST-001**: The `list` command SHALL require a subcommand (`databases`, `tables`, `views`); invoking `tq list` with no subcommand SHALL print subcommand help and exit with code 2. Invoking with an unknown subcommand SHALL print `Error: Unknown list subcommand: <name>` followed by the available subcommands, and exit with code 2.
+2. **REQ-LIST-002**: `list databases` data source: `DBC.DatabasesV`. Columns displayed: Name, Owner, Type.
 3. **REQ-LIST-003**: `list databases` type classification: databases owned by `DBC` SHALL be shown as type `System`; all others SHALL be shown as type `User`.
-4. **REQ-LIST-004**: `list databases` sorting: System databases first (alphabetical), then User databases (alphabetical).
-5. **REQ-LIST-005**: `list tables` data source: `DBC.TablesV WHERE TableKind = 'T'`. Columns displayed: Table, Type (always `Table`), Rows (Est.), Size.
-6. **REQ-LIST-006**: `list tables` with `--database <db>` SHALL list tables in the specified database, regardless of the database in the logon string. Without `--database`, the command targets the database from the logon connection string.
-7. **REQ-LIST-007**: `list tables [PATTERN]` filter: the pattern is applied as a SQL LIKE clause against `TableName` (case-insensitive). `%` matches any sequence of characters; `_` matches any single character.
-8. **REQ-LIST-008**: `list tables` sorting: alphabetical by table name.
-9. **REQ-LIST-009**: `list tables` size values: in table format, size SHALL be displayed as a human-readable string (`890 KB`, `2.1 MB`, `320.5 MB`). In CSV and JSON formats, size SHALL be expressed as raw bytes (`size_bytes` integer).
-10. **REQ-LIST-010**: `list views` data source: `DBC.TablesV WHERE TableKind = 'V'`. Columns displayed: View, Owner, Definition (truncated).
-11. **REQ-LIST-011**: `list views` view definition: in table format, the definition SHALL be truncated to 50 characters with `...` appended. In CSV and JSON formats, the full view definition text SHALL be included.
-12. **REQ-LIST-012**: `list views` with `--database <db>` SHALL list views in the specified database. Without `--database`, the command targets the database from the logon connection string.
+4. **REQ-LIST-004**: `list databases` sorting: alphabetical by database name.
+5. **REQ-LIST-005**: `list databases` JSON key for database name SHALL be `"name"`.
+6. **REQ-LIST-006**: `list tables` data source: `DBC.TablesV WHERE TableKind IN ('T', 'O')` joined with `DBC.TableSizeV` for row count and size estimates. Columns displayed: Name, Type, Rows (Est.), Size.
+7. **REQ-LIST-007**: `list tables` with `--database <db>` SHALL list tables in the specified database, regardless of the database in the logon string. Without `--database`, the command targets the current (session default) database.
+8. **REQ-LIST-008**: `list tables [PATTERN]` filter: the pattern uses glob syntax with `*` (any sequence of characters) and `?` (any single character). Matching is case-insensitive. Glob syntax is preferred over SQL LIKE because it follows standard shell conventions familiar to CLI users.
+9. **REQ-LIST-009**: `list tables` sorting: alphabetical by table name.
+10. **REQ-LIST-010**: `list tables` size values: in all formats (table, CSV, JSON), size SHALL be displayed as a human-readable string (`890.0 KB`, `2.1 MB`, `320.5 MB`). The `rows_est` and `size` values in JSON and CSV are strings matching the display format. Raw byte values are not exposed — use `tq inspect` when precise byte counts are needed.
+11. **REQ-LIST-011**: `list views` data source: `DBC.TablesV WHERE TableKind = 'V'` joined to get owner from `CreatorName`. Columns displayed: Name, Owner.
+12. **REQ-LIST-012**: `list views` with `--database <db>` SHALL list views in the specified database. Without `--database`, the command targets the current (session default) database.
 13. **REQ-LIST-013**: `list views` sorting: alphabetical by view name.
-14. **REQ-LIST-014**: When a subcommand returns no results, an informative "No X found" message SHALL be displayed and the command SHALL exit with code 0 (not an error).
+14. **REQ-LIST-014**: When a subcommand returns no results, the count line (`0 table(s)`, `0 view(s)`, `0 database(s)`) SHALL be displayed and the command SHALL exit with code 0 (not an error).
 15. **REQ-LIST-015**: The `--format` and `--output` flags follow the same semantics as all other tq commands (see [Flag Design Guidelines](#flag-design-guidelines)).
 16. **REQ-LIST-016**: In JSON format, all list subcommands return a JSON array (`[]`). An empty result set returns an empty array `[]`, not `null` or an error.
 
@@ -1985,33 +2010,36 @@ Exit code: 1
 **Integration with Scripting**:
 ```bash
 # Find all databases with "staging" in the name
-tq list databases --format json | jq -r '.[] | select(.database | test("staging";"i")) | .database'
+tq list databases --format json | jq -r '.[] | select(.name | test("staging";"i")) | .name'
 
 # Count tables per database (using --database flag)
-for db in $(tq list databases --format json | jq -r '.[].database'); do
+for db in $(tq list databases --format json | jq -r '.[].name'); do
   count=$(tq list tables --database "$db" --format json | jq 'length')
   echo "$db: $count tables"
 done
 
-# Find all views matching a pattern across staging
-tq list views --database staging --format json | jq '.[].view'
+# Find all views in staging
+tq list views --database staging --format json | jq '.[].name'
 
 # Export table inventory to CSV
 tq --profile prod list tables --format csv --output tables-$(date +%Y%m%d).csv
 ```
 
 **Acceptance Tests**:
-- Execute `tq list databases` and verify table output with Database, Owner, Type columns; system databases appear before user databases
-- Execute `tq list databases --format json` and verify JSON array with `database`, `owner`, `type` keys; empty result is `[]`
-- Execute `tq list databases --format csv` and verify CSV with `database,owner,type` header row
-- Execute `tq list tables` with a valid database in logon string and verify table output with Table, Type, Rows (Est.), Size columns
-- Execute `tq list tables emp%` and verify only tables matching the pattern are shown
+- Execute `tq list databases` and verify plain-text table output with Name, Owner, Type columns
+- Execute `tq list databases --format json` and verify JSON array with `"name"`, `"owner"`, `"type"` keys (not `"database"`); empty result is `[]`
+- Execute `tq list databases --format csv` and verify CSV with `DatabaseName,Owner,Type` header row
+- Execute `tq list databases` and verify DBC-owned databases show type `System`, others show type `User`
+- Execute `tq list tables` with a valid database in logon string and verify table output with Name, Type, Rows (Est.), Size columns
+- Execute `tq list tables 'emp*'` (glob) and verify only tables whose names start with `emp` are shown
+- Execute `tq list tables 'emp?loyees'` (glob `?`) and verify single-character wildcard matching
 - Execute `tq list tables --database staging` and verify tables from the `staging` database are listed
-- Execute `tq list tables xyz_nonexistent%` and verify "No tables found" message with exit code 0
-- Execute `tq list views` and verify view output with View, Owner, Definition columns; definition is truncated in table format
-- Execute `tq list views --format json` and verify JSON array with full `definition` field (not truncated)
-- Execute `tq list views --format csv` and verify CSV with full `definition` field (not truncated)
+- Execute `tq list tables 'xyz_nonexistent*'` and verify `0 table(s)` output with exit code 0
+- Execute `tq list views` and verify output with Name and Owner columns; alphabetical order
+- Execute `tq list views --format json` and verify JSON array with `"name"` and `"owner"` keys
+- Execute `tq list views --format csv` and verify CSV with `ViewName,Owner` header
 - Execute `tq list` with no subcommand and verify usage help is shown with exit code 2
+- Execute `tq list unknown_sub` and verify `Error: Unknown list subcommand: unknown_sub` message with exit code 2
 - Execute `tq list databases --output db-list.txt` and verify file is created
 
 ---
@@ -2057,45 +2085,58 @@ tq show-indexes --output indexes.txt employees
 
 **Output — Table Format (table with primary and secondary indexes)**:
 ```
-Index structure for PRODUCTION.employees:
+Indexes on PRODUCTION.employees:
 
-  Primary Index
-    Type:     Unique Primary Index (UPI)
-    Columns:  employee_id
+── Primary Index ──
+  Primary Index (UPI): employee_id
 
-  Secondary Indexes
-    #1  Non-Unique Secondary Index (NUSI)  (department_id)
-    #2  Unique Secondary Index (USI)       (email)
+── Secondary Indexes ──
+  Secondary Index (NUSI): department_id
+  Secondary Index (USI): email
+
+3 index(es), 3 index column(s)
 ```
 
 **Output — Table Format (NoPI table)**:
 ```
-Index structure for PRODUCTION.fact_sales:
+Indexes on PRODUCTION.fact_sales:
 
-  Primary Index
-    No Primary Index (NoPI)
+── Primary Index ──
+  No Primary Index (NoPI)
 
-  Secondary Indexes
-    #1  Non-Unique Secondary Index (NUSI)  (region_id, sale_date)
+── Secondary Indexes ──
+  Secondary Index (NUSI): region_id, sale_date
+
+2 index(es), 3 index column(s)
 ```
 
 **Output — Table Format (primary index only, no secondary indexes)**:
 ```
-Index structure for PRODUCTION.config:
+Indexes on PRODUCTION.config:
 
-  Primary Index
-    Type:     Non-Unique Primary Index (NUPI)
-    Columns:  config_key
+── Primary Index ──
+  Primary Index (NUPI): config_key
 
-  No secondary indexes defined.
+No secondary indexes.
+
+1 index(es), 1 index column(s)
+```
+
+**Output — Table Format (named index)**:
+
+When an index has a name (other than `(unnamed)`), the name is shown in quotes:
+
+```
+── Secondary Indexes ──
+  Secondary Index (NUSI) "idx_dept": department_id
 ```
 
 **Output — CSV Format**:
 ```csv
-kind,index_no,type,columns
-Primary Index,,UPI,employee_id
-Secondary Index,1,NUSI,department_id
-Secondary Index,2,USI,email
+IndexName,IndexType,ShortType,IsPrimary,Columns
+(unnamed),Primary Index,UPI,Yes,employee_id
+(unnamed),Secondary Index,NUSI,No,department_id
+(unnamed),Secondary Index,USI,No,email
 ```
 
 **Output — JSON Format**:
@@ -2104,13 +2145,11 @@ Secondary Index,2,USI,email
   "object": "PRODUCTION.employees",
   "primary_index": {
     "type": "UPI",
-    "type_label": "Unique Primary Index (UPI)",
-    "columns": ["employee_id"],
-    "no_pi": false
+    "columns": ["employee_id"]
   },
   "secondary_indexes": [
-    { "index_no": 1, "type": "NUSI", "type_label": "Non-Unique Secondary Index (NUSI)", "columns": ["department_id"] },
-    { "index_no": 2, "type": "USI",  "type_label": "Unique Secondary Index (USI)",      "columns": ["email"] }
+    { "name": "(unnamed)", "type": "NUSI", "columns": ["department_id"] },
+    { "name": "(unnamed)", "type": "USI",  "columns": ["email"] }
   ]
 }
 ```
@@ -2119,14 +2158,9 @@ Secondary Index,2,USI,email
 ```json
 {
   "object": "PRODUCTION.fact_sales",
-  "primary_index": {
-    "no_pi": true,
-    "type": null,
-    "type_label": "No Primary Index (NoPI)",
-    "columns": []
-  },
+  "primary_index": null,
   "secondary_indexes": [
-    { "index_no": 1, "type": "NUSI", "type_label": "Non-Unique Secondary Index (NUSI)", "columns": ["region_id", "sale_date"] }
+    { "name": "(unnamed)", "type": "NUSI", "columns": ["region_id", "sale_date"] }
   ]
 }
 ```
@@ -2136,23 +2170,24 @@ Secondary Index,2,USI,email
 1. **REQ-SHOW-IDX-001**: The command SHALL require exactly one object argument; invoking without an argument SHALL exit with code 2 and print the usage error.
 2. **REQ-SHOW-IDX-002**: Object names SHALL be treated case-insensitively (Teradata convention).
 3. **REQ-SHOW-IDX-003**: Data source: `DBC.IndicesV`. The command fetches all index records for the specified object.
-4. **REQ-SHOW-IDX-004**: Primary index type labels SHALL follow the Teradata index naming convention:
-   | IndexType value | Display Label |
-   |-----------------|---------------|
-   | `UPI` | Unique Primary Index (UPI) |
-   | `NUPI` | Non-Unique Primary Index (NUPI) |
-   | NoPI (TableKind = `O`) | No Primary Index (NoPI) |
-5. **REQ-SHOW-IDX-005**: Secondary index type labels:
-   | IndexType value | Display Label |
-   |-----------------|---------------|
-   | `USI` | Unique Secondary Index (USI) |
-   | `NUSI` | Non-Unique Secondary Index (NUSI) |
-6. **REQ-SHOW-IDX-006**: When no secondary indexes exist, the secondary indexes subsection SHALL display `No secondary indexes defined.` in table format; the `secondary_indexes` key SHALL be an empty array `[]` in JSON format; no secondary index rows SHALL appear in CSV format.
-7. **REQ-SHOW-IDX-007**: When the table has no primary index (`TableKind = 'O'` in `DBC.TablesV`), the primary index subsection SHALL display `No Primary Index (NoPI)` in table format, and `"no_pi": true` with `"columns": []` in JSON format.
+4. **REQ-SHOW-IDX-004**: Index type labels in table format display as `<type_label> (<short_label>)`:
+   | Index category | type_label | short_label | Full display |
+   |----------------|------------|-------------|--------------|
+   | Unique Primary Index | `Primary Index` | `UPI` | `Primary Index (UPI)` |
+   | Non-Unique Primary Index | `Primary Index` | `NUPI` | `Primary Index (NUPI)` |
+   | Unique Secondary Index | `Secondary Index` | `USI` | `Secondary Index (USI)` |
+   | Non-Unique Secondary Index | `Secondary Index` | `NUSI` | `Secondary Index (NUSI)` |
+   | Partitioned Primary Index | `Partitioned Primary Index` | `PPI` | `Partitioned Primary Index (PPI)` |
+   | No Primary Index | N/A | N/A | `No Primary Index (NoPI)` |
+5. **REQ-SHOW-IDX-005**: The `short_label` (e.g., `UPI`, `NUSI`) SHALL be used as the `"type"` field in JSON output and as `ShortType` in CSV output.
+6. **REQ-SHOW-IDX-006**: When no secondary indexes exist, the table format SHALL display `No secondary indexes.` on its own line (without a `── Secondary Indexes ──` header); the `secondary_indexes` key SHALL be an empty array `[]` in JSON format; no secondary index rows SHALL appear in CSV format.
+7. **REQ-SHOW-IDX-007**: For NoPI tables (where no primary index rows exist in `DBC.IndicesV`), the `── Primary Index ──` section SHALL display `  No Primary Index (NoPI)`; in JSON format `"primary_index"` SHALL be `null`.
 8. **REQ-SHOW-IDX-008**: When multiple columns form a composite index, all columns SHALL be listed in index column order, separated by `, ` in table and CSV formats, and as a JSON array in JSON format.
 9. **REQ-SHOW-IDX-009**: Secondary indexes SHALL be displayed in index number order (ascending `IndexNumber` from `DBC.IndicesV`).
 10. **REQ-SHOW-IDX-010**: The `--format` and `--output` flags follow the same semantics as all other tq commands (see [Flag Design Guidelines](#flag-design-guidelines)).
 11. **REQ-SHOW-IDX-011**: This command applies only to tables. Invoking `tq show-indexes` against a view SHALL display an informative message (views have no indexes) and exit with code 0.
+12. **REQ-SHOW-IDX-012**: Table format output uses `──` section headers (`── Primary Index ──`, `── Secondary Indexes ──`) with two-space indented content below each header. Each index is shown on a single inline line: `  <Full Label> (<Short>): col1, col2`. Named indexes include the name in quotes before the colon: `  <Full Label> (<Short>) "<name>": col1, col2`.
+13. **REQ-SHOW-IDX-013**: A summary line at the end of table format output shows the total number of indexes and index columns: `N index(es), M index column(s)`.
 
 **View Target**:
 ```
@@ -2231,13 +2266,14 @@ tq show-indexes --format json production.orders | \
 ```
 
 **Acceptance Tests**:
-- Execute `tq show-indexes <table>` with a UPI and secondary indexes and verify table output showing primary and secondary sections
-- Execute `tq show-indexes <nopi_table>` and verify "No Primary Index (NoPI)" is displayed in the primary index section
-- Execute `tq show-indexes <table_without_secondary_indexes>` and verify "No secondary indexes defined." is displayed
-- Execute `tq show-indexes <view>` and verify informative "not applicable to views" message is shown with exit code 0
+- Execute `tq show-indexes <table>` with a UPI and secondary indexes and verify `──` section headers and inline index lines (no box-drawing, no multi-line type/columns)
+- Execute `tq show-indexes <nopi_table>` and verify `── Primary Index ──` section shows `  No Primary Index (NoPI)`
+- Execute `tq show-indexes <table_without_secondary_indexes>` and verify `No secondary indexes.` line appears (without a secondary section header)
+- Execute `tq show-indexes <view>` and verify informative message is shown with exit code 0
 - Execute `tq show-indexes <database>.<table>` (qualified name) and verify correct database resolution
-- Execute `tq show-indexes --format json <table>` and verify valid JSON with `object`, `primary_index`, `secondary_indexes` keys; `no_pi` is boolean; `columns` is an array
-- Execute `tq show-indexes --format csv <table>` and verify CSV with `kind,index_no,type,columns` header and one row per index
+- Execute `tq show-indexes --format json <table>` and verify valid JSON with `"object"` string, `"primary_index"` (object or null), `"secondary_indexes"` array; each secondary index has `"name"`, `"type"`, `"columns"` keys
+- Execute `tq show-indexes --format json <nopi_table>` and verify `"primary_index"` is `null`
+- Execute `tq show-indexes --format csv <table>` and verify CSV with `IndexName,IndexType,ShortType,IsPrimary,Columns` header
 - Execute `tq show-indexes` with no argument and verify usage error (exit code 2)
 - Execute `tq show-indexes <nonexistent>` and verify not-found error (exit code 1)
 - Verify composite index columns are listed in correct order in all output formats
@@ -2744,6 +2780,7 @@ Every user-visible error message SHALL begin with `Error:` (capital E, followed 
 - Object not found errors
 - Permission denied errors
 - Usage errors (missing arguments, invalid flags)
+- Unknown subcommand errors
 - Connection failures
 - Any other failure condition that produces a non-zero exit code or an inline error display in REPL mode
 
@@ -2752,6 +2789,7 @@ Every user-visible error message SHALL begin with `Error:` (capital E, followed 
 Error: Object 'employees' not found.
 Error: Missing required argument <object>
 Error: Cannot describe 'employees'.
+Error: Unknown list subcommand: schema
 ```
 
 **Incorrect:**
@@ -2759,6 +2797,7 @@ Error: Cannot describe 'employees'.
 employees not found.
 Missing argument
 Cannot describe employees.
+Unknown list subcommand: schema
 ```
 
 ### REQ-ERR-002: Object Placeholder in Usage Text

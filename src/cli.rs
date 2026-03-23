@@ -649,12 +649,12 @@ pub struct InspectArgs {
     pub output: Option<PathBuf>,
 }
 
-/// Arguments for the describe command (Sprint 46)
+/// Arguments for the describe command
 #[derive(Parser, Debug)]
 pub struct DescribeArgs {
     /// Table or view to describe (unqualified or database.object)
     #[arg(value_name = "OBJECT")]
-    pub table: String,
+    pub object: String,
 
     /// Output format
     ///
@@ -720,11 +720,11 @@ pub enum ListObjectType {
     Views,
 }
 
-/// Arguments for the show-indexes command (Sprint 46)
+/// Arguments for the show-indexes command
 #[derive(Parser, Debug)]
 pub struct ShowIndexesArgs {
-    /// Table to show indexes for (unqualified or database.table)
-    #[arg(value_name = "TABLE")]
+    /// Object to show indexes for (unqualified or database.object)
+    #[arg(value_name = "OBJECT")]
     pub table: String,
 
     /// Output format
@@ -1643,7 +1643,7 @@ mod tests {
         let args = vec!["tq", "describe", "employees"];
         let cli = Cli::try_parse_from(args).unwrap();
         if let Command::Describe(args) = cli.command {
-            assert_eq!(args.table, "employees");
+            assert_eq!(args.object, "employees");
             assert_eq!(args.format, OutputFormat::Table);
             assert!(args.output.is_none());
         } else {
@@ -1656,7 +1656,7 @@ mod tests {
         let args = vec!["tq", "describe", "mydb.employees"];
         let cli = Cli::try_parse_from(args).unwrap();
         if let Command::Describe(args) = cli.command {
-            assert_eq!(args.table, "mydb.employees");
+            assert_eq!(args.object, "mydb.employees");
         } else {
             panic!("Expected Describe command");
         }
