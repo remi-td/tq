@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-03-23
-**Current Version:** 1.29.0
-**Latest Sprint:** Sprint 48 Complete (Query Layer Consolidation & Spec Alignment)
+**Current Version:** 1.32.0
+**Latest Sprint:** Sprint 51 Complete (Session History & Trends)
 
 ---
 
@@ -406,16 +406,80 @@ All core features are complete and tested.
 - **Spec canonicalized**: `──` headers, glob patterns, inline index format, conditional Comment column
 - 833 unit tests + 178 integration tests (100% pass rate), zero clippy warnings
 
+**Sprint 49 Session Control Functions (v1.30.0):**
+- **`/abort <session_id> [yes]`**: Abort session with interactive confirmation
+- **`/abort query <session_id> [yes]`**: Abort running query only (keeps session alive)
+- **`/priority <session_id> <level>`**: Change session priority (RUSH/MEDIUM/LOW)
+- **Batch mode**: `tq abort --force`, `tq priority` with table/CSV/JSON output
+- **Safety model**: REPL requires explicit 'yes', batch requires `--force` flag
+- **Tab completion**: Both commands in metacommand completion menu
+- 855 unit tests + 178 integration tests (100% pass rate), zero clippy warnings
+
+**Sprint 50 Query Drill-Down & Explain Plans (v1.31.0):**
+- **`/explain <sql>`**: Show Teradata EXPLAIN execution plan step-by-step
+- **`/skew [session_id]`**: Analyze AMP-level CPU/IO resource distribution
+- **Batch mode**: `tq explain`, `tq skew` with table/CSV/JSON output
+- **Skew interpretation**: Automatic hints (good/moderate/high/severe) based on thresholds
+- **Top sessions**: `/skew` without session_id shows top-10 by CPU skew
+- **EXPLAIN detection**: Automatically avoids double-prefixing EXPLAIN keyword
+- 882 unit tests + 178 integration tests (100% pass rate), zero clippy warnings
+
+**Sprint 51 Session History & Trends (v1.32.0):**
+- **`/history [--last <dur>] [--user <name>]`**: View session logon/logoff activity
+- **`tq history --last 24h`**: Batch mode with table/CSV/JSON output
+- **Duration parsing**: 30m, 1h, 24h, 7d with validation and upper limits
+- **Summary statistics**: Logons, logoffs, auth failures, unique users
+- **User filtering**: `--user <name>` with SQL injection prevention
+- **Event mapping**: L→Logon, O→Logoff, A→Auth Fail from DBC.LogOnOffV
+- 906 unit tests + 178 integration tests (100% pass rate), zero clippy warnings
+
+---
+
+## Session Control
+
+| Feature | Status | Spec Reference | Since |
+|---------|--------|----------------|-------|
+| `/abort` command (REPL) | ✅ | [Admin User Stories](../specifications/admin-user-stories.md#control-functions) | v1.30.0 (Sprint 49) |
+| `tq abort` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#abort-command) | v1.30.0 (Sprint 49) |
+| `/priority` command (REPL) | ✅ | [Admin User Stories](../specifications/admin-user-stories.md#control-functions) | v1.30.0 (Sprint 49) |
+| `tq priority` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#priority-command) | v1.30.0 (Sprint 49) |
+| Safety confirmation (REPL) | ✅ | Internal requirement | v1.30.0 (Sprint 49) |
+| Batch --force flag | ✅ | Internal requirement | v1.30.0 (Sprint 49) |
+
+---
+
+## Query Analysis
+
+| Feature | Status | Spec Reference | Since |
+|---------|--------|----------------|-------|
+| `/explain` command (REPL) | ✅ | [Admin User Stories](../specifications/admin-user-stories.md#query-drill-down) | v1.31.0 (Sprint 50) |
+| `tq explain` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#explain-command) | v1.31.0 (Sprint 50) |
+| `/skew` command (REPL) | ✅ | [Admin User Stories](../specifications/admin-user-stories.md#query-drill-down) | v1.31.0 (Sprint 50) |
+| `tq skew` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#skew-command) | v1.31.0 (Sprint 50) |
+| Skew interpretation hints | ✅ | Internal enhancement | v1.31.0 (Sprint 50) |
+
+---
+
+## Session History
+
+| Feature | Status | Spec Reference | Since |
+|---------|--------|----------------|-------|
+| `/history` command (REPL) | ✅ | [Admin User Stories](../specifications/admin-user-stories.md#session-history) | v1.32.0 (Sprint 51) |
+| `tq history` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#history-command) | v1.32.0 (Sprint 51) |
+| Time range filtering | ✅ | Internal requirement | v1.32.0 (Sprint 51) |
+| User filtering | ✅ | Internal requirement | v1.32.0 (Sprint 51) |
+| Summary statistics | ✅ | Internal requirement | v1.32.0 (Sprint 51) |
+
 ---
 
 ## Summary Statistics
 
-- **Total Features**: 88
-- **Implemented**: 86 (98%)
+- **Total Features**: 99
+- **Implemented**: 97 (98%)
 - **Planned**: 2 (2%)
-- **Test Pass Rate**: 100% (1011/1011 executed, 57 ignored database-dependent)
+- **Test Pass Rate**: 100% (1084/1084 executed, 58 ignored database-dependent)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 48 - Query Layer Consolidation & Spec Alignment
+- **Latest Sprint**: Sprint 51 - Session History & Trends
 
 ---
 
