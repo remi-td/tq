@@ -49,6 +49,7 @@ pub fn resolve_driver_lib_dir(explicit_dir: Option<&str>) -> (String, Vec<String
     // 1. Explicit CLI flag takes highest priority (trusted unconditionally)
     if let Some(dir) = explicit_dir {
         searched.push(dir.to_string());
+        log::debug!("resolve_driver_lib_dir: using explicit CLI override: {}", dir);
         return (dir.to_string(), searched);
     }
 
@@ -56,9 +57,12 @@ pub fn resolve_driver_lib_dir(explicit_dir: Option<&str>) -> (String, Vec<String
     if let Ok(dir) = std::env::var("TERADATA_LIB_DIR") {
         if !dir.is_empty() {
             searched.push(dir.clone());
+            log::debug!("resolve_driver_lib_dir: checking TERADATA_LIB_DIR: {}", dir);
             if Path::new(&dir).join(lib_name).exists() {
+                log::debug!("resolve_driver_lib_dir: found library at TERADATA_LIB_DIR");
                 return (dir, searched);
             }
+            log::debug!("resolve_driver_lib_dir: library not found in TERADATA_LIB_DIR");
         }
     }
 
@@ -67,15 +71,19 @@ pub fn resolve_driver_lib_dir(explicit_dir: Option<&str>) -> (String, Vec<String
         if let Some(exe_dir) = exe_path.parent() {
             let dir_str = exe_dir.to_string_lossy().to_string();
             searched.push(dir_str.clone());
+            log::debug!("resolve_driver_lib_dir: checking exe dir: {}", dir_str);
             if exe_dir.join(lib_name).exists() {
+                log::debug!("resolve_driver_lib_dir: found library in exe dir");
                 return (dir_str, searched);
             }
+            log::debug!("resolve_driver_lib_dir: library not found in exe dir");
         }
     }
 
     // 4. Current working directory (last resort)
     let cwd = ".".to_string();
     searched.push(cwd.clone());
+    log::debug!("resolve_driver_lib_dir: falling back to CWD");
     (cwd, searched)
 }
 

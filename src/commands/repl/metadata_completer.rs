@@ -340,6 +340,12 @@ const METACOMMANDS: &[MetacommandDef] = &[
         aliases: &["p"],
         description: "Manage YAML parameter files for variable substitution",
     },
+    // Sprint 45: Object inspection command
+    MetacommandDef {
+        name: "inspect",
+        aliases: &["i"],
+        description: "Inspect database object (type, columns, indexes, size)",
+    },
 ];
 
 /// Test helper: returns metacommand names matching a prefix

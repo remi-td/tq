@@ -274,6 +274,16 @@ pub enum Command {
     /// Example: tq query-inspect 1234
     #[command(name = "query-inspect")]
     QueryInspect(QueryInspectArgs),
+
+    /// Inspect a database object (type, columns, indexes, size)
+    ///
+    /// Shows comprehensive metadata for a table, view, or other object
+    /// including type, columns with types, index structure, and storage
+    /// metrics with skew factor.
+    ///
+    /// Example: tq inspect employees
+    ///          tq inspect mydb.employees
+    Inspect(InspectArgs),
 }
 
 /// Profile management subcommands
@@ -362,7 +372,7 @@ pub enum ProfileAction {
         #[arg(value_name = "NAME")]
         name: String,
 
-        /// Confirm deletion (required)
+        /// Skip confirmation prompt
         #[arg(long)]
         force: bool,
     },
@@ -566,6 +576,36 @@ pub struct QueryInspectArgs {
     /// table: Key-value pairs for each query (default)
     /// json: JSON array of query objects
     /// csv: Comma-separated values
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    ///
+    /// If the file exists, it will be overwritten.
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for the inspect command (Sprint 45)
+#[derive(Parser, Debug)]
+pub struct InspectArgs {
+    /// Object to inspect (table, view, or database.object)
+    ///
+    /// Can be unqualified (uses current database) or qualified (database.object).
+    #[arg(value_name = "OBJECT")]
+    pub object: String,
+
+    /// Output format
+    ///
+    /// table: Human-readable structured output (default)
+    /// json: JSON object with all metadata
+    /// csv: Column information as CSV
     #[arg(
         short,
         long,

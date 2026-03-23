@@ -42,8 +42,9 @@ pub fn handle_metacommand<W: Write>(
     client: &DatabaseClient,
     writer: &mut W,
 ) -> Result<bool> {
-    // Normalize: remove leading / or \ and lowercase for command matching
-    let trimmed = input.trim();
+    // Normalize: remove leading / or \, strip trailing semicolons (users type them
+    // out of SQL habit), and lowercase for command matching
+    let trimmed = input.trim().trim_end_matches(';').trim();
     let without_prefix = trimmed.trim_start_matches('/').trim_start_matches('\\');
 
     // Split into command and arguments (preserve case for arguments)
@@ -224,6 +225,14 @@ pub fn handle_metacommand<W: Write>(
             )?;
         }
 
+        // Sprint 45: Inspect command (basic handler - no client available)
+        "inspect" | "i" => {
+            writeln!(
+                writer,
+                "The /inspect command requires full REPL mode with database connection."
+            )?;
+        }
+
         // Sprint 40: Params command (basic handler)
         "params" | "p" => {
             handle_params_basic(&args, state, writer)?;
@@ -251,8 +260,9 @@ pub fn handle_metacommand_with_state<W: Write>(
     completion_state: &mut CompletionState,
     writer: &mut W,
 ) -> Result<bool> {
-    // Normalize: remove leading / or \ and lowercase for command matching
-    let trimmed = input.trim();
+    // Normalize: remove leading / or \, strip trailing semicolons (users type them
+    // out of SQL habit), and lowercase for command matching
+    let trimmed = input.trim().trim_end_matches(';').trim();
     let without_prefix = trimmed.trim_start_matches('/').trim_start_matches('\\');
 
     // Split into command and arguments (preserve case for arguments)
@@ -560,6 +570,23 @@ pub fn handle_metacommand_with_state<W: Write>(
             }
         }
 
+        // Sprint 45: Inspect command (full handler)
+        "inspect" | "i" => {
+            if args.is_empty() {
+                writeln!(writer)?;
+                writeln!(writer, "Usage: /inspect <table_or_view>")?;
+                writeln!(writer, "       /inspect <database>.<object>")?;
+                writeln!(writer)?;
+            } else {
+                let object_name = args.join(" ");
+                crate::commands::inspect::execute_for_repl(
+                    completion_state.client(),
+                    &object_name,
+                    writer,
+                )?;
+            }
+        }
+
         // Sprint 40: Params command (full handler)
         "params" | "p" => {
             handle_params_basic(&args, state, writer)?;
@@ -613,6 +640,10 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     )?;
     writeln!(writer)?;
     writeln!(writer, "Schema Inspection:")?;
+    writeln!(
+        writer,
+        "  /inspect <obj>, /i     Inspect object (type, columns, indexes, size)"
+    )?;
     writeln!(
         writer,
         "  /list databases        List all accessible databases"
@@ -3688,5 +3719,102 @@ mod tests {
         let suggestions = complete_metacommands_for_test("e");
         let has_edit = suggestions.iter().any(|s| s.contains("edit"));
         assert!(has_edit, "Tab completion for 'e' should include edit");
+    }
+
+    // Sprint 45: Semicolon stripping tests (Bug #32)
+
+    #[test]
+    fn test_semicolon_stripping_describe() {
+        // /describe tablename; should strip the semicolon
+        let input = "/describe tablename;";
+        let trimmed = input.trim().trim_end_matches(';').trim();
+        let without_prefix = trimmed.trim_start_matches('/').trim_start_matches('\\');
+        let mut parts = without_prefix.split_whitespace();
+        let command = parts.next().unwrap_or("").to_lowercase();
+        let args: Vec<&str> = parts.collect();
+        assert_eq!(command, "describe");
+        assert_eq!(args, vec!["tablename"]);
+    }
+
+    #[test]
+    fn test_semicolon_stripping_list_tables() {
+        // /list tables; should strip the semicolon
+        let input = "/list tables;";
+        let trimmed = input.trim().trim_end_matches(';').trim();
+        let without_prefix = trimmed.trim_start_matches('/').trim_start_matches('\\');
+        let mut parts = without_prefix.split_whitespace();
+        let command = parts.next().unwrap_or("").to_lowercase();
+        let args: Vec<&str> = parts.collect();
+        assert_eq!(command, "list");
+        assert_eq!(args, vec!["tables"]);
+    }
+
+    #[test]
+    fn test_semicolon_stripping_no_semicolon() {
+        // /describe tablename (no semicolon) should still work
+        let input = "/describe tablename";
+        let trimmed = input.trim().trim_end_matches(';').trim();
+        let without_prefix = trimmed.trim_start_matches('/').trim_start_matches('\\');
+        let mut parts = without_prefix.split_whitespace();
+        let command = parts.next().unwrap_or("").to_lowercase();
+        let args: Vec<&str> = parts.collect();
+        assert_eq!(command, "describe");
+        assert_eq!(args, vec!["tablename"]);
+    }
+
+    #[test]
+    fn test_semicolon_stripping_double_semicolons() {
+        // /describe a;; should strip both semicolons
+        let input = "/describe a;;";
+        let trimmed = input.trim().trim_end_matches(';').trim();
+        let without_prefix = trimmed.trim_start_matches('/').trim_start_matches('\\');
+        let mut parts = without_prefix.split_whitespace();
+        let command = parts.next().unwrap_or("").to_lowercase();
+        let args: Vec<&str> = parts.collect();
+        assert_eq!(command, "describe");
+        assert_eq!(args, vec!["a"]);
+    }
+
+    #[test]
+    fn test_semicolon_stripping_show_indexes() {
+        // /show indexes tablename; should strip the semicolon
+        let input = "/show indexes tablename;";
+        let trimmed = input.trim().trim_end_matches(';').trim();
+        let without_prefix = trimmed.trim_start_matches('/').trim_start_matches('\\');
+        let mut parts = without_prefix.split_whitespace();
+        let command = parts.next().unwrap_or("").to_lowercase();
+        let args: Vec<&str> = parts.collect();
+        assert_eq!(command, "show");
+        assert_eq!(args, vec!["indexes", "tablename"]);
+    }
+
+    #[test]
+    fn test_semicolon_stripping_sample() {
+        // /sample dbc.tables; should strip the semicolon
+        let input = "/sample dbc.tables;";
+        let trimmed = input.trim().trim_end_matches(';').trim();
+        let without_prefix = trimmed.trim_start_matches('/').trim_start_matches('\\');
+        let mut parts = without_prefix.split_whitespace();
+        let command = parts.next().unwrap_or("").to_lowercase();
+        let args: Vec<&str> = parts.collect();
+        assert_eq!(command, "sample");
+        assert_eq!(args, vec!["dbc.tables"]);
+    }
+
+    // Sprint 45: Inspect tab completion test
+
+    #[test]
+    fn test_inspect_in_metacommands() {
+        use crate::commands::repl::metadata_completer::complete_metacommands_for_test;
+
+        let suggestions = complete_metacommands_for_test("inspect");
+        assert!(
+            !suggestions.is_empty(),
+            "Tab completion should include /inspect"
+        );
+
+        let suggestions = complete_metacommands_for_test("i");
+        let has_inspect = suggestions.iter().any(|s| s.contains("inspect"));
+        assert!(has_inspect, "Tab completion for 'i' should include inspect");
     }
 }

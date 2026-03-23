@@ -1,15 +1,29 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.25.0 (Sprint 44 - Driver Distribution Fix & Profile Polish)
-**Last Updated:** 2026-03-21
-**Base Commit:** [Sprint 44 - In Progress]
+**Version:** 1.26.0 (Sprint 45 - Helper Bug Fix & Object Inspection)
+**Last Updated:** 2026-03-23
+**Base Commit:** [Sprint 45 - In Progress]
 
 ## Overview
 
 This directory contains comprehensive test case definitions for the tq CLI tool. These test cases cover all implemented MVP features (FR-001 through FR-010) and provide detailed procedures for validating functionality, usability, error handling, and security.
 
 ## Test Case Categories
+
+### Sprint 45: Helper Bug Fix & Object Inspection
+
+- **TC-045-001**: Semicolon Stripped from /describe Argument (Unit, no-DB) — `TC-045-001.md`
+- **TC-045-BUG32-SEMICOLON**: Bug #32 Full Metacommand Semicolon Stripping Suite (Unit, no-DB) — covers TC-045-001 through TC-045-006 — `TC-045-BUG32-SEMICOLON.md`
+- **TC-045-INSPECT-UNIT**: /inspect Command — Unit Tests for Pure Logic Helpers (Unit, no-DB) — covers TC-045-008 through TC-045-013 — `TC-045-INSPECT-UNIT.md`
+- **TC-045-INSPECT-INTEGRATION**: /inspect Command — Integration Tests (DB required, #[ignore]) — covers TC-045-007, TC-045-014 through TC-045-018 — `TC-045-INSPECT-INTEGRATION.md`
+- **TC-045-DEFERRED-S44**: Sprint 44 Deferred Items (Unit + Code Inspection, no-DB) — covers TC-045-020 through TC-045-023 — `TC-045-DEFERRED-S44.md`
+
+**Sprint 45 test case summary:**
+- Unit tests (no DB): TC-045-001 through TC-045-006 (Bug #32), TC-045-008 through TC-045-013 (/inspect logic), TC-045-021 through TC-045-023 (deferred items) = 23 unit tests
+- Integration/interactive (DB required, ignored): TC-045-007, TC-045-014 through TC-045-019 = 9 tests
+- Manual code inspection: TC-045-020 = 1 procedure
+- Total: 33 test cases
 
 ### Sprint 44: Driver Distribution Fix & Profile Polish
 

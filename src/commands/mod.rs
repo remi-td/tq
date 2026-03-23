@@ -3,6 +3,7 @@
 //! Each command has a dedicated implementation with proper error handling
 //! and output formatting.
 
+pub mod inspect;
 pub mod locks;
 pub mod monitoring_utils;
 pub mod ping;

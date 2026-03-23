@@ -60,6 +60,20 @@ tq> SELECT
 - Slash (`/`) on empty line executes buffered SQL (Oracle-style)
 - `\g` metacommand executes buffered SQL (psql-style)
 
+### Metacommand Input Parsing
+
+**REQ-META-INPUT-001: Trailing Semicolon Stripping**
+
+The metacommand parser SHALL strip trailing semicolons from the entire input line before parsing metacommand arguments.
+
+1. **REQ-META-INPUT-001.1** - A trailing `;` on any metacommand input SHALL be stripped before argument extraction. Example: `/describe employees;` SHALL resolve as `/describe employees`.
+2. **REQ-META-INPUT-001.2** - Multiple trailing semicolons SHALL all be stripped. Example: `/list tables;;` SHALL resolve as `/list tables`.
+3. **REQ-META-INPUT-001.3** - Semicolons embedded mid-argument SHALL NOT be stripped. Example: `/describe schema;table` is a user error and SHALL produce an "object not found" error, not silently strip the semicolon.
+4. **REQ-META-INPUT-001.4** - Semicolon stripping SHALL apply to ALL metacommands that accept arguments, including `/describe`, `/list`, `/sample`, `/peek`, `/show indexes`, `/inspect`, and all future argument-bearing metacommands.
+5. **REQ-META-INPUT-001.5** - Semicolon stripping SHALL apply to short-form aliases (e.g., `\d employees;` SHALL resolve as `\d employees`).
+
+**Rationale:** Users habitually append `;` from SQL muscle memory. Failing silently or with a confusing "object not found" error (e.g., searching for table `employees;`) degrades the experience. Stripping the semicolon from metacommand input is safe because semicolons have no meaning in metacommand syntax.
+
 ### Command History
 
 **Features**:
@@ -1752,6 +1766,7 @@ Suggestions:
 | Command | Alias | Description | Example |
 |---------|-------|-------------|---------|
 | `/describe <table>` | `\d` | Describe table structure | `/describe employees` |
+| `/inspect <object>` | `\i` | Comprehensive object inspection (type, columns, indexes, size, dependencies) | `/inspect employees` |
 | `/list databases` | `\l` | List all databases | `/list databases` |
 | `/list tables` | `\dt` | List tables in current database | `/list tables` |
 | `/list tables <pattern>` | `\dt` | List tables matching pattern | `/list tables emp%` |
@@ -3210,6 +3225,427 @@ Foreign Keys:
   department_id → departments(id)
   manager_id → employees(employee_id)
 ```
+
+---
+
+### `/inspect` Command
+
+**Purpose:** Provide a single, comprehensive view of any database object. Where `/describe` shows columns and `/show indexes` shows index structure, `/inspect` consolidates all available metadata into one command — including object type, column definitions, index structure, storage metrics, and dependency relationships — so users never need multiple commands to understand an object.
+
+**REQ-INSPECT-001: Command Availability and Syntax**
+
+The `/inspect` command SHALL be available as a metacommand in REPL mode.
+
+1. **REQ-INSPECT-001.1** - Primary syntax: `/inspect <object_name>`
+2. **REQ-INSPECT-001.2** - Qualified syntax: `/inspect <database>.<object_name>`
+3. **REQ-INSPECT-001.3** - Short alias: `\i <object_name>` (note: `\di` is reserved for `/show indexes`)
+4. **REQ-INSPECT-001.4** - The command SHALL execute immediately (no semicolon required)
+5. **REQ-INSPECT-001.5** - The object name parameter is REQUIRED; invoking `/inspect` with no argument SHALL display a usage error
+6. **REQ-INSPECT-001.6** - Object name is case-insensitive (Teradata convention)
+7. **REQ-INSPECT-001.7** - Trailing semicolons SHALL be stripped from the argument per REQ-META-INPUT-001
+
+**Rationale:** A unified inspection command reduces context-switching. Power users already know `/describe` and `/show indexes` — `/inspect` is the "go deeper" command. The short alias `\i` is short, memorable, and unambiguous.
+
+---
+
+**REQ-INSPECT-002: Object Type Detection**
+
+The command SHALL determine the object type before rendering output.
+
+1. **REQ-INSPECT-002.1** - Object type SHALL be resolved by querying `DBC.TablesV` using `TableKind`
+2. **REQ-INSPECT-002.2** - The following `TableKind` values SHALL be mapped to display labels:
+
+   | TableKind | Display Label |
+   |-----------|---------------|
+   | `T` | Table |
+   | `O` | Table (NoPI) |
+   | `V` | View |
+   | `M` | Macro |
+   | `P` | Stored Procedure |
+   | `F` | Function |
+   | `E` | External Stored Procedure |
+   | `Q` | Queue Table |
+   | `G` | Global Temporary Table |
+   | `I` | Join Index |
+   | `N` | Hash Index |
+
+3. **REQ-INSPECT-002.3** - If `TableKind` is unrecognized, the raw value SHALL be displayed as-is (e.g., `Type: X`)
+4. **REQ-INSPECT-002.4** - The resolved type SHALL govern which sections are displayed (see REQ-INSPECT-004 through REQ-INSPECT-007)
+
+---
+
+**REQ-INSPECT-003: Output Structure**
+
+Output SHALL be organized into clearly labeled sections, displayed in a fixed order. Each section is conditionally shown based on object type and data availability.
+
+The section order is:
+
+1. Object Info (always shown)
+2. Columns (tables, views, macros, queue tables, global temporary tables, join indexes)
+3. Index Structure (tables and table-like objects only)
+4. Storage (tables and table-like objects only)
+5. Dependencies (views and macros only)
+
+**REQ-INSPECT-003.1** - Each section SHALL be preceded by a section header in the format `── <Section Name> ─────────...`
+
+**REQ-INSPECT-003.2** - If a section cannot be populated due to a permission error on a DBC view, the section SHALL still be displayed with a brief note: `(Access denied — requires SELECT on <DBC.ViewName>)`
+
+**REQ-INSPECT-003.3** - If a section cannot be populated because no data exists (e.g., no secondary indexes), the section SHALL be omitted entirely (do not display an empty section)
+
+**REQ-INSPECT-003.4** - If all sections after Object Info are unavailable due to permissions, the command SHALL display Object Info and a summary of what was inaccessible, then exit with code 0
+
+---
+
+**REQ-INSPECT-004: Section 1 — Object Info**
+
+This section SHALL always be displayed.
+
+1. **REQ-INSPECT-004.1** - Displayed fields (in order):
+   - **Type**: Human-readable object type (from REQ-INSPECT-002.2)
+   - **Database**: Fully qualified database name
+   - **Name**: Object name
+   - **Created**: Creation timestamp if available from `DBC.TablesV.CreateTimeStamp`; omitted if NULL
+2. **REQ-INSPECT-004.2** - Field labels are left-aligned, values are colon-separated
+
+**Example output (Object Info section):**
+```
+tq> /inspect employees
+
+── Object Info ───────────────────────────────────────────
+
+  Type:      Table
+  Database:  PRODUCTION
+  Name:      employees
+  Created:   2023-04-15 09:12:33
+```
+
+---
+
+**REQ-INSPECT-005: Section 2 — Columns**
+
+Displayed for: Tables, Views, Macros, Queue Tables, Global Temporary Tables, Join Indexes.
+
+1. **REQ-INSPECT-005.1** - Data source: `DBC.ColumnsV`
+2. **REQ-INSPECT-005.2** - Columns displayed in ordinal position order (`ColumnId`)
+3. **REQ-INSPECT-005.3** - Table columns (in order): `Column`, `Type`, `Nullable`, `Default`
+4. **REQ-INSPECT-005.4** - `Nullable` SHALL display `YES` or `NO`
+5. **REQ-INSPECT-005.5** - `Default` SHALL display the default value if defined, or `-` if none
+6. **REQ-INSPECT-005.6** - Column count footer: `N columns`
+
+**Example output (Columns section):**
+```
+── Columns ───────────────────────────────────────────────
+
+┌───────────────┬──────────────┬──────────┬─────────┐
+│ Column        │ Type         │ Nullable │ Default │
+├───────────────┼──────────────┼──────────┼─────────┤
+│ employee_id   │ INTEGER      │ NO       │ -       │
+│ first_name    │ VARCHAR(50)  │ YES      │ NULL    │
+│ last_name     │ VARCHAR(50)  │ YES      │ NULL    │
+│ email         │ VARCHAR(100) │ YES      │ NULL    │
+│ hire_date     │ DATE         │ YES      │ NULL    │
+│ salary        │ DECIMAL(10,2)│ YES      │ NULL    │
+│ department_id │ INTEGER      │ YES      │ NULL    │
+└───────────────┴──────────────┴──────────┴─────────┘
+
+7 columns
+```
+
+---
+
+**REQ-INSPECT-006: Section 3 — Index Structure**
+
+Displayed for: Tables (TableKind `T`, `O`, `Q`, `G`). Not shown for Views, Macros, Functions, Stored Procedures.
+
+1. **REQ-INSPECT-006.1** - Data source: `DBC.IndicesV`
+2. **REQ-INSPECT-006.2** - Primary index subsection SHALL display:
+   - PI type: one of `Unique Primary Index (UPI)`, `Non-Unique Primary Index (NUPI)`, `Primary Partition Index (PPI)`, or `No Primary Index (NoPI)`
+   - PI columns: comma-separated list of column names
+3. **REQ-INSPECT-006.3** - If the table has no primary index (`TableKind = 'O'`), display `No Primary Index (NoPI)`
+4. **REQ-INSPECT-006.4** - Secondary indexes subsection SHALL be displayed only if secondary indexes exist
+5. **REQ-INSPECT-006.5** - Each secondary index SHALL display: index number, type (`USI` or `NUSI`), and column list
+6. **REQ-INSPECT-006.6** - Secondary index type labels: `Unique Secondary Index (USI)` or `Non-Unique Secondary Index (NUSI)`
+
+**Example output (Index Structure section — table with PI and secondary indexes):**
+```
+── Index Structure ───────────────────────────────────────
+
+  Primary Index
+    Type:     Unique Primary Index (UPI)
+    Columns:  employee_id
+
+  Secondary Indexes
+    #1  Non-Unique Secondary Index (NUSI)  (department_id)
+    #2  Unique Secondary Index (USI)       (email)
+```
+
+**Example output (NoPI table):**
+```
+── Index Structure ───────────────────────────────────────
+
+  Primary Index
+    Type:     No Primary Index (NoPI)
+```
+
+---
+
+**REQ-INSPECT-007: Section 4 — Storage**
+
+Displayed for: Tables (TableKind `T`, `O`, `Q`, `G`). Not shown for Views, Macros, Functions, Stored Procedures.
+
+1. **REQ-INSPECT-007.1** - Data source: `DBC.TableSizeV`
+2. **REQ-INSPECT-007.2** - Fields displayed:
+   - **Current Size**: Sum of `CurrentPerm` across all AMPs, formatted as human-readable bytes (e.g., `1.4 GB`, `345 MB`, `12 KB`)
+   - **Peak Size**: Sum of `PeakPerm` across all AMPs, formatted as human-readable bytes
+   - **Skew Factor**: `(max_AMP_CurrentPerm / avg_AMP_CurrentPerm - 1) × 100`, displayed as a percentage with one decimal place (e.g., `12.3%`)
+   - **AMPs**: Count of AMPs that hold data for this table
+3. **REQ-INSPECT-007.3** - Skew factor interpretation hint SHALL be appended:
+   - `< 10%` → `(low skew)`
+   - `10% – 30%` → `(moderate skew)`
+   - `> 30%` → `(high skew — consider redistributing)`
+4. **REQ-INSPECT-007.4** - If `DBC.TableSizeV` is inaccessible (permission denied or view unavailable), the section SHALL be replaced with: `(Size information unavailable — requires SELECT on DBC.TableSizeV)`
+5. **REQ-INSPECT-007.5** - If the table has zero rows and zero size (new or empty table), all size values SHALL display as `0 bytes` and skew as `0.0% (no data)`
+
+**Example output (Storage section):**
+```
+── Storage ───────────────────────────────────────────────
+
+  Current Size:  1.4 GB
+  Peak Size:     1.8 GB
+  Skew Factor:   8.2%  (low skew)
+  AMPs:          32
+```
+
+---
+
+**REQ-INSPECT-008: Section 5 — Dependencies**
+
+Displayed for: Views (`V`) and Macros (`M`) only.
+
+This section has two subsections: upstream objects (what this object depends on) and downstream objects (what depends on this object).
+
+1. **REQ-INSPECT-008.1** - Data source: `DBC.TVM`, `DBC.TextTbl`, `DBC.Dbase` for dependency analysis
+2. **REQ-INSPECT-008.2** - **Uses (upstream)** subsection: objects referenced by this view or macro
+   - Each entry: `<database>.<object_name>  (<type>)`
+   - `<type>` is the human-readable label from REQ-INSPECT-002.2
+3. **REQ-INSPECT-008.3** - **Used By (downstream)** subsection: objects that reference this view or macro
+   - Each entry: `<database>.<object_name>  (<type>)`
+4. **REQ-INSPECT-008.4** - If the upstream or downstream list is empty, display `None` for that subsection
+5. **REQ-INSPECT-008.5** - If `DBC.TVM` or related views are inaccessible, the section SHALL display: `(Dependency information unavailable — requires SELECT on DBC.TVM)`
+
+**Example output (Dependencies section — a view with upstream and downstream):**
+```
+── Dependencies ──────────────────────────────────────────
+
+  Uses (upstream)
+    PRODUCTION.employees          (Table)
+    PRODUCTION.departments        (Table)
+
+  Used By (downstream)
+    ANALYTICS.employee_report_v   (View)
+    REPORTING.headcount_macro     (Macro)
+```
+
+**Example output (Dependencies section — no downstream):**
+```
+── Dependencies ──────────────────────────────────────────
+
+  Uses (upstream)
+    PRODUCTION.orders             (Table)
+    PRODUCTION.customers          (Table)
+
+  Used By (downstream)
+    None
+```
+
+---
+
+**REQ-INSPECT-009: Full Output Examples**
+
+**Table inspection:**
+```
+tq> /inspect employees
+
+── Object Info ───────────────────────────────────────────
+
+  Type:      Table
+  Database:  PRODUCTION
+  Name:      employees
+  Created:   2023-04-15 09:12:33
+
+── Columns ───────────────────────────────────────────────
+
+┌───────────────┬──────────────┬──────────┬─────────┐
+│ Column        │ Type         │ Nullable │ Default │
+├───────────────┼──────────────┼──────────┼─────────┤
+│ employee_id   │ INTEGER      │ NO       │ -       │
+│ first_name    │ VARCHAR(50)  │ YES      │ NULL    │
+│ last_name     │ VARCHAR(50)  │ YES      │ NULL    │
+│ email         │ VARCHAR(100) │ YES      │ NULL    │
+│ hire_date     │ DATE         │ YES      │ NULL    │
+│ salary        │ DECIMAL(10,2)│ YES      │ NULL    │
+│ department_id │ INTEGER      │ YES      │ NULL    │
+└───────────────┴──────────────┴──────────┴─────────┘
+
+7 columns
+
+── Index Structure ───────────────────────────────────────
+
+  Primary Index
+    Type:     Unique Primary Index (UPI)
+    Columns:  employee_id
+
+  Secondary Indexes
+    #1  Non-Unique Secondary Index (NUSI)  (department_id)
+    #2  Unique Secondary Index (USI)       (email)
+
+── Storage ───────────────────────────────────────────────
+
+  Current Size:  1.4 GB
+  Peak Size:     1.8 GB
+  Skew Factor:   8.2%  (low skew)
+  AMPs:          32
+```
+
+**View inspection:**
+```
+tq> /inspect active_employees_view
+
+── Object Info ───────────────────────────────────────────
+
+  Type:      View
+  Database:  PRODUCTION
+  Name:      active_employees_view
+  Created:   2024-01-10 14:30:00
+
+── Columns ───────────────────────────────────────────────
+
+┌───────────────┬──────────────┬──────────┬─────────┐
+│ Column        │ Type         │ Nullable │ Default │
+├───────────────┼──────────────┼──────────┼─────────┤
+│ employee_id   │ INTEGER      │ NO       │ -       │
+│ full_name     │ VARCHAR(101) │ YES      │ NULL    │
+│ department    │ VARCHAR(50)  │ YES      │ NULL    │
+└───────────────┴──────────────┴──────────┴─────────┘
+
+3 columns
+
+── Dependencies ──────────────────────────────────────────
+
+  Uses (upstream)
+    PRODUCTION.employees          (Table)
+    PRODUCTION.departments        (Table)
+
+  Used By (downstream)
+    ANALYTICS.headcount_rpt_v     (View)
+```
+
+---
+
+**REQ-INSPECT-010: Error Handling**
+
+1. **REQ-INSPECT-010.1** - **Object not found**: When the object does not exist in `DBC.TablesV`, display:
+   ```
+   Error: Object 'PRODUCTION.employeees' not found.
+
+   Suggestions:
+     - Check spelling (did you mean 'employees'?)
+     - Try a qualified name: /inspect <database>.<object>
+     - Use /list tables to browse available objects
+   ```
+   Exit code: 0 (not a fatal error in REPL context)
+
+2. **REQ-INSPECT-010.2** - **Permission denied on object lookup**: When the user cannot access `DBC.TablesV`, display:
+   ```
+   Error: Cannot determine object type for 'employees'.
+   Reason: SELECT permission denied on DBC.TablesV.
+
+   Contact your DBA to request access:
+     GRANT SELECT ON DBC.TablesV TO <your_username>;
+   ```
+   Exit code: 1
+
+3. **REQ-INSPECT-010.3** - **Missing argument**: When `/inspect` is typed with no argument, display:
+   ```
+   Usage: /inspect <object>
+          /inspect <database>.<object>
+
+   Example: /inspect employees
+            /inspect production.orders
+   ```
+
+4. **REQ-INSPECT-010.4** - **Graceful degradation**: Individual section failures (e.g., no access to `DBC.TableSizeV`) SHALL NOT abort the entire command. The failed section SHALL display its inline note and the remaining sections SHALL render normally.
+
+---
+
+**REQ-INSPECT-011: Tab Completion Integration**
+
+1. **REQ-INSPECT-011.1** - Typing `/i<TAB>` SHALL suggest `/inspect` (and any other metacommands starting with `/i`)
+2. **REQ-INSPECT-011.2** - Typing `/inspect <TAB>` (with trailing space) SHALL suggest table names from the current database
+3. **REQ-INSPECT-011.3** - Table name completion SHALL support qualified names: typing `/inspect mydb.<TAB>` SHALL suggest object names in `mydb`
+4. **REQ-INSPECT-011.4** - `/inspect` SHALL appear in the metacommand list when typing `/<TAB>`
+5. **REQ-INSPECT-011.5** - `\i` alias SHALL appear in metacommand completion alongside `/inspect`
+
+---
+
+**REQ-INSPECT-012: Help Text Integration**
+
+1. **REQ-INSPECT-012.1** - `/help` SHALL list `/inspect` in the Schema Inspection section with description: `Comprehensive object inspection (type, columns, indexes, size, dependencies)`
+2. **REQ-INSPECT-012.2** - `/help inspect` SHALL display extended help:
+   ```
+   /inspect <object>
+   /inspect <database>.<object>
+   Alias: \i
+
+   Displays a comprehensive view of a database object.
+
+   Sections shown depend on object type:
+     Tables:  Object Info, Columns, Index Structure, Storage
+     Views:   Object Info, Columns, Dependencies
+     Macros:  Object Info, Columns, Dependencies
+     Others:  Object Info, Columns (when available)
+
+   Examples:
+     /inspect employees
+     /inspect dbc.tables
+     /inspect mydb.orders_view
+
+   Related commands:
+     /describe <table>        Column structure only
+     /show indexes <table>    Index structure only
+   ```
+3. **REQ-INSPECT-012.3** - `/help describe` and `/help show indexes` SHALL cross-reference `/inspect` as the unified alternative
+
+---
+
+**REQ-INSPECT-013: Object Type Scope**
+
+Different object types yield different section combinations. The table below defines what is shown for each type:
+
+| Object Type | Object Info | Columns | Index Structure | Storage | Dependencies |
+|-------------|:-----------:|:-------:|:---------------:|:-------:|:------------:|
+| Table | Yes | Yes | Yes | Yes | No |
+| Table (NoPI) | Yes | Yes | Yes | Yes | No |
+| View | Yes | Yes | No | No | Yes |
+| Macro | Yes | Yes | No | No | Yes |
+| Stored Procedure | Yes | No | No | No | No |
+| Function | Yes | No | No | No | No |
+| Queue Table | Yes | Yes | Yes | Yes | No |
+| Global Temporary Table | Yes | Yes | Yes | Yes | No |
+| Join Index | Yes | Yes | Yes | No | No |
+| Hash Index | Yes | Yes | Yes | No | No |
+
+**REQ-INSPECT-013.1** - For object types where Columns are not applicable (Stored Procedures, Functions), the Columns section SHALL be omitted entirely.
+
+**REQ-INSPECT-013.2** - For Stored Procedures and Functions, the Object Info section SHALL still include Type, Database, Name, and Created timestamp.
+
+---
+
+**REQ-INSPECT-014: Batch Mode Integration**
+
+The `/inspect` command functionality SHALL be available as a top-level batch command `tq inspect`. See `docs/specifications/cli-interface.md` for the full batch mode specification.
+
+---
 
 ### Data Sampling Commands
 

@@ -313,7 +313,7 @@ fn handle_delete(name: &str, force: bool) -> Result<()> {
         let mut stdin = std::io::BufReader::new(std::io::stdin());
         let confirmed = confirm_deletion(name, is_tty, &mut stdin)?;
         if !confirmed {
-            eprintln!("Aborted.");
+            eprintln!("Aborted. Profile '{}' was not deleted.", name);
             return Ok(());
         }
     }

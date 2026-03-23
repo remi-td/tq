@@ -590,51 +590,69 @@ Fallback chain (first match wins):
 
 #### Implementation in `src/db/client.rs`
 
+The function signature returns a tuple so that the searched paths can be included in the
+`TqError::DriverNotFound` error message. It also verifies that the library file exists in
+candidate directories before accepting them (step 1 is trusted unconditionally).
+
 ```rust
 /// Resolve the directory containing the Teradata driver library.
 ///
 /// Searches in priority order:
-/// 1. Explicit CLI flag (--driver-lib-dir)
-/// 2. TERADATA_LIB_DIR environment variable
-/// 3. Directory containing the tq executable
-/// 4. Current working directory
-fn resolve_driver_lib_dir(cli_override: Option<String>) -> String {
-    // 1. CLI flag takes highest priority
-    if let Some(dir) = cli_override {
-        return dir;
+/// 1. Explicit CLI flag (`--driver-lib-dir`) — trusted unconditionally
+/// 2. `TERADATA_LIB_DIR` environment variable — only if library exists there
+/// 3. Directory containing the tq executable — only if library exists there
+/// 4. Current working directory (`"."`) — last resort fallback
+///
+/// Returns `(chosen_dir, all_searched_paths)`.
+pub fn resolve_driver_lib_dir(explicit_dir: Option<&str>) -> (String, Vec<String>) {
+    let lib_name = determine_library_name();
+    let mut searched = Vec::new();
+
+    // 1. CLI flag takes highest priority (trusted unconditionally)
+    if let Some(dir) = explicit_dir {
+        searched.push(dir.to_string());
+        log::debug!("resolve_driver_lib_dir: using explicit CLI override: {}", dir);
+        return (dir.to_string(), searched);
     }
 
     // 2. Runtime environment variable
     if let Ok(dir) = std::env::var("TERADATA_LIB_DIR") {
         if !dir.is_empty() {
-            return dir;
+            searched.push(dir.clone());
+            log::debug!("resolve_driver_lib_dir: checking TERADATA_LIB_DIR: {}", dir);
+            if Path::new(&dir).join(lib_name).exists() {
+                log::debug!("resolve_driver_lib_dir: found library at TERADATA_LIB_DIR");
+                return (dir, searched);
+            }
+            log::debug!("resolve_driver_lib_dir: library not found in TERADATA_LIB_DIR");
         }
     }
 
-    // 3. Executable's directory (primary for installed binaries)
+    // 3. Executable's directory (primary path for installed binaries)
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            return exe_dir.to_string_lossy().to_string();
+            let dir_str = exe_dir.to_string_lossy().to_string();
+            searched.push(dir_str.clone());
+            log::debug!("resolve_driver_lib_dir: checking exe dir: {}", dir_str);
+            if exe_dir.join(lib_name).exists() {
+                log::debug!("resolve_driver_lib_dir: found library in exe dir");
+                return (dir_str, searched);
+            }
+            log::debug!("resolve_driver_lib_dir: library not found in exe dir");
         }
     }
 
     // 4. Current working directory (last resort)
-    ".".to_string()
+    let cwd = ".".to_string();
+    searched.push(cwd.clone());
+    log::debug!("resolve_driver_lib_dir: falling back to CWD");
+    (cwd, searched)
 }
 ```
 
-The `DatabaseClient::new()` method changes from:
-
-```rust
-let default_dir = option_env!("TERADATA_LIB_DIR").unwrap_or(".");
-let driver_lib_dir = driver_lib_dir.unwrap_or_else(|| default_dir.to_string());
-```
-
-To:
-
-```rust
-let driver_lib_dir = resolve_driver_lib_dir(driver_lib_dir);
-```
+`DatabaseClient::new()` calls `resolve_driver_lib_dir(driver_lib_dir.as_deref())` and uses
+the returned `chosen_dir` to load the library. The `searched` vec is preserved for error
+reporting in `TqError::DriverNotFound`.
 
 #### Error Message Enhancement
 

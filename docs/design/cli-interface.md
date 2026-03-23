@@ -612,6 +612,106 @@ Extract a shared `display_profiles()` function in `src/commands/profile.rs` that
 | Extract helper | `src/commands/profile.rs` | Public `display_profiles()` function |
 | Reuse in main | `src/main.rs` | Import and call shared helper |
 
+## tq inspect Command
+
+The `tq inspect` batch command exposes the `/inspect` REPL functionality in one-shot mode,
+following the same structural pattern as `tq sessions`, `tq locks`, and `tq query-inspect`.
+
+### CLI Argument Definition
+
+```rust
+// src/cli.rs — add to the Command enum
+
+/// Inspect a database object (table, view, macro, procedure)
+///
+/// Shows a comprehensive report: object type, columns, indexes, storage
+/// size/skew (tables), and definition text (views and macros).
+///
+/// Requires SELECT privilege on DBC.TablesV, DBC.ColumnsV, DBC.IndicesV,
+/// DBC.TableSizeV (optional for size section).
+///
+/// Example: tq inspect employees
+/// Example: tq inspect dbc.tables
+Inspect(InspectArgs),
+```
+
+```rust
+// src/cli.rs — InspectArgs struct
+
+/// Arguments for the inspect command
+#[derive(Parser, Debug)]
+pub struct InspectArgs {
+    /// Object name to inspect (table, view, macro, stored procedure)
+    ///
+    /// Accepts qualified names: database.object or unqualified object
+    /// (uses the default database from the connection profile).
+    #[arg(value_name = "OBJECT")]
+    pub object: String,
+
+    /// Output format
+    #[arg(short = 'f', long, default_value = "table", value_name = "FORMAT")]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short = 'o', long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+```
+
+### Command Dispatch
+
+```rust
+// src/main.rs — add to the match block in run()
+
+Command::Inspect(args) => {
+    if let Some(ref output_path) = args.output {
+        let file = std::fs::File::create(output_path)?;
+        let mut writer = std::io::BufWriter::new(file);
+        commands::inspect(&client, &args, &mut writer, use_color)?;
+    } else {
+        let mut stdout = io::stdout();
+        commands::inspect(&client, &args, &mut stdout, use_color)?;
+    }
+}
+```
+
+```rust
+// src/commands/mod.rs — add export
+pub mod inspect;
+pub use inspect::execute as inspect;
+```
+
+### Public Signature in inspect.rs
+
+```rust
+// src/commands/inspect.rs
+
+pub fn execute<W: Write>(
+    client: &DatabaseClient,
+    args: &InspectArgs,
+    writer: &mut W,
+    _use_color: bool,
+) -> Result<()> {
+    execute_for_repl(client, &args.object, writer)
+    // CSV/JSON formatting can be layered in a follow-up sprint; for now
+    // the structured table output is emitted regardless of format choice.
+}
+```
+
+The initial implementation emits the same section-based text output for all formats. Structured
+CSV/JSON output (where each section would be a separate JSON object) is a future enhancement.
+
+### Code Linkage
+
+| Component | File | Key Types / Functions |
+|-----------|------|-----------------------|
+| CLI args | `src/cli.rs` | `InspectArgs`, `Command::Inspect` |
+| Command dispatch | `src/main.rs` | `run()` match arm |
+| Module export | `src/commands/mod.rs` | `pub mod inspect`, `pub use inspect::execute as inspect` |
+| Implementation | `src/commands/inspect.rs` | `execute()`, `execute_for_repl()` |
+| REPL integration | `src/commands/repl/metacommands.rs` | `handle_metacommand_with_state()` |
+| Tab completion | `src/commands/repl/metadata_completer.rs` | `METACOMMAND_REGISTRY` |
+
 ## Future Enhancements
 
 - **Config file flag**: `--config <path>` to override default config location

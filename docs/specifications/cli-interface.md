@@ -15,6 +15,7 @@
    - [sysconfig - System Configuration Summary](#sysconfig---system-configuration-summary)
    - [locks - Lock and Blocking Information](#locks---lock-and-blocking-information)
    - [query-inspect - Inspect Session Query Text](#query-inspect---inspect-session-query-text)
+   - [inspect - Inspect a Database Object](#inspect---inspect-a-database-object)
    - [profiles - List Connection Profiles](#profiles---list-connection-profiles)
    - [profile - Manage Connection Profiles](#profile---manage-connection-profiles)
 6. [Input/Output Behavior](#inputoutput-behavior)
@@ -49,6 +50,7 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 - `sysconfig` - Display system configuration (version and AMP count)
 - `locks` - Display current lock contention and blocking chains
 - `query-inspect` - Show SQL text for a specific session
+- `inspect` - Comprehensive inspection of a database object (type, columns, indexes, size, dependencies)
 - `profiles` - List connection profiles
 - `profile` - Manage connection profiles (add, edit, delete, list)
 
@@ -1193,6 +1195,251 @@ tq locks --format json | \
 - Execute with non-integer session ID and verify invalid argument error (exit code 2)
 - Trigger privilege error and verify helpful error message with GRANT example (exit code 1)
 - Verify query text is truncated in table format but full in CSV/JSON
+
+---
+
+### inspect - Inspect a Database Object
+
+**Purpose**: Display a comprehensive inspection of a single database object — its type, column definitions, index structure, storage metrics, and dependency relationships. This is the batch equivalent of the REPL `/inspect` command, designed for scripting and programmatic use.
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] inspect [OPTIONS] <OBJECT>
+```
+
+**Arguments**:
+- `<OBJECT>`: Required. An object name (`tablename`) or a fully qualified name (`database.tablename`).
+
+**Options**:
+
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv` |
+| `--output` | `-o` | path | stdout | Write output to file |
+| `--section` | - | enum | (all) | Show only one section: `info`, `columns`, `indexes`, `storage`, `dependencies` |
+
+**Examples**:
+```bash
+# Full inspection of a table
+tq inspect employees
+
+# Qualified name (cross-database)
+tq inspect dbc.tables
+
+# JSON output for scripting
+tq inspect --format json employees
+
+# Only show storage metrics
+tq inspect --section storage employees
+
+# CSV output piped to analysis tool
+tq inspect --format csv --section columns orders | csvkit ...
+
+# Using a connection profile
+tq --profile prod inspect employees
+
+# Write report to file
+tq inspect --output employees-report.txt employees
+```
+
+**Output — Table Format (Full Table Inspection)**:
+```
+── Object Info ───────────────────────────────────────────
+
+  Type:      Table
+  Database:  PRODUCTION
+  Name:      employees
+  Created:   2023-04-15 09:12:33
+
+── Columns ───────────────────────────────────────────────
+
+┌───────────────┬──────────────┬──────────┬─────────┐
+│ Column        │ Type         │ Nullable │ Default │
+├───────────────┼──────────────┼──────────┼─────────┤
+│ employee_id   │ INTEGER      │ NO       │ -       │
+│ first_name    │ VARCHAR(50)  │ YES      │ NULL    │
+│ last_name     │ VARCHAR(50)  │ YES      │ NULL    │
+│ email         │ VARCHAR(100) │ YES      │ NULL    │
+│ hire_date     │ DATE         │ YES      │ NULL    │
+│ salary        │ DECIMAL(10,2)│ YES      │ NULL    │
+│ department_id │ INTEGER      │ YES      │ NULL    │
+└───────────────┴──────────────┴──────────┴─────────┘
+
+7 columns
+
+── Index Structure ───────────────────────────────────────
+
+  Primary Index
+    Type:     Unique Primary Index (UPI)
+    Columns:  employee_id
+
+  Secondary Indexes
+    #1  Non-Unique Secondary Index (NUSI)  (department_id)
+    #2  Unique Secondary Index (USI)       (email)
+
+── Storage ───────────────────────────────────────────────
+
+  Current Size:  1.4 GB
+  Peak Size:     1.8 GB
+  Skew Factor:   8.2%  (low skew)
+  AMPs:          32
+```
+
+**Output — JSON Format**:
+
+In JSON format, all sections are represented as a single object. Sections that are not applicable to the object type are omitted.
+
+```json
+{
+  "object_info": {
+    "type": "Table",
+    "database": "PRODUCTION",
+    "name": "employees",
+    "created": "2023-04-15T09:12:33"
+  },
+  "columns": [
+    { "column": "employee_id",   "type": "INTEGER",       "nullable": false, "default": null },
+    { "column": "first_name",    "type": "VARCHAR(50)",   "nullable": true,  "default": null },
+    { "column": "last_name",     "type": "VARCHAR(50)",   "nullable": true,  "default": null },
+    { "column": "email",         "type": "VARCHAR(100)",  "nullable": true,  "default": null },
+    { "column": "hire_date",     "type": "DATE",          "nullable": true,  "default": null },
+    { "column": "salary",        "type": "DECIMAL(10,2)", "nullable": true,  "default": null },
+    { "column": "department_id", "type": "INTEGER",       "nullable": true,  "default": null }
+  ],
+  "index_structure": {
+    "primary_index": {
+      "type": "Unique Primary Index (UPI)",
+      "columns": ["employee_id"]
+    },
+    "secondary_indexes": [
+      { "index_no": 1, "type": "Non-Unique Secondary Index (NUSI)", "columns": ["department_id"] },
+      { "index_no": 2, "type": "Unique Secondary Index (USI)",      "columns": ["email"] }
+    ]
+  },
+  "storage": {
+    "current_size_bytes": 1503238553,
+    "current_size_human": "1.4 GB",
+    "peak_size_bytes": 1932735283,
+    "peak_size_human": "1.8 GB",
+    "skew_factor_pct": 8.2,
+    "amps": 32
+  }
+}
+```
+
+**Output — CSV Format**:
+
+In CSV format, each section is output as a separate block with a section header comment row, followed by column headers and data rows. This enables downstream filtering by section.
+
+```csv
+#section,object_info
+type,database,name,created
+Table,PRODUCTION,employees,2023-04-15T09:12:33
+#section,columns
+column,type,nullable,default
+employee_id,INTEGER,NO,
+first_name,VARCHAR(50),YES,
+last_name,VARCHAR(50),YES,
+#section,index_structure
+...
+#section,storage
+current_size_bytes,current_size_human,peak_size_bytes,peak_size_human,skew_factor_pct,amps
+1503238553,1.4 GB,1932735283,1.8 GB,8.2,32
+```
+
+**Behavior Requirements**:
+
+1. **REQ-INSPECT-BATCH-001**: The command SHALL require exactly one object argument; missing argument exits with code 2
+2. **REQ-INSPECT-BATCH-002**: When `--section` is specified, only that section is rendered (other sections are fetched but not displayed)
+3. **REQ-INSPECT-BATCH-003**: The `--section` flag is valid with all `--format` values
+4. **REQ-INSPECT-BATCH-004**: In JSON format, section keys use snake_case (`object_info`, `columns`, `index_structure`, `storage`, `dependencies`)
+5. **REQ-INSPECT-BATCH-005**: In JSON format, size values SHALL be expressed both as raw bytes (integer) and human-readable string, to support both machine processing and human review
+6. **REQ-INSPECT-BATCH-006**: Section applicability rules are identical to REPL mode (see `docs/specifications/repl.md` REQ-INSPECT-013)
+7. **REQ-INSPECT-BATCH-007**: Graceful degradation on DBC permission errors applies identically to REPL mode (see REQ-INSPECT-003.2 and REQ-INSPECT-007.4)
+8. **REQ-INSPECT-BATCH-008**: In table format, section separator lines (`── Section Name ─────...`) SHALL be included in `--output` file output but SHALL be omitted when stdout is piped to another process (TTY detection)
+9. **REQ-INSPECT-BATCH-009**: In CSV and JSON formats, section separator lines SHALL never be included
+
+**Error Handling**:
+
+**Object Not Found**:
+```
+Error: Object 'PRODUCTION.employeees' not found.
+
+Suggestions:
+  - Check spelling (did you mean 'employees'?)
+  - Try a qualified name: tq inspect <database>.<object>
+
+Exit code: 1
+```
+
+**Missing Argument**:
+```
+Error: Missing required argument <object>
+Usage: tq inspect <object>
+
+Example: tq inspect employees
+         tq inspect production.orders
+
+Exit code: 2
+```
+
+**Permission Denied (object lookup)**:
+```
+Error: Cannot determine object type for 'employees'.
+Reason: SELECT permission denied on DBC.TablesV.
+
+Contact your DBA to request access:
+  GRANT SELECT ON DBC.TablesV TO <your_username>;
+
+Exit code: 1
+```
+
+**Invalid --section value**:
+```
+Error: Unknown section 'sizes'
+Valid sections: info, columns, indexes, storage, dependencies
+
+Exit code: 2
+```
+
+**Exit Codes**:
+- `0`: Object inspected successfully (even if some sections were unavailable due to permissions — graceful degradation)
+- `1`: Object not found, permission error on primary object lookup, or connection failure
+- `2`: Usage error (missing argument, invalid flag value)
+
+**Integration with Scripting**:
+
+```bash
+# Extract skew factor for all large tables (JSON + jq)
+tq sessions --format json | jq -r '.[].TableName' | \
+  while read tbl; do
+    tq inspect --format json --section storage "$tbl" | \
+      jq -r '"$tbl: " + (.storage.skew_factor_pct | tostring) + "%"'
+  done
+
+# Export column definitions to CSV for documentation
+tq inspect --format csv --section columns production.orders > orders-schema.csv
+
+# Check if a table has high skew before running heavy queries
+skew=$(tq inspect --format json --section storage employees | jq '.storage.skew_factor_pct')
+if (( $(echo "$skew > 30" | bc -l) )); then
+  echo "Warning: High skew on employees table ($skew%)"
+fi
+```
+
+**Acceptance Tests**:
+- Execute `tq inspect <table>` and verify all four sections (Object Info, Columns, Index Structure, Storage) are displayed
+- Execute `tq inspect <view>` and verify three sections (Object Info, Columns, Dependencies) are displayed; Storage and Index Structure are absent
+- Execute `tq inspect <database>.<object>` (qualified name) and verify correct database resolution
+- Execute `tq inspect --format json <table>` and verify valid JSON with `object_info`, `columns`, `index_structure`, `storage` keys; no `dependencies` key for table
+- Execute `tq inspect --format csv <table>` and verify CSV output with `#section` separator rows
+- Execute `tq inspect --section storage <table>` and verify only Storage data is rendered
+- Execute `tq inspect --section storage --format json <table>` and verify JSON contains only `storage` key
+- Execute `tq inspect <nonexistent>` and verify not-found error with suggestions (exit code 1)
+- Execute `tq inspect` with no argument and verify usage error (exit code 2)
+- Execute `tq inspect --section invalid <table>` and verify invalid section error (exit code 2)
+- Trigger `DBC.TableSizeV` permission error and verify graceful degradation: other sections render, storage section shows inline note, exit code 0
+- Execute `tq inspect --output report.txt <table>` and verify file is created with correct content
 
 ---
 

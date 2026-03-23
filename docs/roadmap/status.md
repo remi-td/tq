@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
-**Last Updated:** 2026-03-21
-**Current Version:** 1.25.0
-**Latest Sprint:** Sprint 44 Complete (Driver Distribution Fix & Profile Polish)
+**Last Updated:** 2026-03-23
+**Current Version:** 1.26.0
+**Latest Sprint:** Sprint 45 Complete (Helper Bug Fix & Object Inspection)
 
 ---
 
@@ -288,6 +288,8 @@ All core features are complete and tested.
 | `/list tables [pattern]` | ✅ | [REPL Mode](../specifications/repl.md#schema-inspection) | v1.9.0 (Sprint 22) |
 | `/list views` | ✅ | [REPL Mode](../specifications/repl.md#schema-inspection) | v1.9.0 (Sprint 22) |
 | `/show indexes <table>` | ✅ | [REPL Mode](../specifications/repl.md#schema-inspection) | v1.17.0 (Sprint 36) |
+| `/inspect <object>` | ✅ | [REPL Mode](../specifications/repl.md#object-inspection) | v1.26.0 (Sprint 45) |
+| `tq inspect` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#inspect-command) | v1.26.0 (Sprint 45) |
 
 ---
 
@@ -364,16 +366,24 @@ All core features are complete and tested.
 - **Shared display_profile() helper**: Eliminated handle_list/handle_profiles duplication
 - 715 unit tests + 178 integration tests (100% pass rate), zero clippy warnings
 
+**Sprint 45 Features (v1.26.0):**
+- **Bug #32 fix**: Metacommand semicolon stripping — `/describe a;`, `/list tables;`, `/sample dbc.tables;` now work correctly
+- **`/inspect` command** (Issue #33): Comprehensive object inspection showing type, columns, indexes, storage/skew, and view/macro definitions
+- **`tq inspect`**: Batch mode with table/CSV/JSON output for scripting
+- **Tab completion**: `/inspect` and `\i` alias in metacommand completion menu
+- **Sprint 44 deferred**: `--force` help text, abort message with profile name, debug logging in driver resolution, design doc drift fix
+- 742 unit tests + 191 integration tests (100% pass rate), zero clippy warnings
+
 ---
 
 ## Summary Statistics
 
-- **Total Features**: 83
-- **Implemented**: 81 (98%)
+- **Total Features**: 85
+- **Implemented**: 83 (98%)
 - **Planned**: 2 (2%)
-- **Test Pass Rate**: 100% (893/893 executed, 57 ignored database-dependent)
+- **Test Pass Rate**: 100% (933/933 executed, 58 ignored database-dependent)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 44 - Driver Distribution Fix & Profile Polish
+- **Latest Sprint**: Sprint 45 - Helper Bug Fix & Object Inspection
 
 ---
 

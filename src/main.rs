@@ -175,6 +175,17 @@ fn run(cli: Cli) -> Result<()> {
                 commands::query_inspect(&client, &args, &mut stdout, use_color)?;
             }
         }
+        // Sprint 45: Inspect command for object metadata
+        Command::Inspect(args) => {
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::inspect::execute(&client, &args.object, args.format, &mut writer, use_color)?;
+            } else {
+                let mut stdout = io::stdout();
+                commands::inspect::execute(&client, &args.object, args.format, &mut stdout, use_color)?;
+            }
+        }
         // Help, Profiles, and Profile already handled above
         Command::Help(_) | Command::Profiles | Command::Profile(_) => unreachable!(),
     }

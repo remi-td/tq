@@ -39,6 +39,7 @@ Available metacommands:
     /disconnect  Disconnect current connection
     /edit        Edit last query in external editor
     /help        Show help
+    /inspect     Comprehensive object inspection (type, columns, indexes, size, dependencies)
     /list        Schema inspection (databases, tables, views)
     /locks       Display current lock contention and blocking chains
     /logon       Connect/switch database
@@ -105,6 +106,8 @@ employee_id    first_name    last_name    email    hire_date
 ### Schema Exploration Commands
 
 REPL mode includes quick commands to explore your database schema without writing SQL.
+
+**Tip:** Metacommands accept trailing semicolons — they are silently stripped. If you type `/describe employees;` or `/list tables;` out of SQL habit, the semicolon is ignored and the command works as expected.
 
 #### List All Databases
 
@@ -1261,6 +1264,133 @@ You do not have permission to view index information for 'secure_table'.
 Contact your database administrator if you need access.
 ```
 
+### Inspect a Database Object
+
+The `/inspect` command gives you a single, comprehensive view of any object — its type, columns, index structure, storage metrics, and dependency relationships. It is the "go deeper" companion to `/describe` and `/show indexes`.
+
+**Short alias:** `\i`
+
+**Syntax:**
+
+```sql
+/inspect <object>
+/inspect <database>.<object>
+```
+
+#### Inspect a Table
+
+```sql
+tq> /inspect employees
+
+── Object Info ───────────────────────────────────────────
+
+  Type:      Table
+  Database:  PRODUCTION
+  Name:      employees
+  Created:   2023-04-15 09:12:33
+
+── Columns ───────────────────────────────────────────────
+
+┌───────────────┬──────────────┬──────────┬─────────┐
+│ Column        │ Type         │ Nullable │ Default │
+├───────────────┼──────────────┼──────────┼─────────┤
+│ employee_id   │ INTEGER      │ NO       │ -       │
+│ first_name    │ VARCHAR(50)  │ YES      │ NULL    │
+│ last_name     │ VARCHAR(50)  │ YES      │ NULL    │
+│ email         │ VARCHAR(100) │ YES      │ NULL    │
+│ hire_date     │ DATE         │ YES      │ NULL    │
+│ salary        │ DECIMAL(10,2)│ YES      │ NULL    │
+│ department_id │ INTEGER      │ YES      │ NULL    │
+└───────────────┴──────────────┴──────────┴─────────┘
+
+7 columns
+
+── Index Structure ───────────────────────────────────────
+
+  Primary Index
+    Type:     Unique Primary Index (UPI)
+    Columns:  employee_id
+
+  Secondary Indexes
+    #1  Non-Unique Secondary Index (NUSI)  (department_id)
+    #2  Unique Secondary Index (USI)       (email)
+
+── Storage ───────────────────────────────────────────────
+
+  Current Size:  1.4 GB
+  Peak Size:     1.8 GB
+  Skew Factor:   8.2%  (low skew)
+  AMPs:          32
+```
+
+#### Inspect a View
+
+Views show a **Dependencies** section instead of Index Structure and Storage, so you can trace what the view reads from and what objects depend on it.
+
+```sql
+tq> /inspect active_employees_view
+
+── Object Info ───────────────────────────────────────────
+
+  Type:      View
+  Database:  PRODUCTION
+  Name:      active_employees_view
+  Created:   2024-01-10 14:22:07
+
+── Columns ───────────────────────────────────────────────
+
+┌───────────────┬──────────────┬──────────┬─────────┐
+│ Column        │ Type         │ Nullable │ Default │
+├───────────────┼──────────────┼──────────┼─────────┤
+│ employee_id   │ INTEGER      │ NO       │ -       │
+│ first_name    │ VARCHAR(50)  │ YES      │ NULL    │
+│ last_name     │ VARCHAR(50)  │ YES      │ NULL    │
+│ department_id │ INTEGER      │ YES      │ NULL    │
+└───────────────┴──────────────┴──────────┴─────────┘
+
+4 columns
+
+── Dependencies ──────────────────────────────────────────
+
+  Uses (upstream)
+    PRODUCTION.employees          (Table)
+    PRODUCTION.departments        (Table)
+
+  Used By (downstream)
+    ANALYTICS.employee_report_v   (View)
+```
+
+#### Using a Qualified Name
+
+To inspect an object in a different database, prefix the name with the database:
+
+```sql
+tq> /inspect staging.orders
+tq> \i dbc.tables
+```
+
+#### Graceful Degradation
+
+`/inspect` fetches each section independently. If your account lacks access to a specific DBC system view, that section shows an informative note instead of failing the entire command:
+
+```
+── Storage ───────────────────────────────────────────────
+
+  (Access denied — requires SELECT on DBC.TableSizeV)
+```
+
+All other sections are still displayed normally.
+
+**When to use `/inspect` vs other commands:**
+
+| Command | Best for |
+|---------|----------|
+| `/describe` | Quick column lookup |
+| `/show indexes` | Index details only |
+| `/inspect` | Full picture — type, columns, indexes, size, and dependencies in one shot |
+
+**Cross-reference:** For batch and scripting use, see `tq inspect` in the Batch Mode Guide.
+
 ### Check Connection
 
 Test your database connection:
@@ -1814,7 +1944,7 @@ tq> /quit
 2. **Use `/list` commands** - They're faster than writing SQL for schema exploration
 3. **Use patterns** - Filter tables with `/list tables pattern` instead of viewing all tables
 4. **Watch for loading indicators** - They tell you when tq is fetching data
-5. **Use short aliases** - Commands like `/sc`, `/lk`, `/s`, `\l`, `\dt`, `\d` save typing
+5. **Use short aliases** - Commands like `/sc`, `/lk`, `/s`, `\l`, `\dt`, `\d`, `\i` save typing
 6. **Write readable multi-line queries** - They're stored as single history entries, so formatting makes them easier to recall and edit
 7. **Use `/edit` for complex changes** - When you need to refine a query with JOINs, filters, or formatting, use `/edit` to open it in your editor
 8. **Sample before selecting** - Use `/sample` to inspect data before writing complex queries
@@ -1822,14 +1952,15 @@ tq> /quit
 10. **Start with small samples** - When exploring large tables, use `/sample table 10` to avoid overwhelming output
 11. **Combine sampling with patterns** - First use `/list tables pattern%` to find tables, then `/sample` to inspect them
 12. **Iterative query development** - Start simple, run it, then use `/edit` to add complexity step by step
-13. **The pager is experimental** - By default, wide results show with truncation. You can try `/pager on` to test interactive navigation
-14. **Orient yourself on new systems** - Run `/sysconfig` as soon as you connect to an unfamiliar Teradata instance to check the version and AMP count
-15. **Use `/locks` before maintenance** - Always check for active locks before running DDL or bulk operations to avoid unexpected blocking
-16. **Diagnose hangs with `/locks` + `/sessions`** - If a query is hanging, use `/locks` to see if it is blocked, then cross-reference with `/sessions` to identify the blocking session's workload
-17. **Drill into heavy sessions with `/query`** - When `/sessions` shows a session with high CPU or spool, use `/query <session_id>` to see what SQL it is executing
-18. **Use `/params` for repeatable analysis** - Load a YAML parameter file once, then run the same SQL template against different databases or dates without retyping queries
-19. **Switch environments quickly with `/params load`** - Load a different override file to point queries at staging or production without editing SQL
-20. **Use `/params show` to audit active parameters** - Check which values are loaded before running a critical query
+13. **Use `/inspect` to understand unfamiliar objects** - When you encounter a table or view you have never seen before, `/inspect` gives you type, columns, indexes, storage size, and dependencies in a single command
+14. **The pager is experimental** - By default, wide results show with truncation. You can try `/pager on` to test interactive navigation
+15. **Orient yourself on new systems** - Run `/sysconfig` as soon as you connect to an unfamiliar Teradata instance to check the version and AMP count
+16. **Use `/locks` before maintenance** - Always check for active locks before running DDL or bulk operations to avoid unexpected blocking
+17. **Diagnose hangs with `/locks` + `/sessions`** - If a query is hanging, use `/locks` to see if it is blocked, then cross-reference with `/sessions` to identify the blocking session's workload
+18. **Drill into heavy sessions with `/query`** - When `/sessions` shows a session with high CPU or spool, use `/query <session_id>` to see what SQL it is executing
+19. **Use `/params` for repeatable analysis** - Load a YAML parameter file once, then run the same SQL template against different databases or dates without retyping queries
+20. **Switch environments quickly with `/params load`** - Load a different override file to point queries at staging or production without editing SQL
+21. **Use `/params show` to audit active parameters** - Check which values are loaded before running a critical query
 
 ## Keyboard Shortcuts Reference
 

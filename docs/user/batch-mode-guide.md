@@ -1380,6 +1380,107 @@ tq query "SELECT id, name, status FROM customers WHERE region='US' SAMPLE 50" --
 - Works with WHERE, ORDER BY, and other clauses
 - Combine with aggregations for statistical sampling
 
+#### Object Inspection with `tq inspect`
+
+Use `tq inspect` to get a comprehensive view of any database object — its type, column definitions, index structure, storage metrics, and dependency relationships. This is the batch equivalent of the REPL `/inspect` command.
+
+```bash
+# Full inspection of a table
+tq inspect employees
+
+# Inspect a table in another database
+tq inspect dbc.tables
+
+# JSON output for programmatic use
+tq inspect --format json employees
+
+# Show only storage metrics (great for capacity scripts)
+tq inspect --section storage employees
+
+# Show only columns (equivalent to a structured DESCRIBE)
+tq inspect --section columns orders
+
+# Write a full inspection report to a file
+tq inspect --output employees-report.txt employees
+
+# Using a connection profile
+tq --profile prod inspect employees
+```
+
+**Example output:**
+
+```
+── Object Info ───────────────────────────────────────────
+
+  Type:      Table
+  Database:  PRODUCTION
+  Name:      employees
+  Created:   2023-04-15 09:12:33
+
+── Columns ───────────────────────────────────────────────
+
+┌───────────────┬──────────────┬──────────┬─────────┐
+│ Column        │ Type         │ Nullable │ Default │
+├───────────────┼──────────────┼──────────┼─────────┤
+│ employee_id   │ INTEGER      │ NO       │ -       │
+│ first_name    │ VARCHAR(50)  │ YES      │ NULL    │
+│ last_name     │ VARCHAR(50)  │ YES      │ NULL    │
+│ email         │ VARCHAR(100) │ YES      │ NULL    │
+│ hire_date     │ DATE         │ YES      │ NULL    │
+│ salary        │ DECIMAL(10,2)│ YES      │ NULL    │
+│ department_id │ INTEGER      │ YES      │ NULL    │
+└───────────────┴──────────────┴──────────┴─────────┘
+
+7 columns
+
+── Index Structure ───────────────────────────────────────
+
+  Primary Index
+    Type:     Unique Primary Index (UPI)
+    Columns:  employee_id
+
+  Secondary Indexes
+    #1  Non-Unique Secondary Index (NUSI)  (department_id)
+    #2  Unique Secondary Index (USI)       (email)
+
+── Storage ───────────────────────────────────────────────
+
+  Current Size:  1.4 GB
+  Peak Size:     1.8 GB
+  Skew Factor:   8.2%  (low skew)
+  AMPs:          32
+```
+
+**Options:**
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--format` | `-f` | `table` | Output format: `table`, `json`, `csv` |
+| `--output` | `-o` | stdout | Write output to file |
+| `--section` | - | all | Show only one section: `info`, `columns`, `indexes`, `storage`, `dependencies` |
+
+**Scripting examples:**
+
+```bash
+# Extract column list as CSV for documentation
+tq inspect --format csv --section columns employees > employees-columns.csv
+
+# Check table size across environments
+for env in dev staging prod; do
+  echo "=== $env ==="
+  tq --profile $env inspect --section storage orders
+done
+
+# Audit all tables for skew (pipe JSON through jq)
+tq inspect --format json orders | jq '.storage.skew_factor'
+```
+
+**When to use `tq inspect` vs `tq query`:**
+- Use `tq inspect` when you want structured metadata about an object (schema, indexes, size)
+- Use `tq query` when you want to execute ad-hoc SQL and return rows of data
+
+**Cross-reference:** For interactive use, see `/inspect` in the REPL Guide.
+
 ---
 
 ## Common Recipes

@@ -6352,3 +6352,351 @@ Add to `print_help_extended()`:
 - Explain plan inspection (`/explain <session_id>`) using DBQL step data
 - AMP skew analysis (`/skew <session_id>`) using DBQL step-level metrics
 - Full SQL text retrieval from DBQLSqlTbl (`--full-sql` flag for `/query`)
+
+---
+
+## /inspect Command
+
+The `/inspect` command provides comprehensive object inspection, consolidating and extending the
+existing `/describe`, `/show indexes`, and schema metadata commands into a single, rich view.
+
+### Design Overview
+
+`/inspect <object>` produces a multi-section report for any Teradata object (table, view, macro,
+procedure). Each section is fetched independently; if one DBC view is inaccessible, the remaining
+sections still render. This graceful-degradation strategy ensures the command is useful even in
+environments with restricted DBC access.
+
+```
+/inspect employees
+/inspect dbc.tables
+\i orders
+```
+
+Alias: `\i` (mirrors the `\d` alias for `/describe`).
+
+### Module: `src/commands/inspect.rs`
+
+The inspect logic lives in a dedicated module following the same structural pattern as
+`sessions.rs`, `locks.rs`, and `sysconfig.rs`. The module exposes two public entry points:
+
+```rust
+// src/commands/inspect.rs
+
+/// REPL entry point — writes formatted multi-section output to writer.
+pub fn execute_for_repl<W: Write>(
+    client: &DatabaseClient,
+    object_name: &str,
+    writer: &mut W,
+) -> Result<()>
+
+/// Batch-mode entry point — used by `tq inspect` CLI command.
+pub fn execute<W: Write>(
+    client: &DatabaseClient,
+    args: &InspectArgs,
+    writer: &mut W,
+    use_color: bool,
+) -> Result<()>
+```
+
+### Object Name Resolution
+
+Object names follow the `[database.]object` pattern already established by `/describe` and
+`/show indexes`. The same inline split pattern used in `execute_describe()` and
+`execute_show_indexes()` is applied:
+
+```rust
+// Inline qualified-name split (consistent with existing metacommands)
+let (database, obj) = if let Some(dot_pos) = object_name.find('.') {
+    (Some(&object_name[..dot_pos]), &object_name[dot_pos + 1..])
+} else {
+    (None, object_name)
+};
+```
+
+When no database qualifier is present, the inspect module queries DBC without a database filter,
+relying on the session default database. This matches the existing behaviour in `/describe`.
+String values used in WHERE clauses are wrapped with `escape_sql_string()` from `src/sql.rs`
+(already imported by `metacommands.rs`) to prevent injection through crafted object names.
+
+### Section Architecture
+
+Each section is an independent query function. Failures are caught per-section and surfaced as
+`"(unavailable: <reason>)"` without aborting the whole report.
+
+```rust
+// Internal helpers
+
+fn query_object_type(
+    client: &DatabaseClient,
+    db: &str,
+    obj: &str,
+) -> Result<ObjectTypeInfo>
+
+fn query_columns(
+    client: &DatabaseClient,
+    db: &str,
+    obj: &str,
+) -> Result<QueryResult>
+
+fn query_indexes(
+    client: &DatabaseClient,
+    db: &str,
+    obj: &str,
+) -> Result<QueryResult>
+
+fn query_storage(
+    client: &DatabaseClient,
+    db: &str,
+    obj: &str,
+) -> Result<StorageInfo>
+
+fn query_definition(
+    client: &DatabaseClient,
+    db: &str,
+    obj: &str,
+    kind: &str,
+) -> Result<String>
+
+/// Human-readable byte counts: 1.5 KB, 2.3 MB, 1.1 GB, 4.2 TB
+fn format_size(bytes: i64) -> String
+```
+
+### Data Types
+
+```rust
+/// Object kind returned by DBC.TablesV
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObjectKind {
+    Table,
+    View,
+    Macro,
+    StoredProcedure,
+    JoinIndex,
+    HashIndex,
+    Other(String),
+}
+
+impl ObjectKind {
+    fn from_table_kind(kind: &str) -> Self {
+        match kind.trim() {
+            "T" | "O" => ObjectKind::Table,
+            "V"       => ObjectKind::View,
+            "M"       => ObjectKind::Macro,
+            "P"       => ObjectKind::StoredProcedure,
+            "J"       => ObjectKind::JoinIndex,
+            "N"       => ObjectKind::HashIndex,
+            other     => ObjectKind::Other(other.to_string()),
+        }
+    }
+
+    fn display_name(&self) -> &str {
+        match self {
+            ObjectKind::Table          => "Table",
+            ObjectKind::View           => "View",
+            ObjectKind::Macro          => "Macro",
+            ObjectKind::StoredProcedure => "Stored Procedure",
+            ObjectKind::JoinIndex      => "Join Index",
+            ObjectKind::HashIndex      => "Hash Index",
+            ObjectKind::Other(s)       => s.as_str(),
+        }
+    }
+}
+
+/// Result of the object-type lookup
+pub struct ObjectTypeInfo {
+    pub kind: ObjectKind,
+    pub created: Option<String>,
+    pub comment: Option<String>,
+}
+
+/// Aggregated storage metrics
+pub struct StorageInfo {
+    pub total_bytes: i64,
+    pub peak_bytes: i64,
+    pub max_amp_bytes: i64,
+    pub avg_amp_bytes: f64,
+    pub amp_count: i64,
+    pub skew_pct: Option<f64>,
+}
+```
+
+### SQL Queries
+
+#### Object Type (DBC.TablesV)
+
+```sql
+SELECT TableKind,
+       CAST(CreateTimeStamp AS VARCHAR(26)) AS Created,
+       CommentString
+FROM DBC.TablesV
+WHERE DatabaseName = '{db}'
+  AND TableName    = '{obj}'
+```
+
+SQL strings are built using `escape_sql_string()` from `src/sql.rs` (already imported in
+`metacommands.rs`) to prevent injection through object names containing single quotes.
+
+#### Columns (DBC.ColumnsV) — reuses `/describe` query
+
+```sql
+SELECT ColumnName, ColumnType, Nullable, DefaultValue, CommentString
+FROM DBC.ColumnsV
+WHERE DatabaseName = '{db}'
+  AND TableName    = '{obj}'
+ORDER BY ColumnId
+```
+
+#### Indexes (DBC.IndicesV) — reuses `/show indexes` query
+
+```sql
+SELECT IndexNumber, IndexType, UniqueFlag, IndexName, ColumnName, ColumnPosition
+FROM DBC.IndicesV
+WHERE DatabaseName = '{db}'
+  AND TableName    = '{obj}'
+ORDER BY IndexNumber, ColumnPosition
+```
+
+#### Storage (DBC.TableSizeV)
+
+```sql
+SELECT SUM(CurrentPerm)       AS TotalSize,
+       SUM(PeakPerm)          AS PeakSize,
+       MAX(CurrentPerm)       AS MaxAmpSize,
+       AVG(CAST(CurrentPerm AS FLOAT)) AS AvgAmpSize,
+       COUNT(*)               AS AmpCount
+FROM DBC.TableSizeV
+WHERE DatabaseName = '{db}'
+  AND TableName    = '{obj}'
+```
+
+Skew is calculated in Rust:
+
+```rust
+fn compute_skew(max_amp: i64, avg_amp: f64) -> Option<f64> {
+    if avg_amp > 0.0 {
+        Some(((max_amp as f64 / avg_amp) - 1.0) * 100.0)
+    } else {
+        None
+    }
+}
+```
+
+A skew of 0% means perfectly even distribution. Values above ~20% indicate meaningful skew.
+
+#### Definition (views and macros)
+
+For `ObjectKind::View`, execute `SHOW VIEW {db}.{obj}`. For `ObjectKind::Macro`, execute
+`SHOW MACRO {db}.{obj}`. For other object types, this section is omitted.
+
+The SHOW statement returns the CREATE text as a character result. The definition section is
+rendered verbatim, which lets users read dependencies directly from the text.
+
+### Output Format
+
+REPL and batch table output share the same section-oriented format:
+
+```
+Object: dbc.employees  (Table)
+Created: 2023-08-14 09:12:33.00
+Comment: Employee master table
+
+=== Columns (7) ===
+ # | Column Name  | Type         | Nullable | Default
+---+--------------+--------------+----------+---------
+ 1 | EmployeeId   | INTEGER      | N        |
+ 2 | FirstName    | VARCHAR(50)  | Y        |
+...
+
+=== Indexes ===
+Index 1 (Unique Primary Index):  EmployeeId
+Index 2 (Non-unique Secondary Index: emp_dept_idx):  DepartmentId
+
+=== Storage ===
+Total size : 4.2 MB
+Peak size  : 4.8 MB
+AMP count  : 16
+Skew       : 3.2%
+
+(Size information unavailable)    ← shown when DBC.TableSizeV query fails
+```
+
+Sections are separated by blank lines. Section headers use the `=== Header ===` convention
+already established by `/show indexes`.
+
+### REPL Integration
+
+Add the `/inspect` handler to `handle_metacommand_with_state()` in `metacommands.rs`:
+
+```rust
+// In the match block of handle_metacommand_with_state()
+"inspect" | "i" => {
+    if args.is_empty() {
+        writeln!(writer, "Usage: /inspect <table_name>")?;
+        writeln!(writer, "       /inspect <database>.<table_name>")?;
+    } else {
+        crate::commands::inspect::execute_for_repl(
+            completion_state.client(),
+            args[0],
+            writer,
+        )?;
+    }
+}
+```
+
+Add to `print_help_extended()`:
+
+```
+  /inspect <table>, /i   Comprehensive object inspection (type, columns, indexes, size)
+```
+
+### Tab Completion Integration
+
+Add to the `METACOMMAND_REGISTRY` constant in `metadata_completer.rs`:
+
+```rust
+MetacommandDef {
+    name: "inspect",
+    aliases: &["i"],
+    description: "Comprehensive object inspection",
+},
+```
+
+The completion context for `/inspect ` after a space already resolves to
+`CompletionContext::MetacommandArg`, which triggers table name completion using the existing
+`complete_table_names()` path. No changes to completion context analysis are needed.
+
+### Semicolon Stripping (Bug #32)
+
+Both `handle_metacommand()` and `handle_metacommand_with_state()` currently call `input.trim()`
+but do not strip trailing semicolons before splitting into command and arguments. Users who type
+`/inspect employees;` will have `employees;` passed as the object name, causing a DBC query
+failure.
+
+The fix adds `trim_end_matches(';')` immediately after the leading prefix is stripped:
+
+```rust
+// Before (in both handler functions):
+let without_prefix = trimmed.trim_start_matches('/').trim_start_matches('\\');
+
+// After:
+let without_prefix = trimmed
+    .trim_start_matches('/')
+    .trim_start_matches('\\')
+    .trim_end_matches(';')
+    .trim();
+```
+
+Applying `.trim()` again after `trim_end_matches(';')` handles the unusual case where the user
+types `/ describe table ;` (spaces around the trailing semicolon). This matches the pattern
+already used in `executor.rs`:
+
+```rust
+// src/commands/repl/executor.rs (reference pattern)
+let trimmed = input.trim();
+let sql = trimmed.trim_end_matches(';').trim();
+```
+
+The fix must be applied in both functions to keep them consistent:
+- `handle_metacommand()` at approximately line 46
+- `handle_metacommand_with_state()` at approximately line 255
