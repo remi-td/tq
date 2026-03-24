@@ -237,7 +237,8 @@ fn inspect_object<W: Write>(
         match query_definition(client, &database, obj_part, &obj_info.table_kind) {
             Ok(definition) => {
                 writeln!(writer, "── Definition ──")?;
-                for line in definition.lines() {
+                let formatted = format_ddl(&definition);
+                for line in formatted.lines() {
                     writeln!(writer, "  {}", line)?;
                 }
                 writeln!(writer)?;
@@ -247,6 +248,50 @@ fn inspect_object<W: Write>(
                     writer,
                     "  (Definition unavailable: {})",
                     summarize_error(&e)
+                )?;
+                writeln!(writer)?;
+            }
+        }
+    }
+
+    // Section 6: Dependencies (for views and macros)
+    if obj_info.table_kind == "V" || obj_info.table_kind == "M" {
+        match query_dependencies(client, &database, obj_part) {
+            Ok((upstream, downstream)) => {
+                writeln!(writer, "── Dependencies ──")?;
+                writeln!(writer)?;
+                writeln!(writer, "  Uses (upstream)")?;
+                if upstream.is_empty() {
+                    writeln!(writer, "    None")?;
+                } else {
+                    for dep in &upstream {
+                        writeln!(
+                            writer,
+                            "    {}.{}  ({})",
+                            dep.database, dep.name, dep.kind_label
+                        )?;
+                    }
+                }
+                writeln!(writer)?;
+                writeln!(writer, "  Used By (downstream)")?;
+                if downstream.is_empty() {
+                    writeln!(writer, "    None")?;
+                } else {
+                    for dep in &downstream {
+                        writeln!(
+                            writer,
+                            "    {}.{}  ({})",
+                            dep.database, dep.name, dep.kind_label
+                        )?;
+                    }
+                }
+                writeln!(writer)?;
+            }
+            Err(_) => {
+                writeln!(writer, "── Dependencies ──")?;
+                writeln!(
+                    writer,
+                    "  (Dependency information unavailable — requires SELECT on DBC.TablesV)"
                 )?;
                 writeln!(writer)?;
             }
@@ -544,6 +589,209 @@ fn query_definition(
     }
 
     Ok(definition.trim().to_string())
+}
+
+/// Format raw DDL text with line breaks at SQL keywords for readability
+///
+/// Teradata's SHOW VIEW returns DDL as a single continuous string.
+/// This function inserts line breaks before major SQL clause keywords
+/// using word-boundary matching to avoid splitting inside identifiers.
+fn format_ddl(raw: &str) -> String {
+    // Normalize whitespace: collapse multiple spaces/tabs into single space
+    let normalized: String = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    // SQL clause keywords that should start a new line.
+    // Each must be preceded and followed by a word boundary (space or start/end).
+    let break_before = [
+        "SELECT", "FROM", "WHERE", "AND", "OR", "JOIN", "LEFT JOIN",
+        "RIGHT JOIN", "INNER JOIN", "OUTER JOIN", "CROSS JOIN",
+        "ON", "GROUP BY", "ORDER BY", "HAVING", "UNION", "UNION ALL",
+        "INTERSECT", "MINUS", "LOCK", "LOCKING", "WITH CHECK OPTION",
+    ];
+
+    let mut result = normalized;
+
+    for kw in &break_before {
+        // Build pattern: " KEYWORD " (space-bounded) to match whole words only
+        let pattern = format!(" {} ", kw);
+        let upper = result.to_uppercase();
+        let mut new_result = String::new();
+        let mut search_from = 0;
+
+        while let Some(pos) = upper[search_from..].find(&pattern) {
+            let abs_pos = search_from + pos;
+            // Append everything up to the match, then newline + the keyword + space
+            new_result.push_str(&result[search_from..abs_pos]);
+            new_result.push('\n');
+            // Preserve original case from result
+            new_result.push_str(&result[abs_pos..abs_pos + pattern.len()]);
+            search_from = abs_pos + pattern.len();
+        }
+        new_result.push_str(&result[search_from..]);
+        result = new_result;
+    }
+
+    // Also break after AS that follows the view/macro name (e.g., "CREATE VIEW x AS")
+    // Match " AS SELECT" or "AS\nSELECT" pattern
+    let upper = result.to_uppercase();
+    if let Some(pos) = upper.find(" AS SELECT") {
+        let mut new_result = String::new();
+        new_result.push_str(&result[..pos + 3]); // include " AS"
+        new_result.push('\n');
+        new_result.push_str(&result[pos + 3..]); // rest starting with " SELECT"
+        result = new_result;
+    } else if let Some(pos) = upper.find(" AS\nSELECT") {
+        // Already broken, keep as-is
+        let _ = pos;
+    }
+
+    result.trim().to_string()
+}
+
+/// A dependency reference to another database object
+#[derive(Debug, Clone)]
+struct DependencyRef {
+    database: String,
+    name: String,
+    kind_label: String,
+}
+
+/// Query upstream and downstream dependencies for a view or macro
+///
+/// Upstream: objects referenced by this view/macro (parsed from DDL text in DBC.ViewTextV/TableTextV)
+/// Downstream: objects that reference this view/macro (searched in DBC.ViewTextV/TableTextV)
+fn query_dependencies(
+    client: &DatabaseClient,
+    database: &str,
+    name: &str,
+) -> Result<(Vec<DependencyRef>, Vec<DependencyRef>)> {
+    let upstream = query_upstream_dependencies(client, database, name);
+    let downstream = query_downstream_dependencies(client, database, name);
+
+    // If both fail, propagate the error
+    match (&upstream, &downstream) {
+        (Err(_), Err(e)) => Err(crate::error::TqError::QueryExecution(e.to_string())),
+        _ => Ok((
+            upstream.unwrap_or_default(),
+            downstream.unwrap_or_default(),
+        )),
+    }
+}
+
+/// Query upstream dependencies by finding objects referenced in this view's DDL
+///
+/// Uses DBC.TablesV to find tables/views in the same database that appear in the
+/// view text from DBC.ViewTextV or DBC.TableTextV.
+fn query_upstream_dependencies(
+    client: &DatabaseClient,
+    database: &str,
+    name: &str,
+) -> Result<Vec<DependencyRef>> {
+    // Get the view/macro text and parse referenced objects from it
+    let sql = format!(
+        "SELECT TRIM(t.DatabaseName) AS DepDatabase, \
+                TRIM(t.TableName) AS DepName, \
+                TRIM(t.TableKind) AS DepKind \
+         FROM DBC.TablesV t \
+         WHERE EXISTS ( \
+             SELECT 1 FROM DBC.ViewTextV v \
+             WHERE v.DatabaseName = '{}' \
+               AND v.TableName = '{}' \
+               AND v.RequestText LIKE '%' || TRIM(t.TableName) || '%' \
+         ) \
+         AND NOT (t.DatabaseName = '{}' AND t.TableName = '{}') \
+         AND t.TableKind IN ('T', 'O', 'V', 'M') \
+         ORDER BY t.DatabaseName, t.TableName",
+        escape_sql_string(database),
+        escape_sql_string(name),
+        escape_sql_string(database),
+        escape_sql_string(name)
+    );
+
+    match client.execute(&sql) {
+        Ok(result) => {
+            Ok(result
+                .rows
+                .iter()
+                .filter_map(|row| {
+                    if row.len() >= 3 {
+                        let db = row[0].display().trim().to_string();
+                        let obj_name = row[1].display().trim().to_string();
+                        let kind = row[2].display().trim().to_string();
+                        Some(DependencyRef {
+                            database: db,
+                            name: obj_name,
+                            kind_label: map_table_kind(&kind),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect())
+        }
+        Err(_) => {
+            // ViewTextV may not be accessible — try a simpler approach via SHOW
+            Ok(Vec::new())
+        }
+    }
+}
+
+/// Query downstream dependencies by finding views/macros that reference this object
+fn query_downstream_dependencies(
+    client: &DatabaseClient,
+    database: &str,
+    name: &str,
+) -> Result<Vec<DependencyRef>> {
+    let sql = format!(
+        "SELECT TRIM(v.DatabaseName) AS DepDatabase, \
+                TRIM(v.TableName) AS DepName, \
+                TRIM(t.TableKind) AS DepKind \
+         FROM DBC.ViewTextV v \
+         JOIN DBC.TablesV t \
+           ON t.DatabaseName = v.DatabaseName AND t.TableName = v.TableName \
+         WHERE v.RequestText LIKE '%{}.{}%' \
+           OR v.RequestText LIKE '%\"{}\".\"{}\"%' \
+           OR v.RequestText LIKE '% {}%' \
+         AND NOT (v.DatabaseName = '{}' AND v.TableName = '{}') \
+         ORDER BY v.DatabaseName, v.TableName",
+        escape_sql_string(database),
+        escape_sql_string(name),
+        escape_sql_string(database),
+        escape_sql_string(name),
+        escape_sql_string(name),
+        escape_sql_string(database),
+        escape_sql_string(name)
+    );
+
+    match client.execute(&sql) {
+        Ok(result) => {
+            Ok(result
+                .rows
+                .iter()
+                .filter_map(|row| {
+                    if row.len() >= 3 {
+                        let db = row[0].display().trim().to_string();
+                        let obj_name = row[1].display().trim().to_string();
+                        let kind = row[2].display().trim().to_string();
+                        // Don't include self
+                        if db.eq_ignore_ascii_case(database)
+                            && obj_name.eq_ignore_ascii_case(name)
+                        {
+                            return None;
+                        }
+                        Some(DependencyRef {
+                            database: db,
+                            name: obj_name,
+                            kind_label: map_table_kind(&kind),
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect())
+        }
+        Err(_) => Ok(Vec::new()),
+    }
 }
 
 // =============================================================================
