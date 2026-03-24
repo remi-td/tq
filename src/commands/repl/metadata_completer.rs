@@ -352,11 +352,6 @@ const METACOMMANDS: &[MetacommandDef] = &[
         aliases: &[],
         description: "Abort a session or running query",
     },
-    MetacommandDef {
-        name: "priority",
-        aliases: &[],
-        description: "Change session priority (RUSH/MEDIUM/LOW)",
-    },
     // Sprint 50: Query drill-down commands
     MetacommandDef {
         name: "explain",

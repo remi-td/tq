@@ -409,8 +409,7 @@ All core features are complete and tested.
 **Sprint 49 Session Control Functions (v1.30.0):**
 - **`/abort <session_id> [yes]`**: Abort session with interactive confirmation
 - **`/abort query <session_id> [yes]`**: Abort running query only (keeps session alive)
-- **`/priority <session_id> <level>`**: Change session priority (RUSH/MEDIUM/LOW)
-- **Batch mode**: `tq abort --force`, `tq priority` with table/CSV/JSON output
+- **Batch mode**: `tq abort --force` with table/CSV/JSON output
 - **Safety model**: REPL requires explicit 'yes', batch requires `--force` flag
 - **Tab completion**: Both commands in metacommand completion menu
 - 855 unit tests + 178 integration tests (100% pass rate), zero clippy warnings
@@ -441,8 +440,6 @@ All core features are complete and tested.
 |---------|--------|----------------|-------|
 | `/abort` command (REPL) | ✅ | [Admin User Stories](../specifications/admin-user-stories.md#control-functions) | v1.30.0 (Sprint 49) |
 | `tq abort` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#abort-command) | v1.30.0 (Sprint 49) |
-| `/priority` command (REPL) | ✅ | [Admin User Stories](../specifications/admin-user-stories.md#control-functions) | v1.30.0 (Sprint 49) |
-| `tq priority` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#priority-command) | v1.30.0 (Sprint 49) |
 | Safety confirmation (REPL) | ✅ | Internal requirement | v1.30.0 (Sprint 49) |
 | Batch --force flag | ✅ | Internal requirement | v1.30.0 (Sprint 49) |
 

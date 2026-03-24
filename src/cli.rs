@@ -321,14 +321,6 @@ pub enum Command {
     ///          tq abort --force --query 1234
     Abort(AbortArgs),
 
-    /// Change session priority
-    ///
-    /// Changes the execution priority of a Teradata session.
-    /// Valid levels: RUSH, MEDIUM, LOW.
-    ///
-    /// Example: tq priority 1234 rush
-    Priority(PriorityArgs),
-
     /// Show execution plan for a SQL statement
     ///
     /// Displays the Teradata EXPLAIN plan for a SQL statement,
@@ -810,40 +802,6 @@ pub struct AbortArgs {
     /// accidental session termination.
     #[arg(long)]
     pub force: bool,
-
-    /// Output format
-    ///
-    /// table: Human-readable message (default)
-    /// json: JSON result object
-    /// csv: Comma-separated result
-    #[arg(
-        short,
-        long,
-        env = "TQ_FORMAT",
-        default_value = "table",
-        value_name = "FORMAT"
-    )]
-    pub format: OutputFormat,
-
-    /// Write output to file instead of stdout
-    #[arg(short, long, value_name = "FILE")]
-    pub output: Option<PathBuf>,
-}
-
-/// Arguments for the priority command (Sprint 49)
-#[derive(Parser, Debug)]
-pub struct PriorityArgs {
-    /// Session ID to change priority for
-    ///
-    /// The Teradata session number whose priority should be changed.
-    #[arg(value_name = "SESSION_ID")]
-    pub session_id: i64,
-
-    /// Priority level to set
-    ///
-    /// Valid levels: RUSH, MEDIUM, LOW (case-insensitive).
-    #[arg(value_name = "LEVEL")]
-    pub level: String,
 
     /// Output format
     ///

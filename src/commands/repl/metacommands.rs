@@ -263,13 +263,6 @@ pub fn handle_metacommand<W: Write>(
                 "The /abort command requires full REPL mode with database connection."
             )?;
         }
-        "priority" => {
-            writeln!(
-                writer,
-                "The /priority command requires full REPL mode with database connection."
-            )?;
-        }
-
         // Sprint 40: Params command (basic handler)
         "params" | "p" => {
             handle_params_basic(&args, state, writer)?;
@@ -755,42 +748,6 @@ pub fn handle_metacommand_with_state<W: Write>(
             }
         }
 
-        // Sprint 49: Priority change command
-        "priority" => {
-            if args.len() < 2 {
-                writeln!(writer)?;
-                writeln!(writer, "Usage: /priority <session_id> <level>")?;
-                writeln!(writer)?;
-                writeln!(writer, "Change the priority of a Teradata session.")?;
-                writeln!(writer, "Valid levels: RUSH, MEDIUM, LOW")?;
-                writeln!(writer)?;
-                writeln!(writer, "Examples:")?;
-                writeln!(writer, "  /priority 1234 rush")?;
-                writeln!(writer, "  /priority 1234 low")?;
-                writeln!(writer)?;
-                writeln!(writer, "Use /sessions to list active session IDs.")?;
-                writeln!(writer)?;
-            } else {
-                match args[0].parse::<i64>() {
-                    Ok(session_id) => {
-                        crate::commands::priority::execute_for_repl(
-                            completion_state.client(),
-                            session_id,
-                            args[1],
-                            writer,
-                        )?;
-                    }
-                    Err(_) => {
-                        writeln!(
-                            writer,
-                            "Error: '{}' is not a valid session ID. Expected a number.",
-                            args[0]
-                        )?;
-                    }
-                }
-            }
-        }
-
         // Sprint 40: Params command (full handler)
         "params" | "p" => {
             handle_params_basic(&args, state, writer)?;
@@ -899,10 +856,6 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(
         writer,
         "  /abort query <id> [yes] Abort running query on a session"
-    )?;
-    writeln!(
-        writer,
-        "  /priority <id> <level> Change session priority (RUSH/MEDIUM/LOW)"
     )?;
     writeln!(
         writer,
