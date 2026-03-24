@@ -285,14 +285,6 @@ pub enum Command {
     ///          tq inspect mydb.employees
     Inspect(InspectArgs),
 
-    /// Describe table structure (columns, types, nullable, defaults)
-    ///
-    /// Shows column information for a table or view from DBC.ColumnsV.
-    ///
-    /// Example: tq describe employees
-    ///          tq describe mydb.employees
-    Describe(DescribeArgs),
-
     /// List database objects (databases, tables, or views)
     ///
     /// Lists objects of the specified type. For tables, an optional
@@ -680,32 +672,6 @@ pub struct InspectArgs {
     /// Write output to file instead of stdout
     ///
     /// If the file exists, it will be overwritten.
-    #[arg(short, long, value_name = "FILE")]
-    pub output: Option<PathBuf>,
-}
-
-/// Arguments for the describe command
-#[derive(Parser, Debug)]
-pub struct DescribeArgs {
-    /// Table or view to describe (unqualified or database.object)
-    #[arg(value_name = "OBJECT")]
-    pub object: String,
-
-    /// Output format
-    ///
-    /// table: Human-readable column listing (default)
-    /// json: JSON array of column objects
-    /// csv: Comma-separated column information
-    #[arg(
-        short,
-        long,
-        env = "TQ_FORMAT",
-        default_value = "table",
-        value_name = "FORMAT"
-    )]
-    pub format: OutputFormat,
-
-    /// Write output to file instead of stdout
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
 }
@@ -1803,53 +1769,6 @@ mod tests {
             assert_eq!(args.topic, Some(HelpTopic::Params));
         } else {
             panic!("Expected Help command");
-        }
-    }
-
-    // Sprint 46: Tests for describe command
-    #[test]
-    fn test_cli_describe_default() {
-        let args = vec!["tq", "describe", "employees"];
-        let cli = Cli::try_parse_from(args).unwrap();
-        if let Command::Describe(args) = cli.command {
-            assert_eq!(args.object, "employees");
-            assert_eq!(args.format, OutputFormat::Table);
-            assert!(args.output.is_none());
-        } else {
-            panic!("Expected Describe command");
-        }
-    }
-
-    #[test]
-    fn test_cli_describe_qualified() {
-        let args = vec!["tq", "describe", "mydb.employees"];
-        let cli = Cli::try_parse_from(args).unwrap();
-        if let Command::Describe(args) = cli.command {
-            assert_eq!(args.object, "mydb.employees");
-        } else {
-            panic!("Expected Describe command");
-        }
-    }
-
-    #[test]
-    fn test_cli_describe_with_format() {
-        let args = vec!["tq", "describe", "--format", "json", "employees"];
-        let cli = Cli::try_parse_from(args).unwrap();
-        if let Command::Describe(args) = cli.command {
-            assert_eq!(args.format, OutputFormat::Json);
-        } else {
-            panic!("Expected Describe command");
-        }
-    }
-
-    #[test]
-    fn test_cli_describe_with_output() {
-        let args = vec!["tq", "describe", "--output", "desc.csv", "employees"];
-        let cli = Cli::try_parse_from(args).unwrap();
-        if let Command::Describe(args) = cli.command {
-            assert_eq!(args.output, Some(PathBuf::from("desc.csv")));
-        } else {
-            panic!("Expected Describe command");
         }
     }
 

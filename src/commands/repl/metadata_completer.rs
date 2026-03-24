@@ -245,7 +245,7 @@ const METACOMMANDS: &[MetacommandDef] = &[
     MetacommandDef {
         name: "describe",
         aliases: &["d"],
-        description: "Describe table structure",
+        description: "Describe object (alias for /inspect)",
     },
     MetacommandDef {
         name: "export",

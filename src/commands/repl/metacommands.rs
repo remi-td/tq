@@ -74,13 +74,15 @@ pub fn handle_metacommand<W: Write>(
             execute_ping(client, state, writer)?;
         }
 
-        // Describe command — delegates to batch describe module
+        // Describe command — alias for /inspect (consolidated in Sprint 52)
         "describe" | "d" => {
             if args.is_empty() {
-                writeln!(writer, "Usage: /describe <table_name>")?;
-                writeln!(writer, "       /describe <database>.<table_name>")?;
+                writeln!(writer, "Usage: /describe <object>")?;
+                writeln!(writer, "       /describe <database>.<object>")?;
+                writeln!(writer)?;
+                writeln!(writer, "Note: /describe is an alias for /inspect")?;
             } else {
-                crate::commands::describe::execute_for_repl(client, args[0], writer)?;
+                writeln!(writer, "The /describe command requires full REPL mode with database connection.")?;
             }
         }
 
@@ -321,15 +323,18 @@ pub fn handle_metacommand_with_state<W: Write>(
             execute_ping(completion_state.client(), state, writer)?;
         }
 
-        // Describe command — delegates to batch describe module
+        // Describe command — alias for /inspect (consolidated in Sprint 52)
         "describe" | "d" => {
             if args.is_empty() {
-                writeln!(writer, "Usage: /describe <table_name>")?;
-                writeln!(writer, "       /describe <database>.<table_name>")?;
+                writeln!(writer, "Usage: /describe <object>")?;
+                writeln!(writer, "       /describe <database>.<object>")?;
+                writeln!(writer)?;
+                writeln!(writer, "Note: /describe is an alias for /inspect")?;
             } else {
-                crate::commands::describe::execute_for_repl(
+                let object_name = args.join(" ");
+                crate::commands::inspect::execute_for_repl(
                     completion_state.client(),
-                    args[0],
+                    &object_name,
                     writer,
                 )?;
             }

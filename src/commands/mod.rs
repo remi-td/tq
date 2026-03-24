@@ -4,7 +4,6 @@
 //! and output formatting.
 
 pub mod abort;
-pub mod describe;
 pub mod explain;
 pub mod format_helpers;
 pub mod history;

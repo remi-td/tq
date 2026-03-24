@@ -72,19 +72,16 @@ pub fn resolve_database(
 /// Query DBC.TablesV for object header metadata.
 ///
 /// Returns `None` if the object does not exist.
+/// Row count is fetched separately from DBC.TableSizeV with graceful fallback
+/// (some systems may not have TableSizeV or user may lack privileges).
 pub fn query_object_header(
     client: &DatabaseClient,
     database: &str,
     name: &str,
 ) -> Result<Option<ObjectHeader>> {
     let sql = format!(
-        "SELECT TRIM(DatabaseName), TRIM(TableName), TRIM(TableKind), \
-         COALESCE(CAST( \
-             (SELECT SUM(RowCount) FROM DBC.TableSizeV s \
-              WHERE s.DatabaseName = t.DatabaseName \
-                AND s.TableName = t.TableName) \
-         AS BIGINT), NULL) AS RowCount \
-         FROM DBC.TablesV t \
+        "SELECT TRIM(DatabaseName), TRIM(TableName), TRIM(TableKind) \
+         FROM DBC.TablesV \
          WHERE DatabaseName = '{}' AND TableName = '{}'",
         escape_sql_string(database),
         escape_sql_string(name)
@@ -105,18 +102,13 @@ pub fn query_object_header(
             .map(|v| v.display().trim().to_string())
             .unwrap_or_default();
         let kind_label = map_table_kind(&table_kind);
-        let row_count = row.get(3).and_then(|v| match v {
-            Value::Integer(n) => Some(*n),
-            Value::Decimal(f) => Some(*f as i64),
-            _ => {
-                let s = v.display().trim().to_string();
-                if s.is_empty() || s == "[NULL]" {
-                    None
-                } else {
-                    s.parse::<i64>().ok()
-                }
-            }
-        });
+
+        // Try to get row count from TableSizeV, but don't fail if unavailable
+        let row_count = if table_kind == "T" || table_kind == "O" {
+            query_row_count(client, database, name).ok().flatten()
+        } else {
+            None
+        };
 
         Ok(Some(ObjectHeader {
             database: db,
@@ -129,6 +121,41 @@ pub fn query_object_header(
     } else {
         Ok(None)
     }
+}
+
+/// Query DBC.TableSizeV for estimated row count.
+/// Returns Ok(None) if no data found, Err if query fails (e.g., view doesn't exist).
+fn query_row_count(
+    client: &DatabaseClient,
+    database: &str,
+    name: &str,
+) -> Result<Option<i64>> {
+    let sql = format!(
+        "SELECT CAST(SUM(RowCount) AS BIGINT) \
+         FROM DBC.TableSizeV \
+         WHERE DatabaseName = '{}' AND TableName = '{}'",
+        escape_sql_string(database),
+        escape_sql_string(name)
+    );
+
+    let result = client.execute(&sql)?;
+    if let Some(row) = result.rows.first() {
+        if let Some(val) = row.first() {
+            return Ok(match val {
+                Value::Integer(n) => Some(*n),
+                Value::Decimal(f) => Some(*f as i64),
+                _ => {
+                    let s = val.display().trim().to_string();
+                    if s.is_empty() || s == "[NULL]" {
+                        None
+                    } else {
+                        s.parse::<i64>().ok()
+                    }
+                }
+            });
+        }
+    }
+    Ok(None)
 }
 
 /// Query DBC.ColumnsV for column metadata with proper type translation.

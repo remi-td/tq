@@ -186,17 +186,6 @@ fn run(cli: Cli) -> Result<()> {
                 commands::inspect::execute(&client, &args.object, args.format, &mut stdout, use_color)?;
             }
         }
-        // Sprint 46: Describe command
-        Command::Describe(args) => {
-            if let Some(ref output_path) = args.output {
-                let file = std::fs::File::create(output_path)?;
-                let mut writer = std::io::BufWriter::new(file);
-                commands::describe::execute(&client, &args.object, args.format, &mut writer, use_color)?;
-            } else {
-                let mut stdout = io::stdout();
-                commands::describe::execute(&client, &args.object, args.format, &mut stdout, use_color)?;
-            }
-        }
         // Sprint 46: List command
         Command::List(args) => {
             if let Some(ref output_path) = args.output {

@@ -513,6 +513,11 @@ fn query_storage(
 }
 
 /// Query the definition of a view or macro using SHOW statement
+///
+/// Teradata's SHOW VIEW/MACRO returns the DDL as multiple rows, each containing
+/// a fixed-width VARCHAR chunk. These chunks are split at arbitrary character
+/// boundaries (NOT logical line breaks), so they must be concatenated directly
+/// without inserting newlines between rows.
 fn query_definition(
     client: &DatabaseClient,
     db: &str,
@@ -527,16 +532,13 @@ fn query_definition(
 
     let result = client.execute(&show_cmd)?;
 
+    // Concatenate all row chunks directly — they are arbitrary splits of the DDL text
     let mut definition = String::new();
     for row in &result.rows {
         if let Some(val) = row.first() {
             let text = val.display();
             if text != "[NULL]" {
-                let trimmed = text.trim_end();
-                if !definition.is_empty() && !trimmed.is_empty() {
-                    definition.push('\n');
-                }
-                definition.push_str(trimmed);
+                definition.push_str(&text);
             }
         }
     }
