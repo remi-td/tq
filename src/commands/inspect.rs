@@ -8,7 +8,7 @@ use crate::commands::format_helpers::{
     csv_escape, format_size, json_escape, map_table_kind, parse_table_name, truncate_str,
 };
 use crate::commands::query_helpers;
-use crate::db::{DatabaseClient, Value};
+use crate::db::{DatabaseClient, Row, Value};
 use crate::error::Result;
 use crate::sql::escape_sql_string;
 use std::io::Write;
@@ -658,8 +658,11 @@ struct DependencyRef {
 
 /// Query upstream and downstream dependencies for a view or macro
 ///
-/// Upstream: objects referenced by this view/macro (parsed from DDL text in DBC.ViewTextV/TableTextV)
-/// Downstream: objects that reference this view/macro (searched in DBC.ViewTextV/TableTextV)
+/// Uses DBC.TVM (internal system table) which contains CreateText with
+/// fully-qualified object references like "DB"."TableName". Also checks
+/// DBC.TextTbl for overflow text on large DDL definitions.
+///
+/// Based on the dependency query pattern from Issue #33.
 fn query_dependencies(
     client: &DatabaseClient,
     database: &str,
@@ -678,120 +681,115 @@ fn query_dependencies(
     }
 }
 
-/// Query upstream dependencies by finding objects referenced in this view's DDL
+/// Query upstream dependencies: objects referenced by this view/macro's CreateText.
 ///
-/// Uses DBC.TablesV to find tables/views in the same database that appear in the
-/// view text from DBC.ViewTextV or DBC.TableTextV.
+/// Cross-joins DBC.TVM (self) with all other objects and checks if the self's
+/// CreateText contains quoted references like "DB"."ObjName" to them.
 fn query_upstream_dependencies(
     client: &DatabaseClient,
     database: &str,
     name: &str,
 ) -> Result<Vec<DependencyRef>> {
-    // Get the view/macro text and parse referenced objects from it
+    // Search this object's CreateText for quoted references to other objects.
+    // Also search DBC.TextTbl for overflow text on large definitions.
     let sql = format!(
-        "SELECT TRIM(t.DatabaseName) AS DepDatabase, \
-                TRIM(t.TableName) AS DepName, \
-                TRIM(t.TableKind) AS DepKind \
-         FROM DBC.TablesV t \
-         WHERE EXISTS ( \
-             SELECT 1 FROM DBC.ViewTextV v \
-             WHERE v.DatabaseName = '{}' \
-               AND v.TableName = '{}' \
-               AND v.RequestText LIKE '%' || TRIM(t.TableName) || '%' \
-         ) \
-         AND NOT (t.DatabaseName = '{}' AND t.TableName = '{}') \
-         AND t.TableKind IN ('T', 'O', 'V', 'M') \
-         ORDER BY t.DatabaseName, t.TableName",
+        "SELECT DISTINCT TRIM(D2.DatabaseName), TRIM(T2.TVMName), TRIM(T2.TableKind) \
+         FROM DBC.TVM T1 \
+         JOIN DBC.Dbase D1 ON D1.DatabaseId = T1.DatabaseId, \
+              DBC.TVM T2 \
+         JOIN DBC.Dbase D2 ON D2.DatabaseId = T2.DatabaseId \
+         WHERE D1.DatabaseName = '{}' AND T1.TVMName = '{}' \
+           AND T1.CreateText LIKE '%' || '\"' || TRIM(D2.DatabaseName) || '\"' || '.' || '\"' || TRIM(T2.TVMName) || '\"' || '%' \
+           AND NOT (TRIM(D2.DatabaseName) = '{}' AND TRIM(T2.TVMName) = '{}') \
+         UNION \
+         SELECT DISTINCT TRIM(D2.DatabaseName), TRIM(T2.TVMName), TRIM(T2.TableKind) \
+         FROM DBC.TVM T1 \
+         JOIN DBC.Dbase D1 ON D1.DatabaseId = T1.DatabaseId \
+         JOIN DBC.TextTbl X ON X.TextId = T1.TVMId AND X.TextType = 'C', \
+              DBC.TVM T2 \
+         JOIN DBC.Dbase D2 ON D2.DatabaseId = T2.DatabaseId \
+         WHERE D1.DatabaseName = '{}' AND T1.TVMName = '{}' \
+           AND X.TextString LIKE '%' || '\"' || TRIM(D2.DatabaseName) || '\"' || '.' || '\"' || TRIM(T2.TVMName) || '\"' || '%' \
+           AND NOT (TRIM(D2.DatabaseName) = '{}' AND TRIM(T2.TVMName) = '{}') \
+         ORDER BY 1, 2",
         escape_sql_string(database),
         escape_sql_string(name),
         escape_sql_string(database),
-        escape_sql_string(name)
+        escape_sql_string(name),
+        escape_sql_string(database),
+        escape_sql_string(name),
+        escape_sql_string(database),
+        escape_sql_string(name),
     );
 
     match client.execute(&sql) {
-        Ok(result) => {
-            Ok(result
-                .rows
-                .iter()
-                .filter_map(|row| {
-                    if row.len() >= 3 {
-                        let db = row[0].display().trim().to_string();
-                        let obj_name = row[1].display().trim().to_string();
-                        let kind = row[2].display().trim().to_string();
-                        Some(DependencyRef {
-                            database: db,
-                            name: obj_name,
-                            kind_label: map_table_kind(&kind),
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect())
-        }
-        Err(_) => {
-            // ViewTextV may not be accessible — try a simpler approach via SHOW
-            Ok(Vec::new())
-        }
+        Ok(result) => Ok(parse_dependency_rows(&result.rows)),
+        Err(_) => Ok(Vec::new()),
     }
 }
 
-/// Query downstream dependencies by finding views/macros that reference this object
+/// Query downstream dependencies: objects whose CreateText references this object.
+///
+/// Searches all objects' CreateText and TextTbl overflow for quoted references
+/// like "database"."name" pointing to the inspected object.
 fn query_downstream_dependencies(
     client: &DatabaseClient,
     database: &str,
     name: &str,
 ) -> Result<Vec<DependencyRef>> {
-    let sql = format!(
-        "SELECT TRIM(v.DatabaseName) AS DepDatabase, \
-                TRIM(v.TableName) AS DepName, \
-                TRIM(t.TableKind) AS DepKind \
-         FROM DBC.ViewTextV v \
-         JOIN DBC.TablesV t \
-           ON t.DatabaseName = v.DatabaseName AND t.TableName = v.TableName \
-         WHERE v.RequestText LIKE '%{}.{}%' \
-           OR v.RequestText LIKE '%\"{}\".\"{}\"%' \
-           OR v.RequestText LIKE '% {}%' \
-         AND NOT (v.DatabaseName = '{}' AND v.TableName = '{}') \
-         ORDER BY v.DatabaseName, v.TableName",
-        escape_sql_string(database),
-        escape_sql_string(name),
-        escape_sql_string(database),
-        escape_sql_string(name),
-        escape_sql_string(name),
+    let quoted_ref = format!(
+        "'%' || '\"{}\"' || '.' || '\"{}\"' || '%'",
         escape_sql_string(database),
         escape_sql_string(name)
     );
 
+    let esc_db = escape_sql_string(database);
+    let esc_name = escape_sql_string(name);
+
+    let sql = format!(
+        "SELECT DISTINCT TRIM(D.DatabaseName), TRIM(T.TVMName), TRIM(T.TableKind) \
+         FROM DBC.TVM T \
+         JOIN DBC.Dbase D ON D.DatabaseId = T.DatabaseId \
+         WHERE T.CreateText LIKE {quoted_ref} \
+           AND NOT (TRIM(D.DatabaseName) = '{esc_db}' AND TRIM(T.TVMName) = '{esc_name}') \
+         UNION \
+         SELECT DISTINCT TRIM(D.DatabaseName), TRIM(T.TVMName), TRIM(T.TableKind) \
+         FROM DBC.TextTbl X \
+         JOIN DBC.TVM T ON X.TextId = T.TVMId \
+         JOIN DBC.Dbase D ON D.DatabaseId = T.DatabaseId \
+         WHERE X.TextType = 'C' \
+           AND X.TextString LIKE {quoted_ref} \
+           AND NOT (TRIM(D.DatabaseName) = '{esc_db}' AND TRIM(T.TVMName) = '{esc_name}') \
+         ORDER BY 1, 2",
+    );
+
     match client.execute(&sql) {
-        Ok(result) => {
-            Ok(result
-                .rows
-                .iter()
-                .filter_map(|row| {
-                    if row.len() >= 3 {
-                        let db = row[0].display().trim().to_string();
-                        let obj_name = row[1].display().trim().to_string();
-                        let kind = row[2].display().trim().to_string();
-                        // Don't include self
-                        if db.eq_ignore_ascii_case(database)
-                            && obj_name.eq_ignore_ascii_case(name)
-                        {
-                            return None;
-                        }
-                        Some(DependencyRef {
-                            database: db,
-                            name: obj_name,
-                            kind_label: map_table_kind(&kind),
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect())
-        }
+        Ok(result) => Ok(parse_dependency_rows(&result.rows)),
         Err(_) => Ok(Vec::new()),
     }
+}
+
+/// Parse dependency result rows into DependencyRef structs
+fn parse_dependency_rows(rows: &[Row]) -> Vec<DependencyRef> {
+    rows.iter()
+        .filter_map(|row| {
+            if row.len() >= 3 {
+                let db = row[0].display().trim().to_string();
+                let obj_name = row[1].display().trim().to_string();
+                let kind = row[2].display().trim().to_string();
+                if db == "[NULL]" || obj_name == "[NULL]" {
+                    return None;
+                }
+                Some(DependencyRef {
+                    database: db,
+                    name: obj_name,
+                    kind_label: map_table_kind(&kind),
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 // =============================================================================
