@@ -254,44 +254,54 @@ fn inspect_object<W: Write>(
         }
     }
 
-    // Section 6: Dependencies (for views and macros)
-    if obj_info.table_kind == "V" || obj_info.table_kind == "M" {
+    // Section 6: Dependencies
+    // Views/macros: show both upstream and downstream
+    // Tables: show downstream only (what references this table)
+    {
+        let show_upstream = obj_info.table_kind == "V" || obj_info.table_kind == "M";
         match query_dependencies(client, &database, obj_part) {
             Ok((upstream, downstream)) => {
-                writeln!(writer, "── Dependencies ──")?;
-                writeln!(writer)?;
-                writeln!(writer, "  Uses (upstream)")?;
-                if upstream.is_empty() {
-                    writeln!(writer, "    None")?;
-                } else {
-                    for dep in &upstream {
-                        writeln!(
-                            writer,
-                            "    {}.{}  ({})",
-                            dep.database, dep.name, dep.kind_label
-                        )?;
+                // Only show section if there's something to display
+                if show_upstream || !downstream.is_empty() {
+                    writeln!(writer, "── Dependencies ──")?;
+                    writeln!(writer)?;
+
+                    if show_upstream {
+                        writeln!(writer, "  Uses (upstream)")?;
+                        if upstream.is_empty() {
+                            writeln!(writer, "    None")?;
+                        } else {
+                            for dep in &upstream {
+                                writeln!(
+                                    writer,
+                                    "    {}.{}  ({})",
+                                    dep.database, dep.name, dep.kind_label
+                                )?;
+                            }
+                        }
+                        writeln!(writer)?;
                     }
-                }
-                writeln!(writer)?;
-                writeln!(writer, "  Used By (downstream)")?;
-                if downstream.is_empty() {
-                    writeln!(writer, "    None")?;
-                } else {
-                    for dep in &downstream {
-                        writeln!(
-                            writer,
-                            "    {}.{}  ({})",
-                            dep.database, dep.name, dep.kind_label
-                        )?;
+
+                    writeln!(writer, "  Used By (downstream)")?;
+                    if downstream.is_empty() {
+                        writeln!(writer, "    None")?;
+                    } else {
+                        for dep in &downstream {
+                            writeln!(
+                                writer,
+                                "    {}.{}  ({})",
+                                dep.database, dep.name, dep.kind_label
+                            )?;
+                        }
                     }
+                    writeln!(writer)?;
                 }
-                writeln!(writer)?;
             }
             Err(_) => {
                 writeln!(writer, "── Dependencies ──")?;
                 writeln!(
                     writer,
-                    "  (Dependency information unavailable — requires SELECT on DBC.TablesV)"
+                    "  (Dependency information unavailable — requires SELECT on DBC.TVM)"
                 )?;
                 writeln!(writer)?;
             }

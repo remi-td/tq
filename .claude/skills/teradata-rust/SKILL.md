@@ -78,3 +78,30 @@ teradatarustapi::go_close_connection_wrapper(u_log, conn_handle)?;
 - Always close connections, even on errors
 - Never log passwords or connection strings
 - Use parameterized queries to prevent SQL injection
+
+## Teradata System Object Verification
+
+**CRITICAL: Never invent or assume Teradata system tables, views, or table functions exist.** Teradata's internal API surface is not predictable by analogy. Always verify against the live database before implementing.
+
+**Confirmed working table functions:**
+- `MonitorSession(-1, '*', 0)` — Active sessions
+- `MonitorAbortSession(session_id)` — Abort a session
+- `MonitorCancelRequest(session_id)` — Cancel running query
+
+**Confirmed NOT existing:**
+- `MonitorSetResource` — Does NOT exist (priority is TASM/TDWM)
+
+**Dependency analysis (from Issue #33):**
+- Use `DBC.TVM.CreateText` + `DBC.TextTbl` (TextType='C') for dependency analysis
+- Search for fully-qualified `"DB"."Object"` patterns in CreateText
+- Do NOT use `DBC.ViewTextV` for dependency analysis — unreliable for qualified references
+
+**DDL retrieval:**
+- `SHOW VIEW "db"."name"` returns DDL as fixed-width VARCHAR chunks
+- Chunks are split at arbitrary character boundaries — concatenate directly WITHOUT newlines
+- `DBC.TableSizeV` may not exist on all systems — always use with graceful fallback
+
+**Testing rule:** Before committing any command that uses Teradata system SQL, test the raw query:
+```bash
+echo "<sql>" | cargo run -- query --format csv
+```

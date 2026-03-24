@@ -172,13 +172,43 @@ ORDER BY "CurrSpool_GB" DESC;
 
 ## Monitor Functions (require EXECUTE FUNCTION privileges)
 
-| Function | Purpose |
-|----------|---------|
-| `MonitorSession(HostId, User, SessionNo)` | List active sessions |
-| `MonitorSQLText(HostId, SessionNo, VprocNo)` | Get running SQL text |
-| `MonitorSQLCurrentStep(HostId, SessionNo, VprocNo)` | Query step progress |
-| `MonitorPhysicalResource()` | Physical resource metrics |
-| `MonitorVirtualResource()` | Virtual resource metrics |
+| Function | Purpose | Verified |
+|----------|---------|----------|
+| `MonitorSession(HostId, User, SessionNo)` | List active sessions | Yes |
+| `MonitorAbortSession(SessionNo)` | Abort a session | Yes |
+| `MonitorCancelRequest(SessionNo)` | Cancel running query | Yes |
+| `MonitorSQLText(HostId, SessionNo, VprocNo)` | Get running SQL text | Yes |
+| `MonitorSQLCurrentStep(HostId, SessionNo, VprocNo)` | Query step progress | Yes |
+| `MonitorPhysicalResource()` | Physical resource metrics | Unverified |
+| `MonitorVirtualResource()` | Virtual resource metrics | Unverified |
+
+**WARNING:** Do NOT assume other Monitor* functions exist. `MonitorSetResource` does NOT exist (priority is managed via TASM/TDWM). Always test against a live database before using any unverified function.
+
+## Object Dependency Analysis
+
+Use `DBC.TVM.CreateText` and `DBC.TextTbl` for dependency analysis (NOT `DBC.ViewTextV`):
+
+```sql
+-- Upstream: objects referenced by a view/macro's CreateText
+SELECT DISTINCT TRIM(D2.DatabaseName), TRIM(T2.TVMName), TRIM(T2.TableKind)
+FROM DBC.TVM T1
+JOIN DBC.Dbase D1 ON D1.DatabaseId = T1.DatabaseId,
+     DBC.TVM T2
+JOIN DBC.Dbase D2 ON D2.DatabaseId = T2.DatabaseId
+WHERE D1.DatabaseName = '{db}' AND T1.TVMName = '{name}'
+  AND T1.CreateText LIKE '%"' || TRIM(D2.DatabaseName) || '"."' || TRIM(T2.TVMName) || '"%'
+  AND NOT (TRIM(D2.DatabaseName) = '{db}' AND TRIM(T2.TVMName) = '{name}');
+
+-- Downstream: objects whose CreateText references the target object
+SELECT DISTINCT TRIM(D.DatabaseName), TRIM(T.TVMName), TRIM(T.TableKind)
+FROM DBC.TVM T
+JOIN DBC.Dbase D ON D.DatabaseId = T.DatabaseId
+WHERE T.CreateText LIKE '%"{db}"."{name}"%'
+  AND NOT (TRIM(D.DatabaseName) = '{db}' AND TRIM(T.TVMName) = '{name}');
+
+-- Also check DBC.TextTbl for overflow (large DDL):
+-- WHERE X.TextType = 'C' AND X.TextString LIKE '%"db"."name"%'
+```
 
 ## Guidelines
 
