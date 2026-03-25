@@ -1,7 +1,7 @@
 # Feature Backlog
 
-**Last Updated:** 2026-03-21
-**Next Sprint:** Sprint 44
+**Last Updated:** 2026-03-25
+**Next Sprint:** Sprint 55
 
 ---
 
@@ -18,6 +18,20 @@ No P0 features currently in backlog. All critical features have been implemented
 ---
 
 ## P1 - High Priority (Should Have)
+
+### Agent Mode - Remaining Items (Issue #37)
+
+**Search/Discovery Commands** (Issue #37 part 5)
+- Schema search: find tables/views/columns by pattern
+- Column-level search across databases
+- Agent-friendly discovery without requiring exact object names
+- Builds on existing `/list` and `/inspect` infrastructure
+
+**Result Pagination** (Issue #37 part 6)
+- Cursor-based pagination for large result sets
+- `--page` and `--page-size` flags
+- Next-page token in JSON envelope for stateless iteration
+- Prevents context window overflow in AI agents
 
 ### REPL Enhancements
 
@@ -154,7 +168,7 @@ No P0 features currently in backlog. All critical features have been implemented
 **Additional Export Formats**
 - Parquet format for big data tools
 - HTML tables for reports
-- Markdown tables for documentation
+- ~~Markdown tables for documentation~~ ✅ (Sprint 52)
 - Spec: [Output Formats - Additional Formats](../specifications/output-formats.md#additional-formats)
 
 **Format Customization**

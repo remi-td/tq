@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
-**Last Updated:** 2026-03-23
-**Current Version:** 1.32.0
-**Latest Sprint:** Sprint 51 Complete (Session History & Trends)
+**Last Updated:** 2026-03-25
+**Current Version:** 1.35.0
+**Latest Sprint:** Sprint 54 Complete (Agent-Safe Mode & Richer Introspection)
 
 ---
 
@@ -432,6 +432,32 @@ All core features are complete and tested.
 - **Event mapping**: L→Logon, O→Logoff, A→Auth Fail from DBC.LogOnOffV
 - 906 unit tests + 178 integration tests (100% pass rate), zero clippy warnings
 
+**Sprint 52 Enhancements (v1.33.0):**
+- **Markdown output format**: New `markdown`/`md` format (`src/format/markdown.rs`) supported across all 14+ commands
+- **Comment column**: Added to inspect/describe output in table, JSON, CSV, and markdown formats
+- **Format documentation**: `--format` argument documented in all command `--help` text
+- **Issues closed**: #38 (markdown output), #39 (comment column), #40 (format docs)
+- 893 unit tests + 178 integration tests (100% pass rate), zero clippy warnings
+
+**Sprint 53 Enhancements (v1.34.0):**
+- **JSON envelope**: All JSON output uses consistent `{"ok": true, "row_count": N, "data": [...]}` structure
+- **Structured JSON errors**: Error output with code, category, retryable, message, hint fields
+- **12 error codes**: Across 9 categories for comprehensive error taxonomy
+- **Command.format() method**: Centralized format resolution in CLI
+- **JSON errors to stdout**: When `--format json`, errors output to stdout (not stderr) for single-stream parsing
+- **Issue #37 parts 1-2**: Agent mode JSON envelope and structured errors
+- 901 unit tests + 178 integration tests (100% pass rate), zero clippy warnings
+
+**Sprint 54 Enhancements (v1.35.0):**
+- **`--agent-safe` flag**: Blocks DDL/DML, enforces single-statement, limits rows
+- **`--allow-dml` flag**: Fine-grained override to permit DML in agent-safe mode
+- **`--max-rows` flag**: Limit result set size for agent context windows
+- **Statement classification**: ReadOnly/DML/DDL with Teradata-specific support (LOCKING, COLLECT, SEL, INS, etc.)
+- **Richer inspect JSON**: Indexes, storage, definition (DDL), and dependency graph in inspect output
+- **Error variants**: `AgentSafeBlocked` and `AgentSafeMaxRows` for agent-specific errors
+- **Issue #37 parts 3-4**: Agent-safe mode and richer introspection
+- 913 unit tests + 178 integration tests (100% pass rate), zero clippy warnings
+
 ---
 
 ## Session Control
@@ -469,14 +495,43 @@ All core features are complete and tested.
 
 ---
 
+## Output Formats
+
+| Feature | Status | Spec Reference | Since |
+|---------|--------|----------------|-------|
+| Table format | ✅ | [Output Formats](../specifications/output-formats.md#table-format) | v1.0.0 |
+| CSV format | ✅ | [Output Formats](../specifications/output-formats.md#csv-format) | v1.0.0 |
+| JSON format | ✅ | [Output Formats](../specifications/output-formats.md#json-format) | v1.0.0 |
+| Markdown format | ✅ | [Output Formats](../specifications/output-formats.md#markdown-format) | v1.33.0 (Sprint 52) |
+| Format documentation in --help | ✅ | Internal requirement | v1.33.0 (Sprint 52) |
+| Comment column in inspect/describe | ✅ | Internal enhancement | v1.33.0 (Sprint 52) |
+
+---
+
+## Agent Mode
+
+| Feature | Status | Spec Reference | Since |
+|---------|--------|----------------|-------|
+| JSON envelope (`ok`, `row_count`, `data`) | ✅ | Issue #37 part 1 | v1.34.0 (Sprint 53) |
+| Structured JSON errors | ✅ | Issue #37 part 2 | v1.34.0 (Sprint 53) |
+| `--agent-safe` flag | ✅ | Issue #37 part 3 | v1.35.0 (Sprint 54) |
+| `--allow-dml` flag | ✅ | Issue #37 part 3 | v1.35.0 (Sprint 54) |
+| `--max-rows` flag | ✅ | Issue #37 part 3 | v1.35.0 (Sprint 54) |
+| Statement classification (ReadOnly/DML/DDL) | ✅ | Issue #37 part 3 | v1.35.0 (Sprint 54) |
+| Richer inspect JSON (indexes, storage, DDL, deps) | ✅ | Issue #37 part 4 | v1.35.0 (Sprint 54) |
+| Search/discovery commands | 📋 | Issue #37 part 5 | Future |
+| Result pagination | 📋 | Issue #37 part 6 | Future |
+
+---
+
 ## Summary Statistics
 
-- **Total Features**: 99
-- **Implemented**: 97 (98%)
+- **Total Features**: 108
+- **Implemented**: 106 (98%)
 - **Planned**: 2 (2%)
-- **Test Pass Rate**: 100% (1084/1084 executed, 58 ignored database-dependent)
+- **Test Pass Rate**: 100% (1091/1091 executed, 58 ignored database-dependent)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 51 - Session History & Trends
+- **Latest Sprint**: Sprint 54 - Agent-Safe Mode & Richer Introspection
 
 ---
 
