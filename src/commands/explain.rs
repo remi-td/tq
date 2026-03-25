@@ -33,6 +33,9 @@ pub fn execute<W: Write>(
         OutputFormat::Table => display_table(&steps, &args.sql, writer)?,
         OutputFormat::Csv => display_csv(&steps, writer)?,
         OutputFormat::Json => display_json(&steps, &args.sql, writer)?,
+        OutputFormat::Markdown | OutputFormat::Md => {
+            display_markdown(&steps, &args.sql, writer)?
+        }
     }
 
     Ok(())
@@ -164,6 +167,23 @@ fn display_csv<W: Write>(steps: &[ExplainStep], writer: &mut W) -> Result<()> {
     writeln!(writer, "StepNo,Text")?;
     for step in steps {
         writeln!(writer, "{},{}", step.step_no, escape_csv(&step.text))?;
+    }
+    Ok(())
+}
+
+/// Display explain steps in Markdown format
+fn display_markdown<W: Write>(steps: &[ExplainStep], sql: &str, writer: &mut W) -> Result<()> {
+    fn esc(s: &str) -> String {
+        s.replace('|', "\\|")
+    }
+    writeln!(writer, "## Explain Plan")?;
+    writeln!(writer)?;
+    writeln!(writer, "**SQL:** `{}`", esc(&truncate_sql(sql, 200)))?;
+    writeln!(writer)?;
+    writeln!(writer, "| StepNo | Text |")?;
+    writeln!(writer, "| ---: | :--- |")?;
+    for step in steps {
+        writeln!(writer, "| {} | {} |", step.step_no, esc(&step.text))?;
     }
     Ok(())
 }

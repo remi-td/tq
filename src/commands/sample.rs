@@ -64,6 +64,7 @@ pub fn execute_sample<W: Write>(
         OutputFormat::Table => display_table_result(&result, writer, sample_size, &args.table)?,
         OutputFormat::Csv => display_csv_result(&result, writer)?,
         OutputFormat::Json => display_json_result(&result, writer)?,
+        OutputFormat::Markdown | OutputFormat::Md => display_markdown_result(&result, writer)?,
     }
 
     Ok(())
@@ -110,6 +111,9 @@ pub fn execute_peek<W: Write>(
         OutputFormat::Table => display_peek_table(&columns, &result, writer, &args.table)?,
         OutputFormat::Csv => display_peek_csv(&columns, &result, writer)?,
         OutputFormat::Json => display_peek_json(&columns, &result, writer)?,
+        OutputFormat::Markdown | OutputFormat::Md => {
+            display_peek_markdown(&columns, &result, writer)?
+        }
     }
 
     Ok(())
@@ -453,6 +457,63 @@ fn display_peek_json<W: Write>(
 
     let json_output = serde_json::to_string_pretty(&output)?;
     writeln!(writer, "{}", json_output)?;
+
+    Ok(())
+}
+
+/// Display sample result as Markdown table
+fn display_markdown_result<W: Write>(result: &QueryResult, writer: &mut W) -> Result<()> {
+    fn esc(s: &str) -> String {
+        s.replace('|', "\\|")
+    }
+
+    let column_names = get_column_names(result);
+    if !column_names.is_empty() {
+        // Header
+        let header: Vec<String> = column_names.iter().map(|c| esc(c)).collect();
+        writeln!(writer, "| {} |", header.join(" | "))?;
+        // Separator
+        let sep: Vec<&str> = column_names.iter().map(|_| ":---").collect();
+        writeln!(writer, "| {} |", sep.join(" | "))?;
+        // Data rows
+        for row in &result.rows {
+            let cells: Vec<String> = row.iter().map(|v| esc(&v.display())).collect();
+            writeln!(writer, "| {} |", cells.join(" | "))?;
+        }
+    }
+    Ok(())
+}
+
+/// Display peek result as Markdown with column metadata and data
+fn display_peek_markdown<W: Write>(
+    columns: &[ColumnInfo],
+    result: &QueryResult,
+    writer: &mut W,
+) -> Result<()> {
+    fn esc(s: &str) -> String {
+        s.replace('|', "\\|")
+    }
+
+    // Column metadata section
+    writeln!(writer, "## Columns")?;
+    writeln!(writer)?;
+    writeln!(writer, "| Column | Type | Nullable |")?;
+    writeln!(writer, "| :--- | :--- | :--- |")?;
+    for col in columns {
+        writeln!(
+            writer,
+            "| {} | {} | {} |",
+            esc(&col.name),
+            esc(&col.data_type),
+            if col.nullable { "YES" } else { "NO" }
+        )?;
+    }
+    writeln!(writer)?;
+
+    // Data section
+    writeln!(writer, "## Data")?;
+    writeln!(writer)?;
+    display_markdown_result(result, writer)?;
 
     Ok(())
 }

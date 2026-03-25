@@ -47,6 +47,7 @@ pub fn execute<W: Write>(
         OutputFormat::Table => display_table(&result, writer)?,
         OutputFormat::Csv => display_csv(&result, writer)?,
         OutputFormat::Json => display_json(&result, writer)?,
+        OutputFormat::Markdown | OutputFormat::Md => display_markdown(&result, writer)?,
     }
 
     Ok(())
@@ -188,6 +189,22 @@ fn display_json<W: Write>(result: &AbortResult, writer: &mut W) -> Result<()> {
     });
     let output = serde_json::to_string_pretty(&json)?;
     writeln!(writer, "{}", output)?;
+    Ok(())
+}
+
+/// Display abort result in Markdown format
+fn display_markdown<W: Write>(result: &AbortResult, writer: &mut W) -> Result<()> {
+    let action = if result.query_only { "AbortQuery" } else { "AbortSession" };
+    writeln!(writer, "| SessionId | Action | Success | Message |")?;
+    writeln!(writer, "| ---: | :--- | :--- | :--- |")?;
+    writeln!(
+        writer,
+        "| {} | {} | {} | {} |",
+        result.session_id,
+        action,
+        result.success,
+        result.message.replace('|', "\\|")
+    )?;
     Ok(())
 }
 

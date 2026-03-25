@@ -47,6 +47,9 @@ pub fn execute<W: Write>(
         OutputFormat::Csv => {
             inspect_object_csv(client, object_name, writer)?;
         }
+        OutputFormat::Markdown | OutputFormat::Md => {
+            inspect_object_markdown(client, object_name, writer)?;
+        }
     }
     Ok(())
 }
@@ -117,21 +120,45 @@ fn inspect_object<W: Write>(
     match query_helpers::query_columns(client, &database, obj_part) {
         Ok(columns) => {
             if !columns.is_empty() {
+                // Check if any column has a comment
+                let has_comments = columns.iter().any(|c| !c.comment.is_empty());
+
                 writeln!(writer, "── Columns ({}) ──", columns.len())?;
-                let header_default = "Default";
-                writeln!(
-                    writer,
-                    "  {:<24} {:<20} {:<10} {}",
-                    "Column", "Type", "Nullable", header_default
-                )?;
-                let separator = format!(
-                    "  {:<24} {:<20} {:<10} {}",
-                    "\u{2500}".repeat(22),
-                    "\u{2500}".repeat(18),
-                    "\u{2500}".repeat(8),
-                    "\u{2500}".repeat(15)
-                );
-                writeln!(writer, "{}", separator)?;
+                let col_hdr = "Column";
+                let type_hdr = "Type";
+                let null_hdr = "Nullable";
+                let def_hdr = "Default";
+                if has_comments {
+                    let cmt_hdr = "Comment";
+                    writeln!(
+                        writer,
+                        "  {:<24} {:<20} {:<10} {:<15} {}",
+                        col_hdr, type_hdr, null_hdr, def_hdr, cmt_hdr
+                    )?;
+                    writeln!(
+                        writer,
+                        "  {:<24} {:<20} {:<10} {:<15} {}",
+                        "\u{2500}".repeat(22),
+                        "\u{2500}".repeat(18),
+                        "\u{2500}".repeat(8),
+                        "\u{2500}".repeat(13),
+                        "\u{2500}".repeat(40)
+                    )?;
+                } else {
+                    writeln!(
+                        writer,
+                        "  {:<24} {:<20} {:<10} {}",
+                        col_hdr, type_hdr, null_hdr, def_hdr
+                    )?;
+                    writeln!(
+                        writer,
+                        "  {:<24} {:<20} {:<10} {}",
+                        "\u{2500}".repeat(22),
+                        "\u{2500}".repeat(18),
+                        "\u{2500}".repeat(8),
+                        "\u{2500}".repeat(15)
+                    )?;
+                }
 
                 for col in &columns {
                     let default_display = if col.default_val == "-" {
@@ -139,14 +166,26 @@ fn inspect_object<W: Write>(
                     } else {
                         &col.default_val
                     };
-                    writeln!(
-                        writer,
-                        "  {:<24} {:<20} {:<10} {}",
-                        truncate_str(&col.name, 22),
-                        truncate_str(&col.col_type, 18),
-                        &col.nullable,
-                        default_display
-                    )?;
+                    if has_comments {
+                        writeln!(
+                            writer,
+                            "  {:<24} {:<20} {:<10} {:<15} {}",
+                            truncate_str(&col.name, 22),
+                            truncate_str(&col.col_type, 18),
+                            &col.nullable,
+                            default_display,
+                            &col.comment
+                        )?;
+                    } else {
+                        writeln!(
+                            writer,
+                            "  {:<24} {:<20} {:<10} {}",
+                            truncate_str(&col.name, 22),
+                            truncate_str(&col.col_type, 18),
+                            &col.nullable,
+                            default_display
+                        )?;
+                    }
                 }
                 writeln!(writer, "{} columns", columns.len())?;
                 writeln!(writer)?;
@@ -357,6 +396,9 @@ fn inspect_object_json<W: Write>(
             if col.default_val != "-" {
                 write!(writer, ",\"default\":\"{}\"", json_escape(&col.default_val))?;
             }
+            if !col.comment.is_empty() {
+                write!(writer, ",\"comment\":\"{}\"", json_escape(&col.comment))?;
+            }
             write!(writer, "}}")?;
         }
         write!(writer, "]")?;
@@ -396,7 +438,7 @@ fn inspect_object_csv<W: Write>(
     };
 
     // Output columns as CSV (most useful tabular representation)
-    writeln!(writer, "Column,Type,Nullable,Default")?;
+    writeln!(writer, "Column,Type,Nullable,Default,Comment")?;
     if let Ok(columns) = query_helpers::query_columns(client, &database, obj_part) {
         for col in &columns {
             let default_display = if col.default_val == "-" {
@@ -406,11 +448,12 @@ fn inspect_object_csv<W: Write>(
             };
             writeln!(
                 writer,
-                "{},{},{},{}",
+                "{},{},{},{},{}",
                 csv_escape(&col.name),
                 csv_escape(&col.col_type),
                 csv_escape(&col.nullable),
-                csv_escape(default_display)
+                csv_escape(default_display),
+                csv_escape(&col.comment)
             )?;
         }
     }
@@ -427,6 +470,195 @@ fn inspect_object_csv<W: Write>(
                 skew,
                 storage.amp_count
             )?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Markdown output for batch mode
+fn inspect_object_markdown<W: Write>(
+    client: &DatabaseClient,
+    object_name: &str,
+    writer: &mut W,
+) -> Result<()> {
+    use crate::format::markdown::escape_value;
+
+    let (db_part, obj_part) = parse_table_name(object_name);
+    let database = query_helpers::resolve_database(client, db_part)?;
+
+    let obj_info = match query_object_type(client, &database, obj_part)? {
+        Some(info) => info,
+        None => {
+            writeln!(writer, "Object '{}' not found.", object_name)?;
+            return Ok(());
+        }
+    };
+
+    // Title
+    writeln!(writer, "# Object: {}.{}", database, obj_part)?;
+    writeln!(writer)?;
+    writeln!(writer, "**Type:** {}", escape_value(&obj_info.kind_label))?;
+    if !obj_info.created.is_empty() {
+        writeln!(writer, "**Created:** {}", escape_value(&obj_info.created))?;
+    }
+    if !obj_info.comment.is_empty() {
+        writeln!(writer, "**Comment:** {}", escape_value(&obj_info.comment))?;
+    }
+    writeln!(writer)?;
+
+    // Columns
+    if let Ok(columns) = query_helpers::query_columns(client, &database, obj_part) {
+        if !columns.is_empty() {
+            writeln!(writer, "## Columns ({})", columns.len())?;
+            writeln!(writer)?;
+            let has_comments = columns.iter().any(|c| !c.comment.is_empty());
+            if has_comments {
+                writeln!(writer, "| Column | Type | Nullable | Default | Comment |")?;
+                writeln!(writer, "| :--- | :--- | :--- | :--- | :--- |")?;
+            } else {
+                writeln!(writer, "| Column | Type | Nullable | Default |")?;
+                writeln!(writer, "| :--- | :--- | :--- | :--- |")?;
+            }
+            for col in &columns {
+                let default_display = if col.default_val == "-" {
+                    ""
+                } else {
+                    &col.default_val
+                };
+                if has_comments {
+                    writeln!(
+                        writer,
+                        "| {} | {} | {} | {} | {} |",
+                        escape_value(&col.name),
+                        escape_value(&col.col_type),
+                        escape_value(&col.nullable),
+                        escape_value(default_display),
+                        escape_value(&col.comment)
+                    )?;
+                } else {
+                    writeln!(
+                        writer,
+                        "| {} | {} | {} | {} |",
+                        escape_value(&col.name),
+                        escape_value(&col.col_type),
+                        escape_value(&col.nullable),
+                        escape_value(default_display)
+                    )?;
+                }
+            }
+            writeln!(writer)?;
+        }
+    }
+
+    // Indexes (only for tables)
+    if obj_info.table_kind == "T" || obj_info.table_kind == "O" {
+        if let Ok(indexes) = query_helpers::query_indexes(client, &database, obj_part) {
+            if !indexes.is_empty() {
+                writeln!(writer, "## Indexes")?;
+                writeln!(writer)?;
+                writeln!(writer, "| Index | Type | Columns |")?;
+                writeln!(writer, "| :--- | :--- | :--- |")?;
+                for idx in &indexes {
+                    let name_display = idx.name.as_deref().unwrap_or("(unnamed)");
+                    let columns_str = idx.columns.join(", ");
+                    writeln!(
+                        writer,
+                        "| {} | {} ({}) | {} |",
+                        escape_value(name_display),
+                        escape_value(&idx.index_type_label),
+                        escape_value(&idx.short_label),
+                        escape_value(&columns_str)
+                    )?;
+                }
+                writeln!(writer)?;
+            }
+        }
+
+        // Storage
+        if let Ok(storage) = query_storage(client, &database, obj_part) {
+            let skew = calculate_skew(storage.max_amp_size, storage.avg_amp_size);
+            writeln!(writer, "## Storage")?;
+            writeln!(writer)?;
+            writeln!(writer, "| Metric | Value |")?;
+            writeln!(writer, "| :--- | ---: |")?;
+            writeln!(
+                writer,
+                "| Current Size | {} |",
+                format_size(storage.total_size, 2)
+            )?;
+            writeln!(
+                writer,
+                "| Peak Size | {} |",
+                format_size(storage.peak_size, 2)
+            )?;
+            writeln!(
+                writer,
+                "| Skew Factor | {:.1}% {} |",
+                skew,
+                interpret_skew(skew)
+            )?;
+            writeln!(writer, "| AMP Count | {} |", storage.amp_count)?;
+            writeln!(writer)?;
+        }
+    }
+
+    // Definition (for views and macros)
+    if obj_info.table_kind == "V" || obj_info.table_kind == "M" {
+        if let Ok(definition) = query_definition(client, &database, obj_part, &obj_info.table_kind)
+        {
+            writeln!(writer, "## Definition")?;
+            writeln!(writer)?;
+            writeln!(writer, "```sql")?;
+            let formatted = format_ddl(&definition);
+            for line in formatted.lines() {
+                writeln!(writer, "{}", line)?;
+            }
+            writeln!(writer, "```")?;
+            writeln!(writer)?;
+        }
+    }
+
+    // Dependencies
+    {
+        let show_upstream = obj_info.table_kind == "V" || obj_info.table_kind == "M";
+        if let Ok((upstream, downstream)) = query_dependencies(client, &database, obj_part) {
+            if show_upstream || !downstream.is_empty() {
+                writeln!(writer, "## Dependencies")?;
+                writeln!(writer)?;
+
+                if show_upstream {
+                    writeln!(writer, "### Uses (upstream)")?;
+                    writeln!(writer)?;
+                    if upstream.is_empty() {
+                        writeln!(writer, "None")?;
+                    } else {
+                        for dep in &upstream {
+                            writeln!(
+                                writer,
+                                "- {}.{} ({})",
+                                dep.database, dep.name, dep.kind_label
+                            )?;
+                        }
+                    }
+                    writeln!(writer)?;
+                }
+
+                writeln!(writer, "### Used By (downstream)")?;
+                writeln!(writer)?;
+                if downstream.is_empty() {
+                    writeln!(writer, "None")?;
+                } else {
+                    for dep in &downstream {
+                        writeln!(
+                            writer,
+                            "- {}.{} ({})",
+                            dep.database, dep.name, dep.kind_label
+                        )?;
+                    }
+                }
+                writeln!(writer)?;
+            }
         }
     }
 

@@ -249,6 +249,7 @@ pub fn execute<W: Write>(
         }
         OutputFormat::Csv => display_csv(&display_rows, writer)?,
         OutputFormat::Json => display_json(&display_rows, writer)?,
+        OutputFormat::Markdown | OutputFormat::Md => display_markdown(&display_rows, writer)?,
     }
 
     Ok(())
@@ -498,6 +499,30 @@ fn display_json<W: Write>(rows: &[LockDisplayRow], writer: &mut W) -> Result<()>
     let json_output = serde_json::to_string_pretty(&json_rows)?;
     writeln!(writer, "{}", json_output)?;
 
+    Ok(())
+}
+
+/// Display locks in Markdown format
+fn display_markdown<W: Write>(rows: &[LockDisplayRow], writer: &mut W) -> Result<()> {
+    fn esc(s: &str) -> String {
+        s.replace('|', "\\|")
+    }
+    writeln!(
+        writer,
+        "| Locked Object | Lock Type | Lock Mode | Locking Sess | Waiting Sess |"
+    )?;
+    writeln!(writer, "| :--- | :--- | :--- | ---: | :--- |")?;
+    for row in rows {
+        writeln!(
+            writer,
+            "| {} | {} | {} | {} | {} |",
+            esc(&row.locked_object),
+            esc(&row.lock_type),
+            esc(&row.lock_mode),
+            row.locking_session,
+            esc(&format_waiting_sessions(&row.waiting_sessions))
+        )?;
+    }
     Ok(())
 }
 

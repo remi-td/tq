@@ -495,6 +495,7 @@ pub struct QueryArgs {
     /// table: Human-readable ASCII table (default for terminals)
     /// json: JSON array of objects
     /// csv: Comma-separated values (RFC 4180 compliant)
+    /// markdown/md: GitHub-Flavored Markdown table
     #[arg(
         short,
         long,
@@ -552,6 +553,7 @@ pub struct SessionsArgs {
     /// table: Human-readable ASCII table (default)
     /// json: JSON array of session objects
     /// csv: Comma-separated values
+    /// markdown/md: GitHub-Flavored Markdown table
     #[arg(
         short,
         long,
@@ -576,6 +578,7 @@ pub struct SysconfigArgs {
     /// table: Two-column key-value table (default)
     /// json: JSON object with property keys
     /// csv: Comma-separated Property,Value pairs
+    /// markdown/md: GitHub-Flavored Markdown table
     #[arg(
         short,
         long,
@@ -600,6 +603,7 @@ pub struct LocksArgs {
     /// table: Human-readable ASCII table (default)
     /// json: JSON array of lock objects
     /// csv: Comma-separated values
+    /// markdown/md: GitHub-Flavored Markdown table
     #[arg(
         short,
         long,
@@ -630,6 +634,7 @@ pub struct QueryInspectArgs {
     /// table: Key-value pairs for each query (default)
     /// json: JSON array of query objects
     /// csv: Comma-separated values
+    /// markdown/md: GitHub-Flavored Markdown table
     #[arg(
         short,
         long,
@@ -660,6 +665,7 @@ pub struct InspectArgs {
     /// table: Human-readable structured output (default)
     /// json: JSON object with all metadata
     /// csv: Column information as CSV
+    /// markdown/md: GitHub-Flavored Markdown table
     #[arg(
         short,
         long,
@@ -696,6 +702,7 @@ pub struct ListArgs {
     /// table: Human-readable listing (default)
     /// json: JSON array of objects
     /// csv: Comma-separated values
+    /// markdown/md: GitHub-Flavored Markdown table
     #[arg(
         short,
         long,
@@ -733,6 +740,7 @@ pub struct ShowIndexesArgs {
     /// table: Human-readable index listing (default)
     /// json: JSON array of index objects
     /// csv: Comma-separated index information
+    /// markdown/md: GitHub-Flavored Markdown table
     #[arg(
         short,
         long,
@@ -774,6 +782,7 @@ pub struct AbortArgs {
     /// table: Human-readable message (default)
     /// json: JSON result object
     /// csv: Comma-separated result
+    /// markdown/md: GitHub-Flavored Markdown table
     #[arg(
         short,
         long,
@@ -803,6 +812,7 @@ pub struct ExplainArgs {
     /// table: Formatted explain output (default)
     /// json: JSON object with steps array
     /// csv: Step number and text as CSV
+    /// markdown/md: GitHub-Flavored Markdown table
     #[arg(
         short,
         long,
@@ -832,6 +842,7 @@ pub struct SkewArgs {
     /// table: Formatted skew analysis (default)
     /// json: JSON array of session objects
     /// csv: Comma-separated values
+    /// markdown/md: GitHub-Flavored Markdown table
     #[arg(
         short,
         long,
@@ -867,6 +878,7 @@ pub struct HistoryArgs {
     /// table: Summary header + event table (default)
     /// json: JSON object with summary and events
     /// csv: Comma-separated event records
+    /// markdown/md: GitHub-Flavored Markdown table
     #[arg(
         short,
         long,
@@ -901,6 +913,7 @@ pub struct SampleArgs {
     /// table: Human-readable ASCII table (default)
     /// json: JSON array of objects
     /// csv: Comma-separated values
+    /// markdown/md: GitHub-Flavored Markdown table
     #[arg(
         short,
         long,
@@ -933,6 +946,7 @@ pub struct PeekArgs {
     /// table: Human-readable ASCII table (default)
     /// json: JSON object with columns and rows
     /// csv: Comma-separated values (columns section, then data)
+    /// markdown/md: GitHub-Flavored Markdown table
     #[arg(
         short,
         long,
@@ -1029,14 +1043,38 @@ impl std::fmt::Display for LogonMechanism {
 }
 
 /// Output format for query results
+///
+/// Controls how command output is rendered:
+/// - `table`: Human-readable bordered table (default for terminals)
+/// - `json`: JSON array of objects with type preservation
+/// - `csv`: RFC 4180 compliant comma-separated values
+/// - `markdown`/`md`: GitHub-Flavored Markdown table
+///
+/// For commands that return multiple sections (e.g. `inspect`), `csv`
+/// outputs only the primary tabular section while `json` and `markdown`
+/// include all sections in a structured format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum OutputFormat {
-    /// Human-readable table with borders
+    /// Human-readable table with borders (default)
     Table,
     /// JSON array of objects
     Json,
     /// Comma-separated values (RFC 4180)
     Csv,
+    /// GitHub-Flavored Markdown table
+    Markdown,
+    /// GitHub-Flavored Markdown table (alias for markdown)
+    Md,
+}
+
+impl OutputFormat {
+    /// Normalize aliases to their canonical variant
+    pub fn canonical(self) -> Self {
+        match self {
+            OutputFormat::Md => OutputFormat::Markdown,
+            other => other,
+        }
+    }
 }
 
 impl std::fmt::Display for OutputFormat {
@@ -1045,6 +1083,7 @@ impl std::fmt::Display for OutputFormat {
             OutputFormat::Table => write!(f, "table"),
             OutputFormat::Json => write!(f, "json"),
             OutputFormat::Csv => write!(f, "csv"),
+            OutputFormat::Markdown | OutputFormat::Md => write!(f, "markdown"),
         }
     }
 }
@@ -1870,5 +1909,47 @@ mod tests {
         let args = vec!["tq", "show-indexes"];
         let result = Cli::try_parse_from(args);
         assert!(result.is_err());
+    }
+
+    // Sprint 52: Markdown format tests
+
+    #[test]
+    fn test_cli_query_with_markdown_format() {
+        let args = vec!["tq", "query", "--format", "markdown", "SELECT 1"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Query(args) = cli.command {
+            assert_eq!(args.format, OutputFormat::Markdown);
+        } else {
+            panic!("Expected Query command");
+        }
+    }
+
+    #[test]
+    fn test_cli_query_with_md_alias() {
+        let args = vec!["tq", "query", "--format", "md", "SELECT 1"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Query(args) = cli.command {
+            assert_eq!(args.format, OutputFormat::Md);
+        } else {
+            panic!("Expected Query command");
+        }
+    }
+
+    #[test]
+    fn test_output_format_canonical() {
+        assert_eq!(OutputFormat::Md.canonical(), OutputFormat::Markdown);
+        assert_eq!(OutputFormat::Markdown.canonical(), OutputFormat::Markdown);
+        assert_eq!(OutputFormat::Table.canonical(), OutputFormat::Table);
+        assert_eq!(OutputFormat::Json.canonical(), OutputFormat::Json);
+        assert_eq!(OutputFormat::Csv.canonical(), OutputFormat::Csv);
+    }
+
+    #[test]
+    fn test_output_format_display() {
+        assert_eq!(OutputFormat::Table.to_string(), "table");
+        assert_eq!(OutputFormat::Json.to_string(), "json");
+        assert_eq!(OutputFormat::Csv.to_string(), "csv");
+        assert_eq!(OutputFormat::Markdown.to_string(), "markdown");
+        assert_eq!(OutputFormat::Md.to_string(), "markdown");
     }
 }

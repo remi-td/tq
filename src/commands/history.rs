@@ -200,6 +200,9 @@ pub fn execute<W: Write>(
         OutputFormat::Table => display_table(&events, &summary, duration_str, writer)?,
         OutputFormat::Csv => display_csv(&events, writer)?,
         OutputFormat::Json => display_json(&events, &summary, duration_str, writer)?,
+        OutputFormat::Markdown | OutputFormat::Md => {
+            display_markdown(&events, &summary, duration_str, writer)?
+        }
     }
 
     Ok(())
@@ -506,6 +509,40 @@ fn display_json<W: Write>(
     });
     let output = serde_json::to_string_pretty(&json)?;
     writeln!(writer, "{}", output)?;
+    Ok(())
+}
+
+/// Display history in Markdown format
+fn display_markdown<W: Write>(
+    events: &[HistoryEvent],
+    summary: &HistorySummary,
+    duration: &str,
+    writer: &mut W,
+) -> Result<()> {
+    fn esc(s: &str) -> String {
+        s.replace('|', "\\|")
+    }
+    writeln!(writer, "## Session History (last {})", duration)?;
+    writeln!(writer)?;
+    writeln!(
+        writer,
+        "Logons: {} | Logoffs: {} | Auth Failures: {} | Unique Users: {}",
+        summary.logons, summary.logoffs, summary.auth_fails, summary.unique_users
+    )?;
+    writeln!(writer)?;
+    writeln!(writer, "| SessionNo | UserName | Event | Time | Client |")?;
+    writeln!(writer, "| ---: | :--- | :--- | :--- | :--- |")?;
+    for event in events {
+        writeln!(
+            writer,
+            "| {} | {} | {} | {} | {} |",
+            event.session_id,
+            esc(&event.user_name),
+            esc(&event.event_type),
+            esc(&event.event_time),
+            esc(&event.client_addr)
+        )?;
+    }
     Ok(())
 }
 

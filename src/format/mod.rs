@@ -7,6 +7,7 @@
 
 pub mod csv;
 pub mod json;
+pub mod markdown;
 pub mod table;
 
 use crate::cli::OutputFormat;
@@ -23,6 +24,8 @@ pub struct FormatOptions {
     pub json: json::JsonOptions,
     /// CSV formatting options
     pub csv: csv::CsvOptions,
+    /// Markdown formatting options
+    pub markdown: markdown::MarkdownOptions,
 }
 
 impl FormatOptions {
@@ -30,6 +33,7 @@ impl FormatOptions {
     pub fn with_header(mut self, show_header: bool) -> Self {
         self.table.show_header = show_header;
         self.csv.show_header = show_header;
+        self.markdown.show_header = show_header;
         self
     }
 
@@ -53,10 +57,12 @@ pub fn write_output<W: Write>(
     format: OutputFormat,
     options: &FormatOptions,
 ) -> Result<()> {
-    match format {
+    match format.canonical() {
         OutputFormat::Table => table::write(result, writer, &options.table),
         OutputFormat::Json => json::write(result, writer, &options.json),
         OutputFormat::Csv => csv::write(result, writer, &options.csv),
+        OutputFormat::Markdown => markdown::write(result, writer, &options.markdown),
+        _ => unreachable!(),
     }
 }
 
@@ -68,7 +74,7 @@ pub fn write_output_with_timing<W: Write>(
     options: &FormatOptions,
     show_timing: bool,
 ) -> Result<()> {
-    match format {
+    match format.canonical() {
         OutputFormat::Table => {
             if show_timing {
                 table::write_with_timing(result, writer, &options.table)
@@ -83,10 +89,15 @@ pub fn write_output_with_timing<W: Write>(
                 json::write(result, writer, &options.json)
             }
         }
-        OutputFormat::Csv => {
-            // CSV doesn't typically include timing, just write data
-            csv::write(result, writer, &options.csv)
+        OutputFormat::Csv => csv::write(result, writer, &options.csv),
+        OutputFormat::Markdown => {
+            if show_timing {
+                markdown::write_with_metadata(result, writer, &options.markdown)
+            } else {
+                markdown::write(result, writer, &options.markdown)
+            }
         }
+        _ => unreachable!(),
     }
 }
 
@@ -160,7 +171,28 @@ mod tests {
 
         assert!(!options.table.show_header);
         assert!(!options.csv.show_header);
+        assert!(!options.markdown.show_header);
         assert!(!options.table.use_color);
         assert!(!options.json.pretty);
+    }
+
+    #[test]
+    fn test_format_to_string_markdown() {
+        let result = create_test_result();
+        let options = FormatOptions::default();
+        let output = format_to_string(&result, OutputFormat::Markdown, &options).unwrap();
+
+        assert!(output.contains("| id | name |"));
+        assert!(output.contains("| 1 | Alice |"));
+    }
+
+    #[test]
+    fn test_format_md_alias() {
+        let result = create_test_result();
+        let options = FormatOptions::default();
+        let output = format_to_string(&result, OutputFormat::Md, &options).unwrap();
+
+        assert!(output.contains("| id | name |"));
+        assert!(output.contains("| 2 | Bob |"));
     }
 }

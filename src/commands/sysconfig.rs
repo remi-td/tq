@@ -103,6 +103,7 @@ pub fn execute<W: Write>(
         OutputFormat::Table => display_table(&info, writer)?,
         OutputFormat::Csv => display_csv(&info, writer)?,
         OutputFormat::Json => display_json(&info, writer)?,
+        OutputFormat::Markdown | OutputFormat::Md => display_markdown(&info, writer)?,
     }
 
     Ok(())
@@ -218,6 +219,19 @@ fn display_json<W: Write>(info: &SysconfigInfo, writer: &mut W) -> Result<()> {
     let json_output = serde_json::to_string_pretty(&json)?;
     writeln!(writer, "{}", json_output)?;
 
+    Ok(())
+}
+
+/// Display sysconfig in Markdown format
+fn display_markdown<W: Write>(info: &SysconfigInfo, writer: &mut W) -> Result<()> {
+    fn esc(s: &str) -> String {
+        s.replace('|', "\\|")
+    }
+    writeln!(writer, "| Property | Value |")?;
+    writeln!(writer, "| :--- | :--- |")?;
+    for (name, value) in info.as_properties() {
+        writeln!(writer, "| {} | {} |", esc(name), esc(&value))?;
+    }
     Ok(())
 }
 

@@ -27,6 +27,9 @@ pub fn execute<W: Write>(
         OutputFormat::Table => show_indexes_table(client, table_name, writer),
         OutputFormat::Json => show_indexes_json(client, table_name, writer),
         OutputFormat::Csv => show_indexes_csv(client, table_name, writer),
+        OutputFormat::Markdown | OutputFormat::Md => {
+            show_indexes_markdown(client, table_name, writer)
+        }
     }
 }
 
@@ -220,6 +223,34 @@ fn show_indexes_csv<W: Write>(
             csv_escape(&idx.short_label),
             if idx.is_primary { "Yes" } else { "No" },
             csv_escape(&cols)
+        )?;
+    }
+    Ok(())
+}
+
+fn show_indexes_markdown<W: Write>(
+    client: &DatabaseClient,
+    table_name: &str,
+    writer: &mut W,
+) -> Result<()> {
+    let (groups, _qualified) = query_helpers::query_indexes_qualified(client, table_name)?;
+
+    fn esc(s: &str) -> String {
+        s.replace('|', "\\|")
+    }
+    writeln!(writer, "| IndexName | IndexType | ShortType | IsPrimary | Columns |")?;
+    writeln!(writer, "| :--- | :--- | :--- | :--- | :--- |")?;
+    for idx in &groups {
+        let cols = idx.columns.join(", ");
+        let name_display = idx.name.as_deref().unwrap_or("(unnamed)");
+        writeln!(
+            writer,
+            "| {} | {} | {} | {} | {} |",
+            esc(name_display),
+            esc(&idx.index_type_label),
+            esc(&idx.short_label),
+            if idx.is_primary { "Yes" } else { "No" },
+            esc(&cols)
         )?;
     }
     Ok(())

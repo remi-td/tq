@@ -139,6 +139,7 @@ fn list_databases<W: Write>(
         OutputFormat::Table => render_databases_table(&databases, writer)?,
         OutputFormat::Json => render_databases_json(&databases, writer)?,
         OutputFormat::Csv => render_databases_csv(&databases, writer)?,
+        OutputFormat::Markdown | OutputFormat::Md => render_databases_markdown(&databases, writer)?,
     }
 
     Ok(())
@@ -205,6 +206,28 @@ fn render_databases_csv<W: Write>(
             csv_escape(&db.name),
             csv_escape(&db.owner),
             csv_escape(&db.db_kind)
+        )?;
+    }
+    Ok(())
+}
+
+/// Render databases as a Markdown table.
+fn render_databases_markdown<W: Write>(
+    databases: &[DatabaseEntry],
+    writer: &mut W,
+) -> Result<()> {
+    fn esc(s: &str) -> String {
+        s.replace('|', "\\|")
+    }
+    writeln!(writer, "| DatabaseName | Owner | Type |")?;
+    writeln!(writer, "| :--- | :--- | :--- |")?;
+    for db in databases {
+        writeln!(
+            writer,
+            "| {} | {} | {} |",
+            esc(&db.name),
+            esc(&db.owner),
+            esc(&db.db_kind)
         )?;
     }
     Ok(())
@@ -395,6 +418,24 @@ fn list_tables<W: Write>(
                 )?;
             }
         }
+        OutputFormat::Markdown | OutputFormat::Md => {
+            fn esc(s: &str) -> String {
+                s.replace('|', "\\|")
+            }
+            writeln!(writer, "| Name | Type | Rows (Est.) | Size | Owner |")?;
+            writeln!(writer, "| :--- | :--- | ---: | ---: | :--- |")?;
+            for t in &tables {
+                writeln!(
+                    writer,
+                    "| {} | {} | {} | {} | {} |",
+                    esc(&t.name),
+                    esc(&t.kind),
+                    esc(&t.row_count_display),
+                    esc(&t.size_display),
+                    esc(&t.owner)
+                )?;
+            }
+        }
     }
 
     Ok(())
@@ -505,6 +546,21 @@ fn list_views<W: Write>(
                     "{},{}",
                     csv_escape(&view.name),
                     csv_escape(&view.owner)
+                )?;
+            }
+        }
+        OutputFormat::Markdown | OutputFormat::Md => {
+            fn esc(s: &str) -> String {
+                s.replace('|', "\\|")
+            }
+            writeln!(writer, "| ViewName | Owner |")?;
+            writeln!(writer, "| :--- | :--- |")?;
+            for view in &views {
+                writeln!(
+                    writer,
+                    "| {} | {} |",
+                    esc(&view.name),
+                    esc(&view.owner)
                 )?;
             }
         }

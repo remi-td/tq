@@ -118,6 +118,9 @@ pub fn execute<W: Write>(
         OutputFormat::Table => display_table(&queries, args.session_id, writer)?,
         OutputFormat::Csv => display_csv(&queries, writer)?,
         OutputFormat::Json => display_json(&queries, writer)?,
+        OutputFormat::Markdown | OutputFormat::Md => {
+            display_markdown(&queries, args.session_id, writer)?
+        }
     }
 
     Ok(())
@@ -283,6 +286,40 @@ fn display_csv<W: Write>(queries: &[QueryInfo], writer: &mut W) -> Result<()> {
         )?;
     }
 
+    Ok(())
+}
+
+/// Display queries in Markdown format
+fn display_markdown<W: Write>(
+    queries: &[QueryInfo],
+    session_id: i64,
+    writer: &mut W,
+) -> Result<()> {
+    fn esc(s: &str) -> String {
+        s.replace('|', "\\|")
+    }
+    writeln!(
+        writer,
+        "## Recent Queries for Session {}",
+        session_id
+    )?;
+    writeln!(writer)?;
+    writeln!(
+        writer,
+        "| SessionID | StartTime | ElapsedTime | Status | QueryText |"
+    )?;
+    writeln!(writer, "| ---: | :--- | :--- | :--- | :--- |")?;
+    for query in queries {
+        writeln!(
+            writer,
+            "| {} | {} | {} | {} | {} |",
+            query.session_id,
+            esc(&query.start_time),
+            esc(&query.total_elapsed),
+            esc(&query.status),
+            esc(&truncate_sql(&query.query_text, TABLE_SQL_MAX_LEN))
+        )?;
+    }
     Ok(())
 }
 

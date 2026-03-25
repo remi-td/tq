@@ -195,6 +195,7 @@ pub fn execute<W: Write>(
         OutputFormat::Table => display_table(&result, writer)?,
         OutputFormat::Csv => display_csv(&result, writer)?,
         OutputFormat::Json => display_json(&result, writer)?,
+        OutputFormat::Markdown | OutputFormat::Md => display_markdown(&result, writer)?,
     }
 
     Ok(())
@@ -424,6 +425,56 @@ fn display_json<W: Write>(result: &QueryResult, writer: &mut W) -> Result<()> {
 
     let json_output = serde_json::to_string_pretty(&sessions)?;
     writeln!(writer, "{}", json_output)?;
+
+    Ok(())
+}
+
+/// Display sessions in Markdown format
+fn display_markdown<W: Write>(result: &QueryResult, writer: &mut W) -> Result<()> {
+    fn esc(s: &str) -> String {
+        s.replace('|', "\\|")
+    }
+
+    let sessions: Vec<SessionInfo> = result
+        .rows
+        .iter()
+        .filter_map(|row| SessionInfo::from_row(row))
+        .collect();
+
+    writeln!(
+        writer,
+        "| SessionNo | UserName | LogonTime | PEState | AMPState | AMPCPUSec | AMPIO | ReqSpool | Amp CPU Skew % | Amp IO Skew % |"
+    )?;
+    writeln!(
+        writer,
+        "| ---: | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: |"
+    )?;
+
+    for session in &sessions {
+        let cpu_skew_str = session
+            .cpu_skew
+            .map(|v| format!("{:.2}", v))
+            .unwrap_or_else(|| "[--]".to_string());
+        let io_skew_str = session
+            .io_skew
+            .map(|v| format!("{:.2}", v))
+            .unwrap_or_else(|| "[--]".to_string());
+
+        writeln!(
+            writer,
+            "| {} | {} | {} | {} | {} | {:.3} | {} | {} | {} | {} |",
+            session.session_no,
+            esc(&session.user_name),
+            esc(&session.logon_time),
+            esc(&session.pe_state),
+            esc(&session.amp_state),
+            session.amp_cpu_sec,
+            session.amp_io,
+            session.req_spool,
+            cpu_skew_str,
+            io_skew_str
+        )?;
+    }
 
     Ok(())
 }

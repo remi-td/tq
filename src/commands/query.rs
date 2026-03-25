@@ -691,6 +691,9 @@ fn format_statement_status(result: &crate::db::QueryResult, format: OutputFormat
             OutputFormat::Table => format!("{} rows returned", row_count),
             OutputFormat::Json => format!("{} rows (JSON)", row_count),
             OutputFormat::Csv => format!("{} rows (CSV)", row_count),
+            OutputFormat::Markdown | OutputFormat::Md => {
+                format!("{} rows (Markdown)", row_count)
+            }
         }
     }
 }

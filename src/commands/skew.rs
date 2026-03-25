@@ -164,6 +164,7 @@ pub fn execute<W: Write>(
         OutputFormat::Table => display_table(&infos, args.session_id, writer)?,
         OutputFormat::Csv => display_csv(&infos, writer)?,
         OutputFormat::Json => display_json(&infos, writer)?,
+        OutputFormat::Markdown | OutputFormat::Md => display_markdown(&infos, writer)?,
     }
 
     Ok(())
@@ -396,6 +397,46 @@ fn display_json<W: Write>(infos: &[SkewInfo], writer: &mut W) -> Result<()> {
 
     let output = serde_json::to_string_pretty(&sessions)?;
     writeln!(writer, "{}", output)?;
+    Ok(())
+}
+
+/// Display skew info in Markdown format
+fn display_markdown<W: Write>(infos: &[SkewInfo], writer: &mut W) -> Result<()> {
+    fn esc(s: &str) -> String {
+        s.replace('|', "\\|")
+    }
+    writeln!(
+        writer,
+        "| SessionNo | UserName | AMP CPU (s) | AMP I/O | CPU Skew % | I/O Skew % | Max CPU | Min CPU | Max I/O | Min I/O |"
+    )?;
+    writeln!(
+        writer,
+        "| ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+    )?;
+    for info in infos {
+        let cpu_skew_str = info
+            .cpu_skew
+            .map(|v| format!("{:.1}", v))
+            .unwrap_or_else(|| "[--]".to_string());
+        let io_skew_str = info
+            .io_skew
+            .map(|v| format!("{:.1}", v))
+            .unwrap_or_else(|| "[--]".to_string());
+        writeln!(
+            writer,
+            "| {} | {} | {:.3} | {} | {} | {} | {:.3} | {:.3} | {} | {} |",
+            info.session_no,
+            esc(&info.user_name),
+            info.amp_cpu_sec,
+            info.amp_io,
+            cpu_skew_str,
+            io_skew_str,
+            info.max_amp_cpu,
+            info.min_amp_cpu,
+            info.max_amp_io,
+            info.min_amp_io
+        )?;
+    }
     Ok(())
 }
 
