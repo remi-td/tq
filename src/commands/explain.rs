@@ -201,6 +201,7 @@ fn display_json<W: Write>(steps: &[ExplainStep], sql: &str, writer: &mut W) -> R
         .collect();
 
     let json = serde_json::json!({
+        "ok": true,
         "SQL": sql,
         "Steps": json_steps,
         "StepCount": steps.len()

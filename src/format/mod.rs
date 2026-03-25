@@ -147,9 +147,12 @@ mod tests {
         let options = FormatOptions::default();
         let output = format_to_string(&result, OutputFormat::Json, &options).unwrap();
 
-        let parsed: Vec<serde_json::Value> = serde_json::from_str(output.trim()).unwrap();
-        assert_eq!(parsed.len(), 2);
-        assert_eq!(parsed[0]["name"], "Alice");
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        assert_eq!(parsed["ok"], true);
+        assert_eq!(parsed["row_count"], 2);
+        let data = parsed["data"].as_array().unwrap();
+        assert_eq!(data.len(), 2);
+        assert_eq!(data[0]["name"], "Alice");
     }
 
     #[test]

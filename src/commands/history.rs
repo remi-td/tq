@@ -497,6 +497,7 @@ fn display_json<W: Write>(
         .collect();
 
     let json = serde_json::json!({
+        "ok": true,
         "Duration": duration,
         "Summary": {
             "Logons": summary.logons,

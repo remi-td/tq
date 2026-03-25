@@ -8,7 +8,7 @@ use clap::Parser;
 use std::io::{self};
 use std::process::ExitCode;
 
-use tq::cli::{Cli, Command, GlobalOpts, HelpTopic};
+use tq::cli::{Cli, Command, GlobalOpts, HelpTopic, OutputFormat};
 use tq::config::{parse_logmech, Config};
 use tq::db::{parse_duration, ConnectionConfig, DatabaseClient};
 use tq::error::TqError;
@@ -28,12 +28,24 @@ fn main() -> ExitCode {
     // Parse CLI arguments
     let cli = Cli::parse();
 
+    // Extract format before consuming cli (for structured error output)
+    let is_json_format = cli
+        .command
+        .format()
+        .map(|f| matches!(f.canonical(), OutputFormat::Json))
+        .unwrap_or(false);
+
     // Run the application
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            // Print user-friendly error message
-            eprintln!("{}", e.user_message());
+            if is_json_format {
+                // Structured JSON error to stdout (for agent consumption)
+                println!("{}", e.to_json());
+            } else {
+                // Human-readable error to stderr
+                eprintln!("{}", e.user_message());
+            }
 
             // Return appropriate exit code
             match e.exit_code() {

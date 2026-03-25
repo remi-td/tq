@@ -151,8 +151,8 @@ fn show_indexes_json<W: Write>(
 ) -> Result<()> {
     let (groups, qualified) = query_helpers::query_indexes_qualified(client, table_name)?;
 
-    // Structured JSON: {object, primary_index, secondary_indexes}
-    write!(writer, "{{\"object\":\"{}\"", json_escape(&qualified))?;
+    // Structured JSON: {ok, object, primary_index, secondary_indexes}
+    write!(writer, "{{\"ok\":true,\"object\":\"{}\"", json_escape(&qualified))?;
 
     // Primary index
     let primary: Vec<&IndexGroup> = groups.iter().filter(|g| g.is_primary).collect();

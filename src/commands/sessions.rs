@@ -423,8 +423,13 @@ fn display_json<W: Write>(result: &QueryResult, writer: &mut W) -> Result<()> {
         })
         .collect();
 
-    let json_output = serde_json::to_string_pretty(&sessions)?;
-    writeln!(writer, "{}", json_output)?;
+    let json_output = serde_json::json!({
+        "ok": true,
+        "row_count": sessions.len(),
+        "data": sessions
+    });
+    let json_str = serde_json::to_string_pretty(&json_output)?;
+    writeln!(writer, "{}", json_str)?;
 
     Ok(())
 }

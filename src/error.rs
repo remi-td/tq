@@ -410,6 +410,132 @@ impl TqError {
         }
     }
 
+    /// Get a machine-readable error code for structured error output
+    pub fn error_code(&self) -> &'static str {
+        match self {
+            TqError::ConnectionFailed { .. } => "CONNECTION_FAILED",
+            TqError::ConnectionTimeout { .. } => "CONNECTION_TIMEOUT",
+            TqError::AuthenticationFailed { .. } => "AUTH_FAILED",
+            TqError::DriverLoad { .. } => "DRIVER_LOAD_FAILED",
+            TqError::SqlSyntaxError { .. } => "SQL_SYNTAX_ERROR",
+            TqError::QueryExecution(_) => "QUERY_EXECUTION_FAILED",
+            TqError::TableNotFound { .. } => "OBJECT_NOT_FOUND",
+            TqError::PermissionDenied(_) => "PERMISSION_DENIED",
+            TqError::RowFetch { .. } => "ROW_FETCH_FAILED",
+            TqError::ResultParsing { .. } => "RESULT_PARSING_FAILED",
+            TqError::ResultSetClose(_) => "RESULT_SET_CLOSE_FAILED",
+            TqError::PingFailed(_) => "PING_FAILED",
+            TqError::MetadataFetch(_) => "METADATA_FETCH_FAILED",
+            TqError::MetadataParsing { .. } => "METADATA_PARSING_FAILED",
+            TqError::InvalidConnectionString(_) => "INVALID_ARGUMENT",
+            TqError::InvalidConfig(_) => "INVALID_ARGUMENT",
+            TqError::MissingPassword => "INVALID_ARGUMENT",
+            TqError::ConfigParseError(_) => "INVALID_ARGUMENT",
+            TqError::InvalidLogonMechanism(_) => "INVALID_ARGUMENT",
+            TqError::InvalidDuration(_) => "INVALID_ARGUMENT",
+            TqError::FileReadError { .. } => "IO_ERROR",
+            TqError::FileWriteError { .. } => "IO_ERROR",
+            TqError::IoError(_) => "IO_ERROR",
+            TqError::FormatError(_) => "FORMAT_ERROR",
+            TqError::JsonError(_) => "FORMAT_ERROR",
+            TqError::CsvError(_) => "FORMAT_ERROR",
+            TqError::TransactionError { .. } => "TRANSACTION_FAILED",
+            TqError::AtomicConflict => "INVALID_ARGUMENT",
+            TqError::SessionModeTransactionError { .. } => "TRANSACTION_FAILED",
+            TqError::SqlParseError { .. } => "SQL_PARSE_ERROR",
+            TqError::InternalError(_) => "INTERNAL_ERROR",
+        }
+    }
+
+    /// Get the error category for structured error output
+    pub fn error_category(&self) -> &'static str {
+        match self {
+            TqError::ConnectionFailed { .. }
+            | TqError::ConnectionTimeout { .. }
+            | TqError::DriverLoad { .. } => "connection",
+            TqError::AuthenticationFailed { .. } => "auth",
+            TqError::PermissionDenied(_) => "authz",
+            TqError::SqlSyntaxError { .. }
+            | TqError::QueryExecution(_)
+            | TqError::TableNotFound { .. }
+            | TqError::PingFailed(_)
+            | TqError::SqlParseError { .. } => "query",
+            TqError::RowFetch { .. }
+            | TqError::ResultParsing { .. }
+            | TqError::ResultSetClose(_)
+            | TqError::MetadataFetch(_)
+            | TqError::MetadataParsing { .. } => "result",
+            TqError::InvalidConnectionString(_)
+            | TqError::InvalidConfig(_)
+            | TqError::MissingPassword
+            | TqError::ConfigParseError(_)
+            | TqError::InvalidLogonMechanism(_)
+            | TqError::InvalidDuration(_)
+            | TqError::AtomicConflict => "config",
+            TqError::FileReadError { .. }
+            | TqError::FileWriteError { .. }
+            | TqError::IoError(_) => "io",
+            TqError::FormatError(_)
+            | TqError::JsonError(_)
+            | TqError::CsvError(_) => "format",
+            TqError::TransactionError { .. }
+            | TqError::SessionModeTransactionError { .. } => "transaction",
+            TqError::InternalError(_) => "internal",
+        }
+    }
+
+    /// Whether this error is retryable
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            TqError::ConnectionFailed { .. }
+                | TqError::ConnectionTimeout { .. }
+                | TqError::PingFailed(_)
+                | TqError::IoError(_)
+        )
+    }
+
+    /// Get a short hint for troubleshooting (for structured error output)
+    pub fn hint(&self) -> Option<&'static str> {
+        match self {
+            TqError::ConnectionFailed { .. } => {
+                Some("Check hostname, port, and network connectivity")
+            }
+            TqError::ConnectionTimeout { .. } => Some("Increase --timeout or check network"),
+            TqError::AuthenticationFailed { .. } => {
+                Some("Check username, password, and logon mechanism")
+            }
+            TqError::DriverLoad { .. } => {
+                Some("Install Teradata ODBC driver or set --driver-lib-dir")
+            }
+            TqError::PermissionDenied(_) => Some("Request appropriate GRANT from DBA"),
+            TqError::TableNotFound { .. } => Some("Check object name and database qualification"),
+            TqError::MissingPassword => {
+                Some("Use --password-file, TQ_PASSWORD env var, or interactive prompt")
+            }
+            TqError::InvalidConnectionString(_) => {
+                Some("Expected format: user:password@host:port/database")
+            }
+            _ => None,
+        }
+    }
+
+    /// Format this error as a JSON object string for structured error output
+    pub fn to_json(&self) -> String {
+        let hint_json = match self.hint() {
+            Some(h) => format!(",\"hint\":\"{}\"", h.replace('"', "\\\"")),
+            None => String::new(),
+        };
+        format!(
+            "{{\"ok\":false,\"error\":{{\"code\":\"{}\",\"category\":\"{}\",\"retryable\":{},\"message\":\"{}\"{}}}}}",
+            self.error_code(),
+            self.error_category(),
+            self.is_retryable(),
+            self.to_string().replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n"),
+            hint_json
+        )
+    }
+
     /// Create a connection failed error from a string message
     pub fn connection_failed(
         host: impl Into<String>,
@@ -565,5 +691,143 @@ mod tests {
         };
         // Runtime errors should return exit code 1
         assert_eq!(err.exit_code(), 1);
+    }
+
+    // Sprint 53: Structured error classification tests
+
+    #[test]
+    fn test_error_codes() {
+        assert_eq!(
+            TqError::connection_failed("host", 1025, "refused").error_code(),
+            "CONNECTION_FAILED"
+        );
+        assert_eq!(
+            TqError::AuthenticationFailed {
+                user: "u".into(),
+                logmech: "TD2".into(),
+                source: None
+            }
+            .error_code(),
+            "AUTH_FAILED"
+        );
+        assert_eq!(
+            TqError::PermissionDenied("test".into()).error_code(),
+            "PERMISSION_DENIED"
+        );
+        assert_eq!(
+            TqError::TableNotFound {
+                table: "t".into()
+            }
+            .error_code(),
+            "OBJECT_NOT_FOUND"
+        );
+        assert_eq!(
+            TqError::QueryExecution("test".into()).error_code(),
+            "QUERY_EXECUTION_FAILED"
+        );
+        assert_eq!(
+            TqError::InvalidConnectionString("test".into()).error_code(),
+            "INVALID_ARGUMENT"
+        );
+        assert_eq!(
+            TqError::InternalError("test".into()).error_code(),
+            "INTERNAL_ERROR"
+        );
+    }
+
+    #[test]
+    fn test_error_categories() {
+        assert_eq!(
+            TqError::connection_failed("h", 1, "e").error_category(),
+            "connection"
+        );
+        assert_eq!(
+            TqError::AuthenticationFailed {
+                user: "u".into(),
+                logmech: "TD2".into(),
+                source: None
+            }
+            .error_category(),
+            "auth"
+        );
+        assert_eq!(
+            TqError::PermissionDenied("t".into()).error_category(),
+            "authz"
+        );
+        assert_eq!(
+            TqError::QueryExecution("t".into()).error_category(),
+            "query"
+        );
+        assert_eq!(
+            TqError::InvalidConfig("t".into()).error_category(),
+            "config"
+        );
+        assert_eq!(
+            TqError::FormatError("t".into()).error_category(),
+            "format"
+        );
+    }
+
+    #[test]
+    fn test_retryable() {
+        assert!(TqError::connection_failed("h", 1, "e").is_retryable());
+        assert!(TqError::ConnectionTimeout {
+            timeout: Duration::from_secs(30)
+        }
+        .is_retryable());
+        assert!(TqError::PingFailed("e".into()).is_retryable());
+        assert!(!TqError::PermissionDenied("t".into()).is_retryable());
+        assert!(!TqError::QueryExecution("t".into()).is_retryable());
+        assert!(!TqError::InvalidConfig("t".into()).is_retryable());
+    }
+
+    #[test]
+    fn test_hint() {
+        assert!(TqError::connection_failed("h", 1, "e").hint().is_some());
+        assert!(TqError::PermissionDenied("t".into()).hint().is_some());
+        assert!(TqError::MissingPassword.hint().is_some());
+        assert!(TqError::QueryExecution("t".into()).hint().is_none());
+    }
+
+    #[test]
+    fn test_to_json() {
+        let err = TqError::PermissionDenied("SELECT on DBC.Tables".into());
+        let json = err.to_json();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["ok"], false);
+        assert_eq!(parsed["error"]["code"], "PERMISSION_DENIED");
+        assert_eq!(parsed["error"]["category"], "authz");
+        assert_eq!(parsed["error"]["retryable"], false);
+        assert!(parsed["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("SELECT on DBC.Tables"));
+        assert!(parsed["error"]["hint"].as_str().is_some());
+    }
+
+    #[test]
+    fn test_to_json_no_hint() {
+        let err = TqError::QueryExecution("some error".into());
+        let json = err.to_json();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["ok"], false);
+        assert_eq!(parsed["error"]["code"], "QUERY_EXECUTION_FAILED");
+        // No hint field when hint() returns None
+        assert!(parsed["error"]["hint"].is_null());
+    }
+
+    #[test]
+    fn test_to_json_with_special_chars() {
+        let err = TqError::QueryExecution("error with \"quotes\" and \\backslash".into());
+        let json = err.to_json();
+        // Should be valid JSON even with special chars
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["ok"], false);
+        assert!(parsed["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("quotes"));
     }
 }

@@ -211,6 +211,7 @@ fn display_csv<W: Write>(info: &SysconfigInfo, writer: &mut W) -> Result<()> {
 /// Display sysconfig in JSON format
 fn display_json<W: Write>(info: &SysconfigInfo, writer: &mut W) -> Result<()> {
     let json = serde_json::json!({
+        "ok": true,
         "Teradata Version": info.version,
         "Release": info.release,
         "AMP Count": info.amp_count,

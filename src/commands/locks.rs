@@ -496,8 +496,13 @@ fn display_json<W: Write>(rows: &[LockDisplayRow], writer: &mut W) -> Result<()>
         })
         .collect();
 
-    let json_output = serde_json::to_string_pretty(&json_rows)?;
-    writeln!(writer, "{}", json_output)?;
+    let json_output = serde_json::json!({
+        "ok": true,
+        "row_count": json_rows.len(),
+        "data": json_rows
+    });
+    let json_str = serde_json::to_string_pretty(&json_output)?;
+    writeln!(writer, "{}", json_str)?;
 
     Ok(())
 }
@@ -885,14 +890,17 @@ mod tests {
         display_json(&rows, &mut output).unwrap();
         let output_str = String::from_utf8(output).unwrap();
 
-        let json: Vec<serde_json::Value> = serde_json::from_str(&output_str).unwrap();
-        assert_eq!(json.len(), 1);
-        assert_eq!(json[0]["Locked Object"], "PROD.orders");
-        assert_eq!(json[0]["Lock Type"], "Table");
-        assert_eq!(json[0]["Lock Mode"], "WRITE");
-        assert_eq!(json[0]["Locking Sess"], 1023);
+        let json: serde_json::Value = serde_json::from_str(&output_str).unwrap();
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["row_count"], 1);
+        let data = json["data"].as_array().unwrap();
+        assert_eq!(data.len(), 1);
+        assert_eq!(data[0]["Locked Object"], "PROD.orders");
+        assert_eq!(data[0]["Lock Type"], "Table");
+        assert_eq!(data[0]["Lock Mode"], "WRITE");
+        assert_eq!(data[0]["Locking Sess"], 1023);
 
-        let waiting = json[0]["Waiting Sess"].as_array().unwrap();
+        let waiting = data[0]["Waiting Sess"].as_array().unwrap();
         assert_eq!(waiting.len(), 2);
         assert_eq!(waiting[0], 1045);
         assert_eq!(waiting[1], 1067);
@@ -912,8 +920,10 @@ mod tests {
         display_json(&rows, &mut output).unwrap();
         let output_str = String::from_utf8(output).unwrap();
 
-        let json: Vec<serde_json::Value> = serde_json::from_str(&output_str).unwrap();
-        let waiting = json[0]["Waiting Sess"].as_array().unwrap();
+        let json: serde_json::Value = serde_json::from_str(&output_str).unwrap();
+        assert_eq!(json["ok"], true);
+        let data = json["data"].as_array().unwrap();
+        let waiting = data[0]["Waiting Sess"].as_array().unwrap();
         assert!(waiting.is_empty());
     }
 
@@ -1127,8 +1137,11 @@ mod tests {
         display_json(&rows, &mut output).unwrap();
         let output_str = String::from_utf8(output).unwrap();
 
-        let json: Vec<serde_json::Value> = serde_json::from_str(&output_str).unwrap();
-        assert!(json.is_empty());
+        let json: serde_json::Value = serde_json::from_str(&output_str).unwrap();
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["row_count"], 0);
+        let data = json["data"].as_array().unwrap();
+        assert!(data.is_empty());
     }
 
     #[test]

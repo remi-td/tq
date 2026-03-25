@@ -176,7 +176,7 @@ fn render_databases_json<W: Write>(
     databases: &[DatabaseEntry],
     writer: &mut W,
 ) -> Result<()> {
-    write!(writer, "[")?;
+    write!(writer, "{{\"ok\":true,\"row_count\":{},\"data\":[", databases.len())?;
     for (i, db) in databases.iter().enumerate() {
         if i > 0 {
             write!(writer, ",")?;
@@ -189,7 +189,7 @@ fn render_databases_json<W: Write>(
             json_escape(&db.db_kind)
         )?;
     }
-    writeln!(writer, "]")?;
+    writeln!(writer, "]}}")?;
     Ok(())
 }
 
@@ -379,7 +379,7 @@ fn list_tables<W: Write>(
             writeln!(writer, "{} table(s)", tables.len())?;
         }
         OutputFormat::Json => {
-            write!(writer, "[")?;
+            write!(writer, "{{\"ok\":true,\"row_count\":{},\"data\":[", tables.len())?;
             for (i, t) in tables.iter().enumerate() {
                 if i > 0 {
                     write!(writer, ",")?;
@@ -402,7 +402,7 @@ fn list_tables<W: Write>(
                     json_escape(&t.owner)
                 )?;
             }
-            writeln!(writer, "]")?;
+            writeln!(writer, "]}}")?;
         }
         OutputFormat::Csv => {
             writeln!(writer, "TableName,Type,RowsEst,Size,Owner")?;
@@ -524,7 +524,7 @@ fn list_views<W: Write>(
             writeln!(writer, "{} view(s)", views.len())?;
         }
         OutputFormat::Json => {
-            write!(writer, "[")?;
+            write!(writer, "{{\"ok\":true,\"row_count\":{},\"data\":[", views.len())?;
             for (i, view) in views.iter().enumerate() {
                 if i > 0 {
                     write!(writer, ",")?;
@@ -536,7 +536,7 @@ fn list_views<W: Write>(
                     json_escape(&view.owner)
                 )?;
             }
-            writeln!(writer, "]")?;
+            writeln!(writer, "]}}")?;
         }
         OutputFormat::Csv => {
             writeln!(writer, "ViewName,Owner")?;

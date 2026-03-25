@@ -1,9 +1,10 @@
 //! JSON output formatting
 //!
-//! Provides JSON formatting with:
-//! - Array of objects format (default)
+//! Provides JSON formatting with a stable envelope contract:
+//! - All responses wrapped in `{"ok": true, ...}` envelope
 //! - Proper type preservation (numbers, booleans, null)
 //! - Pretty printing for human readability
+//! - Consistent fields across all commands
 
 use crate::db::QueryResult;
 use crate::error::Result;
@@ -23,9 +24,9 @@ impl Default for JsonOptions {
     }
 }
 
-/// Write query results as JSON array of objects
-pub fn write<W: Write>(result: &QueryResult, writer: &mut W, options: &JsonOptions) -> Result<()> {
-    let rows: Vec<JsonValue> = result
+/// Build JSON row data from a QueryResult
+fn build_rows(result: &QueryResult) -> Vec<JsonValue> {
+    result
         .rows
         .iter()
         .map(|row| {
@@ -35,23 +36,46 @@ pub fn write<W: Write>(result: &QueryResult, writer: &mut W, options: &JsonOptio
             }
             JsonValue::Object(obj)
         })
-        .collect();
+        .collect()
+}
 
-    let json = JsonValue::Array(rows);
-
-    if options.pretty {
-        serde_json::to_writer_pretty(&mut *writer, &json)?;
+/// Write a JSON value with pretty/compact option
+fn write_json<W: Write>(writer: &mut W, json: &JsonValue, pretty: bool) -> Result<()> {
+    if pretty {
+        serde_json::to_writer_pretty(&mut *writer, json)?;
     } else {
-        serde_json::to_writer(&mut *writer, &json)?;
+        serde_json::to_writer(&mut *writer, json)?;
     }
     writeln!(writer)?;
-
     Ok(())
+}
+
+/// Write query results as JSON with envelope
+///
+/// Format:
+/// ```json
+/// {
+///   "ok": true,
+///   "row_count": N,
+///   "data": [...]
+/// }
+/// ```
+pub fn write<W: Write>(result: &QueryResult, writer: &mut W, options: &JsonOptions) -> Result<()> {
+    let mut envelope = Map::new();
+    envelope.insert("ok".to_string(), JsonValue::Bool(true));
+    envelope.insert(
+        "row_count".to_string(),
+        JsonValue::Number(result.row_count.into()),
+    );
+    envelope.insert("data".to_string(), JsonValue::Array(build_rows(result)));
+
+    write_json(writer, &JsonValue::Object(envelope), options.pretty)
 }
 
 /// Write query results as JSONL (one JSON object per line)
 ///
 /// This format is better for streaming and processing large datasets.
+/// Note: JSONL does NOT use the envelope format — each line is a raw data object.
 pub fn write_jsonl<W: Write>(result: &QueryResult, writer: &mut W) -> Result<()> {
     for row in &result.rows {
         let mut obj = Map::new();
@@ -65,28 +89,32 @@ pub fn write_jsonl<W: Write>(result: &QueryResult, writer: &mut W) -> Result<()>
     Ok(())
 }
 
-/// Write query results with metadata wrapper
+/// Write query results with timing metadata in envelope
 ///
 /// Format:
+/// ```json
 /// {
+///   "ok": true,
 ///   "row_count": N,
 ///   "execution_time_ms": M,
 ///   "columns": [...],
-///   "rows": [...]
+///   "data": [...]
 /// }
+/// ```
 pub fn write_with_metadata<W: Write>(
     result: &QueryResult,
     writer: &mut W,
     options: &JsonOptions,
 ) -> Result<()> {
-    let mut wrapper = Map::new();
+    let mut envelope = Map::new();
 
-    // Add metadata
-    wrapper.insert(
+    // Envelope header
+    envelope.insert("ok".to_string(), JsonValue::Bool(true));
+    envelope.insert(
         "row_count".to_string(),
         JsonValue::Number(result.row_count.into()),
     );
-    wrapper.insert(
+    envelope.insert(
         "execution_time_ms".to_string(),
         JsonValue::Number(
             serde_json::Number::from_f64(result.execution_time.as_secs_f64() * 1000.0)
@@ -94,7 +122,7 @@ pub fn write_with_metadata<W: Write>(
         ),
     );
 
-    // Add column info
+    // Column metadata
     let columns: Vec<JsonValue> = result
         .columns
         .iter()
@@ -109,32 +137,12 @@ pub fn write_with_metadata<W: Write>(
             JsonValue::Object(obj)
         })
         .collect();
-    wrapper.insert("columns".to_string(), JsonValue::Array(columns));
+    envelope.insert("columns".to_string(), JsonValue::Array(columns));
 
-    // Add rows
-    let rows: Vec<JsonValue> = result
-        .rows
-        .iter()
-        .map(|row| {
-            let mut obj = Map::new();
-            for (value, col) in row.iter().zip(&result.columns) {
-                obj.insert(col.name.clone(), value.to_json());
-            }
-            JsonValue::Object(obj)
-        })
-        .collect();
-    wrapper.insert("rows".to_string(), JsonValue::Array(rows));
+    // Data rows
+    envelope.insert("data".to_string(), JsonValue::Array(build_rows(result)));
 
-    let json = JsonValue::Object(wrapper);
-
-    if options.pretty {
-        serde_json::to_writer_pretty(&mut *writer, &json)?;
-    } else {
-        serde_json::to_writer(&mut *writer, &json)?;
-    }
-    writeln!(writer)?;
-
-    Ok(())
+    write_json(writer, &JsonValue::Object(envelope), options.pretty)
 }
 
 /// Format results as a JSON string
@@ -175,7 +183,7 @@ mod tests {
     }
 
     #[test]
-    fn test_write_json() {
+    fn test_write_json_envelope() {
         let result = create_test_result();
         let options = JsonOptions { pretty: false };
 
@@ -183,18 +191,20 @@ mod tests {
         write(&result, &mut buffer, &options).unwrap();
         let output = String::from_utf8_lossy(&buffer);
 
-        // Parse back to verify
-        let parsed: Vec<serde_json::Value> = serde_json::from_str(output.trim()).unwrap();
-        assert_eq!(parsed.len(), 2);
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
 
-        // Check first row
-        assert_eq!(parsed[0]["id"], 1);
-        assert_eq!(parsed[0]["name"], "Alice");
-        assert_eq!(parsed[0]["active"], true);
-        assert_eq!(parsed[0]["score"], 95.5);
+        // Envelope fields
+        assert_eq!(parsed["ok"], true);
+        assert_eq!(parsed["row_count"], 2);
 
-        // Check null handling
-        assert!(parsed[1]["name"].is_null());
+        // Data array
+        let data = parsed["data"].as_array().unwrap();
+        assert_eq!(data.len(), 2);
+        assert_eq!(data[0]["id"], 1);
+        assert_eq!(data[0]["name"], "Alice");
+        assert_eq!(data[0]["active"], true);
+        assert_eq!(data[0]["score"], 95.5);
+        assert!(data[1]["name"].is_null());
     }
 
     #[test]
@@ -207,6 +217,8 @@ mod tests {
         // Pretty output should contain newlines and indentation
         assert!(output.contains('\n'));
         assert!(output.contains("  "));
+        // Should still have envelope
+        assert!(output.contains("\"ok\""));
     }
 
     #[test]
@@ -217,7 +229,7 @@ mod tests {
         write_jsonl(&result, &mut buffer).unwrap();
         let output = String::from_utf8_lossy(&buffer);
 
-        // Should have one JSON object per line
+        // Should have one JSON object per line (no envelope)
         let lines: Vec<&str> = output.trim().lines().collect();
         assert_eq!(lines.len(), 2);
 
@@ -230,7 +242,7 @@ mod tests {
     }
 
     #[test]
-    fn test_write_with_metadata() {
+    fn test_write_with_metadata_envelope() {
         let result = create_test_result();
         let options = JsonOptions { pretty: false };
 
@@ -240,10 +252,11 @@ mod tests {
 
         let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
 
+        assert_eq!(parsed["ok"], true);
         assert_eq!(parsed["row_count"], 2);
         assert!(parsed["execution_time_ms"].as_f64().unwrap() > 0.0);
         assert_eq!(parsed["columns"].as_array().unwrap().len(), 4);
-        assert_eq!(parsed["rows"].as_array().unwrap().len(), 2);
+        assert_eq!(parsed["data"].as_array().unwrap().len(), 2);
     }
 
     #[test]
@@ -263,12 +276,29 @@ mod tests {
         let result = QueryResult::new(columns, rows, Duration::ZERO);
 
         let output = format_string(&result, &JsonOptions { pretty: false }).unwrap();
-        let parsed: Vec<serde_json::Value> = serde_json::from_str(output.trim()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
 
-        // Verify types are preserved
-        assert!(parsed[0]["num"].is_i64());
-        assert!(parsed[0]["dec"].is_f64());
-        assert!(parsed[0]["bool"].is_boolean());
-        assert!(parsed[0]["str"].is_string());
+        // Data is inside the envelope
+        let data = &parsed["data"].as_array().unwrap()[0];
+        assert!(data["num"].is_i64());
+        assert!(data["dec"].is_f64());
+        assert!(data["bool"].is_boolean());
+        assert!(data["str"].is_string());
+    }
+
+    #[test]
+    fn test_empty_result_envelope() {
+        let columns = vec![
+            ColumnMetadata::new("id", TeradataType::Integer, false),
+        ];
+        let rows: Vec<Vec<Value>> = vec![];
+        let result = QueryResult::new(columns, rows, Duration::ZERO);
+
+        let output = format_string(&result, &JsonOptions { pretty: false }).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+
+        assert_eq!(parsed["ok"], true);
+        assert_eq!(parsed["row_count"], 0);
+        assert_eq!(parsed["data"].as_array().unwrap().len(), 0);
     }
 }

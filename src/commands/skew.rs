@@ -395,8 +395,13 @@ fn display_json<W: Write>(infos: &[SkewInfo], writer: &mut W) -> Result<()> {
         })
         .collect();
 
-    let output = serde_json::to_string_pretty(&sessions)?;
-    writeln!(writer, "{}", output)?;
+    let output = serde_json::json!({
+        "ok": true,
+        "row_count": sessions.len(),
+        "data": sessions
+    });
+    let json_str = serde_json::to_string_pretty(&output)?;
+    writeln!(writer, "{}", json_str)?;
     Ok(())
 }
 
@@ -612,11 +617,14 @@ mod tests {
         let mut output = Vec::new();
         display_json(&infos, &mut output).unwrap();
         let s = String::from_utf8(output).unwrap();
-        let json: Vec<serde_json::Value> = serde_json::from_str(&s).unwrap();
-        assert_eq!(json.len(), 1);
-        assert_eq!(json[0]["SessionNo"], 1234);
-        assert_eq!(json[0]["CPUSkew"], 50.0);
-        assert_eq!(json[0]["IOSkew"], 25.0);
+        let json: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["row_count"], 1);
+        let data = json["data"].as_array().unwrap();
+        assert_eq!(data.len(), 1);
+        assert_eq!(data[0]["SessionNo"], 1234);
+        assert_eq!(data[0]["CPUSkew"], 50.0);
+        assert_eq!(data[0]["IOSkew"], 25.0);
     }
 
     #[test]

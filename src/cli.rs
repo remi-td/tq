@@ -340,6 +340,31 @@ pub enum Command {
     History(HistoryArgs),
 }
 
+impl Command {
+    /// Extract the output format from this command's arguments, if applicable.
+    ///
+    /// Returns None for commands that don't have a format argument (Help, Profiles, Profile, Repl, Ping).
+    pub fn format(&self) -> Option<OutputFormat> {
+        match self {
+            Command::Query(a) => Some(a.format),
+            Command::Sessions(a) => Some(a.format),
+            Command::Sample(a) => Some(a.format),
+            Command::Peek(a) => Some(a.format),
+            Command::Sysconfig(a) => Some(a.format),
+            Command::Locks(a) => Some(a.format),
+            Command::QueryInspect(a) => Some(a.format),
+            Command::Inspect(a) => Some(a.format),
+            Command::List(a) => Some(a.format),
+            Command::ShowIndexes(a) => Some(a.format),
+            Command::Abort(a) => Some(a.format),
+            Command::Explain(a) => Some(a.format),
+            Command::Skew(a) => Some(a.format),
+            Command::History(a) => Some(a.format),
+            Command::Ping(_) | Command::Repl(_) | Command::Help(_) | Command::Profiles | Command::Profile(_) => None,
+        }
+    }
+}
+
 /// Profile management subcommands
 #[derive(Subcommand, Debug)]
 pub enum ProfileAction {

@@ -338,8 +338,13 @@ fn display_json<W: Write>(queries: &[QueryInfo], writer: &mut W) -> Result<()> {
         })
         .collect();
 
-    let json_output = serde_json::to_string_pretty(&json_rows)?;
-    writeln!(writer, "{}", json_output)?;
+    let json_output = serde_json::json!({
+        "ok": true,
+        "row_count": json_rows.len(),
+        "data": json_rows
+    });
+    let json_str = serde_json::to_string_pretty(&json_output)?;
+    writeln!(writer, "{}", json_str)?;
 
     Ok(())
 }
@@ -587,13 +592,16 @@ mod tests {
         display_json(&queries, &mut output).unwrap();
         let output_str = String::from_utf8(output).unwrap();
 
-        let json: Vec<serde_json::Value> = serde_json::from_str(&output_str).unwrap();
-        assert_eq!(json.len(), 1);
-        assert_eq!(json[0]["SessionID"], 1234);
-        assert_eq!(json[0]["QueryText"], "SELECT * FROM employees");
-        assert_eq!(json[0]["StartTime"], "2026-02-24 10:30:00");
-        assert_eq!(json[0]["ElapsedTime"], "00:00:05.123");
-        assert_eq!(json[0]["Status"], "Complete");
+        let json: serde_json::Value = serde_json::from_str(&output_str).unwrap();
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["row_count"], 1);
+        let data = json["data"].as_array().unwrap();
+        assert_eq!(data.len(), 1);
+        assert_eq!(data[0]["SessionID"], 1234);
+        assert_eq!(data[0]["QueryText"], "SELECT * FROM employees");
+        assert_eq!(data[0]["StartTime"], "2026-02-24 10:30:00");
+        assert_eq!(data[0]["ElapsedTime"], "00:00:05.123");
+        assert_eq!(data[0]["Status"], "Complete");
     }
 
     #[test]
@@ -619,11 +627,14 @@ mod tests {
         display_json(&queries, &mut output).unwrap();
         let output_str = String::from_utf8(output).unwrap();
 
-        let json: Vec<serde_json::Value> = serde_json::from_str(&output_str).unwrap();
-        assert_eq!(json.len(), 2);
-        assert_eq!(json[0]["QueryText"], "SELECT 1");
-        assert_eq!(json[1]["QueryText"], "SELECT 2");
-        assert_eq!(json[1]["Status"], "Error");
+        let json: serde_json::Value = serde_json::from_str(&output_str).unwrap();
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["row_count"], 2);
+        let data = json["data"].as_array().unwrap();
+        assert_eq!(data.len(), 2);
+        assert_eq!(data[0]["QueryText"], "SELECT 1");
+        assert_eq!(data[1]["QueryText"], "SELECT 2");
+        assert_eq!(data[1]["Status"], "Error");
     }
 
     #[test]

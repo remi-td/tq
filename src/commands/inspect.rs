@@ -367,7 +367,7 @@ fn inspect_object_json<W: Write>(
         }
     };
 
-    write!(writer, "{{")?;
+    write!(writer, "{{\"ok\":true,")?;
     write!(
         writer,
         "\"type\":\"{}\",\"database\":\"{}\",\"name\":\"{}\"",

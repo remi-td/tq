@@ -182,6 +182,7 @@ fn display_csv<W: Write>(result: &AbortResult, writer: &mut W) -> Result<()> {
 /// Display abort result in JSON format
 fn display_json<W: Write>(result: &AbortResult, writer: &mut W) -> Result<()> {
     let json = serde_json::json!({
+        "ok": true,
         "SessionId": result.session_id,
         "Action": if result.query_only { "AbortQuery" } else { "AbortSession" },
         "Success": result.success,
