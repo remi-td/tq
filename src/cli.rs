@@ -568,6 +568,32 @@ pub struct QueryArgs {
     /// control (BEGIN TRANSACTION, COMMIT, ROLLBACK).
     #[arg(long)]
     pub atomic: bool,
+
+    /// Enable agent-safe execution mode
+    ///
+    /// Enforces safety guardrails for automated/LLM-driven usage:
+    /// - Blocks DDL (CREATE, DROP, ALTER, RENAME) and DML (INSERT, UPDATE, DELETE, MERGE)
+    /// - Allows only SELECT, SHOW, EXPLAIN, HELP, COLLECT STATISTICS
+    /// - Enforces single-statement-only (rejects multi-statement input)
+    /// - Enforces --max-rows limit (default 10000)
+    ///
+    /// Use --allow-dml to permit write operations in agent-safe mode.
+    #[arg(long, env = "TQ_AGENT_SAFE")]
+    pub agent_safe: bool,
+
+    /// Maximum rows to return in agent-safe mode (default: 10000)
+    ///
+    /// When --agent-safe is active, the result set is limited to this many rows.
+    /// If the query returns more rows, execution fails with an error.
+    #[arg(long, value_name = "N", default_value = "10000")]
+    pub max_rows: usize,
+
+    /// Allow DML operations in agent-safe mode
+    ///
+    /// Permits INSERT, UPDATE, DELETE, and MERGE statements when
+    /// --agent-safe is active. DDL operations remain blocked.
+    #[arg(long)]
+    pub allow_dml: bool,
 }
 
 /// Arguments for the sessions command (Sprint 26)

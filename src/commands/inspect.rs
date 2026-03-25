@@ -362,7 +362,11 @@ fn inspect_object_json<W: Write>(
     let obj_info = match query_object_type(client, &database, obj_part)? {
         Some(info) => info,
         None => {
-            writeln!(writer, "{{\"error\": \"Object '{}' not found\"}}", object_name)?;
+            writeln!(
+                writer,
+                "{{\"ok\":false,\"error\":{{\"code\":\"OBJECT_NOT_FOUND\",\"message\":\"Object '{}' not found\"}}}}",
+                json_escape(object_name)
+            )?;
             return Ok(());
         }
     };
@@ -404,8 +408,37 @@ fn inspect_object_json<W: Write>(
         write!(writer, "]")?;
     }
 
-    // Storage for tables
+    // Indexes
     if obj_info.table_kind == "T" || obj_info.table_kind == "O" {
+        if let Ok(indexes) = query_helpers::query_indexes(client, &database, obj_part) {
+            write!(writer, ",\"indexes\":[")?;
+            for (i, idx) in indexes.iter().enumerate() {
+                if i > 0 {
+                    write!(writer, ",")?;
+                }
+                let name_json = match &idx.name {
+                    Some(n) => format!("\"{}\"", json_escape(n)),
+                    None => "null".to_string(),
+                };
+                let cols_json: Vec<String> = idx
+                    .columns
+                    .iter()
+                    .map(|c| format!("\"{}\"", json_escape(c)))
+                    .collect();
+                write!(
+                    writer,
+                    "{{\"name\":{},\"type\":\"{}\",\"label\":\"{}\",\"primary\":{},\"columns\":[{}]}}",
+                    name_json,
+                    json_escape(&idx.index_type_label),
+                    json_escape(&idx.short_label),
+                    idx.is_primary,
+                    cols_json.join(",")
+                )?;
+            }
+            write!(writer, "]")?;
+        }
+
+        // Storage for tables
         if let Ok(storage) = query_storage(client, &database, obj_part) {
             let skew = calculate_skew(storage.max_amp_size, storage.avg_amp_size);
             write!(
@@ -414,6 +447,43 @@ fn inspect_object_json<W: Write>(
                 storage.total_size, storage.peak_size, skew, storage.amp_count
             )?;
         }
+    }
+
+    // Definition for views and macros
+    if obj_info.table_kind == "V" || obj_info.table_kind == "M" {
+        if let Ok(definition) = query_definition(client, &database, obj_part, &obj_info.table_kind)
+        {
+            write!(
+                writer,
+                ",\"definition\":\"{}\"",
+                json_escape(&definition)
+            )?;
+        }
+    }
+
+    // Dependencies (upstream and downstream)
+    if let Ok((upstream, downstream)) = query_dependencies(client, &database, obj_part) {
+        let format_deps = |deps: &[DependencyRef]| -> String {
+            let items: Vec<String> = deps
+                .iter()
+                .map(|d| {
+                    format!(
+                        "{{\"database\":\"{}\",\"name\":\"{}\",\"type\":\"{}\"}}",
+                        json_escape(&d.database),
+                        json_escape(&d.name),
+                        json_escape(&d.kind_label)
+                    )
+                })
+                .collect();
+            format!("[{}]", items.join(","))
+        };
+
+        write!(
+            writer,
+            ",\"dependencies\":{{\"upstream\":{},\"downstream\":{}}}",
+            format_deps(&upstream),
+            format_deps(&downstream)
+        )?;
     }
 
     writeln!(writer, "}}")?;

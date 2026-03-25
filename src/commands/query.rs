@@ -232,6 +232,11 @@ pub fn execute<W: Write>(
         _ => sql,
     };
 
+    // Agent-safe mode validation
+    if args.agent_safe {
+        validate_agent_safe(&sql, args)?;
+    }
+
     // Determine execution mode: single statement (fast path) or batch
     // For command-line arguments, always use single statement mode (no splitting)
     // For file/stdin, check for multiple statements
@@ -262,12 +267,28 @@ fn execute_single<W: Write>(
         eprintln!("Executing query: {}", truncate_sql(trimmed_sql, 100));
     }
 
+    // Determine effective row limit: explicit --limit takes precedence, then agent-safe max_rows
+    let effective_limit = if let Some(limit) = args.limit {
+        Some(limit)
+    } else if args.agent_safe {
+        Some(args.max_rows + 1) // Fetch one extra to detect overflow
+    } else {
+        None
+    };
+
     // Execute query
-    let result = if let Some(limit) = args.limit {
+    let result = if let Some(limit) = effective_limit {
         client.execute_with_limit(trimmed_sql, limit)?
     } else {
         client.execute(trimmed_sql)?
     };
+
+    // Agent-safe: check if result exceeds max_rows
+    if args.agent_safe && args.limit.is_none() && result.row_count > args.max_rows {
+        return Err(TqError::AgentSafeMaxRows {
+            limit: args.max_rows,
+        });
+    }
 
     // Configure output formatting
     let format_options = FormatOptions::default()
@@ -491,6 +512,11 @@ pub fn execute_to_file<W: Write>(
         _ => sql,
     };
 
+    // Agent-safe mode validation
+    if args.agent_safe {
+        validate_agent_safe(&sql, args)?;
+    }
+
     // Determine execution mode
     let use_batch = match source {
         InputSource::Argument(_) => false,
@@ -698,6 +724,70 @@ fn format_statement_status(result: &crate::db::QueryResult, format: OutputFormat
     }
 }
 
+// ============================================================================
+// Agent-Safe Mode
+// ============================================================================
+
+/// SQL statement safety classification for agent-safe mode
+#[derive(Debug, PartialEq)]
+enum StatementSafety {
+    /// Read-only: SELECT, SHOW, EXPLAIN, HELP, COLLECT STATISTICS
+    ReadOnly,
+    /// Data manipulation: INSERT, UPDATE, DELETE, MERGE, UPSERT
+    Dml,
+    /// Data definition: CREATE, DROP, ALTER, RENAME, REPLACE, GRANT, REVOKE
+    Ddl,
+}
+
+/// Classify a SQL statement by its safety level
+fn classify_statement(sql: &str) -> StatementSafety {
+    let stmt_type = get_statement_type(sql).to_uppercase();
+    match stmt_type.as_str() {
+        "SELECT" | "SEL" | "SHOW" | "EXPLAIN" | "HELP" | "COLLECT" | "LOCKING" | "LOCK" => {
+            StatementSafety::ReadOnly
+        }
+        "INSERT" | "INS" | "UPDATE" | "UPD" | "DELETE" | "DEL" | "MERGE" | "UPSERT" => {
+            StatementSafety::Dml
+        }
+        _ => StatementSafety::Ddl, // CREATE, DROP, ALTER, RENAME, REPLACE, GRANT, REVOKE, etc.
+    }
+}
+
+/// Validate SQL against agent-safe mode restrictions
+fn validate_agent_safe(sql: &str, args: &QueryArgs) -> Result<()> {
+    // Reject multi-statement input
+    if has_multiple_statements(sql) {
+        return Err(TqError::AgentSafeBlocked {
+            statement_type: "MULTI_STATEMENT".to_string(),
+            message: "Agent-safe mode requires single-statement input".to_string(),
+        });
+    }
+
+    let safety = classify_statement(sql);
+
+    match safety {
+        StatementSafety::ReadOnly => Ok(()),
+        StatementSafety::Dml => {
+            if args.allow_dml {
+                Ok(())
+            } else {
+                let stmt_type = get_statement_type(sql).to_uppercase();
+                Err(TqError::AgentSafeBlocked {
+                    statement_type: stmt_type,
+                    message: "DML statements are blocked in agent-safe mode. Use --allow-dml to permit write operations.".to_string(),
+                })
+            }
+        }
+        StatementSafety::Ddl => {
+            let stmt_type = get_statement_type(sql).to_uppercase();
+            Err(TqError::AgentSafeBlocked {
+                statement_type: stmt_type,
+                message: "DDL statements are always blocked in agent-safe mode.".to_string(),
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -834,5 +924,107 @@ mod tests {
         // First statement failed, no executed
         assert!(!formatted.contains("Statements executed"));
         assert!(formatted.contains("Statements remaining: 2-3"));
+    }
+
+    // Sprint 54: Agent-safe mode tests
+
+    #[test]
+    fn test_classify_select_is_readonly() {
+        assert_eq!(classify_statement("SELECT * FROM t"), StatementSafety::ReadOnly);
+        assert_eq!(classify_statement("  select 1"), StatementSafety::ReadOnly);
+        assert_eq!(classify_statement("SEL * FROM t"), StatementSafety::ReadOnly);
+        assert_eq!(classify_statement("SHOW VIEW db.v"), StatementSafety::ReadOnly);
+        assert_eq!(classify_statement("EXPLAIN SELECT 1"), StatementSafety::ReadOnly);
+        assert_eq!(classify_statement("HELP TABLE t"), StatementSafety::ReadOnly);
+        assert_eq!(classify_statement("COLLECT STATISTICS ON t"), StatementSafety::ReadOnly);
+        assert_eq!(classify_statement("LOCKING t FOR ACCESS SELECT *"), StatementSafety::ReadOnly);
+    }
+
+    #[test]
+    fn test_classify_dml() {
+        assert_eq!(classify_statement("INSERT INTO t VALUES (1)"), StatementSafety::Dml);
+        assert_eq!(classify_statement("UPDATE t SET x=1"), StatementSafety::Dml);
+        assert_eq!(classify_statement("DELETE FROM t"), StatementSafety::Dml);
+        assert_eq!(classify_statement("MERGE INTO t USING s"), StatementSafety::Dml);
+        assert_eq!(classify_statement("INS INTO t VALUES (1)"), StatementSafety::Dml);
+    }
+
+    #[test]
+    fn test_classify_ddl() {
+        assert_eq!(classify_statement("CREATE TABLE t (id INT)"), StatementSafety::Ddl);
+        assert_eq!(classify_statement("DROP TABLE t"), StatementSafety::Ddl);
+        assert_eq!(classify_statement("ALTER TABLE t ADD x INT"), StatementSafety::Ddl);
+        assert_eq!(classify_statement("RENAME TABLE t TO t2"), StatementSafety::Ddl);
+        assert_eq!(classify_statement("GRANT SELECT ON t TO u"), StatementSafety::Ddl);
+        assert_eq!(classify_statement("REVOKE SELECT ON t FROM u"), StatementSafety::Ddl);
+    }
+
+    #[test]
+    fn test_classify_with_comments() {
+        assert_eq!(
+            classify_statement("-- comment\nSELECT 1"),
+            StatementSafety::ReadOnly
+        );
+        assert_eq!(
+            classify_statement("/* block */ INSERT INTO t VALUES (1)"),
+            StatementSafety::Dml
+        );
+    }
+
+    #[test]
+    fn test_validate_agent_safe_allows_select() {
+        let args = make_agent_safe_args(false);
+        assert!(validate_agent_safe("SELECT 1", &args).is_ok());
+    }
+
+    #[test]
+    fn test_validate_agent_safe_blocks_insert() {
+        let args = make_agent_safe_args(false);
+        let err = validate_agent_safe("INSERT INTO t VALUES (1)", &args).unwrap_err();
+        assert!(matches!(err, TqError::AgentSafeBlocked { .. }));
+    }
+
+    #[test]
+    fn test_validate_agent_safe_blocks_ddl() {
+        let args = make_agent_safe_args(false);
+        let err = validate_agent_safe("DROP TABLE t", &args).unwrap_err();
+        assert!(matches!(err, TqError::AgentSafeBlocked { .. }));
+    }
+
+    #[test]
+    fn test_validate_agent_safe_allows_dml_with_flag() {
+        let args = make_agent_safe_args(true);
+        assert!(validate_agent_safe("INSERT INTO t VALUES (1)", &args).is_ok());
+    }
+
+    #[test]
+    fn test_validate_agent_safe_blocks_ddl_even_with_allow_dml() {
+        let args = make_agent_safe_args(true);
+        let err = validate_agent_safe("CREATE TABLE t (id INT)", &args).unwrap_err();
+        assert!(matches!(err, TqError::AgentSafeBlocked { .. }));
+    }
+
+    #[test]
+    fn test_validate_agent_safe_blocks_multi_statement() {
+        let args = make_agent_safe_args(false);
+        let err = validate_agent_safe("SELECT 1; SELECT 2", &args).unwrap_err();
+        assert!(matches!(err, TqError::AgentSafeBlocked { .. }));
+    }
+
+    /// Helper to create QueryArgs for agent-safe testing
+    fn make_agent_safe_args(allow_dml: bool) -> QueryArgs {
+        QueryArgs {
+            query: Some("test".to_string()),
+            file: None,
+            format: OutputFormat::Json,
+            output: None,
+            no_header: false,
+            timing: false,
+            limit: None,
+            atomic: false,
+            agent_safe: true,
+            max_rows: 10000,
+            allow_dml,
+        }
     }
 }
