@@ -1811,6 +1811,396 @@ fn extract_table_name(sql: &str) -> Option<String> {
 | Test updates | `src/sql/identifiers.rs` (tests) | Update expected values to uppercase |
 | New tests | `src/db/client.rs` (tests) | Add `TABLES` vs `TABLE` word boundary test |
 
+## tq search Command
+
+The `tq search` command provides cross-database discovery of tables and columns by keyword.
+Unlike `tq list` which scopes to a single database (defaulting to the current database),
+`tq search` queries across all accessible databases by default, making it suitable for
+discovery workflows where the user does not know which database contains the object.
+
+### Design Rationale
+
+**Why a separate command instead of extending `tq list`?**
+
+`tq list tables` is scoped to a single database and uses client-side glob matching on names
+already returned by the query. Cross-database search requires a fundamentally different SQL
+pattern (LIKE on the server across all databases). Overloading `list` would blur the semantics:
+`list` means "enumerate objects in a known location", while `search` means "find objects across
+an unknown location". The separation follows the same principle as `grep` vs `ls` in UNIX.
+
+**Why SQL LIKE instead of client-side filtering?**
+
+Cross-database search could return thousands of system tables. Server-side LIKE filtering
+reduces network transfer and processing. The keyword is wrapped as `%keyword%` for substring
+matching, which is the most intuitive behavior for discovery.
+
+**Why a default result limit?**
+
+Large Teradata systems can have tens of thousands of tables across hundreds of databases.
+Without a limit, a broad keyword like "a" could return an overwhelming result set. A default
+limit of 100 rows (overridable with `--limit`) provides a safe default while allowing
+power users to retrieve more results when needed. `--limit 0` disables the limit entirely.
+
+### CLI Argument Definition
+
+```rust
+// src/cli.rs -- add to Command enum
+
+/// Search for tables or columns across databases by keyword
+///
+/// Performs cross-database search using SQL LIKE matching.
+/// Returns results from all accessible databases by default.
+///
+/// Example: tq search tables emp
+///          tq search columns salary --database hr_db
+///          tq search tables order --limit 50
+Search(SearchArgs),
+```
+
+```rust
+// src/cli.rs -- SearchArgs and SearchObjectType
+
+#[derive(Parser, Debug)]
+pub struct SearchArgs {
+    /// What to search for: tables or columns
+    #[arg(value_name = "TYPE")]
+    pub object_type: SearchObjectType,
+
+    /// Keyword to search for (case-insensitive substring match)
+    #[arg(value_name = "KEYWORD")]
+    pub keyword: String,
+
+    /// Scope search to a single database
+    #[arg(short, long, value_name = "DB")]
+    pub database: Option<String>,
+
+    /// Maximum number of results (default: 100, 0 = unlimited)
+    #[arg(long, default_value = "100", value_name = "N")]
+    pub limit: usize,
+
+    /// Output format
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short = 'o', long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+pub enum SearchObjectType {
+    Tables,
+    Columns,
+}
+```
+
+Using `ValueEnum` for `SearchObjectType` provides type-safe parsing with automatic help text
+and case-insensitive matching, consistent with `ListObjectType` and other enums in the project.
+
+### SQL Queries
+
+#### Table Search
+
+Queries `DBC.TablesV` joined with `DBC.TableSizeV` for size and row count estimates.
+Filters on `TableKind IN ('T', 'O')` to return only physical tables (standard and NoPI),
+excluding views, macros, and other object types. This is consistent with `tq list tables`.
+
+```sql
+SELECT TRIM(t.DatabaseName) AS database_name,
+       TRIM(t.TableName) AS table_name,
+       t.TableKind,
+       COALESCE(CAST(s.RowCount AS VARCHAR(20)), '') AS RowCount,
+       COALESCE(CAST(s.CurrentPerm AS VARCHAR(20)), '') AS CurrentPerm,
+       TRIM(t.CreatorName) AS Owner
+FROM DBC.TablesV t
+LEFT JOIN (
+    SELECT DatabaseName, TableName,
+           SUM(RowCount) AS RowCount,
+           SUM(CurrentPerm) AS CurrentPerm
+    FROM DBC.TableSizeV
+    GROUP BY DatabaseName, TableName
+) s ON t.DatabaseName = s.DatabaseName AND t.TableName = s.TableName
+WHERE UPPER(t.TableName) LIKE UPPER('%keyword%')
+  AND t.TableKind IN ('T', 'O')
+  {AND t.DatabaseName = 'specific_db'}
+ORDER BY t.DatabaseName, t.TableName
+SAMPLE {limit}
+```
+
+Notes:
+- `UPPER()` on both sides ensures case-insensitive matching regardless of session mode.
+- The `SAMPLE` clause is used for limiting results efficiently on Teradata.
+  When limit is 0 (unlimited), the SAMPLE clause is omitted entirely.
+- The `DatabaseName` filter is added conditionally only when `--database` is specified.
+- The LEFT JOIN with `DBC.TableSizeV` reuses the exact pattern from `list_tables()`.
+
+#### Column Search
+
+Queries `DBC.ColumnsV` for column metadata. Returns database, table, column name, data type,
+and nullable status.
+
+```sql
+SELECT TRIM(c.DatabaseName) AS database_name,
+       TRIM(c.TableName) AS table_name,
+       TRIM(c.ColumnName) AS column_name,
+       TRIM(c.ColumnType) AS column_type,
+       c.Nullable
+FROM DBC.ColumnsV c
+WHERE UPPER(c.ColumnName) LIKE UPPER('%keyword%')
+  {AND c.DatabaseName = 'specific_db'}
+ORDER BY c.DatabaseName, c.TableName, c.ColumnName
+SAMPLE {limit}
+```
+
+Notes:
+- `DBC.ColumnsV` is a standard Teradata system view available on all supported versions.
+- `ColumnType` is a CHAR(2) code (e.g., 'CV' for VARCHAR, 'I' for INTEGER). The implementation
+  maps these codes to human-readable type names using the same mapping used in `inspect.rs`.
+- `Nullable` is a CHAR(1) field: 'Y' for nullable, 'N' for not nullable.
+
+### Data Structures
+
+```rust
+// src/commands/search.rs
+
+/// A table found by cross-database search
+struct TableSearchResult {
+    database: String,
+    table_name: String,
+    kind: String,          // "TABLE" or "NoPI"
+    row_count_display: String,
+    row_count_raw: Option<i64>,
+    size_display: String,
+    size_bytes: Option<i64>,
+    owner: String,
+}
+
+/// A column found by cross-database search
+struct ColumnSearchResult {
+    database: String,
+    table_name: String,
+    column_name: String,
+    column_type: String,   // Human-readable type name
+    nullable: String,      // "Y" or "N"
+}
+```
+
+### Implementation Module
+
+```rust
+// src/commands/search.rs
+
+/// Execute `tq search` in batch mode with format selection
+pub fn execute<W: Write>(
+    client: &DatabaseClient,
+    object_type: SearchObjectType,
+    keyword: &str,
+    database: Option<&str>,
+    limit: usize,
+    format: OutputFormat,
+    writer: &mut W,
+    _use_color: bool,
+) -> Result<()> {
+    match object_type {
+        SearchObjectType::Tables => {
+            search_tables(client, keyword, database, limit, format, writer)
+        }
+        SearchObjectType::Columns => {
+            search_columns(client, keyword, database, limit, format, writer)
+        }
+    }
+}
+
+/// Execute /search in REPL mode (table format, with extra spacing)
+pub fn execute_for_repl<W: Write>(
+    client: &DatabaseClient,
+    subcommand: &str,
+    keyword: &str,
+    database: Option<&str>,
+    writer: &mut W,
+) -> Result<()> {
+    writeln!(writer)?;
+    match subcommand {
+        "tables" | "table" | "t" => {
+            search_tables(client, keyword, database, 100, OutputFormat::Table, writer)?;
+        }
+        "columns" | "column" | "c" => {
+            search_columns(client, keyword, database, 100, OutputFormat::Table, writer)?;
+        }
+        _ => {
+            writeln!(writer, "Error: Unknown search subcommand: {}", subcommand)?;
+            writeln!(writer, "Available: tables, columns")?;
+        }
+    }
+    writeln!(writer)?;
+    Ok(())
+}
+```
+
+The function signatures mirror the `list.rs` pattern: a batch `execute()` with full format
+support and an `execute_for_repl()` that defaults to table format with REPL-style spacing.
+
+### Output Formats
+
+All four output formats are supported, following the established per-command rendering pattern.
+
+**Table format (table search):**
+```
+Search results for "emp" (3 matches):
+Database                       Table                          Type     Rows (Est.)      Size Owner
+----------------------------------------------------------------------------------------------------
+hr_db                          employees                      TABLE          15000    2.5 MB admin
+hr_db                          emp_history                    TABLE           5200  800.0 KB admin
+finance_db                     temp_emp_data                  NoPI             120   12.0 KB etl_user
+
+3 result(s)
+```
+
+**Table format (column search):**
+```
+Search results for "salary" (2 matches):
+Database                       Table                          Column                         Type            Null
+------------------------------------------------------------------------------------------------------------------
+hr_db                          employees                      base_salary                    DECIMAL(10,2)   Y
+hr_db                          employees                      salary_date                    DATE            N
+
+2 result(s)
+```
+
+**JSON format:**
+```json
+{"ok":true,"row_count":3,"data":[{"database":"hr_db","name":"employees","type":"TABLE","estimated_rows":15000,"size_bytes":2621440,"owner":"admin"},{"database":"hr_db","name":"emp_history","type":"TABLE","estimated_rows":5200,"size_bytes":819200,"owner":"admin"}]}
+```
+
+The JSON envelope follows the standard `{"ok": true, "row_count": N, "data": [...]}` contract.
+For table search, JSON keys are: `database`, `name`, `type`, `estimated_rows`, `size_bytes`, `owner`.
+For column search, JSON keys are: `database`, `table`, `column`, `type`, `nullable`.
+
+**CSV format:** Standard header row followed by data rows, using the same `csv_escape()` helper.
+
+**Markdown format:** Pipe-delimited table with alignment indicators, using the same `|` escaping pattern.
+
+### REPL Integration
+
+#### Metacommand Dispatch
+
+In `src/commands/repl/metacommands.rs`, add a `"search"` arm to `handle_metacommand_with_state()`:
+
+```rust
+"search" => {
+    if args.is_empty() {
+        writeln!(writer)?;
+        writeln!(writer, "Usage: /search <subcommand> <keyword>")?;
+        writeln!(writer)?;
+        writeln!(writer, "Subcommands:")?;
+        writeln!(writer, "  tables <keyword>    Search tables by name across databases")?;
+        writeln!(writer, "  columns <keyword>   Search columns by name across databases")?;
+        writeln!(writer)?;
+        writeln!(writer, "Examples:")?;
+        writeln!(writer, "  /search tables emp")?;
+        writeln!(writer, "  /search columns salary")?;
+        writeln!(writer)?;
+    } else {
+        let subcommand = args[0];
+        let keyword = if args.len() > 1 { args[1] } else { "" };
+        if keyword.is_empty() {
+            writeln!(writer, "Error: Missing keyword.")?;
+            writeln!(writer, "Usage: /search {} <keyword>", subcommand)?;
+        } else {
+            crate::commands::search::execute_for_repl(
+                completion_state.client(),
+                subcommand,
+                keyword,
+                None,  // REPL search always cross-database
+                writer,
+            )?;
+        }
+    }
+}
+```
+
+#### Tab Completion
+
+Add entries to the `METACOMMANDS` array in `src/commands/repl/metadata_completer.rs`:
+
+```rust
+MetacommandDef {
+    name: "search tables",
+    aliases: &[],
+    description: "Search tables by name across databases",
+},
+MetacommandDef {
+    name: "search columns",
+    aliases: &[],
+    description: "Search columns by name across databases",
+},
+```
+
+This follows the same two-word metacommand pattern used by `"list databases"`, `"list tables"`,
+and `"list views"`.
+
+#### Help Text
+
+Update `print_help_extended()` to include search commands in the "Schema Inspection" section:
+
+```
+  /search tables <kw>  Search tables by name across databases
+  /search columns <kw> Search columns by name across databases
+```
+
+### Agent-Safe Mode Compatibility
+
+Search commands are read-only SELECT queries against DBC system views. They are inherently
+safe for agent mode and require no special handling. The existing agent-safe SQL classification
+logic in `src/sql/classifier.rs` will correctly identify these as safe SELECT statements since
+the SQL is constructed internally (not user-supplied).
+
+### Performance Considerations
+
+**Cross-database queries on large systems:** `DBC.TablesV` and `DBC.ColumnsV` are system views
+that Teradata optimizes for metadata access. The LIKE predicate with a leading wildcard
+(`%keyword%`) prevents index usage on TableName/ColumnName, but this is acceptable because:
+
+1. Metadata views are typically small relative to data tables.
+2. The SAMPLE clause limits result set size.
+3. Cross-database discovery is an inherently broad operation.
+
+**The `--limit` default of 100** prevents accidental large result sets. Users can increase
+with `--limit 500` or disable with `--limit 0`.
+
+**Size join overhead:** The LEFT JOIN with `DBC.TableSizeV` for table search adds overhead
+but provides valuable size and row count information. This is the same pattern used by
+`tq list tables` and has proven acceptable in practice.
+
+### Error Handling
+
+- **No results:** Print a "No results found" message and return success (exit code 0).
+  JSON format returns `{"ok":true,"row_count":0,"data":[]}`.
+- **Permission errors:** If the user lacks SELECT on DBC views, the Teradata error propagates
+  through the standard error handling path with a clear error message.
+- **Empty keyword:** Validated at the CLI level by clap (keyword is a required positional arg).
+  In REPL mode, handled explicitly with a usage hint.
+
+### Code Linkage
+
+| Component | File | Key Types / Functions |
+|-----------|------|-----------------------|
+| CLI args | `src/cli.rs` | `SearchArgs`, `SearchObjectType`, `Command::Search` |
+| Command dispatch | `src/main.rs` | `run()` match arm |
+| Module export | `src/commands/mod.rs` | `pub mod search` |
+| Implementation | `src/commands/search.rs` | `execute()`, `execute_for_repl()`, `search_tables()`, `search_columns()` |
+| REPL metacommand | `src/commands/repl/metacommands.rs` | `"search"` arm in `handle_metacommand_with_state()` |
+| Tab completion | `src/commands/repl/metadata_completer.rs` | `MetacommandDef` entries for search |
+| REPL help | `src/commands/repl/metacommands.rs` | `print_help_extended()` update |
+| SQL escaping | `src/sql/identifiers.rs` | `escape_sql_string()` for keyword sanitization |
+| Format helpers | `src/commands/format_helpers.rs` | `json_escape()`, `csv_escape()`, `format_size()` |
+
 ## Future Enhancements
 
 - **Config file flag**: `--config <path>` to override default config location

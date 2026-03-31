@@ -295,6 +295,15 @@ pub enum Command {
     ///          tq list views --database mydb
     List(ListArgs),
 
+    /// Search for database objects across all databases
+    ///
+    /// Find tables or columns by keyword across all accessible databases.
+    /// Useful for discovery when exact object names are unknown.
+    ///
+    /// Example: tq search tables emp
+    ///          tq search columns salary --database hr
+    Search(SearchArgs),
+
     /// Show index information for a table
     ///
     /// Displays index names, types, columns, and positions from DBC.IndicesV.
@@ -355,6 +364,7 @@ impl Command {
             Command::QueryInspect(a) => Some(a.format),
             Command::Inspect(a) => Some(a.format),
             Command::List(a) => Some(a.format),
+            Command::Search(a) => Some(a.format),
             Command::ShowIndexes(a) => Some(a.format),
             Command::Abort(a) => Some(a.format),
             Command::Explain(a) => Some(a.format),
@@ -777,6 +787,54 @@ pub enum ListObjectType {
     Tables,
     /// List views in a database
     Views,
+}
+
+/// Arguments for the search command
+#[derive(Parser, Debug)]
+pub struct SearchArgs {
+    /// Type of objects to search for
+    #[arg(value_name = "TYPE")]
+    pub object_type: SearchObjectType,
+
+    /// Search keyword (case-insensitive substring match)
+    #[arg(value_name = "KEYWORD")]
+    pub keyword: String,
+
+    /// Restrict search to a specific database
+    #[arg(short, long, value_name = "DB")]
+    pub database: Option<String>,
+
+    /// Output format
+    ///
+    /// table: Human-readable listing (default)
+    /// json: JSON array of objects
+    /// csv: Comma-separated values
+    /// markdown/md: GitHub-Flavored Markdown table
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Maximum number of results (default: 100, 0 for unlimited)
+    #[arg(short = 'n', long, value_name = "N")]
+    pub limit: Option<usize>,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Types of objects that can be searched
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SearchObjectType {
+    /// Search for tables by name
+    Tables,
+    /// Search for columns by name
+    Columns,
 }
 
 /// Arguments for the show-indexes command

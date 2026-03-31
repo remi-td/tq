@@ -18,6 +18,7 @@
    - [inspect - Inspect a Database Object](#inspect---inspect-a-database-object)
    - [describe - Describe Table Structure](#describe---describe-table-structure)
    - [list - List Database Objects](#list---list-database-objects)
+   - [search - Search Across Databases](#search---search-across-databases)
    - [show-indexes - Show Table Index Structure](#show-indexes---show-table-index-structure)
    - [profiles - List Connection Profiles](#profiles---list-connection-profiles)
    - [profile - Manage Connection Profiles](#profile---manage-connection-profiles)
@@ -56,6 +57,7 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 - `inspect` - Comprehensive inspection of a database object (type, columns, indexes, size, dependencies)
 - `describe` - Show column structure and indexes for a table or view
 - `list` - List database objects: `databases`, `tables [pattern]`, `views`
+- `search` - Search for objects across all accessible databases: `tables <keyword>`, `columns <keyword>`
 - `show-indexes` - Show index structure for a table
 - `profiles` - List connection profiles
 - `profile` - Manage connection profiles (add, edit, delete, list)
@@ -2041,6 +2043,380 @@ tq --profile prod list tables --format csv --output tables-$(date +%Y%m%d).csv
 - Execute `tq list` with no subcommand and verify usage help is shown with exit code 2
 - Execute `tq list unknown_sub` and verify `Error: Unknown list subcommand: unknown_sub` message with exit code 2
 - Execute `tq list databases --output db-list.txt` and verify file is created
+
+---
+
+### search - Search Across Databases
+
+**Purpose**: Search for tables or columns by keyword across all accessible databases. Unlike `tq list tables`, which lists objects within a single database, `search` queries the entire system catalog and returns matching objects regardless of which database they belong to. This is the primary discovery tool when users or agents do not know which database contains the objects they are looking for.
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] search <SUBCOMMAND> [OPTIONS] <KEYWORD>
+```
+
+**Subcommands**:
+| Subcommand | Arguments | Description |
+|------------|-----------|-------------|
+| `tables` | `<keyword>` | Search for tables whose name contains the keyword, across all accessible databases |
+| `columns` | `<keyword>` | Search for columns whose name contains the keyword, across all accessible tables and databases |
+
+**Options** (shared across all subcommands):
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv`, `md` |
+| `--output` | `-o` | path | stdout | Write output to file |
+| `--database` | `-d` | string | (all databases) | Scope search to a single database |
+
+**Key Distinction from `list`**:
+- `tq list tables` — lists objects in **one** database (current or `--database`)
+- `tq search tables <keyword>` — searches for objects **across all** databases, filtered by a name keyword
+
+**Keyword Matching**:
+The keyword argument is matched against object names using SQL `LIKE` with automatic leading and trailing wildcards. A keyword of `emp` is equivalent to the SQL pattern `%emp%`. The match is case-insensitive.
+
+- `emp` — matches `employees`, `temp_emp`, `emp_archive`, `dept_emp_map`
+- `salary` — matches `salary`, `base_salary`, `salary_history`
+- `2024` — matches `sales_2024_q1`, `archive_2024`
+
+Users who need exact-prefix or exact-suffix matching should use `tq list tables` with a glob pattern instead.
+
+**Examples**:
+```bash
+# Search for tables containing "emp" anywhere in the name, across all databases
+tq search tables emp
+
+# Search tables in a specific database only
+tq search tables emp --database production
+
+# Search for columns named like "salary" across all databases
+tq search columns salary
+
+# Search for columns in a specific database
+tq search columns salary --database hr
+
+# JSON output (uses standard envelope) for agent/scripting use
+tq search tables emp --format json
+
+# CSV output for spreadsheet analysis
+tq search columns id --format csv --output columns.csv
+
+# Markdown output for documentation
+tq search tables order --format md
+
+# Pipe to jq to filter by database
+tq search tables emp --format json | jq '.data[] | select(.database == "production")'
+
+# Using a connection profile
+tq --profile prod search tables customer
+```
+
+---
+
+#### search tables
+
+**Purpose**: Find tables whose names match a keyword, across all accessible databases (or one database when `--database` is specified).
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] search tables [OPTIONS] <KEYWORD>
+```
+
+**Arguments**:
+- `<KEYWORD>`: Required. A plain string. Automatically wrapped as `%keyword%` for SQL LIKE matching. Case-insensitive.
+
+**Output Columns**:
+| Column | Description |
+|--------|-------------|
+| Database | Database that contains the table |
+| Table | Table name |
+| Type | Object kind: `TABLE`, `TABLE (NoPI)` |
+| Rows (Est.) | Estimated row count (human-readable) |
+| Size | Estimated storage size (human-readable) |
+
+**Sorting**: Results are sorted first by Database name (ascending), then by Table name (ascending).
+
+**Output — Table Format**:
+```
+Search results for tables matching 'emp' (3 found):
+Database             Table                      Type         Rows (Est.)     Size
+---------------------------------------------------------------------------------
+analytics            emp_summary                TABLE             12,400    1.2 MB
+hr                   employees                  TABLE             42,573    2.1 MB
+staging              emp_archive                TABLE              8,123   512 KB
+
+3 table(s) found
+```
+
+**Output — Table Format (with --database)**:
+```
+Search results for tables matching 'emp' in database 'hr' (1 found):
+Database             Table                      Type         Rows (Est.)     Size
+---------------------------------------------------------------------------------
+hr                   employees                  TABLE             42,573    2.1 MB
+
+1 table(s) found
+```
+
+**Output — Table Format (no results)**:
+```
+No tables found matching 'emp'.
+```
+
+**Output — JSON Format**:
+
+JSON output uses the standard envelope: `{"ok": true, "row_count": N, "data": [...]}`.
+
+```json
+{
+  "ok": true,
+  "row_count": 3,
+  "data": [
+    { "database": "analytics", "table": "emp_summary",  "type": "TABLE", "rows_est": "12400",  "size": "1.2 MB"  },
+    { "database": "hr",        "table": "employees",    "type": "TABLE", "rows_est": "42573",  "size": "2.1 MB"  },
+    { "database": "staging",   "table": "emp_archive",  "type": "TABLE", "rows_est": "8123",   "size": "512 KB"  }
+  ]
+}
+```
+
+When no results are found:
+```json
+{
+  "ok": true,
+  "row_count": 0,
+  "data": []
+}
+```
+
+**Output — CSV Format**:
+```csv
+Database,Table,Type,RowsEst,Size
+analytics,emp_summary,TABLE,12400,1.2 MB
+hr,employees,TABLE,42573,2.1 MB
+staging,emp_archive,TABLE,8123,512 KB
+```
+
+**Output — Markdown Format**:
+```markdown
+| Database  | Table        | Type  | Rows (Est.) | Size   |
+|-----------|--------------|-------|-------------|--------|
+| analytics | emp_summary  | TABLE | 12,400      | 1.2 MB |
+| hr        | employees    | TABLE | 42,573      | 2.1 MB |
+| staging   | emp_archive  | TABLE | 8,123       | 512 KB |
+```
+
+---
+
+#### search columns
+
+**Purpose**: Find columns whose names match a keyword, across all accessible tables and databases (or one database when `--database` is specified).
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] search columns [OPTIONS] <KEYWORD>
+```
+
+**Arguments**:
+- `<KEYWORD>`: Required. A plain string. Automatically wrapped as `%keyword%` for SQL LIKE matching. Case-insensitive.
+
+**Output Columns**:
+| Column | Description |
+|--------|-------------|
+| Database | Database that contains the parent table |
+| Table | Table that contains the column |
+| Column | Column name |
+| Type | Teradata data type (e.g., `INTEGER`, `VARCHAR(100)`, `DECIMAL(10,2)`) |
+| Nullable | Whether the column accepts NULL: `YES` or `NO` |
+
+**Sorting**: Results are sorted first by Database name (ascending), then by Table name (ascending), then by Column name (ascending).
+
+**Output — Table Format**:
+```
+Search results for columns matching 'salary' (4 found):
+Database     Table               Column               Type              Nullable
+--------------------------------------------------------------------------------
+hr           employees           salary               DECIMAL(10,2)     YES
+hr           salary_bands        base_salary          DECIMAL(12,2)     NO
+hr           salary_bands        max_salary           DECIMAL(12,2)     NO
+payroll      payroll_history     gross_salary         DECIMAL(12,2)     YES
+
+4 column(s) found
+```
+
+**Output — Table Format (with --database)**:
+```
+Search results for columns matching 'salary' in database 'hr' (3 found):
+Database     Table               Column               Type              Nullable
+--------------------------------------------------------------------------------
+hr           employees           salary               DECIMAL(10,2)     YES
+hr           salary_bands        base_salary          DECIMAL(12,2)     NO
+hr           salary_bands        max_salary           DECIMAL(12,2)     NO
+
+3 column(s) found
+```
+
+**Output — Table Format (no results)**:
+```
+No columns found matching 'salary'.
+```
+
+**Output — JSON Format**:
+
+JSON output uses the standard envelope: `{"ok": true, "row_count": N, "data": [...]}`.
+
+```json
+{
+  "ok": true,
+  "row_count": 4,
+  "data": [
+    { "database": "hr",      "table": "employees",       "column": "salary",       "type": "DECIMAL(10,2)", "nullable": "YES" },
+    { "database": "hr",      "table": "salary_bands",    "column": "base_salary",  "type": "DECIMAL(12,2)", "nullable": "NO"  },
+    { "database": "hr",      "table": "salary_bands",    "column": "max_salary",   "type": "DECIMAL(12,2)", "nullable": "NO"  },
+    { "database": "payroll", "table": "payroll_history", "column": "gross_salary", "type": "DECIMAL(12,2)", "nullable": "YES" }
+  ]
+}
+```
+
+When no results are found:
+```json
+{
+  "ok": true,
+  "row_count": 0,
+  "data": []
+}
+```
+
+**Output — CSV Format**:
+```csv
+Database,Table,Column,Type,Nullable
+hr,employees,salary,DECIMAL(10_2),YES
+hr,salary_bands,base_salary,DECIMAL(12_2),NO
+hr,salary_bands,max_salary,DECIMAL(12_2),NO
+payroll,payroll_history,gross_salary,DECIMAL(12_2),YES
+```
+
+Note: Parentheses in type strings (e.g., `DECIMAL(10,2)`) are preserved in CSV and JSON output. The underscore shown above is for illustration only; the actual output preserves the exact Teradata type string.
+
+**Output — Markdown Format**:
+```markdown
+| Database | Table           | Column       | Type          | Nullable |
+|----------|-----------------|--------------|---------------|----------|
+| hr       | employees       | salary       | DECIMAL(10,2) | YES      |
+| hr       | salary_bands    | base_salary  | DECIMAL(12,2) | NO       |
+| hr       | salary_bands    | max_salary   | DECIMAL(12,2) | NO       |
+| payroll  | payroll_history | gross_salary | DECIMAL(12,2) | YES      |
+```
+
+---
+
+#### search — Behavior Requirements
+
+1. **REQ-SEARCH-001**: The `search` command SHALL require both a subcommand (`tables`, `columns`) and a keyword argument. Invoking `tq search` with no subcommand SHALL print subcommand help and exit with code 2. Invoking with an unknown subcommand SHALL print `Error: Unknown search subcommand: <name>` followed by available subcommands and exit with code 2.
+2. **REQ-SEARCH-002**: The keyword argument is REQUIRED. Invoking a subcommand without a keyword SHALL print `Error: Missing required argument: <keyword>` with usage guidance and exit with code 2.
+3. **REQ-SEARCH-003**: `search tables` data source: `DBC.TablesV WHERE TableKind IN ('T', 'O')` joined with `DBC.TableSizeV` for size and row estimates. The `TableName` column is filtered using `LIKE '%<keyword>%'` (case-insensitive). Both `DatabaseName` and `TableName` are returned.
+4. **REQ-SEARCH-004**: `search columns` data source: `DBC.ColumnsV` joined with `DBC.TablesV WHERE TableKind IN ('T', 'O', 'V')`. The `ColumnName` column is filtered using `LIKE '%<keyword>%'` (case-insensitive). `DatabaseName`, `TableName`, `ColumnName`, `ColumnType`, and `Nullable` are returned.
+5. **REQ-SEARCH-005**: When `--database <db>` is provided, the search is scoped to the specified database by adding `AND DatabaseName = '<db>'` to the query predicate. Without `--database`, all accessible databases are searched.
+6. **REQ-SEARCH-006**: Results SHALL be sorted by `DatabaseName ASC, TableName ASC` for `search tables`, and by `DatabaseName ASC, TableName ASC, ColumnName ASC` for `search columns`.
+7. **REQ-SEARCH-007**: When a subcommand returns no results, a `No tables found matching '<keyword>'.` or `No columns found matching '<keyword>'.` message SHALL be displayed and the command SHALL exit with code 0 (not an error).
+8. **REQ-SEARCH-008**: In JSON format, both search subcommands use the standard envelope: `{"ok": true, "row_count": N, "data": [...]}`. An empty result returns `{"ok": true, "row_count": 0, "data": []}`.
+9. **REQ-SEARCH-009**: Size and row-count values follow the same human-readable string formatting as `tq list tables` (e.g., `2.1 MB`, `42,573`). In JSON and CSV, `rows_est` and `size` are strings matching the display format.
+10. **REQ-SEARCH-010**: The `search` command is safe for use with `--agent-safe` mode. Both subcommands execute read-only queries against system catalog views and perform no data modification.
+11. **REQ-SEARCH-011**: The `--format` and `--output` flags follow the same semantics as all other tq commands (see [Flag Design Guidelines](#flag-design-guidelines)). The `md` (Markdown) format is supported in addition to `table`, `json`, and `csv`.
+12. **REQ-SEARCH-012**: Object types returned by `search tables` SHALL use the same display labels as `tq list tables`: `TABLE` for `TableKind = 'T'`, `TABLE (NoPI)` for `TableKind = 'O'`.
+
+**Error Handling**:
+
+**Unknown Subcommand**:
+```
+Error: Unknown subcommand 'macros'
+Usage: tq search <tables|columns> [OPTIONS] <KEYWORD>
+
+Available subcommands:
+  tables    Search for tables by name keyword, across all databases
+  columns   Search for columns by name keyword, across all databases
+
+Exit code: 2
+```
+
+**Missing Keyword**:
+```
+Error: Missing required argument: <keyword>
+Usage: tq search tables [OPTIONS] <KEYWORD>
+
+Example:
+  tq search tables emp
+  tq search tables emp --database production
+
+Exit code: 2
+```
+
+**Missing Subcommand**:
+```
+Usage: tq search <tables|columns> [OPTIONS] <KEYWORD>
+
+Available subcommands:
+  tables    Search for tables by name keyword, across all databases
+  columns   Search for columns by name keyword, across all databases
+
+Exit code: 2
+```
+
+**Insufficient Privileges**:
+```
+Error: Unable to search tables.
+Reason: SELECT permission denied on DBC.TablesV.
+
+Contact your DBA to request access:
+  GRANT SELECT ON DBC.TablesV TO <your_username>;
+  GRANT SELECT ON DBC.TableSizeV TO <your_username>;
+
+Exit code: 1
+```
+
+**Exit Codes**:
+- `0`: Search completed successfully (including zero results)
+- `1`: Query error (privilege denied, connection failed, system view unavailable)
+- `2`: Usage error (missing subcommand, missing keyword, unknown subcommand, invalid flag value)
+
+**Integration with Scripting**:
+```bash
+# Find all tables containing "customer" across all databases, output as JSON
+tq search tables customer --format json
+
+# Scope to production and pipe to jq
+tq search tables order --database production --format json | jq '.data[].table'
+
+# Find all columns named like "id" and export to CSV for auditing
+tq search columns _id --format csv --output id-columns.csv
+
+# Count how many databases expose a "salary" column
+tq search columns salary --format json | jq '[.data[].database] | unique | length'
+
+# Use with a profile for production scanning
+tq --profile prod search tables temp --format json | jq '.data | length'
+
+# Find all tables that might be staging/temp tables across all databases
+tq search tables temp_ --format json | jq '.data[] | "\(.database).\(.table)"'
+```
+
+**Acceptance Tests**:
+- Execute `tq search tables emp` and verify table output with Database, Table, Type, Rows (Est.), Size columns; results from multiple databases shown
+- Execute `tq search tables emp --database hr` and verify only tables in the `hr` database appear
+- Execute `tq search tables emp --format json` and verify JSON envelope `{"ok": true, "row_count": N, "data": [...]}` with keys `database`, `table`, `type`, `rows_est`, `size`
+- Execute `tq search tables emp --format csv` and verify CSV with `Database,Table,Type,RowsEst,Size` header
+- Execute `tq search tables emp --format md` and verify Markdown table output
+- Execute `tq search tables xyz_nonexistent_xyz` and verify `No tables found matching 'xyz_nonexistent_xyz'.` with exit code 0
+- Execute `tq search tables emp --format json` with no matching results and verify `{"ok": true, "row_count": 0, "data": []}`
+- Execute `tq search columns salary` and verify table output with Database, Table, Column, Type, Nullable columns
+- Execute `tq search columns salary --database hr` and verify only columns in the `hr` database appear
+- Execute `tq search columns salary --format json` and verify JSON envelope with keys `database`, `table`, `column`, `type`, `nullable`
+- Execute `tq search columns salary --format csv` and verify CSV with `Database,Table,Column,Type,Nullable` header
+- Execute `tq search columns xyz_nonexistent_xyz` and verify `No columns found matching 'xyz_nonexistent_xyz'.` with exit code 0
+- Execute `tq search` with no subcommand and verify usage help with exit code 2
+- Execute `tq search tables` with no keyword and verify `Error: Missing required argument: <keyword>` with exit code 2
+- Execute `tq search unknown_sub emp` and verify `Error: Unknown subcommand 'unknown_sub'` with exit code 2
+- Verify results are sorted: database ascending, then table ascending
+- Execute `tq search tables emp --output results.txt` and verify file is created
 
 ---
 

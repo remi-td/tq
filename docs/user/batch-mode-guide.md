@@ -1755,6 +1755,175 @@ tq --profile prod list tables --format csv --output tables-$(date +%Y%m%d).csv
 
 ---
 
+##### `tq search` — Find Tables or Columns Across All Databases
+
+Use `tq search` when you do not know which database contains the object you are looking for. Unlike `tq list tables`, which works within a single database, `tq search` queries the system catalog across all accessible databases and returns every matching object along with its owning database.
+
+**Usage:**
+```bash
+tq [GLOBAL_OPTIONS] search <tables|columns> [OPTIONS] <KEYWORD>
+```
+
+**Key distinction from `tq list`:**
+- `tq list tables` — lists objects inside **one** database (the logon database or `--database`)
+- `tq search tables <keyword>` — finds objects **across all** databases whose name contains `keyword`
+
+**Keyword matching** is case-insensitive and automatic: a keyword of `emp` matches any name containing `emp` anywhere — `employees`, `temp_emp`, `emp_archive`, `dept_emp_map`. Results are capped at 100 by default.
+
+```bash
+# Find all tables containing "emp" across every database
+tq search tables emp
+
+# Find tables whose name contains "emp" in one specific database
+tq search tables emp --database hr
+
+# Find all columns containing "salary" across every table and database
+tq search columns salary
+
+# Scope column search to a single database
+tq search columns salary --database hr
+
+# JSON output for scripting — uses standard {"ok":true,"row_count":N,"data":[...]} envelope
+tq search tables emp --format json
+
+# CSV output for spreadsheet analysis
+tq search columns id --format csv --output columns.csv
+
+# Markdown output for documentation or reports
+tq search tables order --format md
+
+# Pipe JSON through jq to filter by database
+tq search tables emp --format json | jq '.data[] | select(.database == "production")'
+
+# Using a connection profile
+tq --profile prod search tables customer
+```
+
+**Options:**
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--format` | `-f` | `table` | Output format: `table`, `json`, `csv`, `md` |
+| `--output` | `-o` | stdout | Write output to file |
+| `--database` | `-d` | (all databases) | Scope search to one database |
+
+**`tq search tables` — example output (table format):**
+
+```
+Search results for tables matching 'emp' (3 found):
+Database             Table                      Type         Rows (Est.)     Size
+---------------------------------------------------------------------------------
+analytics            emp_summary                TABLE             12,400    1.2 MB
+hr                   employees                  TABLE             42,573    2.1 MB
+staging              emp_archive                TABLE              8,123   512 KB
+
+3 table(s) found
+```
+
+Results are sorted first by Database name, then by Table name. The `Type` column shows `TABLE` for standard tables and `TABLE (NoPI)` for tables with no primary index. `Rows (Est.)` and `Size` show `-` when statistics have not been collected.
+
+**`tq search tables` with `--database` — example output:**
+
+```
+Search results for tables matching 'emp' in database 'hr' (1 found):
+Database             Table                      Type         Rows (Est.)     Size
+---------------------------------------------------------------------------------
+hr                   employees                  TABLE             42,573    2.1 MB
+
+1 table(s) found
+```
+
+**`tq search tables` — no results:**
+
+```
+No tables found matching 'xyz_nonexistent'.
+```
+
+**`tq search columns` — example output (table format):**
+
+```
+Search results for columns matching 'salary' (4 found):
+Database             Table                      Column               Type               Nullable
+------------------------------------------------------------------------------------------------
+hr                   employees                  salary               DECIMAL(10,2)      YES
+hr                   salary_bands               base_salary          DECIMAL(12,2)      NO
+hr                   salary_bands               max_salary           DECIMAL(12,2)      NO
+payroll              payroll_history            gross_salary         DECIMAL(12,2)      YES
+
+4 column(s) found
+```
+
+Results are sorted by Database, then Table, then Column name. The `Type` column shows the full Teradata data type. The `Nullable` column shows `YES` or `NO`.
+
+**JSON output structure:**
+
+`tq search` uses the standard tq JSON envelope. For tables:
+```json
+{
+  "ok": true,
+  "row_count": 3,
+  "data": [
+    { "database": "analytics", "table": "emp_summary",  "type": "TABLE", "rows_est": "12400",  "size": "1.2 MB"  },
+    { "database": "hr",        "table": "employees",    "type": "TABLE", "rows_est": "42573",  "size": "2.1 MB"  },
+    { "database": "staging",   "table": "emp_archive",  "type": "TABLE", "rows_est": "8123",   "size": "512 KB"  }
+  ]
+}
+```
+
+For columns:
+```json
+{
+  "ok": true,
+  "row_count": 4,
+  "data": [
+    { "database": "hr",      "table": "employees",       "column": "salary",       "type": "DECIMAL(10,2)", "nullable": "YES" },
+    { "database": "hr",      "table": "salary_bands",    "column": "base_salary",  "type": "DECIMAL(12,2)", "nullable": "NO"  },
+    { "database": "hr",      "table": "salary_bands",    "column": "max_salary",   "type": "DECIMAL(12,2)", "nullable": "NO"  },
+    { "database": "payroll", "table": "payroll_history", "column": "gross_salary", "type": "DECIMAL(12,2)", "nullable": "YES" }
+  ]
+}
+```
+
+When there are no results, `row_count` is `0` and `data` is an empty array.
+
+**CSV output structure:**
+
+For tables: `Database,Table,Type,RowsEst,Size`
+For columns: `Database,Table,Column,Type,Nullable`
+
+**Scripting examples:**
+
+```bash
+# Find all order-related tables across every environment and count them
+for profile in dev staging prod; do
+  count=$(tq --profile "$profile" search tables order --format json | jq '.row_count')
+  echo "$profile: $count tables matching 'order'"
+done
+
+# Find every table containing "customer" and save as CSV inventory
+tq search tables customer --format csv --output customer-tables.csv
+
+# Find all columns named like "id" and filter to only non-nullable ones
+tq search columns id --format json | \
+  jq -r '.data[] | select(.nullable == "NO") | "\(.database).\(.table).\(.column)"'
+
+# Locate which database owns the "payroll_history" table
+tq search tables payroll_history --format json | jq -r '.data[0].database'
+
+# Discover all decimal salary columns for a schema audit
+tq search columns salary --format json | \
+  jq -r '.data[] | select(.type | startswith("DECIMAL")) | "\(.database).\(.table).\(.column) \(.type)"'
+```
+
+**When to use `tq search` vs `tq list`:**
+- Use `tq search` when you do not know which database owns the object
+- Use `tq list tables` when you already know the database and want to browse its full contents
+- Use `tq search` with `--database` as a targeted filter within a known database
+
+**Cross-reference:** For interactive use, see `/search` in the REPL Guide.
+
+---
+
 ##### `tq show-indexes` — Table Index Structure
 
 Display the complete index structure for a table — primary index type and columns, plus all secondary indexes:
@@ -1875,8 +2044,10 @@ done
 
 | Command | Shows | Use When |
 |---------|-------|----------|
-| `tq describe <table>` | Columns + indexes | You need column definitions |
-| `tq list tables` | Table inventory + sizes | You need a database inventory |
+| `tq describe <table>` | Columns + indexes | You need column definitions for a known table |
+| `tq list tables` | Table inventory + sizes | You need to browse a known database |
+| `tq search tables <keyword>` | Tables matching a keyword, with database | You do not know which database owns the table |
+| `tq search columns <keyword>` | Columns matching a keyword, across all databases | You are looking for a column by name |
 | `tq show-indexes <table>` | Index structure only | You are auditing indexes |
 | `tq inspect <object>` | Everything (type, columns, indexes, storage, deps) | You want the full picture |
 

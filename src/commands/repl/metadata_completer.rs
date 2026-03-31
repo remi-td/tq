@@ -283,6 +283,17 @@ const METACOMMANDS: &[MetacommandDef] = &[
         aliases: &["dv"],
         description: "List views in current database",
     },
+    // Sprint 55: Search commands for cross-database discovery
+    MetacommandDef {
+        name: "search tables",
+        aliases: &["sf"],
+        description: "Search tables by name across databases",
+    },
+    MetacommandDef {
+        name: "search columns",
+        aliases: &[],
+        description: "Search columns by name across databases",
+    },
     // Sprint 26: Sessions command
     MetacommandDef {
         name: "sessions",
@@ -417,6 +428,11 @@ fn complete_metacommands(prefix: &str, line_start: usize, cursor_pos: usize) -> 
         return complete_show_subcommands(&prefix_parts, line_start, cursor_pos);
     }
 
+    // Sprint 55: Check for /search subcommand completion
+    if !prefix_parts.is_empty() && prefix_parts[0] == "search" {
+        return complete_search_subcommands(&prefix_parts, line_start, cursor_pos);
+    }
+
     // Sprint 40: Check for /params subcommand completion
     if !prefix_parts.is_empty() && prefix_parts[0] == "params" {
         return complete_params_subcommands(&prefix_parts, line_start, cursor_pos);
@@ -510,6 +526,42 @@ fn complete_show_subcommands(
         if partial.is_empty() || name.starts_with(partial) {
             suggestions.push(Suggestion {
                 value: format!("/show {}", name),
+                description: Some(description.to_string()),
+                style: None,
+                extra: None,
+                span: reedline::Span {
+                    start: line_start,
+                    end: cursor_pos,
+                },
+                append_whitespace: true,
+            });
+        }
+    }
+
+    suggestions
+}
+
+/// Complete /search subcommands (tables, columns)
+///
+/// Sprint 55: Tab completion for /search subcommands.
+fn complete_search_subcommands(
+    parts: &[&str],
+    line_start: usize,
+    cursor_pos: usize,
+) -> Vec<Suggestion> {
+    let subcommands = [
+        ("tables", "Search tables by name across databases"),
+        ("columns", "Search columns by name across databases"),
+    ];
+
+    let partial = if parts.len() > 1 { parts[1] } else { "" };
+
+    let mut suggestions = Vec::new();
+
+    for (name, description) in subcommands {
+        if partial.is_empty() || name.starts_with(partial) {
+            suggestions.push(Suggestion {
+                value: format!("/search {}", name),
                 description: Some(description.to_string()),
                 style: None,
                 extra: None,

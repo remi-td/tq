@@ -485,6 +485,38 @@ pub fn handle_metacommand_with_state<W: Write>(
             execute_list(completion_state, &["views"], writer)?;
         }
 
+        // Sprint 55: Search command for cross-database discovery
+        "search" | "sf" => {
+            if args.is_empty() {
+                writeln!(writer)?;
+                writeln!(writer, "Usage: /search <subcommand> <keyword> [in <database>]")?;
+                writeln!(writer)?;
+                writeln!(writer, "Subcommands:")?;
+                writeln!(
+                    writer,
+                    "  tables <keyword>    Search tables by name across databases"
+                )?;
+                writeln!(
+                    writer,
+                    "  columns <keyword>   Search columns by name across databases"
+                )?;
+                writeln!(writer)?;
+                writeln!(writer, "Examples:")?;
+                writeln!(writer, "  /search tables emp")?;
+                writeln!(writer, "  /search columns salary")?;
+                writeln!(writer, "  /search tables emp in hr")?;
+                writeln!(writer, "  /search columns salary in hr")?;
+                writeln!(writer)?;
+                writeln!(writer, "Aliases: /sf (short for /search)")?;
+                writeln!(writer)?;
+            } else if args.len() < 2 {
+                writeln!(writer, "Error: Missing keyword.")?;
+                writeln!(writer, "Usage: /search <tables|columns> <keyword>")?;
+            } else {
+                execute_search(completion_state, &args, writer)?;
+            }
+        }
+
         // Sprint 26: Sessions command
         "sessions" => {
             crate::commands::sessions::execute_for_repl(completion_state.client(), writer)?;
@@ -823,9 +855,18 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
         writer,
         "  /show indexes <table>  Show index information"
     )?;
+    writeln!(
+        writer,
+        "  /search tables <kw>    Search tables by name across databases"
+    )?;
+    writeln!(
+        writer,
+        "  /search columns <kw>   Search columns by name across databases"
+    )?;
     writeln!(writer, "  /dt                    Shortcut for /list tables")?;
     writeln!(writer, "  /dv                    Shortcut for /list views")?;
     writeln!(writer, "  /di <table>            Shortcut for /show indexes")?;
+    writeln!(writer, "  /sf                    Shortcut for /search")?;
     writeln!(writer)?;
     writeln!(writer, "Data Exploration:")?;
     writeln!(
@@ -1067,6 +1108,44 @@ fn execute_list<W: Write>(
         &subcommand,
         pattern,
         None,
+        writer,
+    )?;
+
+    Ok(())
+}
+
+/// Execute the /search metacommand -- delegates to batch search module
+///
+/// Provides cross-database search commands:
+/// - /search tables <keyword> - Search tables by name
+/// - /search columns <keyword> - Search columns by name
+/// - /search tables <keyword> in <database> - Search within a specific database
+fn execute_search<W: Write>(
+    completion_state: &mut CompletionState,
+    args: &[&str],
+    writer: &mut W,
+) -> Result<()> {
+    if args.len() < 2 {
+        writeln!(writer, "Error: Missing keyword.")?;
+        writeln!(writer, "Usage: /search <tables|columns> <keyword>")?;
+        return Ok(());
+    }
+
+    let subcommand = args[0].to_lowercase();
+    let keyword = args[1];
+
+    // Parse optional "in <database>" suffix
+    let database = if args.len() >= 4 && args[2].eq_ignore_ascii_case("in") {
+        Some(args[3])
+    } else {
+        None
+    };
+
+    crate::commands::search::execute_for_repl(
+        completion_state.client(),
+        &subcommand,
+        keyword,
+        database,
         writer,
     )?;
 

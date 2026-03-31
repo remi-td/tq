@@ -18,6 +18,7 @@ pub mod query;
 pub mod query_inspect;
 pub mod repl;
 pub mod sample;
+pub mod search;
 pub mod sessions;
 pub mod show_indexes;
 pub mod skew;

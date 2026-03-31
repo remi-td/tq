@@ -418,6 +418,7 @@ tq> SELECT COUNT(*) FROM employees WHERE dept = 'IT';
 - `/ping` - Test connection
 - `/query` - Show current SQL query for a session
 - `/sample` - Show random sample
+- `/search` - Search for tables or columns by keyword across all databases
 - `/peek` - Show first rows and column info
 - `/export` - Export results
 - `/session` - Show session info
@@ -461,6 +462,7 @@ Available metacommands:
     /reconnect   Reconnect to database
     /repeat      Re-execute last query
     /sample      Show random sample
+    /search      Search for tables or columns by keyword across all databases
     /session     Show session info
     /sessions    List active Teradata sessions with performance metrics
     /set         Set configuration
@@ -2033,6 +2035,137 @@ Reason: Insufficient privileges to query system catalog
 - Execute `/list views` in database with views and verify all shown
 - Execute `/list views` in database without views and verify "No views found" message
 - Verify view definitions are truncated to reasonable length
+
+---
+
+**`/search` Metacommand**
+
+**Requirement:** Search for tables or columns by keyword across all accessible databases, without needing to know which database contains the target object. This is the discovery-oriented companion to `/list`, which operates within a single database. `/search` queries the system catalog globally and surfaces all matching objects along with their owning database.
+
+**Syntax:**
+```
+/search tables <keyword>           -- Search for tables matching keyword across all databases
+/search columns <keyword>          -- Search for columns matching keyword across all databases
+/search tables <keyword> in <db>   -- Scope table search to a specific database
+/search columns <keyword> in <db>  -- Scope column search to a specific database
+```
+
+**Keyword Matching:**
+The keyword is matched using SQL `LIKE '%<keyword>%'` (case-insensitive). A keyword of `emp` matches any table or column name that contains the string `emp` anywhere.
+
+**`/search tables` Output Format:**
+```
+tq> /search tables emp
+
+Search results for tables matching 'emp':
+┌─────────────────────┬──────────────────────┬───────────────┬──────────────┬─────────────┐
+│ Database            │ Table                │ Type          │ Rows (Est.)  │ Size        │
+├─────────────────────┼──────────────────────┼───────────────┼──────────────┼─────────────┤
+│ analytics           │ emp_summary          │ TABLE         │ 12,400       │ 1.2 MB      │
+│ hr                  │ employees            │ TABLE         │ 42,573       │ 2.1 MB      │
+│ staging             │ emp_archive          │ TABLE         │ 8,123        │ 512 KB      │
+└─────────────────────┴──────────────────────┴───────────────┴──────────────┴─────────────┘
+
+3 tables found matching 'emp'
+```
+
+**`/search tables` with database scope:**
+```
+tq> /search tables emp in hr
+
+Search results for tables matching 'emp' in database 'hr':
+┌─────────────────────┬──────────────────────┬───────────────┬──────────────┬─────────────┐
+│ Database            │ Table                │ Type          │ Rows (Est.)  │ Size        │
+├─────────────────────┼──────────────────────┼───────────────┼──────────────┼─────────────┤
+│ hr                  │ employees            │ TABLE         │ 42,573       │ 2.1 MB      │
+└─────────────────────┴──────────────────────┴───────────────┴──────────────┴─────────────┘
+
+1 table found matching 'emp' in database 'hr'
+```
+
+**`/search columns` Output Format:**
+```
+tq> /search columns salary
+
+Search results for columns matching 'salary':
+┌─────────────────────┬──────────────────────┬─────────────────────┬───────────────────┬──────────┐
+│ Database            │ Table                │ Column              │ Type              │ Nullable │
+├─────────────────────┼──────────────────────┼─────────────────────┼───────────────────┼──────────┤
+│ hr                  │ employees            │ salary              │ DECIMAL(10,2)     │ YES      │
+│ hr                  │ salary_bands         │ base_salary         │ DECIMAL(12,2)     │ NO       │
+│ hr                  │ salary_bands         │ max_salary          │ DECIMAL(12,2)     │ NO       │
+│ payroll             │ payroll_history      │ gross_salary        │ DECIMAL(12,2)     │ YES      │
+└─────────────────────┴──────────────────────┴─────────────────────┴───────────────────┴──────────┘
+
+4 columns found matching 'salary'
+```
+
+**No Results:**
+```
+tq> /search tables xyz_nonexistent
+
+No tables found matching 'xyz_nonexistent'.
+```
+
+**Missing Keyword:**
+```
+tq> /search tables
+
+Usage: /search tables <keyword>
+       /search columns <keyword>
+
+Example: /search tables emp
+         /search columns salary
+```
+
+**Unknown Subcommand:**
+```
+tq> /search macros emp
+
+Error: Unknown /search subcommand 'macros'
+Available: tables, columns
+```
+
+**Behavior Requirements:**
+
+1. **REQ-REPL-SEARCH-001**: The `/search` metacommand SHALL accept two subcommands: `tables` and `columns`. Invoking `/search` with no subcommand or an unknown subcommand SHALL display usage guidance (not an error exit).
+2. **REQ-REPL-SEARCH-002**: The keyword argument is REQUIRED for both subcommands. Invoking `/search tables` or `/search columns` without a keyword SHALL display usage guidance.
+3. **REQ-REPL-SEARCH-003**: `tables` subcommand data source: `DBC.TablesV WHERE TableKind IN ('T', 'O')` joined with `DBC.TableSizeV`. Filter: `TableName LIKE '%<keyword>%'` (case-insensitive). Columns displayed: Database, Table, Type, Rows (Est.), Size.
+4. **REQ-REPL-SEARCH-004**: `columns` subcommand data source: `DBC.ColumnsV` joined with `DBC.TablesV WHERE TableKind IN ('T', 'O', 'V')`. Filter: `ColumnName LIKE '%<keyword>%'` (case-insensitive). Columns displayed: Database, Table, Column, Type, Nullable.
+5. **REQ-REPL-SEARCH-005**: The optional `in <database>` qualifier scopes results to a single database. Without it, all accessible databases are searched.
+6. **REQ-REPL-SEARCH-006**: Results SHALL be sorted by Database ascending, then Table ascending (for `search tables`), and by Database ascending, Table ascending, Column ascending (for `search columns`).
+7. **REQ-REPL-SEARCH-007**: The `/search` command executes read-only queries. It is safe to use in any session, including agent-safe sessions.
+8. **REQ-REPL-SEARCH-008**: Tab completion SHALL complete `/search` from a prefix (e.g., `/sea<TAB>` completes to `/search`). After the metacommand, completion SHALL suggest `tables` and `columns` subcommands.
+9. **REQ-REPL-SEARCH-009**: Trailing semicolons SHALL be stripped per REQ-META-INPUT-001.
+
+**Error Cases:**
+
+**Permission denied:**
+```
+tq> /search tables emp
+
+Error: Unable to search tables
+Reason: Insufficient privileges to query DBC.TablesV
+```
+
+**Connection lost:**
+```
+tq> /search tables emp
+
+Error: Cannot search - connection lost
+Use /reconnect to establish new connection
+```
+
+**Acceptance Test:**
+- Execute `/search tables emp` and verify table output with Database, Table, Type, Rows (Est.), Size columns
+- Execute `/search tables emp in hr` and verify only objects from the `hr` database appear
+- Execute `/search columns salary` and verify table output with Database, Table, Column, Type, Nullable columns
+- Execute `/search tables xyz_nonexistent` and verify `No tables found matching 'xyz_nonexistent'.`
+- Execute `/search tables` (no keyword) and verify usage guidance is displayed
+- Execute `/search` (no subcommand) and verify usage guidance is displayed
+- Execute `/sea<TAB>` and verify completion to `/search`
+- Execute `/search <TAB>` and verify completion menu suggests `tables` and `columns`
+- Verify results are sorted: database ascending, then table ascending
 
 ---
 

@@ -1,15 +1,30 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.29.0 (Sprint 48 - Query Layer Consolidation & Spec Alignment)
-**Last Updated:** 2026-03-23
-**Base Commit:** [Sprint 48 - In Progress]
+**Version:** 1.30.0 (Sprint 55 - Search/Discovery Commands)
+**Last Updated:** 2026-03-31
+**Base Commit:** [Sprint 55 - In Progress]
 
 ## Overview
 
 This directory contains comprehensive test case definitions for the tq CLI tool. These test cases cover all implemented MVP features (FR-001 through FR-010) and provide detailed procedures for validating functionality, usability, error handling, and security.
 
 ## Test Case Categories
+
+### Sprint 55: Search/Discovery Commands
+
+- **TC-055-001**: `tq search tables <keyword>` — struct construction, all four output formats (table/JSON/CSV/markdown), JSON envelope, `--database` scoping, no-results handling (Unit writer-injection + Integration DB required `#[ignore]`) — `TC-055-001.md`
+- **TC-055-002**: `tq search columns <keyword>` — struct construction, all four output formats, JSON boolean nullable field, `--database` scoping, no-results handling (Unit writer-injection + Integration DB required `#[ignore]`) — `TC-055-002.md`
+- **TC-055-003**: REPL `/search` metacommand — `/search tables`, `/search columns`, help text on bare `/search`, tab completion (Interactive expectrl DB required `#[ignore]` + Unit structural check no-DB) — `TC-055-003.md`
+
+**Sprint 55 test case summary:**
+- Unit tests (no DB): TC-055-001 (8 tests), TC-055-002 (8 tests), TC-055-003 (2 unit checks) = 18 unit tests
+- Integration tests (DB required, `#[ignore]`): TC-055-001 (4 tests), TC-055-002 (4 tests) = 8 tests
+- Interactive tests (DB required, `#[ignore]`): TC-055-003 (4 tests) = 4 tests
+- Structural grep: TC-055-003 Part E (1 check)
+- Total: ~31 test cases across 3 files
+
+---
 
 ### Sprint 48: Query Layer Consolidation & Spec Alignment
 

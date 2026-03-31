@@ -52,6 +52,7 @@ Available metacommands:
     /reconnect   Reconnect to database
     /repeat      Re-execute last query
     /sample      Show random sample
+    /search      Search for tables or columns by keyword across all databases
     /session     Show session info
     /sessions    List active Teradata sessions with performance metrics
     /set         Set configuration options
@@ -222,6 +223,131 @@ sales_summary                       bob
 ```sql
 tq> \dv
 ```
+
+#### Search Across All Databases
+
+Use `/search` when you do not know which database contains the table or column you are looking for. Unlike `/list`, which operates within a single database, `/search` queries the system catalog globally and returns every matching object along with its owning database.
+
+**Tip:** Like all metacommands, `/search` silently strips trailing semicolons — `/search tables emp;` works exactly the same as `/search tables emp`.
+
+**Syntax:**
+```
+/search tables <keyword>
+/search columns <keyword>
+/search tables <keyword> in <database>
+/search columns <keyword> in <database>
+```
+
+**Find tables by keyword across all databases:**
+
+```sql
+tq> /search tables emp
+
+Search results for tables matching 'emp':
+┌─────────────────────┬──────────────────────┬───────────────┬──────────────┬─────────────┐
+│ Database            │ Table                │ Type          │ Rows (Est.)  │ Size        │
+├─────────────────────┼──────────────────────┼───────────────┼──────────────┼─────────────┤
+│ analytics           │ emp_summary          │ TABLE         │ 12,400       │ 1.2 MB      │
+│ hr                  │ employees            │ TABLE         │ 42,573       │ 2.1 MB      │
+│ staging             │ emp_archive          │ TABLE         │ 8,123        │ 512 KB      │
+└─────────────────────┴──────────────────────┴───────────────┴──────────────┴─────────────┘
+
+3 tables found matching 'emp'
+```
+
+The keyword is matched case-insensitively against the full table name using `%keyword%` — a keyword of `emp` matches `employees`, `temp_emp`, `emp_archive`, and so on. Results are sorted by Database, then Table name.
+
+**Scope the search to one database using `in <database>`:**
+
+```sql
+tq> /search tables emp in hr
+
+Search results for tables matching 'emp' in database 'hr':
+┌─────────────────────┬──────────────────────┬───────────────┬──────────────┬─────────────┐
+│ Database            │ Table                │ Type          │ Rows (Est.)  │ Size        │
+├─────────────────────┼──────────────────────┼───────────────┼──────────────┼─────────────┤
+│ hr                  │ employees            │ TABLE         │ 42,573       │ 2.1 MB      │
+└─────────────────────┴──────────────────────┴───────────────┴──────────────┴─────────────┘
+
+1 table found matching 'emp' in database 'hr'
+```
+
+**Find columns by keyword across all tables and databases:**
+
+```sql
+tq> /search columns salary
+
+Search results for columns matching 'salary':
+┌─────────────────────┬──────────────────────┬─────────────────────┬───────────────────┬──────────┐
+│ Database            │ Table                │ Column              │ Type              │ Nullable │
+├─────────────────────┼──────────────────────┼─────────────────────┼───────────────────┼──────────┤
+│ hr                  │ employees            │ salary              │ DECIMAL(10,2)     │ YES      │
+│ hr                  │ salary_bands         │ base_salary         │ DECIMAL(12,2)     │ NO       │
+│ hr                  │ salary_bands         │ max_salary          │ DECIMAL(12,2)     │ NO       │
+│ payroll             │ payroll_history      │ gross_salary        │ DECIMAL(12,2)     │ YES      │
+└─────────────────────┴──────────────────────┴─────────────────────┴───────────────────┴──────────┘
+
+4 columns found matching 'salary'
+```
+
+Results are sorted by Database, then Table, then Column name. The `Type` column shows the full Teradata data type. The `Nullable` column shows `YES` or `NO`.
+
+**No results:**
+
+```sql
+tq> /search tables xyz_nonexistent
+
+No tables found matching 'xyz_nonexistent'.
+```
+
+**Missing keyword — usage is shown instead of an error:**
+
+```sql
+tq> /search tables
+
+Usage: /search tables <keyword>
+       /search columns <keyword>
+
+Example: /search tables emp
+         /search columns salary
+```
+
+**Tab completion for `/search`:**
+
+Type `/sea` and press TAB to complete to `/search`. After the command name, TAB suggests `tables` and `columns`:
+
+```sql
+tq> /sea<TAB>
+tq> /search _
+
+tq> /search <TAB>
+tables    columns
+```
+
+**Common use cases:**
+
+```sql
+# "I need to find the employees table but I don't know which database it's in"
+tq> /search tables employees
+
+# "I want to find all tables related to orders across the whole system"
+tq> /search tables order
+
+# "Which tables have a column called customer_id?"
+tq> /search columns customer_id
+
+# "I know the column is in the hr database — scope the search"
+tq> /search columns department_id in hr
+
+# "Are there any tables related to payroll in the finance database?"
+tq> /search tables payroll in finance
+```
+
+**Key distinction from `/list`:**
+- `/list tables` — browse tables **inside the current database** (or a specified database)
+- `/search tables <keyword>` — discover tables **across all databases** whose name contains the keyword
+
+**Cross-reference:** For batch/scripting use, see `tq search` in the Batch Mode Guide.
 
 ### Loading Indicators
 

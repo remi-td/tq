@@ -215,6 +215,17 @@ fn run(cli: Cli) -> Result<()> {
                 )?;
             }
         }
+        // Sprint 55: Search command for cross-database discovery
+        Command::Search(ref args) => {
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::search::execute(&client, args, &mut writer, use_color)?;
+            } else {
+                let mut stdout = io::stdout();
+                commands::search::execute(&client, args, &mut stdout, use_color)?;
+            }
+        }
         // Sprint 46: Show-indexes command
         Command::ShowIndexes(args) => {
             if let Some(ref output_path) = args.output {
