@@ -7,7 +7,8 @@
 use crate::cli::{OutputFormat, QueryArgs};
 use crate::db::DatabaseClient;
 use crate::error::{Result, TqError};
-use crate::format::{write_output_with_timing, FormatOptions};
+use crate::format::{write_output_with_pagination, write_output_with_timing, FormatOptions};
+use crate::pagination::PaginationInfo;
 use crate::params::ParamStore;
 use crate::sql::{has_multiple_statements, parse_statements, ParsedStatement};
 use std::io::{self, BufReader, IsTerminal, Read, Write};
@@ -277,7 +278,7 @@ fn execute_single<W: Write>(
     };
 
     // Execute query
-    let result = if let Some(limit) = effective_limit {
+    let mut result = if let Some(limit) = effective_limit {
         client.execute_with_limit(trimmed_sql, limit)?
     } else {
         client.execute(trimmed_sql)?
@@ -295,8 +296,29 @@ fn execute_single<W: Write>(
         .with_header(!args.no_header)
         .with_color(use_color);
 
-    // Write output
-    write_output_with_timing(&result, writer, args.format, &format_options, args.timing)?;
+    // Apply pagination if --page-size is set
+    if let Some(page_size) = args.page_size {
+        let pagination = PaginationInfo::new(args.page, page_size, result.row_count);
+        let (start, end) = pagination.row_range();
+        if start < result.rows.len() {
+            result.rows = result.rows[start..end.min(result.rows.len())].to_vec();
+        } else {
+            result.rows = Vec::new();
+        }
+        result.row_count = result.rows.len();
+
+        write_output_with_pagination(
+            &result,
+            writer,
+            args.format,
+            &format_options,
+            args.timing,
+            Some(&pagination),
+        )?;
+    } else {
+        // Write output
+        write_output_with_timing(&result, writer, args.format, &format_options, args.timing)?;
+    }
 
     Ok(())
 }
@@ -1025,6 +1047,8 @@ mod tests {
             agent_safe: true,
             max_rows: 10000,
             allow_dml,
+            page_size: None,
+            page: 1,
         }
     }
 }

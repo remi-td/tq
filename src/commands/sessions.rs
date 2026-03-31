@@ -6,6 +6,7 @@
 //! Sprint 26: Initial implementation
 
 use crate::cli::{OutputFormat, SessionsArgs};
+use crate::commands::format_helpers::markdown_escape_pipe;
 use crate::db::{DatabaseClient, QueryResult, Value};
 use crate::error::Result;
 use super::monitoring_utils::{extract_decimal, extract_integer, escape_csv};
@@ -436,9 +437,6 @@ fn display_json<W: Write>(result: &QueryResult, writer: &mut W) -> Result<()> {
 
 /// Display sessions in Markdown format
 fn display_markdown<W: Write>(result: &QueryResult, writer: &mut W) -> Result<()> {
-    fn esc(s: &str) -> String {
-        s.replace('|', "\\|")
-    }
 
     let sessions: Vec<SessionInfo> = result
         .rows
@@ -469,10 +467,10 @@ fn display_markdown<W: Write>(result: &QueryResult, writer: &mut W) -> Result<()
             writer,
             "| {} | {} | {} | {} | {} | {:.3} | {} | {} | {} | {} |",
             session.session_no,
-            esc(&session.user_name),
-            esc(&session.logon_time),
-            esc(&session.pe_state),
-            esc(&session.amp_state),
+            markdown_escape_pipe(&session.user_name),
+            markdown_escape_pipe(&session.logon_time),
+            markdown_escape_pipe(&session.pe_state),
+            markdown_escape_pipe(&session.amp_state),
             session.amp_cpu_sec,
             session.amp_io,
             session.req_spool,

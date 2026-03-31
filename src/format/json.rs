@@ -8,6 +8,7 @@
 
 use crate::db::QueryResult;
 use crate::error::Result;
+use crate::pagination::PaginationInfo;
 use serde_json::{Map, Value as JsonValue};
 use std::io::Write;
 
@@ -141,6 +142,94 @@ pub fn write_with_metadata<W: Write>(
 
     // Data rows
     envelope.insert("data".to_string(), JsonValue::Array(build_rows(result)));
+
+    write_json(writer, &JsonValue::Object(envelope), options.pretty)
+}
+
+/// Build a JSON object for pagination metadata
+fn build_pagination_object(pg: &PaginationInfo) -> JsonValue {
+    let mut pg_obj = Map::new();
+    pg_obj.insert("page".to_string(), JsonValue::Number(pg.page.into()));
+    pg_obj.insert(
+        "page_size".to_string(),
+        JsonValue::Number(pg.page_size.into()),
+    );
+    pg_obj.insert(
+        "total_rows".to_string(),
+        JsonValue::Number(pg.total_rows.into()),
+    );
+    pg_obj.insert(
+        "total_pages".to_string(),
+        JsonValue::Number(pg.total_pages().into()),
+    );
+    pg_obj.insert("has_more".to_string(), JsonValue::Bool(pg.has_more()));
+    JsonValue::Object(pg_obj)
+}
+
+/// Write query results as JSON with optional pagination metadata
+pub fn write_with_pagination<W: Write>(
+    result: &QueryResult,
+    writer: &mut W,
+    options: &JsonOptions,
+    pagination: Option<&PaginationInfo>,
+) -> Result<()> {
+    let mut envelope = Map::new();
+    envelope.insert("ok".to_string(), JsonValue::Bool(true));
+    envelope.insert(
+        "row_count".to_string(),
+        JsonValue::Number(result.row_count.into()),
+    );
+    envelope.insert("data".to_string(), JsonValue::Array(build_rows(result)));
+
+    if let Some(pg) = pagination {
+        envelope.insert("pagination".to_string(), build_pagination_object(pg));
+    }
+
+    write_json(writer, &JsonValue::Object(envelope), options.pretty)
+}
+
+/// Write query results with timing metadata and optional pagination in envelope
+pub fn write_with_metadata_and_pagination<W: Write>(
+    result: &QueryResult,
+    writer: &mut W,
+    options: &JsonOptions,
+    pagination: Option<&PaginationInfo>,
+) -> Result<()> {
+    let mut envelope = Map::new();
+
+    envelope.insert("ok".to_string(), JsonValue::Bool(true));
+    envelope.insert(
+        "row_count".to_string(),
+        JsonValue::Number(result.row_count.into()),
+    );
+    envelope.insert(
+        "execution_time_ms".to_string(),
+        JsonValue::Number(
+            serde_json::Number::from_f64(result.execution_time.as_secs_f64() * 1000.0)
+                .unwrap_or_else(|| 0.into()),
+        ),
+    );
+
+    let columns: Vec<JsonValue> = result
+        .columns
+        .iter()
+        .map(|col| {
+            let mut obj = Map::new();
+            obj.insert("name".to_string(), JsonValue::String(col.name.clone()));
+            obj.insert(
+                "type".to_string(),
+                JsonValue::String(format!("{:?}", col.data_type)),
+            );
+            obj.insert("nullable".to_string(), JsonValue::Bool(col.nullable));
+            JsonValue::Object(obj)
+        })
+        .collect();
+    envelope.insert("columns".to_string(), JsonValue::Array(columns));
+    envelope.insert("data".to_string(), JsonValue::Array(build_rows(result)));
+
+    if let Some(pg) = pagination {
+        envelope.insert("pagination".to_string(), build_pagination_object(pg));
+    }
 
     write_json(writer, &JsonValue::Object(envelope), options.pretty)
 }
@@ -300,5 +389,61 @@ mod tests {
         assert_eq!(parsed["ok"], true);
         assert_eq!(parsed["row_count"], 0);
         assert_eq!(parsed["data"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_write_with_pagination() {
+        let result = create_test_result();
+        let options = JsonOptions { pretty: false };
+        let pg = PaginationInfo::new(1, 10, 25);
+
+        let mut buffer = Vec::new();
+        write_with_pagination(&result, &mut buffer, &options, Some(&pg)).unwrap();
+        let output = String::from_utf8_lossy(&buffer);
+
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+
+        assert_eq!(parsed["ok"], true);
+        assert_eq!(parsed["row_count"], 2);
+        assert!(parsed["pagination"].is_object());
+        assert_eq!(parsed["pagination"]["page"], 1);
+        assert_eq!(parsed["pagination"]["page_size"], 10);
+        assert_eq!(parsed["pagination"]["total_rows"], 25);
+        assert_eq!(parsed["pagination"]["total_pages"], 3);
+        assert_eq!(parsed["pagination"]["has_more"], true);
+    }
+
+    #[test]
+    fn test_write_with_pagination_none() {
+        let result = create_test_result();
+        let options = JsonOptions { pretty: false };
+
+        let mut buffer = Vec::new();
+        write_with_pagination(&result, &mut buffer, &options, None).unwrap();
+        let output = String::from_utf8_lossy(&buffer);
+
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        assert!(parsed.get("pagination").is_none());
+    }
+
+    #[test]
+    fn test_write_with_metadata_and_pagination() {
+        let result = create_test_result();
+        let options = JsonOptions { pretty: false };
+        let pg = PaginationInfo::new(3, 5, 12);
+
+        let mut buffer = Vec::new();
+        write_with_metadata_and_pagination(&result, &mut buffer, &options, Some(&pg)).unwrap();
+        let output = String::from_utf8_lossy(&buffer);
+
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+
+        assert_eq!(parsed["ok"], true);
+        assert!(parsed["execution_time_ms"].as_f64().is_some());
+        assert!(parsed["columns"].is_array());
+        assert!(parsed["pagination"].is_object());
+        assert_eq!(parsed["pagination"]["page"], 3);
+        assert_eq!(parsed["pagination"]["has_more"], false);
+        assert_eq!(parsed["pagination"]["total_pages"], 3);
     }
 }

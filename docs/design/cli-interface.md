@@ -2201,6 +2201,476 @@ but provides valuable size and row count information. This is the same pattern u
 | SQL escaping | `src/sql/identifiers.rs` | `escape_sql_string()` for keyword sanitization |
 | Format helpers | `src/commands/format_helpers.rs` | `json_escape()`, `csv_escape()`, `format_size()` |
 
+## Client-Side Result Pagination
+
+### Problem
+
+When querying large tables, users need to browse results page-by-page rather than receiving the entire result set at once. Teradata lacks a native `OFFSET` clause, so server-side pagination is impractical. Client-side pagination fetches the full result set (possibly capped by `--max-rows` in agent-safe mode) and then slices to the requested page boundaries before formatting.
+
+### Design Approach
+
+Pagination is implemented as a post-fetch, pre-format transformation on `QueryResult`. The slicing happens in `execute_single()` in `src/commands/query.rs`, between the database fetch and the call to `write_output_with_timing()`. This keeps the pagination logic centralized in the query command rather than scattered across formatters.
+
+### CLI Flags
+
+Two new flags on `QueryArgs`:
+
+```rust
+// src/cli.rs - in QueryArgs
+
+/// Page number to display (1-indexed, requires --page-size)
+///
+/// Selects which page of results to display. Page 1 is the first page.
+/// Must be used together with --page-size.
+#[arg(long, value_name = "N", requires = "page_size")]
+pub page: Option<usize>,
+
+/// Number of rows per page (requires --page)
+///
+/// Splits the result set into pages of this size.
+/// Must be used together with --page. Mutually exclusive with --limit.
+#[arg(long, value_name = "N", requires = "page", conflicts_with = "limit")]
+pub page_size: Option<usize>,
+```
+
+**Key constraints enforced by clap:**
+- `--page` requires `--page-size` (incomplete pagination request rejected at parse time)
+- `--page-size` requires `--page` (same)
+- `--page-size` conflicts with `--limit` (they serve different purposes; using both is ambiguous)
+
+**Interaction with `--max-rows` (agent-safe mode):**
+- `--max-rows` caps the total rows fetched from the database
+- Pagination operates within that cap: `total_rows` is the fetched count (not the theoretical full table count)
+- This is correct behavior: agents should never paginate beyond their safety cap
+
+### Pagination Data Structure
+
+```rust
+// src/commands/query.rs (or a new src/pagination.rs if the logic warrants its own module)
+
+/// Pagination metadata computed after slicing a result set.
+#[derive(Debug, Clone)]
+pub struct PaginationInfo {
+    /// Current page number (1-indexed)
+    pub page: usize,
+    /// Rows per page
+    pub page_size: usize,
+    /// Total number of rows in the full (possibly capped) result set
+    pub total_rows: usize,
+    /// Total number of pages (ceiling division)
+    pub total_pages: usize,
+}
+
+impl PaginationInfo {
+    /// Compute pagination metadata from page parameters and total row count.
+    ///
+    /// Returns `None` if pagination is not requested (both page and page_size are None).
+    /// Returns an error if the requested page exceeds total pages.
+    pub fn from_args(
+        page: Option<usize>,
+        page_size: Option<usize>,
+        total_rows: usize,
+    ) -> Result<Option<Self>> {
+        match (page, page_size) {
+            (Some(p), Some(ps)) => {
+                if ps == 0 {
+                    return Err(TqError::InvalidConfig(
+                        "--page-size must be greater than 0".to_string(),
+                    ));
+                }
+                if p == 0 {
+                    return Err(TqError::InvalidConfig(
+                        "--page must be greater than 0".to_string(),
+                    ));
+                }
+                let total_pages = if total_rows == 0 {
+                    1
+                } else {
+                    (total_rows + ps - 1) / ps
+                };
+                if p > total_pages {
+                    return Err(TqError::InvalidConfig(format!(
+                        "Page {} exceeds total pages ({} rows, {} per page = {} pages)",
+                        p, total_rows, ps, total_pages
+                    )));
+                }
+                Ok(Some(Self {
+                    page: p,
+                    page_size: ps,
+                    total_rows,
+                    total_pages,
+                }))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// Compute the start index (inclusive) and end index (exclusive) for slicing.
+    pub fn row_range(&self) -> (usize, usize) {
+        let start = (self.page - 1) * self.page_size;
+        let end = (start + self.page_size).min(self.total_rows);
+        (start, end)
+    }
+}
+```
+
+### Result Slicing
+
+A new method on `QueryResult` to produce a paginated subset:
+
+```rust
+// src/db/types.rs
+
+impl QueryResult {
+    /// Return a new QueryResult containing only the rows in the given range.
+    ///
+    /// The returned result's `row_count` reflects the sliced count,
+    /// not the original total. Callers use `PaginationInfo.total_rows`
+    /// for the original count.
+    pub fn slice(&self, start: usize, end: usize) -> Self {
+        let end = end.min(self.rows.len());
+        let start = start.min(end);
+        let sliced_rows: Vec<Row> = self.rows[start..end].to_vec();
+        Self::new(
+            self.columns.clone(),
+            sliced_rows,
+            self.execution_time,
+        )
+    }
+}
+```
+
+**Design decision: `slice()` on `QueryResult`** rather than modifying `.rows` in place. This preserves the original result for metadata computation (total_rows) and follows Rust's preference for immutable transformations.
+
+### Integration in `execute_single()`
+
+The pagination logic slots between the fetch and the format call:
+
+```rust
+fn execute_single<W: Write>(
+    client: &DatabaseClient,
+    sql: &str,
+    args: &QueryArgs,
+    writer: &mut W,
+    use_color: bool,
+    verbose: bool,
+) -> Result<()> {
+    // ... existing fetch logic ...
+
+    let result = /* fetch as today */;
+
+    // Agent-safe overflow check (existing)
+    // ...
+
+    // Pagination: compute metadata, then slice
+    let pagination = PaginationInfo::from_args(
+        args.page,
+        args.page_size,
+        result.row_count,
+    )?;
+
+    let display_result = if let Some(ref pg) = pagination {
+        let (start, end) = pg.row_range();
+        result.slice(start, end)
+    } else {
+        result
+    };
+
+    // Configure output formatting
+    let format_options = FormatOptions::default()
+        .with_header(!args.no_header)
+        .with_color(use_color);
+
+    // Write output (with pagination metadata for JSON)
+    write_output_paginated(
+        &display_result,
+        writer,
+        args.format,
+        &format_options,
+        args.timing,
+        pagination.as_ref(),
+    )?;
+
+    Ok(())
+}
+```
+
+### JSON Envelope Extension
+
+When pagination is active, the JSON envelope gains an optional `pagination` object:
+
+```json
+{
+  "ok": true,
+  "row_count": 25,
+  "pagination": {
+    "page": 2,
+    "page_size": 25,
+    "total_rows": 73,
+    "total_pages": 3
+  },
+  "data": [...]
+}
+```
+
+**Key points:**
+- `row_count` reflects the count of rows **in the current page** (matches `data.length`)
+- `pagination` is only present when `--page` / `--page-size` are used
+- When pagination is absent, the envelope is unchanged (backward compatible)
+
+**Implementation in `src/format/json.rs`:**
+
+```rust
+/// Write query results as JSON with envelope and optional pagination.
+pub fn write_paginated<W: Write>(
+    result: &QueryResult,
+    writer: &mut W,
+    options: &JsonOptions,
+    pagination: Option<&PaginationInfo>,
+) -> Result<()> {
+    let mut envelope = Map::new();
+    envelope.insert("ok".to_string(), JsonValue::Bool(true));
+    envelope.insert(
+        "row_count".to_string(),
+        JsonValue::Number(result.row_count.into()),
+    );
+
+    if let Some(pg) = pagination {
+        let mut pg_obj = Map::new();
+        pg_obj.insert("page".into(), JsonValue::Number(pg.page.into()));
+        pg_obj.insert("page_size".into(), JsonValue::Number(pg.page_size.into()));
+        pg_obj.insert("total_rows".into(), JsonValue::Number(pg.total_rows.into()));
+        pg_obj.insert("total_pages".into(), JsonValue::Number(pg.total_pages.into()));
+        envelope.insert("pagination".to_string(), JsonValue::Object(pg_obj));
+    }
+
+    envelope.insert("data".to_string(), JsonValue::Array(build_rows(result)));
+    write_json(writer, &JsonValue::Object(envelope), options.pretty)
+}
+```
+
+The existing `write()` function remains unchanged for backward compatibility. The new `write_paginated()` is called from the new `write_output_paginated()` dispatch function. If `pagination` is `None`, the output is identical to `write()`.
+
+### Format Dispatch with Pagination
+
+A new dispatch function in `src/format/mod.rs`:
+
+```rust
+/// Write query results with optional pagination metadata.
+///
+/// For JSON: adds `pagination` object to envelope.
+/// For table/markdown: appends "Page X of Y" footer.
+/// For CSV: no pagination footer (data-only format).
+pub fn write_output_paginated<W: Write>(
+    result: &QueryResult,
+    writer: &mut W,
+    format: OutputFormat,
+    options: &FormatOptions,
+    show_timing: bool,
+    pagination: Option<&PaginationInfo>,
+) -> Result<()> {
+    match format.canonical() {
+        OutputFormat::Table => {
+            if show_timing {
+                table::write_with_timing(result, writer, &options.table)?;
+            } else {
+                table::write(result, writer, &options.table)?;
+            }
+            if let Some(pg) = pagination {
+                writeln!(writer, "Page {} of {} ({} total rows)",
+                    pg.page, pg.total_pages, pg.total_rows)?;
+            }
+        }
+        OutputFormat::Json => {
+            if show_timing {
+                // Combine timing + pagination in metadata envelope
+                json::write_paginated_with_metadata(
+                    result, writer, &options.json, pagination,
+                )?;
+            } else {
+                json::write_paginated(result, writer, &options.json, pagination)?;
+            }
+        }
+        OutputFormat::Csv => {
+            csv::write(result, writer, &options.csv)?;
+            // CSV: no pagination footer (pure data format)
+        }
+        OutputFormat::Markdown => {
+            if show_timing {
+                markdown::write_with_metadata(result, writer, &options.markdown)?;
+            } else {
+                markdown::write(result, writer, &options.markdown)?;
+            }
+            if let Some(pg) = pagination {
+                writeln!(writer)?;
+                writeln!(writer, "*Page {} of {} ({} total rows)*",
+                    pg.page, pg.total_pages, pg.total_rows)?;
+            }
+        }
+        _ => unreachable!(),
+    }
+    Ok(())
+}
+```
+
+### Batch Mode
+
+Pagination does **not** apply to batch mode (`execute_batch()`). Batch mode executes multiple statements and streams results; paginating individual statement results would be confusing. If `--page`/`--page-size` are provided with `--file` containing multiple statements, the behavior is to paginate each individual result set. However, for simplicity in Sprint 56, we reject pagination in batch mode:
+
+```rust
+if use_batch && args.page.is_some() {
+    return Err(TqError::InvalidConfig(
+        "Pagination (--page/--page-size) is not supported in batch mode.\n\
+         Use single-statement queries for pagination.".to_string(),
+    ));
+}
+```
+
+### Non-Query Commands
+
+Pagination only applies to `tq query`. The `search`, `list`, `describe`, and other metadata commands have their own `--limit` flag for result limiting. Pagination for these commands is out of scope for Sprint 56.
+
+### Code Linkage
+
+| Component | File | Changes |
+|-----------|------|---------|
+| CLI flags | `src/cli.rs` | Add `page`, `page_size` to `QueryArgs` |
+| Pagination types | `src/commands/query.rs` | Add `PaginationInfo` struct |
+| Result slicing | `src/db/types.rs` | Add `QueryResult::slice()` method |
+| Query execution | `src/commands/query.rs` | Update `execute_single()` with pagination logic |
+| Batch guard | `src/commands/query.rs` | Reject pagination in `execute()` before batch path |
+| JSON envelope | `src/format/json.rs` | Add `write_paginated()`, `write_paginated_with_metadata()` |
+| Format dispatch | `src/format/mod.rs` | Add `write_output_paginated()` |
+| Unit tests | `src/commands/query.rs` | Tests for `PaginationInfo::from_args()`, edge cases |
+| Unit tests | `src/db/types.rs` | Tests for `QueryResult::slice()` |
+| Unit tests | `src/format/json.rs` | Tests for pagination envelope |
+
+## Tech Debt: Consolidate `esc()` Pipe Escape Function
+
+### Problem
+
+The function `fn esc(s: &str) -> String { s.replace('|', "\\|") }` is duplicated as a local `fn` definition in **14 locations** across 10 source files:
+
+| File | Occurrences |
+|------|-------------|
+| `search.rs` | 2 (table markdown, column markdown) |
+| `list.rs` | 3 (databases, tables, views markdown) |
+| `sample.rs` | 2 (result markdown, stats markdown) |
+| `show_indexes.rs` | 1 |
+| `sysconfig.rs` | 1 |
+| `history.rs` | 1 |
+| `explain.rs` | 1 |
+| `sessions.rs` | 1 |
+| `query_inspect.rs` | 1 |
+| `locks.rs` | 1 |
+| `skew.rs` | 1 |
+
+Each copy is identical: a one-line pipe character escape for markdown table cells.
+
+### Solution
+
+Add a `markdown_escape_pipe()` function to `src/commands/format_helpers.rs`:
+
+```rust
+/// Escape pipe characters for safe inclusion in Markdown table cells.
+///
+/// Replaces `|` with `\|` to prevent breaking Markdown table syntax.
+pub fn markdown_escape_pipe(s: &str) -> String {
+    s.replace('|', "\\|")
+}
+```
+
+Then replace all 14 local `fn esc(...)` definitions with a `use crate::commands::format_helpers::markdown_escape_pipe;` import and rename call sites from `esc(...)` to `markdown_escape_pipe(...)`.
+
+**Alternative considered:** Keep the short name `esc` as a module-level re-import alias: `use crate::commands::format_helpers::markdown_escape_pipe as esc;`. This minimizes diff size but reduces clarity. The longer name is preferred because it is self-documenting and the call sites are few enough per file that the extra characters are negligible.
+
+### Code Linkage
+
+| Change | File | Description |
+|--------|------|-------------|
+| New function | `src/commands/format_helpers.rs` | Add `markdown_escape_pipe()` |
+| Migrate | `src/commands/search.rs` | Remove 2 local `esc()`, import helper |
+| Migrate | `src/commands/list.rs` | Remove 3 local `esc()`, import helper |
+| Migrate | `src/commands/sample.rs` | Remove 2 local `esc()`, import helper |
+| Migrate | `src/commands/show_indexes.rs` | Remove 1 local `esc()`, import helper |
+| Migrate | `src/commands/sysconfig.rs` | Remove 1 local `esc()`, import helper |
+| Migrate | `src/commands/history.rs` | Remove 1 local `esc()`, import helper |
+| Migrate | `src/commands/explain.rs` | Remove 1 local `esc()`, import helper |
+| Migrate | `src/commands/sessions.rs` | Remove 1 local `esc()`, import helper |
+| Migrate | `src/commands/query_inspect.rs` | Remove 1 local `esc()`, import helper |
+| Migrate | `src/commands/locks.rs` | Remove 1 local `esc()`, import helper |
+| Migrate | `src/commands/skew.rs` | Remove 1 local `esc()`, import helper |
+| Unit test | `src/commands/format_helpers.rs` | Test for `markdown_escape_pipe()` |
+
+## Tech Debt: Search Dispatch Unit Tests
+
+### Problem
+
+The `search.rs` module has good tests for rendering functions but no tests for the `execute()` dispatch logic or the REPL dispatch in `execute_for_repl()`. Since these functions require a `DatabaseClient`, they cannot be unit-tested without a mock. However, the rendering functions (`render_table_search_*`, `render_column_search_*`) are already well-tested.
+
+### Solution
+
+Add unit tests for the dispatch logic that does not require database access:
+
+1. **Subcommand parsing in `execute_for_repl()`**: Test that unknown subcommands produce an error message.
+2. **Rendering tests with edge cases**: Markdown pipe escaping with special characters, JSON with special characters in object names.
+
+These tests complement the existing rendering tests by covering edge cases that could break the output.
+
+```rust
+#[test]
+fn test_repl_dispatch_unknown_subcommand() {
+    // Mock client not needed - test only the error path
+    // The function writes an error message for unknown subcommands
+    // This requires a mock client, so instead test the rendering edge cases
+}
+
+#[test]
+fn test_markdown_pipe_in_table_name() {
+    let tables = vec![TableSearchResult {
+        database: "db".to_string(),
+        table_name: "has|pipe".to_string(),
+        kind: "TABLE".to_string(),
+        row_count_display: "0".to_string(),
+        row_count_raw: Some(0),
+        size_display: "0 B".to_string(),
+        size_bytes: Some(0),
+        owner: "usr".to_string(),
+    }];
+    let mut buf = Vec::new();
+    render_table_search_markdown(&tables, &mut buf).unwrap();
+    let output = String::from_utf8(buf).unwrap();
+    assert!(output.contains("has\\|pipe"));
+    assert!(!output.contains("has|pipe"));
+}
+
+#[test]
+fn test_json_special_chars_in_names() {
+    let tables = vec![TableSearchResult {
+        database: "db\"name".to_string(),
+        table_name: "tbl\\slash".to_string(),
+        kind: "TABLE".to_string(),
+        row_count_display: "0".to_string(),
+        row_count_raw: Some(0),
+        size_display: "0 B".to_string(),
+        size_bytes: Some(0),
+        owner: "user\nnewline".to_string(),
+    }];
+    let mut buf = Vec::new();
+    render_table_search_json(&tables, &mut buf).unwrap();
+    let output = String::from_utf8(buf).unwrap();
+    assert!(output.contains("db\\\"name"));
+    assert!(output.contains("tbl\\\\slash"));
+    assert!(output.contains("user\\nnewline"));
+}
+```
+
+### Code Linkage
+
+| Change | File | Description |
+|--------|------|-------------|
+| New tests | `src/commands/search.rs` | Edge case tests for markdown and JSON rendering |
+
 ## Future Enhancements
 
 - **Config file flag**: `--config <path>` to override default config location

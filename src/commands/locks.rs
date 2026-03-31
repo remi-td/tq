@@ -6,6 +6,7 @@
 //! Sprint 38: Initial implementation
 
 use crate::cli::{OutputFormat, LocksArgs};
+use crate::commands::format_helpers::markdown_escape_pipe;
 use crate::db::{DatabaseClient, Value};
 use crate::error::Result;
 use super::monitoring_utils::{escape_csv, extract_integer, extract_trimmed_string};
@@ -509,9 +510,6 @@ fn display_json<W: Write>(rows: &[LockDisplayRow], writer: &mut W) -> Result<()>
 
 /// Display locks in Markdown format
 fn display_markdown<W: Write>(rows: &[LockDisplayRow], writer: &mut W) -> Result<()> {
-    fn esc(s: &str) -> String {
-        s.replace('|', "\\|")
-    }
     writeln!(
         writer,
         "| Locked Object | Lock Type | Lock Mode | Locking Sess | Waiting Sess |"
@@ -521,11 +519,11 @@ fn display_markdown<W: Write>(rows: &[LockDisplayRow], writer: &mut W) -> Result
         writeln!(
             writer,
             "| {} | {} | {} | {} | {} |",
-            esc(&row.locked_object),
-            esc(&row.lock_type),
-            esc(&row.lock_mode),
+            markdown_escape_pipe(&row.locked_object),
+            markdown_escape_pipe(&row.lock_type),
+            markdown_escape_pipe(&row.lock_mode),
             row.locking_session,
-            esc(&format_waiting_sessions(&row.waiting_sessions))
+            markdown_escape_pipe(&format_waiting_sessions(&row.waiting_sessions))
         )?;
     }
     Ok(())

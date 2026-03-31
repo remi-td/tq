@@ -7,6 +7,7 @@
 //! Sprint 50: Initial implementation (Issue #24)
 
 use crate::cli::{OutputFormat, SkewArgs};
+use crate::commands::format_helpers::markdown_escape_pipe;
 use crate::db::{DatabaseClient, Value};
 use crate::error::Result;
 use super::monitoring_utils::{escape_csv, extract_decimal, extract_integer, extract_trimmed_string};
@@ -407,9 +408,6 @@ fn display_json<W: Write>(infos: &[SkewInfo], writer: &mut W) -> Result<()> {
 
 /// Display skew info in Markdown format
 fn display_markdown<W: Write>(infos: &[SkewInfo], writer: &mut W) -> Result<()> {
-    fn esc(s: &str) -> String {
-        s.replace('|', "\\|")
-    }
     writeln!(
         writer,
         "| SessionNo | UserName | AMP CPU (s) | AMP I/O | CPU Skew % | I/O Skew % | Max CPU | Min CPU | Max I/O | Min I/O |"
@@ -431,7 +429,7 @@ fn display_markdown<W: Write>(infos: &[SkewInfo], writer: &mut W) -> Result<()> 
             writer,
             "| {} | {} | {:.3} | {} | {} | {} | {:.3} | {:.3} | {} | {} |",
             info.session_no,
-            esc(&info.user_name),
+            markdown_escape_pipe(&info.user_name),
             info.amp_cpu_sec,
             info.amp_io,
             cpu_skew_str,

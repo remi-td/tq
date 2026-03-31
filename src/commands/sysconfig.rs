@@ -6,6 +6,7 @@
 //! Sprint 38: Initial implementation
 
 use crate::cli::{OutputFormat, SysconfigArgs};
+use crate::commands::format_helpers::markdown_escape_pipe;
 use crate::db::DatabaseClient;
 use crate::error::Result;
 use super::monitoring_utils::{escape_csv, extract_integer, extract_trimmed_string};
@@ -225,13 +226,10 @@ fn display_json<W: Write>(info: &SysconfigInfo, writer: &mut W) -> Result<()> {
 
 /// Display sysconfig in Markdown format
 fn display_markdown<W: Write>(info: &SysconfigInfo, writer: &mut W) -> Result<()> {
-    fn esc(s: &str) -> String {
-        s.replace('|', "\\|")
-    }
     writeln!(writer, "| Property | Value |")?;
     writeln!(writer, "| :--- | :--- |")?;
     for (name, value) in info.as_properties() {
-        writeln!(writer, "| {} | {} |", esc(name), esc(&value))?;
+        writeln!(writer, "| {} | {} |", markdown_escape_pipe(name), markdown_escape_pipe(&value))?;
     }
     Ok(())
 }

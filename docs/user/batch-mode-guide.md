@@ -13,10 +13,11 @@ This guide covers using tq for non-interactive batch operations: scripts, automa
 7. [Error Handling](#error-handling)
 8. [Scripting Patterns](#scripting-patterns)
 9. [Performance Tips](#performance-tips)
-10. [Common Recipes](#common-recipes)
-11. [Teradata Session Types and Transaction Support](#teradata-session-types-and-transaction-support)
-12. [Best Practices](#best-practices)
-13. [Troubleshooting](#troubleshooting)
+10. [Pagination](#pagination)
+11. [Common Recipes](#common-recipes)
+12. [Teradata Session Types and Transaction Support](#teradata-session-types-and-transaction-support)
+13. [Best Practices](#best-practices)
+14. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -2053,6 +2054,273 @@ done
 
 ---
 
+## Pagination
+
+Use `--page-size` and `--page` to retrieve large result sets one page at a time. This is the recommended approach for agents and automation workflows that must stay within memory or context-window limits.
+
+### How It Works
+
+- `--page-size N` — enable pagination with N rows per page
+- `--page P` — select a specific page (1-based, default 1)
+
+Without `--page-size`, all rows are returned as usual — existing scripts are unaffected.
+
+### Basic Examples
+
+```bash
+# First 25 rows of a query
+tq query --page-size 25 "SELECT * FROM orders ORDER BY order_date DESC"
+
+# Second page of 25 rows (rows 26-50)
+tq query --page-size 25 --page 2 "SELECT * FROM orders ORDER BY order_date DESC"
+
+# Paginate search results
+tq search tables emp --page-size 10
+
+# Second page of search results
+tq search tables emp --page-size 10 --page 2
+
+# Paginate list output
+tq list tables --page-size 20
+tq list tables --page-size 20 --page 3
+```
+
+### Rules and Constraints
+
+**`--page` requires `--page-size`:**
+```bash
+# Error: --page without --page-size
+$ tq query --page 2 "SELECT * FROM orders"
+Error: --page requires --page-size to be specified.
+
+Exit code: 2
+```
+
+**`--page-size` and `--limit` are mutually exclusive:**
+```bash
+# Error: both flags specified together
+$ tq query --page-size 25 --limit 100 "SELECT * FROM orders"
+Error: --page-size and --limit cannot be used together.
+
+Use --page-size for pagination, or --limit to cap the total result set.
+
+Exit code: 2
+```
+
+**Requesting a page beyond the last page returns empty data, not an error:**
+```bash
+# Table has 15 rows, page 3 of page-size 10 is empty
+$ tq query --page-size 10 --page 3 "SELECT * FROM small_table" --format json
+{
+  "ok": true,
+  "row_count": 0,
+  "pagination": {
+    "page": 3,
+    "page_size": 10,
+    "total_rows": 15,
+    "total_pages": 2
+  },
+  "data": []
+}
+```
+
+### JSON Envelope
+
+When `--page-size` is active, the standard JSON envelope gains a `pagination` object:
+
+```json
+{
+  "ok": true,
+  "row_count": 25,
+  "pagination": {
+    "page": 2,
+    "page_size": 25,
+    "total_rows": 73,
+    "total_pages": 3
+  },
+  "data": [...]
+}
+```
+
+**Field meanings:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `page` | integer | Current page number (1-based) |
+| `page_size` | integer | Rows per page as requested |
+| `total_rows` | integer | Total rows in the full result set |
+| `total_pages` | integer | Total number of pages (`ceil(total_rows / page_size)`) |
+
+`row_count` always matches the actual number of rows in `data` for the current page — which may be less than `page_size` on the last page.
+
+The `pagination` object is absent when `--page-size` is not used, so responses are backward compatible.
+
+**Checking whether more pages exist:**
+
+```bash
+# Use jq to test whether a next page exists
+tq query --page-size 25 --page 1 "SELECT * FROM orders" --format json | \
+  jq '.pagination.page < .pagination.total_pages'
+# → true (more pages available)
+# → false (on the last page)
+```
+
+### Non-JSON Formats
+
+For `table` and `markdown` output, a footer line is appended after the data:
+
+```
+$ tq query --page-size 25 --page 2 "SELECT * FROM orders"
+┌──────────────┬────────────┬──────────────┐
+│ order_id     │ customer   │ total        │
+├──────────────┼────────────┼──────────────┤
+│ 1026         │ Alice      │ 245.00       │
+│ ...          │ ...        │ ...          │
+└──────────────┴────────────┴──────────────┘
+Page 2 of 3 (73 total rows)
+```
+
+For markdown:
+```markdown
+| order_id | customer | total  |
+|----------|----------|--------|
+| 1026     | Alice    | 245.00 |
+| ...      | ...      | ...    |
+
+*Page 2 of 3 (73 total rows)*
+```
+
+For CSV output, no footer is added — the output remains pure data with no metadata lines. Use `--format json` to access pagination metadata in scripts.
+
+### Agent Workflow: Iterating All Pages
+
+The recommended pattern for agents and automated pipelines is to fetch pages in a loop until `pagination.page >= pagination.total_pages`:
+
+**Shell script pattern:**
+
+```bash
+#!/bin/bash
+# Fetch all rows from a large table, page by page
+
+PAGE=1
+PAGE_SIZE=50
+HAS_MORE=true
+
+while [ "$HAS_MORE" = "true" ]; do
+  RESULT=$(tq query \
+    --page-size "$PAGE_SIZE" \
+    --page "$PAGE" \
+    --format json \
+    "SELECT * FROM large_table ORDER BY id")
+
+  # Process rows for this page
+  echo "$RESULT" | jq '.data[]'
+
+  # Determine whether more pages remain
+  CURRENT=$(echo "$RESULT" | jq '.pagination.page')
+  TOTAL=$(echo "$RESULT" | jq '.pagination.total_pages')
+
+  if [ "$CURRENT" -ge "$TOTAL" ]; then
+    HAS_MORE=false
+  fi
+
+  PAGE=$((PAGE + 1))
+done
+```
+
+**Python agent pattern:**
+
+```python
+import subprocess, json
+
+page, page_size = 1, 50
+
+while True:
+    result = subprocess.run(
+        ["tq", "query",
+         "--page-size", str(page_size),
+         "--page", str(page),
+         "--format", "json",
+         "SELECT * FROM large_table ORDER BY id"],
+        capture_output=True, text=True
+    )
+    data = json.loads(result.stdout)
+
+    for row in data["data"]:
+        process(row)
+
+    pg = data.get("pagination", {})
+    if pg.get("page", 1) >= pg.get("total_pages", 1):
+        break
+    page += 1
+```
+
+**With `--agent-safe` mode:**
+
+Pagination works with `--agent-safe`. When `--agent-safe` is active, the result set is first capped by `--max-rows` (default 10,000), then pagination operates within that cap. The `total_rows` in the envelope reflects the capped count, not the theoretical full table size.
+
+```bash
+# Agent-safe pagination: cap at 1000 rows, deliver 100 at a time
+tq query \
+  --agent-safe \
+  --max-rows 1000 \
+  --page-size 100 \
+  --page 1 \
+  --format json \
+  "SELECT * FROM large_table"
+```
+
+### Paginating `tq search`
+
+`tq search` returns up to 100 results by default. For large catalogs, use pagination instead of `--limit`:
+
+```bash
+# First 20 matching tables
+tq search tables customer --page-size 20 --format json
+
+# Next 20
+tq search tables customer --page-size 20 --page 2 --format json
+```
+
+JSON envelope for search results follows the same structure:
+```json
+{
+  "ok": true,
+  "row_count": 20,
+  "pagination": {
+    "page": 2,
+    "page_size": 20,
+    "total_rows": 47,
+    "total_pages": 3
+  },
+  "data": [
+    { "database": "analytics", "table": "customer_events", ... },
+    ...
+  ]
+}
+```
+
+### Paginating `tq list`
+
+```bash
+# List databases, 10 at a time
+tq list databases --page-size 10 --format json
+
+# List tables page by page
+tq list tables --page-size 15 --page 2 --format json
+```
+
+### Pagination vs `--limit`
+
+| Use | Flag |
+|-----|------|
+| Retrieve a fixed cap of rows (no page navigation) | `--limit N` |
+| Browse or iterate through results page by page | `--page-size N --page P` |
+
+Use `--limit` when you just want "the first N rows" and do not need navigation. Use `--page-size` when you want to iterate through a full result set incrementally.
+
+---
+
 ## Common Recipes
 
 ### Daily Report Generation
@@ -2344,6 +2612,7 @@ Suggestions:
 10. **Handle interrupts** - Clean up resources on Ctrl-C
 11. **Version control scripts and params** - Track both SQL files and YAML parameter files in git
 12. **Document assumptions** - Add comments to complex scripts
+13. **Paginate large result sets in agents** - Use `--page-size` with `--format json` to iterate large tables without overwhelming memory or context windows
 
 ---
 
@@ -2379,3 +2648,4 @@ Suggestions:
 - [REPL Guide](repl-guide.md) - Interactive mode with `/params` command for live parameter management
 - `tq help params` - Full variable substitution syntax reference
 - [Specifications](../specifications/batch-mode.md) - Detailed requirements
+- [Output Formats](../specifications/output-formats.md) - JSON envelope and format details

@@ -13,6 +13,7 @@ pub mod table;
 use crate::cli::OutputFormat;
 use crate::db::QueryResult;
 use crate::error::Result;
+use crate::pagination::PaginationInfo;
 use std::io::Write;
 
 /// Format options combining all format-specific options
@@ -99,6 +100,40 @@ pub fn write_output_with_timing<W: Write>(
         }
         _ => unreachable!(),
     }
+}
+
+/// Write query results with optional pagination metadata
+///
+/// When pagination is provided:
+/// - JSON format includes a "pagination" object in the envelope
+/// - Other formats append a "Page X of Y (N total rows)" footer
+pub fn write_output_with_pagination<W: Write>(
+    result: &QueryResult,
+    writer: &mut W,
+    format: OutputFormat,
+    options: &FormatOptions,
+    show_timing: bool,
+    pagination: Option<&PaginationInfo>,
+) -> Result<()> {
+    match format.canonical() {
+        OutputFormat::Json => {
+            if show_timing {
+                // With timing, use metadata writer; add pagination separately
+                json::write_with_metadata_and_pagination(result, writer, &options.json, pagination)?;
+            } else {
+                json::write_with_pagination(result, writer, &options.json, pagination)?;
+            }
+        }
+        _ => {
+            // Render using standard formatters
+            write_output_with_timing(result, writer, format, options, show_timing)?;
+            // Append pagination footer for non-JSON formats
+            if let Some(pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Helper to format to string

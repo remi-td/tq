@@ -199,20 +199,14 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
         // Sprint 46: List command
-        Command::List(args) => {
+        Command::List(ref args) => {
             if let Some(ref output_path) = args.output {
                 let file = std::fs::File::create(output_path)?;
                 let mut writer = std::io::BufWriter::new(file);
-                commands::list::execute(
-                    &client, args.object_type, args.pattern.as_deref(),
-                    args.database.as_deref(), args.format, &mut writer, use_color,
-                )?;
+                commands::list::execute(&client, args, &mut writer, use_color)?;
             } else {
                 let mut stdout = io::stdout();
-                commands::list::execute(
-                    &client, args.object_type, args.pattern.as_deref(),
-                    args.database.as_deref(), args.format, &mut stdout, use_color,
-                )?;
+                commands::list::execute(&client, args, &mut stdout, use_color)?;
             }
         }
         // Sprint 55: Search command for cross-database discovery

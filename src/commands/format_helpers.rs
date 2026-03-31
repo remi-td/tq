@@ -45,6 +45,13 @@ pub fn csv_escape(s: &str) -> String {
     }
 }
 
+/// Escape pipe characters for Markdown table cells.
+///
+/// Replaces `|` with `\|` to avoid breaking table structure.
+pub fn markdown_escape_pipe(s: &str) -> String {
+    s.replace('|', "\\|")
+}
+
 /// Parse a potentially qualified object name into (optional database, object).
 ///
 /// Handles both `database.object` and `object` forms.

@@ -8,6 +8,7 @@
 //! Sprint 34: Refactored to use shared sql utilities for type formatting and identifier quoting
 
 use crate::cli::{OutputFormat, PeekArgs, SampleArgs};
+use crate::commands::format_helpers::markdown_escape_pipe;
 use crate::db::{ColumnInfo, DatabaseClient, QueryResult};
 use crate::error::{Result, TqError};
 use crate::sql::{escape_sql_string, format_column_type, quote_qualified_name};
@@ -469,21 +470,18 @@ fn display_peek_json<W: Write>(
 
 /// Display sample result as Markdown table
 fn display_markdown_result<W: Write>(result: &QueryResult, writer: &mut W) -> Result<()> {
-    fn esc(s: &str) -> String {
-        s.replace('|', "\\|")
-    }
 
     let column_names = get_column_names(result);
     if !column_names.is_empty() {
         // Header
-        let header: Vec<String> = column_names.iter().map(|c| esc(c)).collect();
+        let header: Vec<String> = column_names.iter().map(|c| markdown_escape_pipe(c)).collect();
         writeln!(writer, "| {} |", header.join(" | "))?;
         // Separator
         let sep: Vec<&str> = column_names.iter().map(|_| ":---").collect();
         writeln!(writer, "| {} |", sep.join(" | "))?;
         // Data rows
         for row in &result.rows {
-            let cells: Vec<String> = row.iter().map(|v| esc(&v.display())).collect();
+            let cells: Vec<String> = row.iter().map(|v| markdown_escape_pipe(&v.display())).collect();
             writeln!(writer, "| {} |", cells.join(" | "))?;
         }
     }
@@ -496,9 +494,6 @@ fn display_peek_markdown<W: Write>(
     result: &QueryResult,
     writer: &mut W,
 ) -> Result<()> {
-    fn esc(s: &str) -> String {
-        s.replace('|', "\\|")
-    }
 
     // Column metadata section
     writeln!(writer, "## Columns")?;
@@ -509,8 +504,8 @@ fn display_peek_markdown<W: Write>(
         writeln!(
             writer,
             "| {} | {} | {} |",
-            esc(&col.name),
-            esc(&col.data_type),
+            markdown_escape_pipe(&col.name),
+            markdown_escape_pipe(&col.data_type),
             if col.nullable { "YES" } else { "NO" }
         )?;
     }

@@ -7,6 +7,7 @@
 //! Sprint 51: Initial implementation (Issue #19)
 
 use crate::cli::{HistoryArgs, OutputFormat};
+use crate::commands::format_helpers::markdown_escape_pipe;
 use crate::db::{DatabaseClient, Value};
 use crate::error::Result;
 use super::monitoring_utils::{escape_csv, extract_integer, extract_trimmed_string};
@@ -520,9 +521,6 @@ fn display_markdown<W: Write>(
     duration: &str,
     writer: &mut W,
 ) -> Result<()> {
-    fn esc(s: &str) -> String {
-        s.replace('|', "\\|")
-    }
     writeln!(writer, "## Session History (last {})", duration)?;
     writeln!(writer)?;
     writeln!(
@@ -538,10 +536,10 @@ fn display_markdown<W: Write>(
             writer,
             "| {} | {} | {} | {} | {} |",
             event.session_id,
-            esc(&event.user_name),
-            esc(&event.event_type),
-            esc(&event.event_time),
-            esc(&event.client_addr)
+            markdown_escape_pipe(&event.user_name),
+            markdown_escape_pipe(&event.event_type),
+            markdown_escape_pipe(&event.event_time),
+            markdown_escape_pipe(&event.client_addr)
         )?;
     }
     Ok(())

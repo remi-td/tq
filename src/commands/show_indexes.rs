@@ -5,7 +5,7 @@
 //! Used by `tq show-indexes <object>` (batch) and `/show indexes` (REPL delegation).
 
 use crate::cli::OutputFormat;
-use crate::commands::format_helpers::{csv_escape, json_escape};
+use crate::commands::format_helpers::{csv_escape, json_escape, markdown_escape_pipe};
 use crate::commands::query_helpers::{self, IndexGroup};
 use crate::db::DatabaseClient;
 use crate::error::Result;
@@ -235,9 +235,6 @@ fn show_indexes_markdown<W: Write>(
 ) -> Result<()> {
     let (groups, _qualified) = query_helpers::query_indexes_qualified(client, table_name)?;
 
-    fn esc(s: &str) -> String {
-        s.replace('|', "\\|")
-    }
     writeln!(writer, "| IndexName | IndexType | ShortType | IsPrimary | Columns |")?;
     writeln!(writer, "| :--- | :--- | :--- | :--- | :--- |")?;
     for idx in &groups {
@@ -246,11 +243,11 @@ fn show_indexes_markdown<W: Write>(
         writeln!(
             writer,
             "| {} | {} | {} | {} | {} |",
-            esc(name_display),
-            esc(&idx.index_type_label),
-            esc(&idx.short_label),
+            markdown_escape_pipe(name_display),
+            markdown_escape_pipe(&idx.index_type_label),
+            markdown_escape_pipe(&idx.short_label),
             if idx.is_primary { "Yes" } else { "No" },
-            esc(&cols)
+            markdown_escape_pipe(&cols)
         )?;
     }
     Ok(())

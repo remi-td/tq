@@ -604,6 +604,20 @@ pub struct QueryArgs {
     /// --agent-safe is active. DDL operations remain blocked.
     #[arg(long)]
     pub allow_dml: bool,
+
+    /// Number of rows per page (enables pagination)
+    ///
+    /// When specified, results are split into pages of this size.
+    /// Use with --page to select which page to retrieve.
+    /// Mutually exclusive with --limit.
+    #[arg(long, value_name = "N", conflicts_with = "limit")]
+    pub page_size: Option<usize>,
+
+    /// Page number to retrieve (1-based, default: 1)
+    ///
+    /// Requires --page-size. Returns the specified page of results.
+    #[arg(long, value_name = "P", default_value = "1", requires = "page_size")]
+    pub page: usize,
 }
 
 /// Arguments for the sessions command (Sprint 26)
@@ -776,6 +790,19 @@ pub struct ListArgs {
     /// Write output to file instead of stdout
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+
+    /// Number of rows per page (enables pagination)
+    ///
+    /// When specified, results are split into pages of this size.
+    /// Use with --page to select which page to retrieve.
+    #[arg(long, value_name = "N")]
+    pub page_size: Option<usize>,
+
+    /// Page number to retrieve (1-based, default: 1)
+    ///
+    /// Requires --page-size. Returns the specified page of results.
+    #[arg(long, value_name = "P", default_value = "1", requires = "page_size")]
+    pub page: usize,
 }
 
 /// Types of objects that can be listed
@@ -820,12 +847,26 @@ pub struct SearchArgs {
     pub format: OutputFormat,
 
     /// Maximum number of results (default: 100, 0 for unlimited)
-    #[arg(short = 'n', long, value_name = "N")]
+    #[arg(short = 'n', long, value_name = "N", conflicts_with = "page_size")]
     pub limit: Option<usize>,
 
     /// Write output to file instead of stdout
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+
+    /// Number of rows per page (enables pagination)
+    ///
+    /// When specified, results are split into pages of this size.
+    /// Use with --page to select which page to retrieve.
+    /// Mutually exclusive with --limit.
+    #[arg(long, value_name = "N", conflicts_with = "limit")]
+    pub page_size: Option<usize>,
+
+    /// Page number to retrieve (1-based, default: 1)
+    ///
+    /// Requires --page-size. Returns the specified page of results.
+    #[arg(long, value_name = "P", default_value = "1", requires = "page_size")]
+    pub page: usize,
 }
 
 /// Types of objects that can be searched

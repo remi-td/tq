@@ -6,6 +6,7 @@
 //! Sprint 50: Initial implementation (Issue #24)
 
 use crate::cli::{ExplainArgs, OutputFormat};
+use crate::commands::format_helpers::markdown_escape_pipe;
 use crate::db::{DatabaseClient, Value};
 use crate::error::Result;
 use super::monitoring_utils::escape_csv;
@@ -173,17 +174,14 @@ fn display_csv<W: Write>(steps: &[ExplainStep], writer: &mut W) -> Result<()> {
 
 /// Display explain steps in Markdown format
 fn display_markdown<W: Write>(steps: &[ExplainStep], sql: &str, writer: &mut W) -> Result<()> {
-    fn esc(s: &str) -> String {
-        s.replace('|', "\\|")
-    }
     writeln!(writer, "## Explain Plan")?;
     writeln!(writer)?;
-    writeln!(writer, "**SQL:** `{}`", esc(&truncate_sql(sql, 200)))?;
+    writeln!(writer, "**SQL:** `{}`", markdown_escape_pipe(&truncate_sql(sql, 200)))?;
     writeln!(writer)?;
     writeln!(writer, "| StepNo | Text |")?;
     writeln!(writer, "| ---: | :--- |")?;
     for step in steps {
-        writeln!(writer, "| {} | {} |", step.step_no, esc(&step.text))?;
+        writeln!(writer, "| {} | {} |", step.step_no, markdown_escape_pipe(&step.text))?;
     }
     Ok(())
 }

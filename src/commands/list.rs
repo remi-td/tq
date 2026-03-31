@@ -4,9 +4,10 @@
 //! Used by `tq list <type> [pattern]` (batch) and `/list` (REPL delegation).
 
 use crate::cli::{ListObjectType, OutputFormat};
-use crate::commands::format_helpers::{csv_escape, format_size, json_escape};
+use crate::commands::format_helpers::{csv_escape, format_size, json_escape, markdown_escape_pipe};
 use crate::db::DatabaseClient;
 use crate::error::Result;
+use crate::pagination::PaginationInfo;
 use crate::sql::escape_sql_string;
 use std::io::Write;
 
@@ -17,17 +18,15 @@ use std::io::Write;
 /// Execute `tq list` in batch mode with format selection
 pub fn execute<W: Write>(
     client: &DatabaseClient,
-    object_type: ListObjectType,
-    pattern: Option<&str>,
-    database: Option<&str>,
-    format: OutputFormat,
+    args: &crate::cli::ListArgs,
     writer: &mut W,
     _use_color: bool,
 ) -> Result<()> {
-    match object_type {
-        ListObjectType::Databases => list_databases(client, format, writer),
-        ListObjectType::Tables => list_tables(client, pattern, database, format, writer),
-        ListObjectType::Views => list_views(client, database, format, writer),
+    let pagination_args = args.page_size.map(|ps| (ps, args.page));
+    match args.object_type {
+        ListObjectType::Databases => list_databases(client, args.format, pagination_args, writer),
+        ListObjectType::Tables => list_tables(client, args.pattern.as_deref(), args.database.as_deref(), args.format, pagination_args, writer),
+        ListObjectType::Views => list_views(client, args.database.as_deref(), args.format, pagination_args, writer),
     }
 }
 
@@ -43,12 +42,12 @@ pub fn execute_for_repl<W: Write>(
 ) -> Result<()> {
     writeln!(writer)?;
     match subcommand {
-        "databases" | "db" | "dbs" => list_databases(client, OutputFormat::Table, writer)?,
+        "databases" | "db" | "dbs" => list_databases(client, OutputFormat::Table, None, writer)?,
         "tables" | "table" | "t" => {
-            list_tables(client, pattern, database, OutputFormat::Table, writer)?;
+            list_tables(client, pattern, database, OutputFormat::Table, None, writer)?;
         }
         "views" | "view" | "v" => {
-            list_views(client, database, OutputFormat::Table, writer)?;
+            list_views(client, database, OutputFormat::Table, None, writer)?;
         }
         _ => {
             writeln!(writer, "Error: Unknown list subcommand: {}", subcommand)?;
@@ -73,6 +72,7 @@ struct DatabaseEntry {
 fn list_databases<W: Write>(
     client: &DatabaseClient,
     format: OutputFormat,
+    pagination_args: Option<(usize, usize)>,
     writer: &mut W,
 ) -> Result<()> {
     let sql = r#"
@@ -135,11 +135,42 @@ fn list_databases<W: Write>(
         })
         .collect();
 
+    // Apply pagination if requested
+    let pagination = pagination_args.map(|(page_size, page)| {
+        PaginationInfo::new(page, page_size, databases.len())
+    });
+
+    let display = if let Some(ref pg) = pagination {
+        let (start, end) = pg.row_range();
+        if start < databases.len() {
+            &databases[start..end.min(databases.len())]
+        } else {
+            &databases[0..0]
+        }
+    } else {
+        &databases[..]
+    };
+
     match format {
-        OutputFormat::Table => render_databases_table(&databases, writer)?,
-        OutputFormat::Json => render_databases_json(&databases, writer)?,
-        OutputFormat::Csv => render_databases_csv(&databases, writer)?,
-        OutputFormat::Markdown | OutputFormat::Md => render_databases_markdown(&databases, writer)?,
+        OutputFormat::Table => {
+            render_databases_table(display, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
+        OutputFormat::Json => render_databases_json_with_pagination(display, pagination.as_ref(), writer)?,
+        OutputFormat::Csv => {
+            render_databases_csv(display, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
+        OutputFormat::Markdown | OutputFormat::Md => {
+            render_databases_markdown(display, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
     }
 
     Ok(())
@@ -171,9 +202,10 @@ fn render_databases_table<W: Write>(
     Ok(())
 }
 
-/// Render databases as JSON with "database" key (not "name").
-fn render_databases_json<W: Write>(
+/// Render databases as JSON with optional pagination.
+fn render_databases_json_with_pagination<W: Write>(
     databases: &[DatabaseEntry],
+    pagination: Option<&PaginationInfo>,
     writer: &mut W,
 ) -> Result<()> {
     write!(writer, "{{\"ok\":true,\"row_count\":{},\"data\":[", databases.len())?;
@@ -189,7 +221,19 @@ fn render_databases_json<W: Write>(
             json_escape(&db.db_kind)
         )?;
     }
-    writeln!(writer, "]}}")?;
+    write!(writer, "]")?;
+    if let Some(pg) = pagination {
+        write!(
+            writer,
+            ",\"pagination\":{{\"page\":{},\"page_size\":{},\"total_rows\":{},\"total_pages\":{},\"has_more\":{}}}",
+            pg.page,
+            pg.page_size,
+            pg.total_rows,
+            pg.total_pages(),
+            pg.has_more()
+        )?;
+    }
+    writeln!(writer, "}}")?;
     Ok(())
 }
 
@@ -216,18 +260,15 @@ fn render_databases_markdown<W: Write>(
     databases: &[DatabaseEntry],
     writer: &mut W,
 ) -> Result<()> {
-    fn esc(s: &str) -> String {
-        s.replace('|', "\\|")
-    }
     writeln!(writer, "| DatabaseName | Owner | Type |")?;
     writeln!(writer, "| :--- | :--- | :--- |")?;
     for db in databases {
         writeln!(
             writer,
             "| {} | {} | {} |",
-            esc(&db.name),
-            esc(&db.owner),
-            esc(&db.db_kind)
+            markdown_escape_pipe(&db.name),
+            markdown_escape_pipe(&db.owner),
+            markdown_escape_pipe(&db.db_kind)
         )?;
     }
     Ok(())
@@ -253,6 +294,7 @@ fn list_tables<W: Write>(
     pattern: Option<&str>,
     database: Option<&str>,
     format: OutputFormat,
+    pagination_args: Option<(usize, usize)>,
     writer: &mut W,
 ) -> Result<()> {
     let db_clause = if let Some(db) = database {
@@ -357,6 +399,22 @@ fn list_tables<W: Write>(
         .map(|p| format!(" matching '{}'", p))
         .unwrap_or_default();
 
+    // Apply pagination if requested
+    let pagination = pagination_args.map(|(page_size, page)| {
+        PaginationInfo::new(page, page_size, tables.len())
+    });
+
+    let display = if let Some(ref pg) = pagination {
+        let (start, end) = pg.row_range();
+        if start < tables.len() {
+            &tables[start..end.min(tables.len())]
+        } else {
+            &tables[0..0]
+        }
+    } else {
+        &tables[..]
+    };
+
     match format {
         OutputFormat::Table => {
             writeln!(writer, "Tables in {}{}:", db_label, pattern_str)?;
@@ -367,7 +425,7 @@ fn list_tables<W: Write>(
             )?;
             writeln!(writer, "{}", "-".repeat(78))?;
 
-            for t in &tables {
+            for t in display {
                 writeln!(
                     writer,
                     "{:<30} {:<8} {:>12} {:>10} {:<15}",
@@ -376,11 +434,14 @@ fn list_tables<W: Write>(
             }
 
             writeln!(writer)?;
-            writeln!(writer, "{} table(s)", tables.len())?;
+            writeln!(writer, "{} table(s)", display.len())?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
         }
         OutputFormat::Json => {
-            write!(writer, "{{\"ok\":true,\"row_count\":{},\"data\":[", tables.len())?;
-            for (i, t) in tables.iter().enumerate() {
+            write!(writer, "{{\"ok\":true,\"row_count\":{},\"data\":[", display.len())?;
+            for (i, t) in display.iter().enumerate() {
                 if i > 0 {
                     write!(writer, ",")?;
                 }
@@ -402,11 +463,23 @@ fn list_tables<W: Write>(
                     json_escape(&t.owner)
                 )?;
             }
-            writeln!(writer, "]}}")?;
+            write!(writer, "]")?;
+            if let Some(ref pg) = pagination {
+                write!(
+                    writer,
+                    ",\"pagination\":{{\"page\":{},\"page_size\":{},\"total_rows\":{},\"total_pages\":{},\"has_more\":{}}}",
+                    pg.page,
+                    pg.page_size,
+                    pg.total_rows,
+                    pg.total_pages(),
+                    pg.has_more()
+                )?;
+            }
+            writeln!(writer, "}}")?;
         }
         OutputFormat::Csv => {
             writeln!(writer, "TableName,Type,RowsEst,Size,Owner")?;
-            for t in &tables {
+            for t in display {
                 writeln!(
                     writer,
                     "{},{},{},{},{}",
@@ -417,23 +490,26 @@ fn list_tables<W: Write>(
                     csv_escape(&t.owner)
                 )?;
             }
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
         }
         OutputFormat::Markdown | OutputFormat::Md => {
-            fn esc(s: &str) -> String {
-                s.replace('|', "\\|")
-            }
             writeln!(writer, "| Name | Type | Rows (Est.) | Size | Owner |")?;
             writeln!(writer, "| :--- | :--- | ---: | ---: | :--- |")?;
-            for t in &tables {
+            for t in display {
                 writeln!(
                     writer,
                     "| {} | {} | {} | {} | {} |",
-                    esc(&t.name),
-                    esc(&t.kind),
-                    esc(&t.row_count_display),
-                    esc(&t.size_display),
-                    esc(&t.owner)
+                    markdown_escape_pipe(&t.name),
+                    markdown_escape_pipe(&t.kind),
+                    markdown_escape_pipe(&t.row_count_display),
+                    markdown_escape_pipe(&t.size_display),
+                    markdown_escape_pipe(&t.owner)
                 )?;
+            }
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
             }
         }
     }
@@ -455,6 +531,7 @@ fn list_views<W: Write>(
     client: &DatabaseClient,
     database: Option<&str>,
     format: OutputFormat,
+    pagination_args: Option<(usize, usize)>,
     writer: &mut W,
 ) -> Result<()> {
     let db_clause = if let Some(db) = database {
@@ -502,6 +579,22 @@ fn list_views<W: Write>(
 
     let db_label = database.unwrap_or("(current)");
 
+    // Apply pagination if requested
+    let pagination = pagination_args.map(|(page_size, page)| {
+        PaginationInfo::new(page, page_size, views.len())
+    });
+
+    let display = if let Some(ref pg) = pagination {
+        let (start, end) = pg.row_range();
+        if start < views.len() {
+            &views[start..end.min(views.len())]
+        } else {
+            &views[0..0]
+        }
+    } else {
+        &views[..]
+    };
+
     match format {
         OutputFormat::Table => {
             writeln!(writer, "Views in {}:", db_label)?;
@@ -512,20 +605,23 @@ fn list_views<W: Write>(
             )?;
             writeln!(writer, "{}", "-".repeat(50))?;
 
-            if views.is_empty() {
+            if display.is_empty() {
                 writeln!(writer, "(no views found)")?;
             } else {
-                for view in &views {
+                for view in display {
                     writeln!(writer, "{:<35} {:<15}", view.name, view.owner)?;
                 }
             }
 
             writeln!(writer)?;
-            writeln!(writer, "{} view(s)", views.len())?;
+            writeln!(writer, "{} view(s)", display.len())?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
         }
         OutputFormat::Json => {
-            write!(writer, "{{\"ok\":true,\"row_count\":{},\"data\":[", views.len())?;
-            for (i, view) in views.iter().enumerate() {
+            write!(writer, "{{\"ok\":true,\"row_count\":{},\"data\":[", display.len())?;
+            for (i, view) in display.iter().enumerate() {
                 if i > 0 {
                     write!(writer, ",")?;
                 }
@@ -536,11 +632,23 @@ fn list_views<W: Write>(
                     json_escape(&view.owner)
                 )?;
             }
-            writeln!(writer, "]}}")?;
+            write!(writer, "]")?;
+            if let Some(ref pg) = pagination {
+                write!(
+                    writer,
+                    ",\"pagination\":{{\"page\":{},\"page_size\":{},\"total_rows\":{},\"total_pages\":{},\"has_more\":{}}}",
+                    pg.page,
+                    pg.page_size,
+                    pg.total_rows,
+                    pg.total_pages(),
+                    pg.has_more()
+                )?;
+            }
+            writeln!(writer, "}}")?;
         }
         OutputFormat::Csv => {
             writeln!(writer, "ViewName,Owner")?;
-            for view in &views {
+            for view in display {
                 writeln!(
                     writer,
                     "{},{}",
@@ -548,20 +656,23 @@ fn list_views<W: Write>(
                     csv_escape(&view.owner)
                 )?;
             }
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
         }
         OutputFormat::Markdown | OutputFormat::Md => {
-            fn esc(s: &str) -> String {
-                s.replace('|', "\\|")
-            }
             writeln!(writer, "| ViewName | Owner |")?;
             writeln!(writer, "| :--- | :--- |")?;
-            for view in &views {
+            for view in display {
                 writeln!(
                     writer,
                     "| {} | {} |",
-                    esc(&view.name),
-                    esc(&view.owner)
+                    markdown_escape_pipe(&view.name),
+                    markdown_escape_pipe(&view.owner)
                 )?;
+            }
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
             }
         }
     }
@@ -737,7 +848,7 @@ mod tests {
             db_kind: "User".to_string(),
         }];
         let mut buf = Vec::new();
-        render_databases_json(&databases, &mut buf).unwrap();
+        render_databases_json_with_pagination(&databases, None, &mut buf).unwrap();
         let output = String::from_utf8(buf).unwrap();
         // Must use "database" key, not "name"
         assert!(output.contains("\"database\":\"testdb\""));

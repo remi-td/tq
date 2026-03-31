@@ -4,9 +4,10 @@
 //! Used by `tq search <type> <keyword>` (batch) and `/search` (REPL delegation).
 
 use crate::cli::{OutputFormat, SearchObjectType};
-use crate::commands::format_helpers::{csv_escape, format_size, json_escape};
+use crate::commands::format_helpers::{csv_escape, format_size, json_escape, markdown_escape_pipe};
 use crate::db::DatabaseClient;
 use crate::error::Result;
+use crate::pagination::PaginationInfo;
 use crate::sql::escape_sql_string;
 use std::io::Write;
 
@@ -21,13 +22,23 @@ pub fn execute<W: Write>(
     writer: &mut W,
     _use_color: bool,
 ) -> Result<()> {
+    // When page_size is set, don't apply SQL TOP limit - fetch all then paginate client-side
+    let effective_limit = if args.page_size.is_some() {
+        None
+    } else {
+        args.limit
+    };
+
+    let pagination_args = args.page_size.map(|ps| (ps, args.page));
+
     match args.object_type {
         SearchObjectType::Tables => search_tables(
             client,
             &args.keyword,
             args.database.as_deref(),
             args.format,
-            args.limit,
+            effective_limit,
+            pagination_args,
             writer,
         ),
         SearchObjectType::Columns => search_columns(
@@ -35,7 +46,8 @@ pub fn execute<W: Write>(
             &args.keyword,
             args.database.as_deref(),
             args.format,
-            args.limit,
+            effective_limit,
+            pagination_args,
             writer,
         ),
     }
@@ -54,10 +66,10 @@ pub fn execute_for_repl<W: Write>(
     writeln!(writer)?;
     match subcommand {
         "tables" | "table" | "t" => {
-            search_tables(client, keyword, database, OutputFormat::Table, None, writer)?;
+            search_tables(client, keyword, database, OutputFormat::Table, None, None, writer)?;
         }
         "columns" | "column" | "col" | "c" => {
-            search_columns(client, keyword, database, OutputFormat::Table, None, writer)?;
+            search_columns(client, keyword, database, OutputFormat::Table, None, None, writer)?;
         }
         _ => {
             writeln!(writer, "Error: Unknown search subcommand: {}", subcommand)?;
@@ -90,6 +102,7 @@ fn search_tables<W: Write>(
     database: Option<&str>,
     format: OutputFormat,
     limit: Option<usize>,
+    pagination_args: Option<(usize, usize)>,
     writer: &mut W,
 ) -> Result<()> {
     let escaped_keyword = escape_sql_string(keyword);
@@ -100,7 +113,12 @@ fn search_tables<W: Write>(
         String::new()
     };
 
-    let row_limit = limit.unwrap_or(100);
+    // When paginating, fetch all rows (use large limit); otherwise use specified limit
+    let row_limit = if pagination_args.is_some() {
+        100000 // Large limit to fetch all for client-side pagination
+    } else {
+        limit.unwrap_or(100)
+    };
 
     let sql = format!(
         "SELECT TOP {limit} TRIM(t.DatabaseName) AS db_name, \
@@ -194,12 +212,41 @@ fn search_tables<W: Write>(
         })
         .collect();
 
+    // Apply pagination if requested
+    let pagination = pagination_args.map(|(page_size, page)| {
+        PaginationInfo::new(page, page_size, tables.len())
+    });
+
+    let display_tables = if let Some(ref pg) = pagination {
+        let (start, end) = pg.row_range();
+        if start < tables.len() {
+            &tables[start..end.min(tables.len())]
+        } else {
+            &tables[0..0]
+        }
+    } else {
+        &tables[..]
+    };
+
     match format {
-        OutputFormat::Table => render_table_search_table(&tables, keyword, writer)?,
-        OutputFormat::Json => render_table_search_json(&tables, writer)?,
-        OutputFormat::Csv => render_table_search_csv(&tables, writer)?,
+        OutputFormat::Table => {
+            render_table_search_table(display_tables, keyword, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
+        OutputFormat::Json => render_table_search_json_with_pagination(display_tables, pagination.as_ref(), writer)?,
+        OutputFormat::Csv => {
+            render_table_search_csv(display_tables, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
         OutputFormat::Markdown | OutputFormat::Md => {
-            render_table_search_markdown(&tables, writer)?;
+            render_table_search_markdown(display_tables, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
         }
     }
 
@@ -241,8 +288,9 @@ fn render_table_search_table<W: Write>(
     Ok(())
 }
 
-fn render_table_search_json<W: Write>(
+fn render_table_search_json_with_pagination<W: Write>(
     tables: &[TableSearchResult],
+    pagination: Option<&PaginationInfo>,
     writer: &mut W,
 ) -> Result<()> {
     write!(
@@ -273,7 +321,19 @@ fn render_table_search_json<W: Write>(
             json_escape(&t.owner)
         )?;
     }
-    writeln!(writer, "]}}")?;
+    write!(writer, "]")?;
+    if let Some(pg) = pagination {
+        write!(
+            writer,
+            ",\"pagination\":{{\"page\":{},\"page_size\":{},\"total_rows\":{},\"total_pages\":{},\"has_more\":{}}}",
+            pg.page,
+            pg.page_size,
+            pg.total_rows,
+            pg.total_pages(),
+            pg.has_more()
+        )?;
+    }
+    writeln!(writer, "}}")?;
     Ok(())
 }
 
@@ -301,9 +361,6 @@ fn render_table_search_markdown<W: Write>(
     tables: &[TableSearchResult],
     writer: &mut W,
 ) -> Result<()> {
-    fn esc(s: &str) -> String {
-        s.replace('|', "\\|")
-    }
     writeln!(
         writer,
         "| Database | Name | Type | Rows (Est.) | Size | Owner |"
@@ -313,12 +370,12 @@ fn render_table_search_markdown<W: Write>(
         writeln!(
             writer,
             "| {} | {} | {} | {} | {} | {} |",
-            esc(&t.database),
-            esc(&t.table_name),
-            esc(&t.kind),
-            esc(&t.row_count_display),
-            esc(&t.size_display),
-            esc(&t.owner)
+            markdown_escape_pipe(&t.database),
+            markdown_escape_pipe(&t.table_name),
+            markdown_escape_pipe(&t.kind),
+            markdown_escape_pipe(&t.row_count_display),
+            markdown_escape_pipe(&t.size_display),
+            markdown_escape_pipe(&t.owner)
         )?;
     }
     Ok(())
@@ -343,6 +400,7 @@ fn search_columns<W: Write>(
     database: Option<&str>,
     format: OutputFormat,
     limit: Option<usize>,
+    pagination_args: Option<(usize, usize)>,
     writer: &mut W,
 ) -> Result<()> {
     let escaped_keyword = escape_sql_string(keyword);
@@ -353,7 +411,11 @@ fn search_columns<W: Write>(
         String::new()
     };
 
-    let row_limit = limit.unwrap_or(100);
+    let row_limit = if pagination_args.is_some() {
+        100000
+    } else {
+        limit.unwrap_or(100)
+    };
 
     let sql = format!(
         "SELECT TOP {limit} TRIM(c.DatabaseName) AS db_name, \
@@ -401,12 +463,41 @@ fn search_columns<W: Write>(
         })
         .collect();
 
+    // Apply pagination if requested
+    let pagination = pagination_args.map(|(page_size, page)| {
+        PaginationInfo::new(page, page_size, columns.len())
+    });
+
+    let display_columns = if let Some(ref pg) = pagination {
+        let (start, end) = pg.row_range();
+        if start < columns.len() {
+            &columns[start..end.min(columns.len())]
+        } else {
+            &columns[0..0]
+        }
+    } else {
+        &columns[..]
+    };
+
     match format {
-        OutputFormat::Table => render_column_search_table(&columns, keyword, writer)?,
-        OutputFormat::Json => render_column_search_json(&columns, writer)?,
-        OutputFormat::Csv => render_column_search_csv(&columns, writer)?,
+        OutputFormat::Table => {
+            render_column_search_table(display_columns, keyword, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
+        OutputFormat::Json => render_column_search_json_with_pagination(display_columns, pagination.as_ref(), writer)?,
+        OutputFormat::Csv => {
+            render_column_search_csv(display_columns, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
         OutputFormat::Markdown | OutputFormat::Md => {
-            render_column_search_markdown(&columns, writer)?;
+            render_column_search_markdown(display_columns, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
         }
     }
 
@@ -448,8 +539,9 @@ fn render_column_search_table<W: Write>(
     Ok(())
 }
 
-fn render_column_search_json<W: Write>(
+fn render_column_search_json_with_pagination<W: Write>(
     columns: &[ColumnSearchResult],
+    pagination: Option<&PaginationInfo>,
     writer: &mut W,
 ) -> Result<()> {
     write!(
@@ -471,7 +563,19 @@ fn render_column_search_json<W: Write>(
             json_escape(&c.nullable)
         )?;
     }
-    writeln!(writer, "]}}")?;
+    write!(writer, "]")?;
+    if let Some(pg) = pagination {
+        write!(
+            writer,
+            ",\"pagination\":{{\"page\":{},\"page_size\":{},\"total_rows\":{},\"total_pages\":{},\"has_more\":{}}}",
+            pg.page,
+            pg.page_size,
+            pg.total_rows,
+            pg.total_pages(),
+            pg.has_more()
+        )?;
+    }
+    writeln!(writer, "}}")?;
     Ok(())
 }
 
@@ -498,9 +602,6 @@ fn render_column_search_markdown<W: Write>(
     columns: &[ColumnSearchResult],
     writer: &mut W,
 ) -> Result<()> {
-    fn esc(s: &str) -> String {
-        s.replace('|', "\\|")
-    }
     writeln!(
         writer,
         "| Database | Table | Column | Type | Nullable |"
@@ -510,11 +611,11 @@ fn render_column_search_markdown<W: Write>(
         writeln!(
             writer,
             "| {} | {} | {} | {} | {} |",
-            esc(&c.database),
-            esc(&c.table_name),
-            esc(&c.column_name),
-            esc(&c.column_type),
-            esc(&c.nullable)
+            markdown_escape_pipe(&c.database),
+            markdown_escape_pipe(&c.table_name),
+            markdown_escape_pipe(&c.column_name),
+            markdown_escape_pipe(&c.column_type),
+            markdown_escape_pipe(&c.nullable)
         )?;
     }
     Ok(())
@@ -631,7 +732,7 @@ mod tests {
             owner: "alice".to_string(),
         }];
         let mut buf = Vec::new();
-        render_table_search_json(&tables, &mut buf).unwrap();
+        render_table_search_json_with_pagination(&tables, None, &mut buf).unwrap();
         let output = String::from_utf8(buf).unwrap();
         assert!(output.starts_with("{\"ok\":true,\"row_count\":1,\"data\":["));
         assert!(output.contains("\"database\":\"hr\""));
@@ -647,7 +748,7 @@ mod tests {
     fn test_render_table_search_json_empty() {
         let tables: Vec<TableSearchResult> = vec![];
         let mut buf = Vec::new();
-        render_table_search_json(&tables, &mut buf).unwrap();
+        render_table_search_json_with_pagination(&tables, None, &mut buf).unwrap();
         let output = String::from_utf8(buf).unwrap();
         assert_eq!(output, "{\"ok\":true,\"row_count\":0,\"data\":[]}\n");
     }
@@ -665,7 +766,7 @@ mod tests {
             owner: String::new(),
         }];
         let mut buf = Vec::new();
-        render_table_search_json(&tables, &mut buf).unwrap();
+        render_table_search_json_with_pagination(&tables, None, &mut buf).unwrap();
         let output = String::from_utf8(buf).unwrap();
         assert!(output.contains("\"estimated_rows\":null"));
         assert!(output.contains("\"size_bytes\":null"));
@@ -763,7 +864,7 @@ mod tests {
             nullable: "Y".to_string(),
         }];
         let mut buf = Vec::new();
-        render_column_search_json(&columns, &mut buf).unwrap();
+        render_column_search_json_with_pagination(&columns, None, &mut buf).unwrap();
         let output = String::from_utf8(buf).unwrap();
         assert!(output.starts_with("{\"ok\":true,\"row_count\":1,\"data\":["));
         assert!(output.contains("\"database\":\"hr\""));
@@ -778,7 +879,7 @@ mod tests {
     fn test_render_column_search_json_empty() {
         let columns: Vec<ColumnSearchResult> = vec![];
         let mut buf = Vec::new();
-        render_column_search_json(&columns, &mut buf).unwrap();
+        render_column_search_json_with_pagination(&columns, None, &mut buf).unwrap();
         let output = String::from_utf8(buf).unwrap();
         assert_eq!(output, "{\"ok\":true,\"row_count\":0,\"data\":[]}\n");
     }
@@ -842,7 +943,7 @@ mod tests {
             },
         ];
         let mut buf = Vec::new();
-        render_table_search_json(&tables, &mut buf).unwrap();
+        render_table_search_json_with_pagination(&tables, None, &mut buf).unwrap();
         let output = String::from_utf8(buf).unwrap();
         // ok is true
         assert!(output.contains("\"ok\":true"));
@@ -860,10 +961,69 @@ mod tests {
             nullable: "N".to_string(),
         }];
         let mut buf2 = Vec::new();
-        render_column_search_json(&columns, &mut buf2).unwrap();
+        render_column_search_json_with_pagination(&columns, None, &mut buf2).unwrap();
         let output2 = String::from_utf8(buf2).unwrap();
         assert!(output2.contains("\"ok\":true"));
         assert!(output2.contains("\"row_count\":1"));
         assert!(output2.contains("\"data\":[{"));
+    }
+
+    // =========================================================================
+    // Pagination tests for search renderers
+    // =========================================================================
+
+    #[test]
+    fn test_table_search_json_with_pagination() {
+        let tables = vec![
+            TableSearchResult {
+                database: "a".to_string(),
+                table_name: "t1".to_string(),
+                kind: "TABLE".to_string(),
+                row_count_display: "10".to_string(),
+                row_count_raw: Some(10),
+                size_display: "1 KB".to_string(),
+                size_bytes: Some(1024),
+                owner: "admin".to_string(),
+            },
+        ];
+        let pg = PaginationInfo::new(1, 5, 10);
+        let mut buf = Vec::new();
+        render_table_search_json_with_pagination(&tables, Some(&pg), &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("\"pagination\":{"));
+        assert!(output.contains("\"page\":1"));
+        assert!(output.contains("\"page_size\":5"));
+        assert!(output.contains("\"total_rows\":10"));
+        assert!(output.contains("\"total_pages\":2"));
+        assert!(output.contains("\"has_more\":true"));
+    }
+
+    #[test]
+    fn test_column_search_json_with_pagination() {
+        let columns = vec![
+            ColumnSearchResult {
+                database: "db".to_string(),
+                table_name: "tbl".to_string(),
+                column_name: "col".to_string(),
+                column_type: "INTEGER".to_string(),
+                nullable: "N".to_string(),
+            },
+        ];
+        let pg = PaginationInfo::new(2, 5, 7);
+        let mut buf = Vec::new();
+        render_column_search_json_with_pagination(&columns, Some(&pg), &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("\"pagination\":{"));
+        assert!(output.contains("\"page\":2"));
+        assert!(output.contains("\"has_more\":false"));
+    }
+
+    #[test]
+    fn test_table_search_json_no_pagination() {
+        let tables: Vec<TableSearchResult> = vec![];
+        let mut buf = Vec::new();
+        render_table_search_json_with_pagination(&tables, None, &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(!output.contains("\"pagination\""));
     }
 }

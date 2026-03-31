@@ -1,15 +1,30 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.30.0 (Sprint 55 - Search/Discovery Commands)
+**Version:** 1.31.0 (Sprint 56 - Result Pagination & Sprint 55 Cleanup)
 **Last Updated:** 2026-03-31
-**Base Commit:** [Sprint 55 - In Progress]
+**Base Commit:** [Sprint 56 - In Progress]
 
 ## Overview
 
 This directory contains comprehensive test case definitions for the tq CLI tool. These test cases cover all implemented MVP features (FR-001 through FR-010) and provide detailed procedures for validating functionality, usability, error handling, and security.
 
 ## Test Case Categories
+
+### Sprint 56: Result Pagination & Sprint 55 Cleanup
+
+- **TC-056-001**: Query Result Pagination Unit Tests — JSON envelope pagination metadata (page/page_size/has_more/total_rows), slicing correctness (page 1, page 2, last page, partial last page, beyond last), backward compatibility (no pagination fields when flag absent), table/CSV/markdown format footer, error on --page without --page-size, error on --page-size with --limit (Unit writer-injection, no DB) — `TC-056-001.md`
+- **TC-056-002**: Query Result Pagination Integration Tests — end-to-end CLI flag wiring: `--page-size`, `--page`, `--agent-safe` mode, backward compat (Integration live DB required, `#[ignore]`) — `TC-056-002.md`
+- **TC-056-003**: Search and List Pagination — `tq search tables/columns --page-size N` and `tq list --page-size N` pagination, JSON envelope metadata, --limit/--page-size mutual exclusion (Unit no DB + Integration `#[ignore]`) — `TC-056-003.md`
+- **TC-056-004**: Sprint 55 Tech Debt Cleanup — `markdown_escape_pipe()` unit tests, REPL `/search` dispatch alias routing tests, structural grep verifying `esc()` consolidated into format_helpers.rs and `_use_color` addressed (Unit + Structural grep, no DB) — `TC-056-004.md`
+
+**Sprint 56 test case summary:**
+- Unit tests (no DB): TC-056-001 (~14 tests), TC-056-003 (~8 tests), TC-056-004 (~11 tests) = ~33 unit tests
+- Integration tests (DB required, `#[ignore]`): TC-056-002 (4 tests), TC-056-003 (2 tests) = 6 tests
+- Structural grep: TC-056-004 (4 checks)
+- Total: ~39 tests + 4 structural checks
+
+---
 
 ### Sprint 55: Search/Discovery Commands
 

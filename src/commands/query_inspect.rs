@@ -6,6 +6,7 @@
 //! Sprint 39: Initial implementation
 
 use crate::cli::{OutputFormat, QueryInspectArgs};
+use crate::commands::format_helpers::markdown_escape_pipe;
 use crate::commands::monitoring_utils::{escape_csv, extract_integer, extract_trimmed_string};
 use crate::db::{DatabaseClient, Value};
 use crate::error::Result;
@@ -295,9 +296,6 @@ fn display_markdown<W: Write>(
     session_id: i64,
     writer: &mut W,
 ) -> Result<()> {
-    fn esc(s: &str) -> String {
-        s.replace('|', "\\|")
-    }
     writeln!(
         writer,
         "## Recent Queries for Session {}",
@@ -314,10 +312,10 @@ fn display_markdown<W: Write>(
             writer,
             "| {} | {} | {} | {} | {} |",
             query.session_id,
-            esc(&query.start_time),
-            esc(&query.total_elapsed),
-            esc(&query.status),
-            esc(&truncate_sql(&query.query_text, TABLE_SQL_MAX_LEN))
+            markdown_escape_pipe(&query.start_time),
+            markdown_escape_pipe(&query.total_elapsed),
+            markdown_escape_pipe(&query.status),
+            markdown_escape_pipe(&truncate_sql(&query.query_text, TABLE_SQL_MAX_LEN))
         )?;
     }
     Ok(())
