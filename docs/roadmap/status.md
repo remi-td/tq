@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
-**Last Updated:** 2026-03-25
-**Current Version:** 1.35.0
-**Latest Sprint:** Sprint 54 Complete (Agent-Safe Mode & Richer Introspection)
+**Last Updated:** 2026-03-31
+**Current Version:** 1.36.0
+**Latest Sprint:** Sprint 55 Complete (Search/Discovery Commands)
 
 ---
 
@@ -519,7 +519,7 @@ All core features are complete and tested.
 | `--max-rows` flag | ✅ | Issue #37 part 3 | v1.35.0 (Sprint 54) |
 | Statement classification (ReadOnly/DML/DDL) | ✅ | Issue #37 part 3 | v1.35.0 (Sprint 54) |
 | Richer inspect JSON (indexes, storage, DDL, deps) | ✅ | Issue #37 part 4 | v1.35.0 (Sprint 54) |
-| Search/discovery commands | 📋 | Issue #37 part 5 | Future |
+| Search/discovery commands | ✅ | Issue #37 part 5 | v1.36.0 (Sprint 55) |
 | Result pagination | 📋 | Issue #37 part 6 | Future |
 
 ---
@@ -527,11 +527,11 @@ All core features are complete and tested.
 ## Summary Statistics
 
 - **Total Features**: 108
-- **Implemented**: 106 (98%)
-- **Planned**: 2 (2%)
-- **Test Pass Rate**: 100% (1091/1091 executed, 58 ignored database-dependent)
+- **Implemented**: 107 (99%)
+- **Planned**: 1 (1%)
+- **Test Pass Rate**: 100% (929 unit tests pass, integration tests require live DB)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 54 - Agent-Safe Mode & Richer Introspection
+- **Latest Sprint**: Sprint 55 - Search/Discovery Commands
 
 ---
 
