@@ -2067,6 +2067,7 @@ tq [GLOBAL_OPTIONS] search <SUBCOMMAND> [OPTIONS] <KEYWORD>
 | `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv`, `md` |
 | `--output` | `-o` | path | stdout | Write output to file |
 | `--database` | `-d` | string | (all databases) | Scope search to a single database |
+| `--limit` | `-n` | integer | 100 | Maximum number of results; use `0` for unlimited |
 
 **Key Distinction from `list`**:
 - `tq list tables` — lists objects in **one** database (current or `--database`)
