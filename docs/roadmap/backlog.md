@@ -19,14 +19,6 @@ No P0 features currently in backlog. All critical features have been implemented
 
 ## P1 - High Priority (Should Have)
 
-### Agent Mode - Remaining Items (Issue #37)
-
-**Result Pagination** (Issue #37 part 6)
-- Cursor-based pagination for large result sets
-- `--page` and `--page-size` flags
-- Next-page token in JSON envelope for stateless iteration
-- Prevents context window overflow in AI agents
-
 ### REPL Enhancements
 
 **Second TAB Accepts Selection**
