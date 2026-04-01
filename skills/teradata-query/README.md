@@ -17,40 +17,54 @@ When equipped with this skill, an agent can:
 
 ## Distribution
 
-The canonical source for this skill lives in the tq repository at
-`skills/teradata-query/SKILL.md`. It is published alongside each tq release.
+This directory is a **Claude Code plugin**. The canonical source lives in the
+tq repository at `skills/teradata-query/` and is also published to the
+`remi-td/teradata-skills` marketplace repo.
 
-### Installation Methods
+### Install as a Claude Code Plugin (recommended)
 
-**Copy from local clone:**
+```bash
+claude plugin add remi-td/teradata-skills --subdir skills/teradata-query
+```
+
+Or from the tq repo directly:
+
+```bash
+claude plugin add remi-td/tq --subdir skills/teradata-query
+```
+
+### Manual Installation
+
+Copy the skill file into your agent's skill directory:
 
 ```bash
 # Claude Code (project-level)
 mkdir -p .claude/skills/teradata-query
-cp <tq-repo>/skills/teradata-query/SKILL.md .claude/skills/teradata-query/
+cp <tq-repo>/skills/teradata-query/skills/teradata-query/SKILL.md .claude/skills/teradata-query/
 
 # Claude Code (user-level, all projects)
 mkdir -p ~/.claude/skills/teradata-query
-cp <tq-repo>/skills/teradata-query/SKILL.md ~/.claude/skills/teradata-query/
+cp <tq-repo>/skills/teradata-query/skills/teradata-query/SKILL.md ~/.claude/skills/teradata-query/
 
 # Cross-client (any agent supporting the standard)
 mkdir -p .agents/skills/teradata-query
-cp <tq-repo>/skills/teradata-query/SKILL.md .agents/skills/teradata-query/
+cp <tq-repo>/skills/teradata-query/skills/teradata-query/SKILL.md .agents/skills/teradata-query/
 ```
 
 **Download from GitHub:**
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/skills/teradata-query/SKILL.md \
+curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/skills/teradata-query/skills/teradata-query/SKILL.md \
   -o SKILL.md
 ```
 
 ### Keeping the Skill Updated
 
-The skill is versioned with the tq repository. When tq gains new commands or
-options, the skill is updated in the same commit or release.
+When installed as a plugin, run `/plugin update teradata-query` to pull the
+latest version.
 
-To update, re-download or re-copy the SKILL.md file from the latest release.
+For manual installs: re-download or re-copy the SKILL.md file from the latest
+release. The skill is versioned with the tq repository.
 
 ## Maintenance
 

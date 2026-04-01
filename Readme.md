@@ -319,44 +319,23 @@ coding agents how to install, configure, and use tq. Any agent that supports the
 [Agent Skills Standard](https://agentskills.io/) can use it, including Claude
 Code, Cursor, GitHub Copilot, Gemini CLI, and [30+ other tools](https://agentskills.io/).
 
-The skill lives at [`skills/teradata-query/SKILL.md`](skills/teradata-query/SKILL.md)
-in this repository.
+The skill is packaged as a [Claude Code plugin](skills/teradata-query/) and
+also published to the `remi-td/teradata-skills` marketplace.
 
 ### Adding the Skill to Your Agent
 
-**Claude Code** (project-level -- recommended for teams):
+**Claude Code plugin** (recommended):
 
 ```bash
-mkdir -p .claude/skills
-cp path/to/tq/skills/teradata-query/SKILL.md .claude/skills/teradata-query/SKILL.md
+claude plugin add remi-td/teradata-skills --subdir skills/teradata-query
 ```
 
-Or install it for all your projects (user-level):
+**Manual install** (any agent supporting the standard):
 
 ```bash
-mkdir -p ~/.claude/skills/teradata-query
-cp path/to/tq/skills/teradata-query/SKILL.md ~/.claude/skills/teradata-query/SKILL.md
-```
-
-**Cross-client** (works with any agent supporting the standard):
-
-```bash
-mkdir -p .agents/skills/teradata-query
-cp path/to/tq/skills/teradata-query/SKILL.md .agents/skills/teradata-query/SKILL.md
-```
-
-**From GitHub** (no local clone needed):
-
-```bash
-# Claude Code (project-level)
-mkdir -p .claude/skills/teradata-query
-curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/skills/teradata-query/SKILL.md \
+mkdir -p .claude/skills/teradata-query   # or .agents/skills/teradata-query
+curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/skills/teradata-query/skills/teradata-query/SKILL.md \
   -o .claude/skills/teradata-query/SKILL.md
-
-# Cross-client
-mkdir -p .agents/skills/teradata-query
-curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/skills/teradata-query/SKILL.md \
-  -o .agents/skills/teradata-query/SKILL.md
 ```
 
 Once installed, invoke the skill with `/teradata-query` (in Claude Code) or let
