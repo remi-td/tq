@@ -312,6 +312,60 @@ Or use environment variables:
 
 ---
 
+## Agent Skill
+
+tq ships with an **Agent Skill** -- a portable instruction set that teaches AI
+coding agents how to install, configure, and use tq. Any agent that supports the
+[Agent Skills Standard](https://agentskills.io/) can use it, including Claude
+Code, Cursor, GitHub Copilot, Gemini CLI, and [30+ other tools](https://agentskills.io/).
+
+The skill lives at [`skills/teradata-query/SKILL.md`](skills/teradata-query/SKILL.md)
+in this repository.
+
+### Adding the Skill to Your Agent
+
+**Claude Code** (project-level -- recommended for teams):
+
+```bash
+mkdir -p .claude/skills
+cp path/to/tq/skills/teradata-query/SKILL.md .claude/skills/teradata-query/SKILL.md
+```
+
+Or install it for all your projects (user-level):
+
+```bash
+mkdir -p ~/.claude/skills/teradata-query
+cp path/to/tq/skills/teradata-query/SKILL.md ~/.claude/skills/teradata-query/SKILL.md
+```
+
+**Cross-client** (works with any agent supporting the standard):
+
+```bash
+mkdir -p .agents/skills/teradata-query
+cp path/to/tq/skills/teradata-query/SKILL.md .agents/skills/teradata-query/SKILL.md
+```
+
+**From GitHub** (no local clone needed):
+
+```bash
+# Claude Code (project-level)
+mkdir -p .claude/skills/teradata-query
+curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/skills/teradata-query/SKILL.md \
+  -o .claude/skills/teradata-query/SKILL.md
+
+# Cross-client
+mkdir -p .agents/skills/teradata-query
+curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/skills/teradata-query/SKILL.md \
+  -o .agents/skills/teradata-query/SKILL.md
+```
+
+Once installed, invoke the skill with `/teradata-query` (in Claude Code) or let
+your agent auto-activate it when Teradata-related tasks arise. The skill covers
+installation, connection setup, querying, schema exploration, monitoring, and
+all tq commands.
+
+---
+
 ## Documentation
 
 - **[Configuration Guide](docs/user/configuration-guide.md)** - Configuration files and profiles
