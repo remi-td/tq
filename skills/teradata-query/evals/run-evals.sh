@@ -120,7 +120,6 @@ run_claude() {
   local output_file="$3"
 
   local -a claude_args=(
-    --bare
     -p "$prompt"
     --output-format json
     --model "$MODEL"
@@ -186,21 +185,20 @@ response. An assertion passes if the agent response demonstrates the
 behavior described. Be strict but fair -- the agent describes commands it
 would run, so check if those commands match the assertion.
 
-Return your grading as a JSON object.
+You MUST respond with ONLY a JSON object (no markdown fences, no extra text).
+Use this exact format:
+{"grades":[{"assertion_index":1,"assertion_text":"...","pass":true,"evidence":"..."},{"assertion_index":2,...}]}
 GRADING_EOF
 
   local grading_prompt
   grading_prompt="$(cat "$grading_prompt_file")"
   rm -f "$grading_prompt_file"
 
-  local schema='{"type":"object","properties":{"grades":{"type":"array","items":{"type":"object","properties":{"assertion_index":{"type":"integer"},"assertion_text":{"type":"string"},"pass":{"type":"boolean"},"evidence":{"type":"string"}},"required":["assertion_index","assertion_text","pass","evidence"]}}},"required":["grades"]}'
-
   local grading_output
-  if grading_output="$(claude --bare -p "$grading_prompt" \
+  if grading_output="$(claude -p "$grading_prompt" \
       --output-format json \
       --model "$JUDGE_MODEL" \
-      --max-turns 1 \
-      --json-schema "$schema" 2>/dev/null)"; then
+      --max-turns 1 2>/dev/null)"; then
     echo "$grading_output" > "$grading_file"
   else
     echo "$grading_output" > "$grading_file"
@@ -266,13 +264,13 @@ collect_summary() {
     local baseline_pass="-" baseline_total="-" skill_pass="-" skill_total="-"
 
     if [[ -f "$case_dir/baseline-grading.json" ]]; then
-      baseline_pass="$(jq '[.structured_output.grades[]? | select(.pass == true)] | length' "$case_dir/baseline-grading.json" 2>/dev/null || echo "0")"
-      baseline_total="$(jq '[.structured_output.grades[]?] | length' "$case_dir/baseline-grading.json" 2>/dev/null || echo "0")"
+      baseline_pass="$(jq '[(.result | gsub("```json\\n?";"") | gsub("```";"") | gsub("^\\s+";"") | fromjson? // {grades:[]}).grades[]? | select(.pass == true)] | length' "$case_dir/baseline-grading.json" 2>/dev/null || echo "0")"
+      baseline_total="$(jq '[(.result | gsub("```json\\n?";"") | gsub("```";"") | gsub("^\\s+";"") | fromjson? // {grades:[]}).grades[]?] | length' "$case_dir/baseline-grading.json" 2>/dev/null || echo "0")"
     fi
 
     if [[ -f "$case_dir/skill-grading.json" ]]; then
-      skill_pass="$(jq '[.structured_output.grades[]? | select(.pass == true)] | length' "$case_dir/skill-grading.json" 2>/dev/null || echo "0")"
-      skill_total="$(jq '[.structured_output.grades[]?] | length' "$case_dir/skill-grading.json" 2>/dev/null || echo "0")"
+      skill_pass="$(jq '[(.result | gsub("```json\\n?";"") | gsub("```";"") | gsub("^\\s+";"") | fromjson? // {grades:[]}).grades[]? | select(.pass == true)] | length' "$case_dir/skill-grading.json" 2>/dev/null || echo "0")"
+      skill_total="$(jq '[(.result | gsub("```json\\n?";"") | gsub("```";"") | gsub("^\\s+";"") | fromjson? // {grades:[]}).grades[]?] | length' "$case_dir/skill-grading.json" 2>/dev/null || echo "0")"
     fi
 
     summary_json="$(echo "$summary_json" | jq \
@@ -388,7 +386,7 @@ write_report() {
         echo "|---|-----------|------|----------|"
 
         jq -r '
-          .structured_output.grades[]? |
+          (.result | gsub("```json\\n?";"") | gsub("```";"") | gsub("^\\s+";"") | fromjson? // {grades:[]}).grades[]? |
           "| \(.assertion_index) | \(.assertion_text) | \(if .pass then "PASS" else "FAIL" end) | \(.evidence) |"
         ' "$case_dir/skill-grading.json" 2>/dev/null || echo "| - | Grading unavailable | - | - |"
 
