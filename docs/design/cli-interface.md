@@ -2671,6 +2671,372 @@ fn test_json_special_chars_in_names() {
 |--------|------|-------------|
 | New tests | `src/commands/search.rs` | Edge case tests for markdown and JSON rendering |
 
+## Search Module: Serde JSON Refactoring
+
+### Problem
+
+The `render_table_search_json_with_pagination` and `render_column_search_json_with_pagination` functions in `src/commands/search.rs` use hand-rolled `write!()` calls to build JSON output. This approach is fragile (manual comma handling, manual null rendering, manual escaping via `json_escape()`) and inconsistent with the rest of the codebase, which uses `serde_json` (see `src/format/json.rs`).
+
+### Solution: Serializable Structs with serde_json
+
+Define `#[derive(Serialize)]` structs that mirror the JSON output structure, then use `serde_json::to_writer` for output.
+
+#### Envelope Pattern
+
+```rust
+use serde::Serialize;
+
+/// Standard search result envelope for JSON output
+#[derive(Serialize)]
+struct SearchEnvelope<T: Serialize> {
+    ok: bool,
+    row_count: usize,
+    data: Vec<T>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pagination: Option<PaginationJson>,
+}
+
+/// Pagination metadata for JSON serialization
+#[derive(Serialize)]
+struct PaginationJson {
+    page: usize,
+    page_size: usize,
+    total_rows: usize,
+    total_pages: usize,
+    has_more: bool,
+}
+
+impl From<&PaginationInfo> for PaginationJson {
+    fn from(pg: &PaginationInfo) -> Self {
+        Self {
+            page: pg.page,
+            page_size: pg.page_size,
+            total_rows: pg.total_rows,
+            total_pages: pg.total_pages(),
+            has_more: pg.has_more(),
+        }
+    }
+}
+```
+
+#### Table Search JSON Payload
+
+```rust
+/// JSON representation of a table search result row
+#[derive(Serialize)]
+struct TableSearchJson {
+    database: String,
+    table_name: String,
+    #[serde(rename = "type")]
+    kind: String,
+    estimated_rows: Option<i64>,
+    size_bytes: Option<i64>,
+    owner: String,
+}
+```
+
+Key serde behaviors:
+- `Option<i64>` serializes as `null` when `None` -- matches current hand-rolled behavior
+- `#[serde(rename = "type")]` produces the JSON key `"type"` from the Rust field `kind`
+- No manual `json_escape()` needed -- serde handles all escaping
+
+#### Column Search JSON Payload
+
+```rust
+/// JSON representation of a column search result row
+#[derive(Serialize)]
+struct ColumnSearchJson {
+    database: String,
+    table_name: String,
+    column_name: String,
+    column_type: String,
+    nullable: String,
+}
+```
+
+#### Rendering Functions
+
+Both `render_table_search_json_with_pagination` and `render_column_search_json_with_pagination` become simple conversions:
+
+```rust
+fn render_table_search_json_with_pagination<W: Write>(
+    tables: &[TableSearchResult],
+    pagination: Option<&PaginationInfo>,
+    writer: &mut W,
+) -> Result<()> {
+    let data: Vec<TableSearchJson> = tables.iter().map(|t| TableSearchJson {
+        database: t.database.clone(),
+        table_name: t.table_name.clone(),
+        kind: t.kind.clone(),
+        estimated_rows: t.row_count_raw,
+        size_bytes: t.size_bytes,
+        owner: t.owner.clone(),
+    }).collect();
+
+    let envelope = SearchEnvelope {
+        ok: true,
+        row_count: data.len(),
+        data,
+        pagination: pagination.map(PaginationJson::from),
+    };
+
+    serde_json::to_writer(&mut *writer, &envelope)?;
+    writeln!(writer)?;
+    Ok(())
+}
+```
+
+#### Output Compatibility
+
+The serde output is compact JSON (no whitespace) matching the current hand-rolled output. The `SearchEnvelope` uses `skip_serializing_if = "Option::is_none"` on `pagination` so the key is absent when there is no pagination -- matching current behavior where the pagination block is only written when `pagination.is_some()`.
+
+The existing tests check for content like `"ok":true` and `"estimated_rows":null` -- these assertions remain valid since serde produces the same key-value pairs in the same order (struct field declaration order).
+
+One minor difference: serde may differ in whitespace or field ordering in edge cases. The existing tests use `contains()` assertions (not exact string equality), so they tolerate this.
+
+#### Import Changes
+
+The `json_escape` import from `format_helpers` can be removed from search.rs after this refactoring (it is only used for hand-rolled JSON). The `csv_escape` and `markdown_escape_pipe` imports remain for CSV and markdown renderers.
+
+### Code Linkage
+
+| Change | File | Description |
+|--------|------|-------------|
+| Add serde structs | `src/commands/search.rs` | `SearchEnvelope<T>`, `PaginationJson`, `TableSearchJson`, `ColumnSearchJson` |
+| Refactor JSON render | `src/commands/search.rs` | Replace `write!()` calls with `serde_json::to_writer` |
+| Remove import | `src/commands/search.rs` | Remove `json_escape` from format_helpers import |
+
+## Search Module: MAX_SEARCH_FETCH Constant
+
+### Problem
+
+The hard-coded `100000` value appears twice in `src/commands/search.rs` (once in `search_tables`, once in `search_columns`). It serves as a sentinel "fetch all rows" limit for client-side pagination but reads as a magic number.
+
+### Solution
+
+Define a module-level constant:
+
+```rust
+/// Maximum rows fetched when client-side pagination is active.
+///
+/// When --page-size is set, we fetch up to this many rows from the server
+/// and paginate client-side. This avoids unbounded result sets while being
+/// large enough to cover any practical search.
+const MAX_SEARCH_FETCH: usize = 100_000;
+```
+
+Replace both occurrences:
+
+```rust
+// Before:
+let row_limit = if pagination_args.is_some() {
+    100000
+} else {
+    limit.unwrap_or(100)
+};
+
+// After:
+let row_limit = if pagination_args.is_some() {
+    MAX_SEARCH_FETCH
+} else {
+    limit.unwrap_or(100)
+};
+```
+
+The constant is `pub(crate)` visibility is not needed since it is only used within the search module. A plain `const` suffices.
+
+### Code Linkage
+
+| Change | File | Description |
+|--------|------|-------------|
+| New constant | `src/commands/search.rs` | `MAX_SEARCH_FETCH` replaces magic `100000` |
+
+## Search Views Subcommand
+
+### Overview
+
+Add `tq search views <keyword>` to search for views by name across databases. This follows the exact same architecture as the existing `search_tables` and `search_columns` implementations.
+
+### CLI Integration
+
+#### SearchObjectType Extension
+
+```rust
+// src/cli.rs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SearchObjectType {
+    Tables,
+    Columns,
+    Views,  // New variant
+}
+```
+
+#### Batch Dispatch
+
+In `execute()`, add the `Views` match arm:
+
+```rust
+SearchObjectType::Views => search_views(
+    client,
+    &args.keyword,
+    args.database.as_deref(),
+    args.format,
+    effective_limit,
+    pagination_args,
+    writer,
+),
+```
+
+### SQL Query
+
+```sql
+SELECT TOP {limit}
+    TRIM(t.DatabaseName) AS db_name,
+    TRIM(t.TableName) AS view_name,
+    t.CreateTimeStamp AS created,
+    TRIM(t.CreatorName) AS creator
+FROM DBC.TablesV t
+WHERE UPPER(t.TableName) LIKE UPPER('%{keyword}%')
+  AND t.TableKind IN ('V')
+  {db_filter}
+ORDER BY t.DatabaseName, t.TableName
+```
+
+Design notes:
+- `TableKind = 'V'` selects views only (V = View in Teradata's DBC.TablesV)
+- `CreateTimeStamp` provides useful metadata (when was the view created)
+- `CreatorName` shows who created the view
+- No size/row-count join needed -- views have no storage footprint
+- Uses same `escape_sql_string()` and db_filter pattern as table search
+
+### Data Structure
+
+```rust
+/// View search result entry
+struct ViewSearchResult {
+    database: String,
+    view_name: String,
+    created: String,
+    creator: String,
+}
+```
+
+The `created` field is stored as a `String` because Teradata's `CreateTimeStamp` comes back as a formatted timestamp string. We display it as-is.
+
+### JSON Output
+
+Using the serde envelope pattern introduced by the serde refactoring:
+
+```rust
+#[derive(Serialize)]
+struct ViewSearchJson {
+    database: String,
+    view_name: String,
+    created: String,
+    creator: String,
+}
+```
+
+Envelope output:
+```json
+{"ok":true,"row_count":2,"data":[{"database":"hr","view_name":"emp_view","created":"2024-01-15 10:30:00","creator":"admin"},{"database":"fin","view_name":"budget_view","created":"2024-03-01 08:00:00","creator":"dba"}]}
+```
+
+### All Four Output Formats
+
+Following the established pattern:
+
+| Format | Function | Header/Structure |
+|--------|----------|------------------|
+| Table | `render_view_search_table` | "Database", "View Name", "Created", "Creator" |
+| JSON | `render_view_search_json_with_pagination` | serde envelope with `ViewSearchJson` |
+| CSV | `render_view_search_csv` | `Database,ViewName,Created,Creator` |
+| Markdown | `render_view_search_markdown` | `\| Database \| View Name \| Created \| Creator \|` |
+
+### Pagination Support
+
+Same client-side pagination pattern as table and column search:
+- When `--page-size` is set, fetch up to `MAX_SEARCH_FETCH` rows
+- Apply `PaginationInfo` slicing
+- Write pagination footer (table/CSV/markdown) or pagination JSON block (JSON)
+
+### REPL Integration
+
+#### Dispatch in execute_for_repl
+
+```rust
+// In execute_for_repl match block:
+"views" | "view" | "v" => {
+    search_views(client, keyword, database, OutputFormat::Table, None, None, writer)?;
+}
+```
+
+Update the error message to include views:
+```rust
+_ => {
+    writeln!(writer, "Error: Unknown search subcommand: {}", subcommand)?;
+    writeln!(writer, "Available: tables, columns, views")?;
+}
+```
+
+#### Metacommand Help Text
+
+Update the `/search` help text in `src/commands/repl/metacommands.rs` to include:
+```
+  views <keyword>     Search views by name across databases
+```
+
+Add examples:
+```
+  /search views emp
+  /search views budget in finance
+```
+
+#### Tab Completion
+
+In `src/commands/repl/metadata_completer.rs`:
+
+1. Add a new `MetacommandDef` entry:
+```rust
+MetacommandDef {
+    name: "search views",
+    aliases: &[],
+    description: "Search views by name across databases",
+},
+```
+
+2. Add `"views"` to the `complete_search_subcommands` subcommands array:
+```rust
+let subcommands = [
+    ("tables", "Search tables by name across databases"),
+    ("columns", "Search columns by name across databases"),
+    ("views", "Search views by name across databases"),
+];
+```
+
+### Unit Tests
+
+Follow the same test structure as existing table/column search tests:
+
+1. `test_view_search_result_structure` -- construct and assert fields
+2. `test_render_view_search_table_format` -- verify table format output
+3. `test_render_view_search_table_empty` -- verify "(no views found)" message
+4. `test_render_view_search_json` -- verify JSON envelope with correct keys
+5. `test_render_view_search_json_empty` -- verify empty data array
+6. `test_render_view_search_csv` -- verify CSV header and rows
+7. `test_render_view_search_markdown` -- verify markdown table
+
+### Code Linkage
+
+| Change | File | Description |
+|--------|------|-------------|
+| New enum variant | `src/cli.rs` | `SearchObjectType::Views` |
+| New search function | `src/commands/search.rs` | `search_views()` + 4 render functions |
+| REPL dispatch | `src/commands/search.rs` | `execute_for_repl` views arm |
+| REPL help text | `src/commands/repl/metacommands.rs` | Updated `/search` help and help listing |
+| Tab completion | `src/commands/repl/metadata_completer.rs` | `MetacommandDef` entry + subcommand array |
+| Unit tests | `src/commands/search.rs` | 7 new tests |
+
 ## Future Enhancements
 
 - **Config file flag**: `--config <path>` to override default config location

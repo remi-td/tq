@@ -500,18 +500,24 @@ pub fn handle_metacommand_with_state<W: Write>(
                     writer,
                     "  columns <keyword>   Search columns by name across databases"
                 )?;
+                writeln!(
+                    writer,
+                    "  views <keyword>     Search views by name across databases"
+                )?;
                 writeln!(writer)?;
                 writeln!(writer, "Examples:")?;
                 writeln!(writer, "  /search tables emp")?;
                 writeln!(writer, "  /search columns salary")?;
+                writeln!(writer, "  /search views summary")?;
                 writeln!(writer, "  /search tables emp in hr")?;
                 writeln!(writer, "  /search columns salary in hr")?;
+                writeln!(writer, "  /search views summary in reporting")?;
                 writeln!(writer)?;
                 writeln!(writer, "Aliases: /sf (short for /search)")?;
                 writeln!(writer)?;
             } else if args.len() < 2 {
                 writeln!(writer, "Error: Missing keyword.")?;
-                writeln!(writer, "Usage: /search <tables|columns> <keyword>")?;
+                writeln!(writer, "Usage: /search <tables|columns|views> <keyword>")?;
             } else {
                 execute_search(completion_state, &args, writer)?;
             }
@@ -862,6 +868,10 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(
         writer,
         "  /search columns <kw>   Search columns by name across databases"
+    )?;
+    writeln!(
+        writer,
+        "  /search views <kw>     Search views by name across databases"
     )?;
     writeln!(writer, "  /dt                    Shortcut for /list tables")?;
     writeln!(writer, "  /dv                    Shortcut for /list views")?;

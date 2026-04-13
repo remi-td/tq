@@ -521,17 +521,19 @@ All core features are complete and tested.
 | Richer inspect JSON (indexes, storage, DDL, deps) | ✅ | Issue #37 part 4 | v1.35.0 (Sprint 54) |
 | Search/discovery commands | ✅ | Issue #37 part 5 | v1.36.0 (Sprint 55) |
 | Result pagination | ✅ | Issue #37 part 6 | v1.37.0 (Sprint 56) |
+| Search views subcommand | ✅ | Sprint 57 | v1.38.0 (Sprint 57) |
+| Serde JSON in search renderers | ✅ | Sprint 57 tech debt | v1.38.0 (Sprint 57) |
 
 ---
 
 ## Summary Statistics
 
-- **Total Features**: 108
-- **Implemented**: 108 (100%)
+- **Total Features**: 110
+- **Implemented**: 110 (100%)
 - **Planned**: 0 (0%)
-- **Test Pass Rate**: 100% (944 unit tests pass, integration tests require live DB)
+- **Test Pass Rate**: 100% (956 unit tests pass, integration tests require live DB)
 - **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 56 - Result Pagination & Tech Debt Cleanup
+- **Latest Sprint**: Sprint 57 - Search Quality & View Search
 
 ---
 

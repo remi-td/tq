@@ -418,7 +418,7 @@ tq> SELECT COUNT(*) FROM employees WHERE dept = 'IT';
 - `/ping` - Test connection
 - `/query` - Show current SQL query for a session
 - `/sample` - Show random sample
-- `/search` - Search for tables or columns by keyword across all databases
+- `/search` - Search for tables, columns, or views by keyword across all databases
 - `/peek` - Show first rows and column info
 - `/export` - Export results
 - `/session` - Show session info
@@ -462,7 +462,7 @@ Available metacommands:
     /reconnect   Reconnect to database
     /repeat      Re-execute last query
     /sample      Show random sample
-    /search      Search for tables or columns by keyword across all databases
+    /search      Search for tables, columns, or views by keyword across all databases
     /session     Show session info
     /sessions    List active Teradata sessions with performance metrics
     /set         Set configuration
@@ -2040,18 +2040,24 @@ Reason: Insufficient privileges to query system catalog
 
 **`/search` Metacommand**
 
-**Requirement:** Search for tables or columns by keyword across all accessible databases, without needing to know which database contains the target object. This is the discovery-oriented companion to `/list`, which operates within a single database. `/search` queries the system catalog globally and surfaces all matching objects along with their owning database.
+**Requirement:** Search for tables, columns, or views by keyword across all accessible databases, without needing to know which database contains the target object. This is the discovery-oriented companion to `/list`, which operates within a single database. `/search` queries the system catalog globally and surfaces all matching objects along with their owning database.
 
 **Syntax:**
 ```
 /search tables <keyword>           -- Search for tables matching keyword across all databases
 /search columns <keyword>          -- Search for columns matching keyword across all databases
+/search views <keyword>            -- Search for views matching keyword across all databases
 /search tables <keyword> in <db>   -- Scope table search to a specific database
 /search columns <keyword> in <db>  -- Scope column search to a specific database
+/search views <keyword> in <db>    -- Scope view search to a specific database
 ```
 
+**Aliases:**
+- `/search v <keyword>` — alias for `/search views <keyword>`
+- `/search view <keyword>` — alias for `/search views <keyword>`
+
 **Keyword Matching:**
-The keyword is matched using SQL `LIKE '%<keyword>%'` (case-insensitive). A keyword of `emp` matches any table or column name that contains the string `emp` anywhere.
+The keyword is matched using SQL `LIKE '%<keyword>%'` (case-insensitive). A keyword of `emp` matches any table, column, or view name that contains the string `emp` anywhere.
 
 **`/search tables` Output Format:**
 ```
@@ -2100,11 +2106,48 @@ Search results for columns matching 'salary':
 4 columns found matching 'salary'
 ```
 
+**`/search views` Output Format:**
+```
+tq> /search views summary
+
+Search results for views matching 'summary':
+┌─────────────────────┬──────────────────────┬──────────────────────┐
+│ Database            │ View                 │ Owner                │
+├─────────────────────┼──────────────────────┼──────────────────────┤
+│ analytics           │ daily_summary        │ dba_user             │
+│ reporting           │ sales_summary        │ rpt_owner            │
+│ reporting           │ weekly_summary       │ rpt_owner            │
+└─────────────────────┴──────────────────────┴──────────────────────┘
+
+3 views found matching 'summary'
+```
+
+**`/search views` with database scope:**
+```
+tq> /search views summary in reporting
+
+Search results for views matching 'summary' in database 'reporting':
+┌─────────────────────┬──────────────────────┬──────────────────────┐
+│ Database            │ View                 │ Owner                │
+├─────────────────────┼──────────────────────┼──────────────────────┤
+│ reporting           │ sales_summary        │ rpt_owner            │
+│ reporting           │ weekly_summary       │ rpt_owner            │
+└─────────────────────┴──────────────────────┴──────────────────────┘
+
+2 views found matching 'summary' in database 'reporting'
+```
+
 **No Results:**
 ```
 tq> /search tables xyz_nonexistent
 
 No tables found matching 'xyz_nonexistent'.
+```
+
+```
+tq> /search views xyz_nonexistent
+
+No views found matching 'xyz_nonexistent'.
 ```
 
 **Missing Keyword:**
@@ -2113,9 +2156,11 @@ tq> /search tables
 
 Usage: /search tables <keyword>
        /search columns <keyword>
+       /search views <keyword>
 
 Example: /search tables emp
          /search columns salary
+         /search views summary
 ```
 
 **Unknown Subcommand:**
@@ -2123,20 +2168,21 @@ Example: /search tables emp
 tq> /search macros emp
 
 Error: Unknown /search subcommand 'macros'
-Available: tables, columns
+Available: tables, columns, views
 ```
 
 **Behavior Requirements:**
 
-1. **REQ-REPL-SEARCH-001**: The `/search` metacommand SHALL accept two subcommands: `tables` and `columns`. Invoking `/search` with no subcommand or an unknown subcommand SHALL display usage guidance (not an error exit).
-2. **REQ-REPL-SEARCH-002**: The keyword argument is REQUIRED for both subcommands. Invoking `/search tables` or `/search columns` without a keyword SHALL display usage guidance.
+1. **REQ-REPL-SEARCH-001**: The `/search` metacommand SHALL accept three subcommands: `tables`, `columns`, and `views`. The aliases `v` and `view` SHALL be treated as `views`. Invoking `/search` with no subcommand or an unknown subcommand SHALL display usage guidance (not an error exit).
+2. **REQ-REPL-SEARCH-002**: The keyword argument is REQUIRED for all subcommands. Invoking a subcommand without a keyword SHALL display usage guidance.
 3. **REQ-REPL-SEARCH-003**: `tables` subcommand data source: `DBC.TablesV WHERE TableKind IN ('T', 'O')` joined with `DBC.TableSizeV`. Filter: `TableName LIKE '%<keyword>%'` (case-insensitive). Columns displayed: Database, Table, Type, Rows (Est.), Size.
 4. **REQ-REPL-SEARCH-004**: `columns` subcommand data source: `DBC.ColumnsV` joined with `DBC.TablesV WHERE TableKind IN ('T', 'O', 'V')`. Filter: `ColumnName LIKE '%<keyword>%'` (case-insensitive). Columns displayed: Database, Table, Column, Type, Nullable.
 5. **REQ-REPL-SEARCH-005**: The optional `in <database>` qualifier scopes results to a single database. Without it, all accessible databases are searched.
-6. **REQ-REPL-SEARCH-006**: Results SHALL be sorted by Database ascending, then Table ascending (for `search tables`), and by Database ascending, Table ascending, Column ascending (for `search columns`).
+6. **REQ-REPL-SEARCH-006**: Results SHALL be sorted by Database ascending, then Table ascending (for `search tables`), by Database ascending, Table ascending, Column ascending (for `search columns`), and by Database ascending, then View ascending (for `search views`).
 7. **REQ-REPL-SEARCH-007**: The `/search` command executes read-only queries. It is safe to use in any session, including agent-safe sessions.
-8. **REQ-REPL-SEARCH-008**: Tab completion SHALL complete `/search` from a prefix (e.g., `/sea<TAB>` completes to `/search`). After the metacommand, completion SHALL suggest `tables` and `columns` subcommands.
+8. **REQ-REPL-SEARCH-008**: Tab completion SHALL complete `/search` from a prefix (e.g., `/sea<TAB>` completes to `/search`). After the metacommand, completion SHALL suggest `tables`, `columns`, and `views` subcommands.
 9. **REQ-REPL-SEARCH-009**: Trailing semicolons SHALL be stripped per REQ-META-INPUT-001.
+10. **REQ-REPL-SEARCH-010**: `views` subcommand data source: `DBC.TablesV WHERE TableKind = 'V'`. Filter: `TableName LIKE '%<keyword>%'` (case-insensitive). Columns displayed: Database, View, Owner (mapped from `CreatorName`).
 
 **Error Cases:**
 
@@ -2160,12 +2206,17 @@ Use /reconnect to establish new connection
 - Execute `/search tables emp` and verify table output with Database, Table, Type, Rows (Est.), Size columns
 - Execute `/search tables emp in hr` and verify only objects from the `hr` database appear
 - Execute `/search columns salary` and verify table output with Database, Table, Column, Type, Nullable columns
+- Execute `/search views summary` and verify table output with Database, View, Owner columns
+- Execute `/search views summary in reporting` and verify only views from the `reporting` database appear
+- Execute `/search v summary` and verify it behaves identically to `/search views summary`
+- Execute `/search view summary` and verify it behaves identically to `/search views summary`
 - Execute `/search tables xyz_nonexistent` and verify `No tables found matching 'xyz_nonexistent'.`
+- Execute `/search views xyz_nonexistent` and verify `No views found matching 'xyz_nonexistent'.`
 - Execute `/search tables` (no keyword) and verify usage guidance is displayed
 - Execute `/search` (no subcommand) and verify usage guidance is displayed
 - Execute `/sea<TAB>` and verify completion to `/search`
-- Execute `/search <TAB>` and verify completion menu suggests `tables` and `columns`
-- Verify results are sorted: database ascending, then table ascending
+- Execute `/search <TAB>` and verify completion menu suggests `tables`, `columns`, and `views`
+- Verify results are sorted: database ascending, then table/view ascending
 
 ---
 

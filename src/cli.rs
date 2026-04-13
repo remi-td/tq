@@ -876,6 +876,8 @@ pub enum SearchObjectType {
     Tables,
     /// Search for columns by name
     Columns,
+    /// Search for views by name
+    Views,
 }
 
 /// Arguments for the show-indexes command

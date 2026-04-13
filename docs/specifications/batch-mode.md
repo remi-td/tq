@@ -10,8 +10,9 @@
 6. [Error Handling](#error-handling)
 7. [Scripting Integration](#scripting-integration)
 8. [Performance Considerations](#performance-considerations)
-9. [Transaction Control](#transaction-control)
-10. [Variable Substitution](#variable-substitution)
+9. [Pagination](#pagination)
+10. [Transaction Control](#transaction-control)
+11. [Variable Substitution](#variable-substitution)
 
 ---
 
@@ -1035,6 +1036,60 @@ cat north.csv south.csv east.csv west.csv > all_regions.csv
 - Each parallel `tq` process uses a separate database connection
 - Monitor database connection limits
 - Teradata handles concurrent queries well
+
+## Pagination
+
+The `search` subcommands (`search tables`, `search columns`, `search views`) support client-side result pagination via `--page-size` and `--page` flags. This section documents the pagination behavior and its implications for scripting.
+
+### How Pagination Works
+
+When `--page-size <N>` is provided, `tq` fetches the full result set and slices it into pages of `N` rows in memory. The `--page <P>` flag (1-based, default: `1`) selects which page to return.
+
+```bash
+# Return the first 25 views matching "report"
+tq search views report --page-size 25 --page 1
+
+# Return the second page of 25
+tq search views report --page-size 25 --page 2
+```
+
+`--page-size` and `--limit` are mutually exclusive. Providing both is a usage error.
+
+### Page Footer
+
+In all non-JSON output formats, a footer line is appended after the results:
+
+```
+Page 2 of 5 (47 total rows)
+```
+
+In JSON format, the standard `{"ok": true, "row_count": N, "data": [...]}` envelope gains a `pagination` key:
+
+```json
+{
+  "ok": true,
+  "row_count": 25,
+  "data": [ ... ],
+  "pagination": {
+    "page": 2,
+    "page_size": 25,
+    "total_rows": 72,
+    "total_pages": 3,
+    "has_more": true
+  }
+}
+```
+
+### Scripting Paginated Results
+
+```bash
+# Fetch all pages of a view search and combine into one JSON file
+for page in 1 2 3; do
+  tq search views report --page-size 25 --page "$page" --format json
+done | jq -s '[.[].data[]]'
+```
+
+> **Warning — ORDER BY stability**: Pagination in `search` subcommands relies on a deterministic sort order (`DatabaseName ASC`, `TableName/ViewName/ColumnName ASC`). Pages are stable across invocations as long as the underlying catalog data does not change. If objects are created, dropped, or renamed between paginated requests, rows may shift between pages and some results may appear on multiple pages or be skipped entirely. For fully consistent multi-page iteration, use `--format json` without pagination and process the complete result set at once.
 
 ## Transaction Control
 

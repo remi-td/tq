@@ -57,7 +57,7 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 - `inspect` - Comprehensive inspection of a database object (type, columns, indexes, size, dependencies)
 - `describe` - Show column structure and indexes for a table or view
 - `list` - List database objects: `databases`, `tables [pattern]`, `views`
-- `search` - Search for objects across all accessible databases: `tables <keyword>`, `columns <keyword>`
+- `search` - Search for objects across all accessible databases: `tables <keyword>`, `columns <keyword>`, `views <keyword>`
 - `show-indexes` - Show index structure for a table
 - `profiles` - List connection profiles
 - `profile` - Manage connection profiles (add, edit, delete, list)
@@ -2060,6 +2060,7 @@ tq [GLOBAL_OPTIONS] search <SUBCOMMAND> [OPTIONS] <KEYWORD>
 |------------|-----------|-------------|
 | `tables` | `<keyword>` | Search for tables whose name contains the keyword, across all accessible databases |
 | `columns` | `<keyword>` | Search for columns whose name contains the keyword, across all accessible tables and databases |
+| `views` | `<keyword>` | Search for views whose name contains the keyword, across all accessible databases |
 
 **Options** (shared across all subcommands):
 | Option | Short | Type | Default | Description |
@@ -2067,11 +2068,15 @@ tq [GLOBAL_OPTIONS] search <SUBCOMMAND> [OPTIONS] <KEYWORD>
 | `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv`, `md` |
 | `--output` | `-o` | path | stdout | Write output to file |
 | `--database` | `-d` | string | (all databases) | Scope search to a single database |
-| `--limit` | `-n` | integer | 100 | Maximum number of results; use `0` for unlimited |
+| `--limit` | `-n` | integer | 100 | Maximum number of results; use `0` for unlimited. Mutually exclusive with `--page-size`. |
+| `--page-size` | - | integer | (disabled) | Number of rows per page. Enables pagination. Mutually exclusive with `--limit`. |
+| `--page` | - | integer | `1` | Page number to retrieve (1-based). Requires `--page-size`. |
 
 **Key Distinction from `list`**:
 - `tq list tables` — lists objects in **one** database (current or `--database`)
 - `tq search tables <keyword>` — searches for objects **across all** databases, filtered by a name keyword
+- `tq list views` — lists views in **one** database
+- `tq search views <keyword>` — searches for views **across all** databases, filtered by a name keyword
 
 **Keyword Matching**:
 The keyword argument is matched against object names using SQL `LIKE` with automatic leading and trailing wildcards. A keyword of `emp` is equivalent to the SQL pattern `%emp%`. The match is case-insensitive.
@@ -2096,6 +2101,12 @@ tq search columns salary
 # Search for columns in a specific database
 tq search columns salary --database hr
 
+# Search for views containing "summary" across all databases
+tq search views summary
+
+# Search for views in a specific database
+tq search views summary --database reporting
+
 # JSON output (uses standard envelope) for agent/scripting use
 tq search tables emp --format json
 
@@ -2104,6 +2115,9 @@ tq search columns id --format csv --output columns.csv
 
 # Markdown output for documentation
 tq search tables order --format md
+
+# Paginate large result sets
+tq search views report --page-size 25 --page 1
 
 # Pipe to jq to filter by database
 tq search tables emp --format json | jq '.data[] | select(.database == "production")'
@@ -2310,31 +2324,179 @@ Note: Parentheses in type strings (e.g., `DECIMAL(10,2)`) are preserved in CSV a
 
 ---
 
+#### search views
+
+**Purpose**: Find views whose names match a keyword, across all accessible databases (or one database when `--database` is specified). Views are virtual tables defined by a stored SELECT statement. This subcommand complements `search tables` for environments that separate reporting or transformation logic into views.
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] search views [OPTIONS] <KEYWORD>
+```
+
+**Arguments**:
+- `<KEYWORD>`: Required. A plain string. Automatically wrapped as `%keyword%` for SQL LIKE matching. Case-insensitive.
+
+**Output Columns**:
+| Column | Description |
+|--------|-------------|
+| Database | Database that contains the view |
+| View | View name |
+| Owner | Creator or owning user of the view |
+
+**Sorting**: Results are sorted first by Database name (ascending), then by View name (ascending).
+
+**Output — Table Format**:
+```
+Search results for views matching 'summary' (3 found):
+Database             View                       Owner
+------------------------------------------------------
+analytics            daily_summary              dba_user
+reporting            sales_summary              rpt_owner
+reporting            weekly_summary             rpt_owner
+
+3 view(s) found
+```
+
+**Output — Table Format (with --database)**:
+```
+Search results for views matching 'summary' in database 'reporting' (2 found):
+Database             View                       Owner
+------------------------------------------------------
+reporting            sales_summary              rpt_owner
+reporting            weekly_summary             rpt_owner
+
+2 view(s) found
+```
+
+**Output — Table Format (no results)**:
+```
+No views found matching 'summary'.
+```
+
+**Output — Table Format (with pagination)**:
+```
+Search results for views matching 'report' (page 1 of 3):
+Database             View                       Owner
+------------------------------------------------------
+analytics            report_daily               dba_user
+analytics            report_monthly             dba_user
+...
+
+Page 1 of 3 (72 total rows)
+```
+
+**Output — JSON Format**:
+
+JSON output uses the standard envelope: `{"ok": true, "row_count": N, "data": [...]}`.
+
+```json
+{
+  "ok": true,
+  "row_count": 3,
+  "data": [
+    { "database": "analytics", "view": "daily_summary",  "owner": "dba_user"   },
+    { "database": "reporting", "view": "sales_summary",  "owner": "rpt_owner"  },
+    { "database": "reporting", "view": "weekly_summary", "owner": "rpt_owner"  }
+  ]
+}
+```
+
+When no results are found:
+```json
+{
+  "ok": true,
+  "row_count": 0,
+  "data": []
+}
+```
+
+When pagination is active, a `pagination` object is appended to the envelope:
+```json
+{
+  "ok": true,
+  "row_count": 25,
+  "data": [ ... ],
+  "pagination": {
+    "page": 1,
+    "page_size": 25,
+    "total_rows": 72,
+    "total_pages": 3,
+    "has_more": true
+  }
+}
+```
+
+**Output — CSV Format**:
+```csv
+Database,View,Owner
+analytics,daily_summary,dba_user
+reporting,sales_summary,rpt_owner
+reporting,weekly_summary,rpt_owner
+```
+
+**Output — Markdown Format**:
+```markdown
+| Database  | View           | Owner      |
+|-----------|----------------|------------|
+| analytics | daily_summary  | dba_user   |
+| reporting | sales_summary  | rpt_owner  |
+| reporting | weekly_summary | rpt_owner  |
+```
+
+---
+
+#### search — Pagination
+
+The `--page-size` and `--page` flags enable client-side pagination across all three search subcommands (`tables`, `columns`, `views`). When `--page-size` is specified, the tool fetches the full result set and slices it into pages in memory.
+
+**How pagination works**:
+- `--page-size <N>` activates pagination and sets the number of rows per page.
+- `--page <P>` selects which page to display (1-based, defaults to `1`).
+- `--page-size` and `--limit` are mutually exclusive. Specifying both is a usage error.
+- `--page` without `--page-size` is a usage error.
+
+**Page footer** (all non-JSON formats):
+```
+Page 2 of 5 (47 total rows)
+```
+
+**Pagination in JSON format**: The standard envelope gains a `pagination` key with `page`, `page_size`, `total_rows`, `total_pages`, and `has_more` fields.
+
+**Out-of-range page**: Requesting a page beyond the last page returns an empty `data` array. The pagination footer still shows the correct totals.
+
+> **Warning — ORDER BY stability**: Pagination relies on a deterministic sort order. The search commands apply a fixed sort order (`DatabaseName ASC, TableName/ViewName/ColumnName ASC`) so pages are stable across invocations against an unchanged catalog. If the underlying catalog data changes between requests, rows may shift between pages.
+
+---
+
 #### search — Behavior Requirements
 
-1. **REQ-SEARCH-001**: The `search` command SHALL require both a subcommand (`tables`, `columns`) and a keyword argument. Invoking `tq search` with no subcommand SHALL print subcommand help and exit with code 2. Invoking with an unknown subcommand SHALL print `Error: Unknown search subcommand: <name>` followed by available subcommands and exit with code 2.
+1. **REQ-SEARCH-001**: The `search` command SHALL require both a subcommand (`tables`, `columns`, `views`) and a keyword argument. Invoking `tq search` with no subcommand SHALL print subcommand help and exit with code 2. Invoking with an unknown subcommand SHALL print `Error: Unknown search subcommand: <name>` followed by available subcommands and exit with code 2.
 2. **REQ-SEARCH-002**: The keyword argument is REQUIRED. Invoking a subcommand without a keyword SHALL print `Error: Missing required argument: <keyword>` with usage guidance and exit with code 2.
 3. **REQ-SEARCH-003**: `search tables` data source: `DBC.TablesV WHERE TableKind IN ('T', 'O')` joined with `DBC.TableSizeV` for size and row estimates. The `TableName` column is filtered using `LIKE '%<keyword>%'` (case-insensitive). Both `DatabaseName` and `TableName` are returned.
 4. **REQ-SEARCH-004**: `search columns` data source: `DBC.ColumnsV` joined with `DBC.TablesV WHERE TableKind IN ('T', 'O', 'V')`. The `ColumnName` column is filtered using `LIKE '%<keyword>%'` (case-insensitive). `DatabaseName`, `TableName`, `ColumnName`, `ColumnType`, and `Nullable` are returned.
 5. **REQ-SEARCH-005**: When `--database <db>` is provided, the search is scoped to the specified database by adding `AND DatabaseName = '<db>'` to the query predicate. Without `--database`, all accessible databases are searched.
-6. **REQ-SEARCH-006**: Results SHALL be sorted by `DatabaseName ASC, TableName ASC` for `search tables`, and by `DatabaseName ASC, TableName ASC, ColumnName ASC` for `search columns`.
-7. **REQ-SEARCH-007**: When a subcommand returns no results, a `No tables found matching '<keyword>'.` or `No columns found matching '<keyword>'.` message SHALL be displayed and the command SHALL exit with code 0 (not an error).
-8. **REQ-SEARCH-008**: In JSON format, both search subcommands use the standard envelope: `{"ok": true, "row_count": N, "data": [...]}`. An empty result returns `{"ok": true, "row_count": 0, "data": []}`.
+6. **REQ-SEARCH-006**: Results SHALL be sorted by `DatabaseName ASC, TableName ASC` for `search tables` and `search views`, and by `DatabaseName ASC, TableName ASC, ColumnName ASC` for `search columns`.
+7. **REQ-SEARCH-007**: When a subcommand returns no results, an appropriate message SHALL be displayed (`No tables found matching '<keyword>'.`, `No columns found matching '<keyword>'.`, or `No views found matching '<keyword>'.`) and the command SHALL exit with code 0 (not an error).
+8. **REQ-SEARCH-008**: In JSON format, all search subcommands use the standard envelope: `{"ok": true, "row_count": N, "data": [...]}`. An empty result returns `{"ok": true, "row_count": 0, "data": []}`. When pagination is active, a `pagination` object is included.
 9. **REQ-SEARCH-009**: Size and row-count values follow the same human-readable string formatting as `tq list tables` (e.g., `2.1 MB`, `42,573`). In JSON and CSV, `rows_est` and `size` are strings matching the display format.
-10. **REQ-SEARCH-010**: The `search` command is safe for use with `--agent-safe` mode. Both subcommands execute read-only queries against system catalog views and perform no data modification.
+10. **REQ-SEARCH-010**: The `search` command is safe for use with `--agent-safe` mode. All subcommands execute read-only queries against system catalog views and perform no data modification.
 11. **REQ-SEARCH-011**: The `--format` and `--output` flags follow the same semantics as all other tq commands (see [Flag Design Guidelines](#flag-design-guidelines)). The `md` (Markdown) format is supported in addition to `table`, `json`, and `csv`.
 12. **REQ-SEARCH-012**: Object types returned by `search tables` SHALL use the same display labels as `tq list tables`: `TABLE` for `TableKind = 'T'`, `TABLE (NoPI)` for `TableKind = 'O'`.
+13. **REQ-SEARCH-013**: `search views` data source: `DBC.TablesV WHERE TableKind = 'V'`. The `TableName` column is filtered using `LIKE '%<keyword>%'` (case-insensitive). `DatabaseName`, `TableName`, and `CreatorName` (displayed as Owner) are returned.
+14. **REQ-SEARCH-014**: Pagination is enabled by `--page-size <N>`. When active, the full result set is fetched and sliced client-side. `--page-size` and `--limit` are mutually exclusive; specifying both SHALL produce a usage error (exit code 2). `--page` requires `--page-size`; specifying `--page` alone SHALL produce a usage error (exit code 2).
+15. **REQ-SEARCH-015**: When `--page-size` is active, a footer line `Page P of T (N total rows)` SHALL be appended after results in all non-JSON formats. Requesting a page beyond the last page returns an empty result with the footer showing the correct totals and `has_more: false` in JSON.
 
 **Error Handling**:
 
 **Unknown Subcommand**:
 ```
 Error: Unknown subcommand 'macros'
-Usage: tq search <tables|columns> [OPTIONS] <KEYWORD>
+Usage: tq search <tables|columns|views> [OPTIONS] <KEYWORD>
 
 Available subcommands:
   tables    Search for tables by name keyword, across all databases
   columns   Search for columns by name keyword, across all databases
+  views     Search for views by name keyword, across all databases
 
 Exit code: 2
 ```
@@ -2353,11 +2515,12 @@ Exit code: 2
 
 **Missing Subcommand**:
 ```
-Usage: tq search <tables|columns> [OPTIONS] <KEYWORD>
+Usage: tq search <tables|columns|views> [OPTIONS] <KEYWORD>
 
 Available subcommands:
   tables    Search for tables by name keyword, across all databases
   columns   Search for columns by name keyword, across all databases
+  views     Search for views by name keyword, across all databases
 
 Exit code: 2
 ```
@@ -2393,6 +2556,12 @@ tq search columns _id --format csv --output id-columns.csv
 # Count how many databases expose a "salary" column
 tq search columns salary --format json | jq '[.data[].database] | unique | length'
 
+# Find all views containing "summary" and list by database
+tq search views summary --format json | jq '.data[] | "\(.database).\(.view)"'
+
+# Paginate view search results for large catalogs
+tq search views report --page-size 25 --page 1 --format json
+
 # Use with a profile for production scanning
 tq --profile prod search tables temp --format json | jq '.data | length'
 
@@ -2413,10 +2582,19 @@ tq search tables temp_ --format json | jq '.data[] | "\(.database).\(.table)"'
 - Execute `tq search columns salary --format json` and verify JSON envelope with keys `database`, `table`, `column`, `type`, `nullable`
 - Execute `tq search columns salary --format csv` and verify CSV with `Database,Table,Column,Type,Nullable` header
 - Execute `tq search columns xyz_nonexistent_xyz` and verify `No columns found matching 'xyz_nonexistent_xyz'.` with exit code 0
+- Execute `tq search views summary` and verify table output with Database, View, Owner columns; results from multiple databases shown
+- Execute `tq search views summary --database reporting` and verify only views in the `reporting` database appear
+- Execute `tq search views summary --format json` and verify JSON envelope `{"ok": true, "row_count": N, "data": [...]}` with keys `database`, `view`, `owner`
+- Execute `tq search views summary --format csv` and verify CSV with `Database,View,Owner` header
+- Execute `tq search views summary --format md` and verify Markdown table output
+- Execute `tq search views xyz_nonexistent_xyz` and verify `No views found matching 'xyz_nonexistent_xyz'.` with exit code 0
+- Execute `tq search views summary --page-size 5 --page 1` and verify footer `Page 1 of N (T total rows)` appended
+- Execute `tq search views summary --page-size 5 --format json` and verify `pagination` key in JSON envelope
+- Execute `tq search views summary --page-size 5 --limit 100` and verify usage error (exit code 2) — flags are mutually exclusive
 - Execute `tq search` with no subcommand and verify usage help with exit code 2
 - Execute `tq search tables` with no keyword and verify `Error: Missing required argument: <keyword>` with exit code 2
 - Execute `tq search unknown_sub emp` and verify `Error: Unknown subcommand 'unknown_sub'` with exit code 2
-- Verify results are sorted: database ascending, then table ascending
+- Verify results are sorted: database ascending, then table/view ascending
 - Execute `tq search tables emp --output results.txt` and verify file is created
 
 ---

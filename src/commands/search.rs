@@ -4,12 +4,17 @@
 //! Used by `tq search <type> <keyword>` (batch) and `/search` (REPL delegation).
 
 use crate::cli::{OutputFormat, SearchObjectType};
-use crate::commands::format_helpers::{csv_escape, format_size, json_escape, markdown_escape_pipe};
+use crate::commands::format_helpers::{csv_escape, format_size, markdown_escape_pipe};
 use crate::db::DatabaseClient;
 use crate::error::Result;
 use crate::pagination::PaginationInfo;
 use crate::sql::escape_sql_string;
+use serde::Serialize;
 use std::io::Write;
+
+/// Maximum number of rows to fetch when paginating client-side.
+/// Used as a SQL TOP limit to avoid unbounded result sets.
+const MAX_SEARCH_FETCH: usize = 100_000;
 
 // =============================================================================
 // Public API
@@ -50,6 +55,15 @@ pub fn execute<W: Write>(
             pagination_args,
             writer,
         ),
+        SearchObjectType::Views => search_views(
+            client,
+            &args.keyword,
+            args.database.as_deref(),
+            args.format,
+            effective_limit,
+            pagination_args,
+            writer,
+        ),
     }
 }
 
@@ -71,9 +85,12 @@ pub fn execute_for_repl<W: Write>(
         "columns" | "column" | "col" | "c" => {
             search_columns(client, keyword, database, OutputFormat::Table, None, None, writer)?;
         }
+        "views" | "view" | "v" => {
+            search_views(client, keyword, database, OutputFormat::Table, None, None, writer)?;
+        }
         _ => {
             writeln!(writer, "Error: Unknown search subcommand: {}", subcommand)?;
-            writeln!(writer, "Available: tables, columns")?;
+            writeln!(writer, "Available: tables, columns, views")?;
         }
     }
     writeln!(writer)?;
@@ -115,7 +132,7 @@ fn search_tables<W: Write>(
 
     // When paginating, fetch all rows (use large limit); otherwise use specified limit
     let row_limit = if pagination_args.is_some() {
-        100000 // Large limit to fetch all for client-side pagination
+        MAX_SEARCH_FETCH
     } else {
         limit.unwrap_or(100)
     };
@@ -288,52 +305,73 @@ fn render_table_search_table<W: Write>(
     Ok(())
 }
 
+/// Serde-serializable envelope for table search JSON output
+#[derive(Serialize)]
+struct TableSearchJsonEnvelope<'a> {
+    ok: bool,
+    row_count: usize,
+    data: Vec<TableSearchJsonRow<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pagination: Option<PaginationJson>,
+}
+
+/// Single row in table search JSON output
+#[derive(Serialize)]
+struct TableSearchJsonRow<'a> {
+    database: &'a str,
+    table_name: &'a str,
+    #[serde(rename = "type")]
+    kind: &'a str,
+    estimated_rows: Option<i64>,
+    size_bytes: Option<i64>,
+    owner: &'a str,
+}
+
+/// Pagination metadata for JSON output (shared across search types)
+#[derive(Serialize)]
+struct PaginationJson {
+    page: usize,
+    page_size: usize,
+    total_rows: usize,
+    total_pages: usize,
+    has_more: bool,
+}
+
+impl PaginationJson {
+    fn from_info(pg: &PaginationInfo) -> Self {
+        PaginationJson {
+            page: pg.page,
+            page_size: pg.page_size,
+            total_rows: pg.total_rows,
+            total_pages: pg.total_pages(),
+            has_more: pg.has_more(),
+        }
+    }
+}
+
 fn render_table_search_json_with_pagination<W: Write>(
     tables: &[TableSearchResult],
     pagination: Option<&PaginationInfo>,
     writer: &mut W,
 ) -> Result<()> {
-    write!(
-        writer,
-        "{{\"ok\":true,\"row_count\":{},\"data\":[",
-        tables.len()
-    )?;
-    for (i, t) in tables.iter().enumerate() {
-        if i > 0 {
-            write!(writer, ",")?;
-        }
-        let rows_json = match t.row_count_raw {
-            Some(n) => n.to_string(),
-            None => "null".to_string(),
-        };
-        let size_json = match t.size_bytes {
-            Some(n) => n.to_string(),
-            None => "null".to_string(),
-        };
-        write!(
-            writer,
-            "{{\"database\":\"{}\",\"table_name\":\"{}\",\"type\":\"{}\",\"estimated_rows\":{},\"size_bytes\":{},\"owner\":\"{}\"}}",
-            json_escape(&t.database),
-            json_escape(&t.table_name),
-            json_escape(&t.kind),
-            rows_json,
-            size_json,
-            json_escape(&t.owner)
-        )?;
-    }
-    write!(writer, "]")?;
-    if let Some(pg) = pagination {
-        write!(
-            writer,
-            ",\"pagination\":{{\"page\":{},\"page_size\":{},\"total_rows\":{},\"total_pages\":{},\"has_more\":{}}}",
-            pg.page,
-            pg.page_size,
-            pg.total_rows,
-            pg.total_pages(),
-            pg.has_more()
-        )?;
-    }
-    writeln!(writer, "}}")?;
+    let envelope = TableSearchJsonEnvelope {
+        ok: true,
+        row_count: tables.len(),
+        data: tables
+            .iter()
+            .map(|t| TableSearchJsonRow {
+                database: &t.database,
+                table_name: &t.table_name,
+                kind: &t.kind,
+                estimated_rows: t.row_count_raw,
+                size_bytes: t.size_bytes,
+                owner: &t.owner,
+            })
+            .collect(),
+        pagination: pagination.map(PaginationJson::from_info),
+    };
+    serde_json::to_writer(&mut *writer, &envelope)?;
+    writeln!(writer)?;
     Ok(())
 }
 
@@ -412,7 +450,7 @@ fn search_columns<W: Write>(
     };
 
     let row_limit = if pagination_args.is_some() {
-        100000
+        MAX_SEARCH_FETCH
     } else {
         limit.unwrap_or(100)
     };
@@ -539,43 +577,48 @@ fn render_column_search_table<W: Write>(
     Ok(())
 }
 
+/// Serde-serializable envelope for column search JSON output
+#[derive(Serialize)]
+struct ColumnSearchJsonEnvelope<'a> {
+    ok: bool,
+    row_count: usize,
+    data: Vec<ColumnSearchJsonRow<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pagination: Option<PaginationJson>,
+}
+
+/// Single row in column search JSON output
+#[derive(Serialize)]
+struct ColumnSearchJsonRow<'a> {
+    database: &'a str,
+    table_name: &'a str,
+    column_name: &'a str,
+    column_type: &'a str,
+    nullable: &'a str,
+}
+
 fn render_column_search_json_with_pagination<W: Write>(
     columns: &[ColumnSearchResult],
     pagination: Option<&PaginationInfo>,
     writer: &mut W,
 ) -> Result<()> {
-    write!(
-        writer,
-        "{{\"ok\":true,\"row_count\":{},\"data\":[",
-        columns.len()
-    )?;
-    for (i, c) in columns.iter().enumerate() {
-        if i > 0 {
-            write!(writer, ",")?;
-        }
-        write!(
-            writer,
-            "{{\"database\":\"{}\",\"table_name\":\"{}\",\"column_name\":\"{}\",\"column_type\":\"{}\",\"nullable\":\"{}\"}}",
-            json_escape(&c.database),
-            json_escape(&c.table_name),
-            json_escape(&c.column_name),
-            json_escape(&c.column_type),
-            json_escape(&c.nullable)
-        )?;
-    }
-    write!(writer, "]")?;
-    if let Some(pg) = pagination {
-        write!(
-            writer,
-            ",\"pagination\":{{\"page\":{},\"page_size\":{},\"total_rows\":{},\"total_pages\":{},\"has_more\":{}}}",
-            pg.page,
-            pg.page_size,
-            pg.total_rows,
-            pg.total_pages(),
-            pg.has_more()
-        )?;
-    }
-    writeln!(writer, "}}")?;
+    let envelope = ColumnSearchJsonEnvelope {
+        ok: true,
+        row_count: columns.len(),
+        data: columns
+            .iter()
+            .map(|c| ColumnSearchJsonRow {
+                database: &c.database,
+                table_name: &c.table_name,
+                column_name: &c.column_name,
+                column_type: &c.column_type,
+                nullable: &c.nullable,
+            })
+            .collect(),
+        pagination: pagination.map(PaginationJson::from_info),
+    };
+    serde_json::to_writer(&mut *writer, &envelope)?;
+    writeln!(writer)?;
     Ok(())
 }
 
@@ -616,6 +659,239 @@ fn render_column_search_markdown<W: Write>(
             markdown_escape_pipe(&c.column_name),
             markdown_escape_pipe(&c.column_type),
             markdown_escape_pipe(&c.nullable)
+        )?;
+    }
+    Ok(())
+}
+
+// =============================================================================
+// View Search
+// =============================================================================
+
+/// View search result entry
+struct ViewSearchResult {
+    database: String,
+    view_name: String,
+    owner: String,
+}
+
+fn search_views<W: Write>(
+    client: &DatabaseClient,
+    keyword: &str,
+    database: Option<&str>,
+    format: OutputFormat,
+    limit: Option<usize>,
+    pagination_args: Option<(usize, usize)>,
+    writer: &mut W,
+) -> Result<()> {
+    let escaped_keyword = escape_sql_string(keyword);
+
+    let db_filter = if let Some(db) = database {
+        format!("AND t.DatabaseName = '{}'", escape_sql_string(db))
+    } else {
+        String::new()
+    };
+
+    let row_limit = if pagination_args.is_some() {
+        MAX_SEARCH_FETCH
+    } else {
+        limit.unwrap_or(100)
+    };
+
+    let sql = format!(
+        "SELECT TOP {limit} TRIM(t.DatabaseName) AS db_name, \
+         TRIM(t.TableName) AS view_name, \
+         TRIM(t.CreatorName) AS Owner \
+         FROM DBC.TablesV t \
+         WHERE UPPER(t.TableName) LIKE UPPER('%{keyword}%') \
+         AND t.TableKind = 'V' \
+         {db_filter} \
+         ORDER BY t.DatabaseName, t.TableName",
+        limit = row_limit,
+        keyword = escaped_keyword,
+        db_filter = db_filter
+    );
+
+    let result = client.execute(&sql)?;
+
+    let views: Vec<ViewSearchResult> = result
+        .rows
+        .iter()
+        .filter_map(|row| {
+            let database = row.first().map(|v| v.display())?;
+            let view_name = row.get(1).map(|v| v.display())?;
+
+            if database == "[NULL]" || view_name == "[NULL]" {
+                return None;
+            }
+
+            let owner = row
+                .get(2)
+                .map(|v| {
+                    let s = v.display().trim().to_string();
+                    if s == "[NULL]" {
+                        String::new()
+                    } else {
+                        s
+                    }
+                })
+                .unwrap_or_default();
+
+            Some(ViewSearchResult {
+                database: database.trim().to_string(),
+                view_name: view_name.trim().to_string(),
+                owner,
+            })
+        })
+        .collect();
+
+    // Apply pagination if requested
+    let pagination = pagination_args.map(|(page_size, page)| {
+        PaginationInfo::new(page, page_size, views.len())
+    });
+
+    let display_views = if let Some(ref pg) = pagination {
+        let (start, end) = pg.row_range();
+        if start < views.len() {
+            &views[start..end.min(views.len())]
+        } else {
+            &views[0..0]
+        }
+    } else {
+        &views[..]
+    };
+
+    match format {
+        OutputFormat::Table => {
+            render_view_search_table(display_views, keyword, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
+        OutputFormat::Json => render_view_search_json_with_pagination(display_views, pagination.as_ref(), writer)?,
+        OutputFormat::Csv => {
+            render_view_search_csv(display_views, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
+        OutputFormat::Markdown | OutputFormat::Md => {
+            render_view_search_markdown(display_views, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn render_view_search_table<W: Write>(
+    views: &[ViewSearchResult],
+    keyword: &str,
+    writer: &mut W,
+) -> Result<()> {
+    writeln!(
+        writer,
+        "Views matching '{}' ({}):",
+        keyword,
+        views.len()
+    )?;
+    writeln!(
+        writer,
+        "{:<20} {:<30} {:<15}",
+        "Database", "Name", "Owner"
+    )?;
+    writeln!(writer, "{}", "-".repeat(67))?;
+
+    if views.is_empty() {
+        writeln!(writer, "(no views found)")?;
+    } else {
+        for v in views {
+            writeln!(
+                writer,
+                "{:<20} {:<30} {:<15}",
+                v.database, v.view_name, v.owner
+            )?;
+        }
+    }
+
+    writeln!(writer)?;
+    writeln!(writer, "{} view(s)", views.len())?;
+    Ok(())
+}
+
+/// Serde-serializable envelope for view search JSON output
+#[derive(Serialize)]
+struct ViewSearchJsonEnvelope<'a> {
+    ok: bool,
+    row_count: usize,
+    data: Vec<ViewSearchJsonRow<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pagination: Option<PaginationJson>,
+}
+
+/// Single row in view search JSON output
+#[derive(Serialize)]
+struct ViewSearchJsonRow<'a> {
+    database: &'a str,
+    view_name: &'a str,
+    owner: &'a str,
+}
+
+fn render_view_search_json_with_pagination<W: Write>(
+    views: &[ViewSearchResult],
+    pagination: Option<&PaginationInfo>,
+    writer: &mut W,
+) -> Result<()> {
+    let envelope = ViewSearchJsonEnvelope {
+        ok: true,
+        row_count: views.len(),
+        data: views
+            .iter()
+            .map(|v| ViewSearchJsonRow {
+                database: &v.database,
+                view_name: &v.view_name,
+                owner: &v.owner,
+            })
+            .collect(),
+        pagination: pagination.map(PaginationJson::from_info),
+    };
+    serde_json::to_writer(&mut *writer, &envelope)?;
+    writeln!(writer)?;
+    Ok(())
+}
+
+fn render_view_search_csv<W: Write>(
+    views: &[ViewSearchResult],
+    writer: &mut W,
+) -> Result<()> {
+    writeln!(writer, "Database,ViewName,Owner")?;
+    for v in views {
+        writeln!(
+            writer,
+            "{},{},{}",
+            csv_escape(&v.database),
+            csv_escape(&v.view_name),
+            csv_escape(&v.owner)
+        )?;
+    }
+    Ok(())
+}
+
+fn render_view_search_markdown<W: Write>(
+    views: &[ViewSearchResult],
+    writer: &mut W,
+) -> Result<()> {
+    writeln!(writer, "| Database | Name | Owner |")?;
+    writeln!(writer, "| :--- | :--- | :--- |")?;
+    for v in views {
+        writeln!(
+            writer,
+            "| {} | {} | {} |",
+            markdown_escape_pipe(&v.database),
+            markdown_escape_pipe(&v.view_name),
+            markdown_escape_pipe(&v.owner)
         )?;
     }
     Ok(())
@@ -1025,5 +1301,239 @@ mod tests {
         render_table_search_json_with_pagination(&tables, None, &mut buf).unwrap();
         let output = String::from_utf8(buf).unwrap();
         assert!(!output.contains("\"pagination\""));
+    }
+
+    // =========================================================================
+    // Sprint 57: Serde JSON edge case tests
+    // =========================================================================
+
+    #[test]
+    fn test_table_search_json_special_chars() {
+        let tables = vec![TableSearchResult {
+            database: "my\"db".to_string(),
+            table_name: "emp\\table".to_string(),
+            kind: "TABLE".to_string(),
+            row_count_display: "10".to_string(),
+            row_count_raw: Some(10),
+            size_display: "1 KB".to_string(),
+            size_bytes: Some(1024),
+            owner: "admin".to_string(),
+        }];
+        let mut buf = Vec::new();
+        render_table_search_json_with_pagination(&tables, None, &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        // Must parse as valid JSON
+        let v: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(v["data"][0]["database"], "my\"db");
+        assert_eq!(v["data"][0]["table_name"], "emp\\table");
+    }
+
+    #[test]
+    fn test_column_search_json_special_chars() {
+        let columns = vec![ColumnSearchResult {
+            database: "db".to_string(),
+            table_name: "tbl".to_string(),
+            column_name: "col\"name".to_string(),
+            column_type: "VARCHAR(100)".to_string(),
+            nullable: "Y".to_string(),
+        }];
+        let mut buf = Vec::new();
+        render_column_search_json_with_pagination(&columns, None, &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(v["data"][0]["column_name"], "col\"name");
+    }
+
+    #[test]
+    fn test_table_search_json_multi_row_count() {
+        let tables = vec![
+            TableSearchResult {
+                database: "a".to_string(),
+                table_name: "t1".to_string(),
+                kind: "TABLE".to_string(),
+                row_count_display: "1".to_string(),
+                row_count_raw: Some(1),
+                size_display: "1 B".to_string(),
+                size_bytes: Some(1),
+                owner: "x".to_string(),
+            },
+            TableSearchResult {
+                database: "b".to_string(),
+                table_name: "t2".to_string(),
+                kind: "NoPI".to_string(),
+                row_count_display: "-".to_string(),
+                row_count_raw: None,
+                size_display: "-".to_string(),
+                size_bytes: None,
+                owner: "y".to_string(),
+            },
+            TableSearchResult {
+                database: "c".to_string(),
+                table_name: "t3".to_string(),
+                kind: "TABLE".to_string(),
+                row_count_display: "99".to_string(),
+                row_count_raw: Some(99),
+                size_display: "5 KB".to_string(),
+                size_bytes: Some(5120),
+                owner: "z".to_string(),
+            },
+        ];
+        let mut buf = Vec::new();
+        render_table_search_json_with_pagination(&tables, None, &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(v["row_count"], 3);
+        assert_eq!(v["data"].as_array().unwrap().len(), 3);
+        assert!(v["data"][1]["estimated_rows"].is_null());
+        assert!(v["data"][1]["size_bytes"].is_null());
+    }
+
+    // =========================================================================
+    // Sprint 57: View search tests
+    // =========================================================================
+
+    #[test]
+    fn test_view_search_result_structure() {
+        let v = ViewSearchResult {
+            database: "mydb".to_string(),
+            view_name: "emp_summary".to_string(),
+            owner: "admin".to_string(),
+        };
+        assert_eq!(v.database, "mydb");
+        assert_eq!(v.view_name, "emp_summary");
+        assert_eq!(v.owner, "admin");
+    }
+
+    #[test]
+    fn test_render_view_search_table_format() {
+        let views = vec![
+            ViewSearchResult {
+                database: "hr".to_string(),
+                view_name: "emp_summary".to_string(),
+                owner: "alice".to_string(),
+            },
+            ViewSearchResult {
+                database: "reporting".to_string(),
+                view_name: "emp_report".to_string(),
+                owner: "bob".to_string(),
+            },
+        ];
+        let mut buf = Vec::new();
+        render_view_search_table(&views, "emp", &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("Views matching 'emp' (2):"));
+        assert!(output.contains("Database"));
+        assert!(output.contains("Name"));
+        assert!(output.contains("Owner"));
+        assert!(output.contains("hr"));
+        assert!(output.contains("emp_summary"));
+        assert!(output.contains("reporting"));
+        assert!(output.contains("emp_report"));
+        assert!(output.contains("2 view(s)"));
+    }
+
+    #[test]
+    fn test_render_view_search_table_empty() {
+        let views: Vec<ViewSearchResult> = vec![];
+        let mut buf = Vec::new();
+        render_view_search_table(&views, "xyz", &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("Views matching 'xyz' (0):"));
+        assert!(output.contains("(no views found)"));
+        assert!(output.contains("0 view(s)"));
+    }
+
+    #[test]
+    fn test_render_view_search_json() {
+        let views = vec![ViewSearchResult {
+            database: "hr".to_string(),
+            view_name: "emp_summary".to_string(),
+            owner: "alice".to_string(),
+        }];
+        let mut buf = Vec::new();
+        render_view_search_json_with_pagination(&views, None, &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["row_count"], 1);
+        assert_eq!(v["data"][0]["database"], "hr");
+        assert_eq!(v["data"][0]["view_name"], "emp_summary");
+        assert_eq!(v["data"][0]["owner"], "alice");
+        assert!(v.get("pagination").is_none());
+    }
+
+    #[test]
+    fn test_render_view_search_json_empty() {
+        let views: Vec<ViewSearchResult> = vec![];
+        let mut buf = Vec::new();
+        render_view_search_json_with_pagination(&views, None, &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["row_count"], 0);
+        assert_eq!(v["data"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_render_view_search_json_with_pagination() {
+        let views = vec![ViewSearchResult {
+            database: "hr".to_string(),
+            view_name: "v1".to_string(),
+            owner: "admin".to_string(),
+        }];
+        let pg = PaginationInfo::new(1, 5, 10);
+        let mut buf = Vec::new();
+        render_view_search_json_with_pagination(&views, Some(&pg), &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(v["pagination"]["page"], 1);
+        assert_eq!(v["pagination"]["page_size"], 5);
+        assert_eq!(v["pagination"]["total_rows"], 10);
+        assert_eq!(v["pagination"]["total_pages"], 2);
+        assert_eq!(v["pagination"]["has_more"], true);
+    }
+
+    #[test]
+    fn test_render_view_search_json_special_chars() {
+        let views = vec![ViewSearchResult {
+            database: "my\"db".to_string(),
+            view_name: "view\\name".to_string(),
+            owner: "admin".to_string(),
+        }];
+        let mut buf = Vec::new();
+        render_view_search_json_with_pagination(&views, None, &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(v["data"][0]["database"], "my\"db");
+        assert_eq!(v["data"][0]["view_name"], "view\\name");
+    }
+
+    #[test]
+    fn test_render_view_search_csv() {
+        let views = vec![ViewSearchResult {
+            database: "hr".to_string(),
+            view_name: "emp_summary".to_string(),
+            owner: "alice".to_string(),
+        }];
+        let mut buf = Vec::new();
+        render_view_search_csv(&views, &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("Database,ViewName,Owner"));
+        assert!(output.contains("hr,emp_summary,alice"));
+    }
+
+    #[test]
+    fn test_render_view_search_markdown() {
+        let views = vec![ViewSearchResult {
+            database: "hr".to_string(),
+            view_name: "emp_summary".to_string(),
+            owner: "alice".to_string(),
+        }];
+        let mut buf = Vec::new();
+        render_view_search_markdown(&views, &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("| Database | Name | Owner |"));
+        assert!(output.contains("| :--- | :--- | :--- |"));
+        assert!(output.contains("| hr | emp_summary | alice |"));
     }
 }

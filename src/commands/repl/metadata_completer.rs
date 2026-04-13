@@ -294,6 +294,11 @@ const METACOMMANDS: &[MetacommandDef] = &[
         aliases: &[],
         description: "Search columns by name across databases",
     },
+    MetacommandDef {
+        name: "search views",
+        aliases: &[],
+        description: "Search views by name across databases",
+    },
     // Sprint 26: Sessions command
     MetacommandDef {
         name: "sessions",
@@ -552,6 +557,7 @@ fn complete_search_subcommands(
     let subcommands = [
         ("tables", "Search tables by name across databases"),
         ("columns", "Search columns by name across databases"),
+        ("views", "Search views by name across databases"),
     ];
 
     let partial = if parts.len() > 1 { parts[1] } else { "" };
