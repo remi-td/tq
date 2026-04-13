@@ -16,7 +16,7 @@
 //! Sprint 7 implementation, Sprint 8 bug fixes.
 //! Sprint 22: Added metacommand tab completion.
 
-use super::sql_context::{analyze_context, CompletionContext};
+use super::sql_context::{analyze_context, CompletionContext, KeywordClause};
 use crate::db::{ColumnInfo, DatabaseClient, MetadataCache};
 use reedline::{Completer, Suggestion};
 use std::sync::{Arc, Mutex};
@@ -147,9 +147,9 @@ impl CompletionState {
     /// Ensure columns are loaded for a table
     ///
     /// Sprint 11: Added explicit error logging for debugging completion failures.
-    /// Sprint 20: Not currently used during tab completion (to avoid queries),
-    /// but kept for future use by metacommands like /describe.
-    #[allow(dead_code)]
+    /// Sprint 58: Now used during tab completion for on-demand column loading.
+    /// Columns are loaded automatically when the user enters a column context
+    /// (SELECT, WHERE, ORDER BY, etc.) with table references.
     pub fn ensure_columns_loaded(&mut self, table_name: &str) -> bool {
         if self.cache.get_columns(table_name).is_none() {
             log::debug!(
@@ -870,9 +870,10 @@ impl MetadataCompleter {
     ///
     /// Sprint 8: Now surfaces errors when column loading fails.
     /// Sprint 18: Span is now set by the caller in complete(), not here.
-    /// Sprint 20 Fix: Uses ONLY cached data (NO queries during completion).
-    /// Column completions are only available if columns were previously cached
-    /// (e.g., via /describe command or prior query).
+    /// Sprint 58: On-demand column loading. When columns aren't cached for a
+    /// referenced table, automatically loads them from the database (same pattern
+    /// as per-database table loading in Sprint 21). This makes column completion
+    /// work without requiring a prior /describe or /inspect.
     fn complete_columns(
         &self,
         tables: &[super::sql_context::TableReference],
@@ -883,7 +884,7 @@ impl MetadataCompleter {
             return Vec::new();
         };
 
-        let Ok(state) = state.lock() else {
+        let Ok(mut state) = state.lock() else {
             log::warn!("Failed to acquire lock for column completion");
             return Vec::new();
         };
@@ -895,12 +896,35 @@ impl MetadataCompleter {
         let mut suggestions = Vec::new();
 
         for table in tables {
-            // Sprint 20 Fix: Use ONLY cached columns (NO queries during completion)
-            // If columns for this table aren't cached, skip it.
-            // Columns get cached via /describe command or prior queries.
-            let cache = state.cache();
-            if let Some(columns) = cache.get_columns(&table.name) {
-                // Filter columns by prefix
+            // Sprint 58: On-demand column loading
+            // Resolve the table name to a fully-qualified form for column lookup.
+            // If the table name doesn't contain a schema prefix, qualify it with
+            // the current database so the column query targets the right table.
+            let qualified_name = if table.name.contains('.') {
+                table.name.clone()
+            } else {
+                let current_db = state.current_database().to_string();
+                format!("{}.{}", current_db, table.name)
+            };
+
+            // Load columns on-demand if not cached
+            if state.cache().get_columns(&qualified_name).is_none()
+                && state.cache().get_columns(&table.name).is_none()
+            {
+                log::debug!(
+                    "Tab completion: loading columns on-demand for {}",
+                    qualified_name
+                );
+                state.ensure_columns_loaded(&qualified_name);
+            }
+
+            // Check both qualified and unqualified names in cache
+            let columns = state
+                .cache()
+                .get_columns(&qualified_name)
+                .or_else(|| state.cache().get_columns(&table.name));
+
+            if let Some(columns) = columns {
                 let prefix_upper = prefix.to_uppercase();
                 for col in columns {
                     if col.name.to_uppercase().starts_with(&prefix_upper) {
@@ -909,7 +933,7 @@ impl MetadataCompleter {
                 }
             } else {
                 log::debug!(
-                    "Tab completion: columns for {} not cached, skipping column suggestions",
+                    "Tab completion: columns for {} not available after load attempt",
                     table.name
                 );
             }
@@ -931,6 +955,240 @@ impl MetadataCompleter {
             append_whitespace: false, // Don't add space after column name
         }
     }
+}
+
+// =============================================================================
+// Sprint 58: Context-Aware SQL Keyword Completion
+// =============================================================================
+
+/// SQL keyword definition for context-aware completion
+struct SqlKeyword {
+    /// The keyword text (e.g., "SELECT", "INNER JOIN")
+    keyword: &'static str,
+    /// Description shown in completion menu
+    description: &'static str,
+}
+
+/// Get context-appropriate SQL keywords based on clause position
+fn get_keywords_for_clause(clause: &KeywordClause) -> Vec<SqlKeyword> {
+    match clause {
+        KeywordClause::StatementStart => vec![
+            SqlKeyword { keyword: "SELECT", description: "Query data" },
+            SqlKeyword { keyword: "INSERT INTO", description: "Insert rows" },
+            SqlKeyword { keyword: "UPDATE", description: "Update rows" },
+            SqlKeyword { keyword: "DELETE FROM", description: "Delete rows" },
+            SqlKeyword { keyword: "CREATE TABLE", description: "Create a table" },
+            SqlKeyword { keyword: "CREATE VIEW", description: "Create a view" },
+            SqlKeyword { keyword: "DROP TABLE", description: "Drop a table" },
+            SqlKeyword { keyword: "ALTER TABLE", description: "Alter a table" },
+            SqlKeyword { keyword: "WITH", description: "Common table expression (CTE)" },
+            SqlKeyword { keyword: "SHOW", description: "Show object properties" },
+            SqlKeyword { keyword: "EXPLAIN", description: "Show execution plan" },
+            SqlKeyword { keyword: "GRANT", description: "Grant privileges" },
+            SqlKeyword { keyword: "REVOKE", description: "Revoke privileges" },
+            SqlKeyword { keyword: "DATABASE", description: "Set default database" },
+            SqlKeyword { keyword: "COLLECT STATISTICS", description: "Collect stats on table" },
+            SqlKeyword { keyword: "HELP", description: "Show object definition" },
+        ],
+
+        KeywordClause::AfterSelect => vec![
+            SqlKeyword { keyword: "DISTINCT", description: "Remove duplicate rows" },
+            SqlKeyword { keyword: "TOP", description: "Limit result rows" },
+            SqlKeyword { keyword: "*", description: "All columns" },
+            SqlKeyword { keyword: "CASE", description: "Conditional expression" },
+            SqlKeyword { keyword: "CAST", description: "Type conversion" },
+            SqlKeyword { keyword: "COALESCE", description: "First non-null value" },
+            SqlKeyword { keyword: "NULLIF", description: "Return null if equal" },
+            SqlKeyword { keyword: "COUNT", description: "Count rows" },
+            SqlKeyword { keyword: "SUM", description: "Sum values" },
+            SqlKeyword { keyword: "AVG", description: "Average value" },
+            SqlKeyword { keyword: "MIN", description: "Minimum value" },
+            SqlKeyword { keyword: "MAX", description: "Maximum value" },
+            SqlKeyword { keyword: "TRIM", description: "Trim whitespace" },
+            SqlKeyword { keyword: "SUBSTRING", description: "Extract substring" },
+            SqlKeyword { keyword: "UPPER", description: "Convert to uppercase" },
+            SqlKeyword { keyword: "LOWER", description: "Convert to lowercase" },
+        ],
+
+        KeywordClause::AfterFromClause => vec![
+            SqlKeyword { keyword: "WHERE", description: "Filter rows" },
+            SqlKeyword { keyword: "INNER JOIN", description: "Inner join" },
+            SqlKeyword { keyword: "LEFT JOIN", description: "Left outer join" },
+            SqlKeyword { keyword: "RIGHT JOIN", description: "Right outer join" },
+            SqlKeyword { keyword: "FULL JOIN", description: "Full outer join" },
+            SqlKeyword { keyword: "CROSS JOIN", description: "Cross join" },
+            SqlKeyword { keyword: "GROUP BY", description: "Group rows" },
+            SqlKeyword { keyword: "ORDER BY", description: "Sort results" },
+            SqlKeyword { keyword: "HAVING", description: "Filter groups" },
+            SqlKeyword { keyword: "UNION", description: "Combine results" },
+            SqlKeyword { keyword: "UNION ALL", description: "Combine results (keep duplicates)" },
+            SqlKeyword { keyword: "INTERSECT", description: "Common rows" },
+            SqlKeyword { keyword: "EXCEPT", description: "Difference of results" },
+            SqlKeyword { keyword: "SAMPLE", description: "Random sample rows" },
+            SqlKeyword { keyword: "QUALIFY", description: "Filter window results (Teradata)" },
+        ],
+
+        KeywordClause::InWhereClause => vec![
+            SqlKeyword { keyword: "AND", description: "Logical AND" },
+            SqlKeyword { keyword: "OR", description: "Logical OR" },
+            SqlKeyword { keyword: "NOT", description: "Logical NOT" },
+            SqlKeyword { keyword: "IN", description: "Match value in list" },
+            SqlKeyword { keyword: "NOT IN", description: "Not in list" },
+            SqlKeyword { keyword: "BETWEEN", description: "Range check" },
+            SqlKeyword { keyword: "LIKE", description: "Pattern match" },
+            SqlKeyword { keyword: "IS NULL", description: "Check for null" },
+            SqlKeyword { keyword: "IS NOT NULL", description: "Check for non-null" },
+            SqlKeyword { keyword: "EXISTS", description: "Subquery exists" },
+            SqlKeyword { keyword: "NOT EXISTS", description: "Subquery not exists" },
+            SqlKeyword { keyword: "GROUP BY", description: "Group rows" },
+            SqlKeyword { keyword: "ORDER BY", description: "Sort results" },
+        ],
+
+        KeywordClause::AfterGroupBy => vec![
+            SqlKeyword { keyword: "HAVING", description: "Filter groups" },
+            SqlKeyword { keyword: "ORDER BY", description: "Sort results" },
+            SqlKeyword { keyword: "QUALIFY", description: "Filter window results (Teradata)" },
+        ],
+
+        KeywordClause::AfterOrderBy => vec![
+            SqlKeyword { keyword: "ASC", description: "Ascending order" },
+            SqlKeyword { keyword: "DESC", description: "Descending order" },
+            SqlKeyword { keyword: "NULLS FIRST", description: "Nulls sort first" },
+            SqlKeyword { keyword: "NULLS LAST", description: "Nulls sort last" },
+        ],
+
+        KeywordClause::AfterHaving => vec![
+            SqlKeyword { keyword: "AND", description: "Logical AND" },
+            SqlKeyword { keyword: "OR", description: "Logical OR" },
+            SqlKeyword { keyword: "ORDER BY", description: "Sort results" },
+        ],
+
+        KeywordClause::AfterJoinTable => vec![
+            SqlKeyword { keyword: "ON", description: "Join condition" },
+        ],
+
+        KeywordClause::AfterInsert => vec![
+            SqlKeyword { keyword: "INTO", description: "Target table" },
+        ],
+
+        KeywordClause::AfterInsertInto => vec![
+            SqlKeyword { keyword: "VALUES", description: "Row values" },
+            SqlKeyword { keyword: "SELECT", description: "Insert from query" },
+        ],
+
+        KeywordClause::AfterSet => vec![
+            SqlKeyword { keyword: "WHERE", description: "Filter rows to update" },
+        ],
+    }
+}
+
+/// Build keyword suggestions matching a prefix for a given clause context
+fn complete_keywords(clause: &KeywordClause, prefix: &str) -> Vec<Suggestion> {
+    let keywords = get_keywords_for_clause(clause);
+    let prefix_upper = prefix.to_uppercase();
+
+    keywords
+        .into_iter()
+        .filter(|kw| {
+            prefix.is_empty() || kw.keyword.starts_with(&prefix_upper)
+        })
+        .map(|kw| Suggestion {
+            value: kw.keyword.to_string(),
+            description: Some(format!("(keyword) {}", kw.description)),
+            style: None,
+            extra: None,
+            span: reedline::Span { start: 0, end: 0 }, // Placeholder - set by caller
+            append_whitespace: true,
+        })
+        .collect()
+}
+
+// =============================================================================
+// Sprint 58: SQL Function Completion for Column Context
+// =============================================================================
+
+/// SQL function definition for completion
+struct SqlFunction {
+    /// Function name (e.g., "COUNT")
+    name: &'static str,
+    /// Signature hint shown in description
+    signature: &'static str,
+    /// The text to insert (with opening parenthesis)
+    insert_text: &'static str,
+}
+
+/// Common SQL functions available in expression contexts
+const SQL_FUNCTIONS: &[SqlFunction] = &[
+    // Aggregate functions
+    SqlFunction { name: "COUNT", signature: "COUNT(expr)", insert_text: "COUNT(" },
+    SqlFunction { name: "SUM", signature: "SUM(expr)", insert_text: "SUM(" },
+    SqlFunction { name: "AVG", signature: "AVG(expr)", insert_text: "AVG(" },
+    SqlFunction { name: "MIN", signature: "MIN(expr)", insert_text: "MIN(" },
+    SqlFunction { name: "MAX", signature: "MAX(expr)", insert_text: "MAX(" },
+    // String functions
+    SqlFunction { name: "TRIM", signature: "TRIM(str)", insert_text: "TRIM(" },
+    SqlFunction { name: "UPPER", signature: "UPPER(str)", insert_text: "UPPER(" },
+    SqlFunction { name: "LOWER", signature: "LOWER(str)", insert_text: "LOWER(" },
+    SqlFunction { name: "SUBSTRING", signature: "SUBSTRING(str FROM pos FOR len)", insert_text: "SUBSTRING(" },
+    SqlFunction { name: "LENGTH", signature: "LENGTH(str)", insert_text: "LENGTH(" },
+    SqlFunction { name: "CHAR_LENGTH", signature: "CHAR_LENGTH(str)", insert_text: "CHAR_LENGTH(" },
+    SqlFunction { name: "OREPLACE", signature: "OREPLACE(str, search, replace)", insert_text: "OREPLACE(" },
+    SqlFunction { name: "OTRANSLATE", signature: "OTRANSLATE(str, from, to)", insert_text: "OTRANSLATE(" },
+    SqlFunction { name: "REGEXP_SUBSTR", signature: "REGEXP_SUBSTR(str, pattern)", insert_text: "REGEXP_SUBSTR(" },
+    SqlFunction { name: "STRTOK", signature: "STRTOK(str, delim, token_num)", insert_text: "STRTOK(" },
+    // Type conversion
+    SqlFunction { name: "CAST", signature: "CAST(expr AS type)", insert_text: "CAST(" },
+    SqlFunction { name: "COALESCE", signature: "COALESCE(expr1, expr2, ...)", insert_text: "COALESCE(" },
+    SqlFunction { name: "NULLIF", signature: "NULLIF(expr1, expr2)", insert_text: "NULLIF(" },
+    SqlFunction { name: "TRYCAST", signature: "TRYCAST(expr AS type)", insert_text: "TRYCAST(" },
+    // Date/time functions
+    SqlFunction { name: "CURRENT_DATE", signature: "CURRENT_DATE", insert_text: "CURRENT_DATE" },
+    SqlFunction { name: "CURRENT_TIMESTAMP", signature: "CURRENT_TIMESTAMP", insert_text: "CURRENT_TIMESTAMP" },
+    SqlFunction { name: "EXTRACT", signature: "EXTRACT(part FROM datetime)", insert_text: "EXTRACT(" },
+    SqlFunction { name: "ADD_MONTHS", signature: "ADD_MONTHS(date, n)", insert_text: "ADD_MONTHS(" },
+    SqlFunction { name: "MONTHS_BETWEEN", signature: "MONTHS_BETWEEN(date1, date2)", insert_text: "MONTHS_BETWEEN(" },
+    SqlFunction { name: "TRUNC", signature: "TRUNC(date [, fmt])", insert_text: "TRUNC(" },
+    // Numeric functions
+    SqlFunction { name: "ABS", signature: "ABS(num)", insert_text: "ABS(" },
+    SqlFunction { name: "ROUND", signature: "ROUND(num, decimals)", insert_text: "ROUND(" },
+    SqlFunction { name: "FLOOR", signature: "FLOOR(num)", insert_text: "FLOOR(" },
+    SqlFunction { name: "CEIL", signature: "CEIL(num)", insert_text: "CEIL(" },
+    SqlFunction { name: "MOD", signature: "MOD(a, b)", insert_text: "MOD(" },
+    SqlFunction { name: "POWER", signature: "POWER(base, exp)", insert_text: "POWER(" },
+    // Window functions
+    SqlFunction { name: "ROW_NUMBER", signature: "ROW_NUMBER() OVER (...)", insert_text: "ROW_NUMBER() OVER (" },
+    SqlFunction { name: "RANK", signature: "RANK() OVER (...)", insert_text: "RANK() OVER (" },
+    SqlFunction { name: "DENSE_RANK", signature: "DENSE_RANK() OVER (...)", insert_text: "DENSE_RANK() OVER (" },
+    SqlFunction { name: "LAG", signature: "LAG(expr, offset) OVER (...)", insert_text: "LAG(" },
+    SqlFunction { name: "LEAD", signature: "LEAD(expr, offset) OVER (...)", insert_text: "LEAD(" },
+    SqlFunction { name: "FIRST_VALUE", signature: "FIRST_VALUE(expr) OVER (...)", insert_text: "FIRST_VALUE(" },
+    SqlFunction { name: "LAST_VALUE", signature: "LAST_VALUE(expr) OVER (...)", insert_text: "LAST_VALUE(" },
+    // Conditional
+    SqlFunction { name: "CASE", signature: "CASE WHEN ... THEN ... END", insert_text: "CASE WHEN " },
+    // Teradata-specific
+    SqlFunction { name: "ZEROIFNULL", signature: "ZEROIFNULL(expr)", insert_text: "ZEROIFNULL(" },
+    SqlFunction { name: "NULLIFZERO", signature: "NULLIFZERO(expr)", insert_text: "NULLIFZERO(" },
+    SqlFunction { name: "HASHROW", signature: "HASHROW(cols...)", insert_text: "HASHROW(" },
+    SqlFunction { name: "HASHBUCKET", signature: "HASHBUCKET(HASHROW(cols...))", insert_text: "HASHBUCKET(" },
+    SqlFunction { name: "TD_UNPIVOT", signature: "TD_UNPIVOT(...)", insert_text: "TD_UNPIVOT(" },
+];
+
+/// Build function suggestions matching a prefix
+fn complete_functions(prefix: &str) -> Vec<Suggestion> {
+    let prefix_upper = prefix.to_uppercase();
+
+    SQL_FUNCTIONS
+        .iter()
+        .filter(|f| prefix.is_empty() || f.name.starts_with(&prefix_upper))
+        .map(|f| Suggestion {
+            value: f.insert_text.to_string(),
+            description: Some(format!("(fn) {}", f.signature)),
+            style: None,
+            extra: None,
+            span: reedline::Span { start: 0, end: 0 }, // Placeholder - set by caller
+            append_whitespace: false, // Functions have their own trailing char
+        })
+        .collect()
 }
 
 
@@ -999,14 +1257,23 @@ impl Completer for MetadataCompleter {
             end
         );
 
-        // Get completions based on context - NO KEYWORDS
+        // Get completions based on context
         let mut suggestions = match context {
-            CompletionContext::Keyword => {
-                // Sprint 18: NO keyword completion - return empty
-                Vec::new()
+            CompletionContext::Keyword { clause } => {
+                // Sprint 58: Context-aware keyword completion
+                complete_keywords(&clause, last_word)
             }
 
-            CompletionContext::TableName { prefix } => self.complete_tables(&prefix),
+            CompletionContext::TableName { ref prefix } => {
+                let mut sug = self.complete_tables(prefix);
+                // Sprint 58: When prefix is empty (cursor after table name with space),
+                // also suggest clause keywords (WHERE, JOIN, GROUP BY, etc.) since the
+                // user might want to start a new clause rather than another table.
+                if prefix.is_empty() {
+                    sug.extend(complete_keywords(&KeywordClause::AfterFromClause, ""));
+                }
+                sug
+            }
 
             CompletionContext::SchemaQualifiedTable { schema, prefix } => {
                 // For schema-qualified, we need to adjust the span to cover "schema." or "schema.prefix"
@@ -1049,7 +1316,10 @@ impl Completer for MetadataCompleter {
                     return sug; // Return early with adjusted span
                 }
 
-                self.complete_columns(&tables, &prefix, None)
+                // Sprint 58: Mix column names with SQL functions in expression context
+                let mut sug = self.complete_columns(&tables, &prefix, None);
+                sug.extend(complete_functions(&prefix));
+                sug
             }
         };
 
@@ -1147,12 +1417,13 @@ mod tests {
     }
 
     #[test]
-    fn test_column_context_no_results_without_connection() {
-        // Sprint 18: After WHERE with no connection, no completions
+    fn test_column_context_functions_without_connection() {
+        // Sprint 58: After WHERE with no connection, SQL functions are still available
         let mut completer = MetadataCompleter::keywords_only();
 
         let suggestions = completer.complete("SELECT * FROM employees WHERE n", 31);
-        assert!(suggestions.is_empty());
+        // No column suggestions without connection, but function suggestions matching "n" are returned
+        assert!(suggestions.iter().any(|s| s.value.starts_with("NULLIF")));
     }
 
     #[test]

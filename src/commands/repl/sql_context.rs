@@ -10,11 +10,62 @@
 
 use std::collections::HashSet;
 
+/// Which SQL clause the cursor is in, for context-aware keyword completion
+#[derive(Debug, Clone, PartialEq)]
+pub enum KeywordClause {
+    /// Start of a new statement or empty input
+    /// Suggest: SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, WITH, SHOW, EXPLAIN
+    StatementStart,
+
+    /// After SELECT keyword, before FROM (expression position)
+    /// Suggest: DISTINCT, TOP, *, CASE, and SQL functions
+    AfterSelect,
+
+    /// After FROM/JOIN clause with table(s) — next clause position
+    /// Suggest: WHERE, JOIN variants, GROUP BY, ORDER BY, HAVING, UNION, LIMIT
+    AfterFromClause,
+
+    /// Inside WHERE clause (after a condition or value)
+    /// Suggest: AND, OR, IN, NOT, BETWEEN, LIKE, IS NULL, IS NOT NULL, EXISTS
+    InWhereClause,
+
+    /// After GROUP BY columns
+    /// Suggest: HAVING, ORDER BY, LIMIT
+    AfterGroupBy,
+
+    /// After ORDER BY columns
+    /// Suggest: ASC, DESC, LIMIT, OFFSET
+    AfterOrderBy,
+
+    /// After HAVING clause
+    /// Suggest: AND, OR, ORDER BY
+    AfterHaving,
+
+    /// After a JOIN table reference (expecting ON)
+    /// Suggest: ON
+    AfterJoinTable,
+
+    /// After INSERT keyword
+    /// Suggest: INTO
+    AfterInsert,
+
+    /// After INSERT INTO table
+    /// Suggest: VALUES, SELECT
+    AfterInsertInto,
+
+    /// After UPDATE table SET
+    /// Suggest: WHERE
+    AfterSet,
+}
+
 /// The context for tab completion
 #[derive(Debug, Clone, PartialEq)]
 pub enum CompletionContext {
-    /// Complete SQL keywords (default)
-    Keyword,
+    /// Complete SQL keywords based on clause position
+    Keyword {
+        /// Which clause we're in, determining which keywords to suggest
+        clause: KeywordClause,
+    },
 
     /// Complete table names after FROM, JOIN, UPDATE, INSERT INTO
     TableName {
@@ -121,8 +172,9 @@ pub fn analyze_context(line: &str, cursor_pos: usize) -> CompletionContext {
         }
     }
 
-    // Default to keyword completion
-    CompletionContext::Keyword
+    // Default to keyword completion with clause-aware context
+    let clause = determine_keyword_clause(&upper);
+    CompletionContext::Keyword { clause }
 }
 
 /// Check if we're in a table name context
@@ -592,6 +644,83 @@ fn parse_table_reference(s: &str) -> Option<(TableReference, &str)> {
     Some((TableReference::new(table_name, None), rest))
 }
 
+/// Determine which SQL clause the cursor is in for keyword suggestions
+///
+/// Walks backwards through the SQL tokens to find the most recent clause indicator,
+/// then returns the appropriate keyword context for suggesting next keywords.
+fn determine_keyword_clause(upper: &str) -> KeywordClause {
+    let words: Vec<&str> = upper.split_whitespace().collect();
+
+    if words.is_empty() {
+        return KeywordClause::StatementStart;
+    }
+
+    // Walk backwards to find the most recent clause indicator
+    let len = words.len();
+    for i in (0..len).rev() {
+        let word = words[i];
+
+        match word {
+            // SET clause (UPDATE ... SET col = val)
+            "SET" => return KeywordClause::AfterSet,
+
+            // HAVING clause
+            "HAVING" => return KeywordClause::AfterHaving,
+
+            // ORDER BY / GROUP BY
+            "BY" if i > 0 => {
+                if words[i - 1] == "ORDER" {
+                    return KeywordClause::AfterOrderBy;
+                }
+                if words[i - 1] == "GROUP" {
+                    return KeywordClause::AfterGroupBy;
+                }
+            }
+
+            // WHERE / AND / OR indicate we're in a where/condition clause
+            "WHERE" | "AND" | "OR" => return KeywordClause::InWhereClause,
+
+            // ON after JOIN (expecting join condition)
+            "ON" => return KeywordClause::InWhereClause,
+
+            // After a table reference following JOIN, suggest ON
+            "JOIN" => return KeywordClause::AfterJoinTable,
+
+            // After FROM with tables already listed
+            "FROM" => return KeywordClause::AfterFromClause,
+
+            // INSERT handling
+            "INTO" if i > 0 && words[i - 1] == "INSERT" => {
+                return KeywordClause::AfterInsertInto;
+            }
+            "INSERT" => return KeywordClause::AfterInsert,
+
+            // SELECT without FROM yet
+            "SELECT" => {
+                if upper.contains(" FROM ") {
+                    return KeywordClause::AfterFromClause;
+                }
+                return KeywordClause::AfterSelect;
+            }
+
+            // These indicate we're past a clause boundary — check for FROM context
+            "INNER" | "LEFT" | "RIGHT" | "FULL" | "CROSS" | "OUTER" => {
+                // Part of a JOIN keyword — suggest table context
+                return KeywordClause::AfterFromClause;
+            }
+
+            _ => {}
+        }
+    }
+
+    // If we have words but couldn't determine context, check first word
+    match words[0] {
+        "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "CREATE" | "DROP" | "ALTER" | "WITH"
+        | "SHOW" | "EXPLAIN" | "GRANT" | "REVOKE" => KeywordClause::StatementStart,
+        _ => KeywordClause::StatementStart,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -599,7 +728,7 @@ mod tests {
     #[test]
     fn test_analyze_context_keyword_default() {
         let ctx = analyze_context("SEL", 3);
-        assert_eq!(ctx, CompletionContext::Keyword);
+        assert!(matches!(ctx, CompletionContext::Keyword { .. }));
     }
 
     #[test]
@@ -714,5 +843,73 @@ mod tests {
         assert_eq!(get_last_word("SELECT * FROM "), "");
         assert_eq!(get_last_word("WHERE name = "), "");
         assert_eq!(get_last_word("WHERE name"), "name");
+    }
+
+    // Sprint 58: Keyword clause detection tests
+
+    #[test]
+    fn test_keyword_clause_empty_input() {
+        let clause = determine_keyword_clause("");
+        assert_eq!(clause, KeywordClause::StatementStart);
+    }
+
+    #[test]
+    fn test_keyword_clause_after_select() {
+        let clause = determine_keyword_clause("SELECT");
+        assert_eq!(clause, KeywordClause::AfterSelect);
+    }
+
+    #[test]
+    fn test_keyword_clause_after_select_with_from() {
+        let clause = determine_keyword_clause("SELECT * FROM EMPLOYEES");
+        assert_eq!(clause, KeywordClause::AfterFromClause);
+    }
+
+    #[test]
+    fn test_keyword_clause_in_where() {
+        let clause = determine_keyword_clause("SELECT * FROM EMPLOYEES WHERE");
+        assert_eq!(clause, KeywordClause::InWhereClause);
+    }
+
+    #[test]
+    fn test_keyword_clause_after_and() {
+        let clause = determine_keyword_clause("SELECT * FROM T WHERE A = 1 AND");
+        assert_eq!(clause, KeywordClause::InWhereClause);
+    }
+
+    #[test]
+    fn test_keyword_clause_after_group_by() {
+        let clause = determine_keyword_clause("SELECT * FROM T GROUP BY COL1");
+        assert_eq!(clause, KeywordClause::AfterGroupBy);
+    }
+
+    #[test]
+    fn test_keyword_clause_after_order_by() {
+        let clause = determine_keyword_clause("SELECT * FROM T ORDER BY COL1");
+        assert_eq!(clause, KeywordClause::AfterOrderBy);
+    }
+
+    #[test]
+    fn test_keyword_clause_after_having() {
+        let clause = determine_keyword_clause("SELECT * FROM T GROUP BY C HAVING");
+        assert_eq!(clause, KeywordClause::AfterHaving);
+    }
+
+    #[test]
+    fn test_keyword_clause_after_join_table() {
+        let clause = determine_keyword_clause("SELECT * FROM T1 JOIN");
+        assert_eq!(clause, KeywordClause::AfterJoinTable);
+    }
+
+    #[test]
+    fn test_keyword_clause_after_insert() {
+        let clause = determine_keyword_clause("INSERT");
+        assert_eq!(clause, KeywordClause::AfterInsert);
+    }
+
+    #[test]
+    fn test_keyword_clause_after_insert_into() {
+        let clause = determine_keyword_clause("INSERT INTO T");
+        assert_eq!(clause, KeywordClause::AfterInsertInto);
     }
 }
