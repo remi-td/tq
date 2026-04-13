@@ -23,7 +23,7 @@
 
 use super::executor::execute_sql_with_state;
 use super::metadata_completer::CompletionState;
-use super::state::ReplState;
+use super::state::{PagerMode, ReplState};
 use crate::cli::LogonMechanism;
 use crate::commands::format_helpers::{format_nullable, truncate_str};
 use crate::db::{ConnectionConfig, DatabaseClient};
@@ -107,30 +107,28 @@ pub fn handle_metacommand<W: Write>(
             }
         }
 
-        // Pager control command (Sprint 6)
+        // Pager control command
         "pager" => {
             if args.is_empty() {
-                // Show current setting
-                let status = if state.is_pager_enabled() {
-                    "on"
-                } else {
-                    "off"
-                };
-                writeln!(writer, "Pager: {}", status)?;
+                writeln!(writer, "Pager: {}", state.pager_mode())?;
             } else {
                 match args[0].to_lowercase().as_str() {
+                    "auto" => {
+                        state.set_pager_mode(PagerMode::Auto);
+                        writeln!(writer, "Pager: auto (activates when result is wider than terminal)")?;
+                    }
                     "on" => {
-                        state.set_pager(true);
-                        writeln!(writer, "Result paging enabled")?;
+                        state.set_pager_mode(PagerMode::On);
+                        writeln!(writer, "Pager: on")?;
                     }
                     "off" => {
-                        state.set_pager(false);
-                        writeln!(writer, "Result paging disabled")?;
+                        state.set_pager_mode(PagerMode::Off);
+                        writeln!(writer, "Pager: off")?;
                     }
                     _ => {
                         writeln!(
                             writer,
-                            "Invalid pager setting '{}'. Use 'on' or 'off'.",
+                            "Invalid pager setting '{}'. Use 'auto', 'on', or 'off'.",
                             args[0]
                         )?;
                     }
@@ -362,30 +360,28 @@ pub fn handle_metacommand_with_state<W: Write>(
             }
         }
 
-        // Pager control command (Sprint 6)
+        // Pager control command
         "pager" => {
             if args.is_empty() {
-                // Show current setting
-                let status = if state.is_pager_enabled() {
-                    "on"
-                } else {
-                    "off"
-                };
-                writeln!(writer, "Pager: {}", status)?;
+                writeln!(writer, "Pager: {}", state.pager_mode())?;
             } else {
                 match args[0].to_lowercase().as_str() {
+                    "auto" => {
+                        state.set_pager_mode(PagerMode::Auto);
+                        writeln!(writer, "Pager: auto (activates when result is wider than terminal)")?;
+                    }
                     "on" => {
-                        state.set_pager(true);
-                        writeln!(writer, "Result paging enabled")?;
+                        state.set_pager_mode(PagerMode::On);
+                        writeln!(writer, "Pager: on")?;
                     }
                     "off" => {
-                        state.set_pager(false);
-                        writeln!(writer, "Result paging disabled")?;
+                        state.set_pager_mode(PagerMode::Off);
+                        writeln!(writer, "Pager: off")?;
                     }
                     _ => {
                         writeln!(
                             writer,
-                            "Invalid pager setting '{}'. Use 'on' or 'off'.",
+                            "Invalid pager setting '{}'. Use 'auto', 'on', or 'off'.",
                             args[0]
                         )?;
                     }
@@ -832,7 +828,7 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     )?;
     writeln!(
         writer,
-        "  /pager on|off          Enable/disable result paging"
+        "  /pager [auto|on|off]   Set pager mode (default: auto)"
     )?;
     writeln!(
         writer,
@@ -1195,7 +1191,7 @@ fn print_help<W: Write>(writer: &mut W) -> Result<()> {
     )?;
     writeln!(
         writer,
-        "  /pager on|off          Enable/disable result paging"
+        "  /pager [auto|on|off]   Set pager mode (default: auto)"
     )?;
     writeln!(
         writer,

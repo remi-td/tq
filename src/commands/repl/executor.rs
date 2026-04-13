@@ -15,8 +15,8 @@
 //! on 117-char terminals. Column widths are calculated at render time based
 //! on actual terminal dimensions.
 
-use super::pager::{display_with_pager, PagerConfig};
-use super::state::ReplState;
+use super::pager::{display_with_pager, estimate_table_width, PagerConfig};
+use super::state::{PagerMode, ReplState};
 use crate::cli::OutputFormat;
 use crate::db::DatabaseClient;
 use crate::error::Result;
@@ -172,12 +172,20 @@ pub fn execute_sql_with_state<W: Write>(
         .with_header(true)
         .with_color(use_color);
 
-    // Sprint 30: Pager accepts QueryResult directly (not pre-formatted strings)
-    // This fixes the Sprint 29 bug where 1221-char tables wrapped on 117-char terminals.
-    // Check if pager is enabled in state (controlled by /pager on|off metacommand)
-    let pager_enabled = state.is_pager_enabled();
+    // Determine whether to use the pager based on mode (auto/on/off)
+    let use_pager = match state.pager_mode() {
+        PagerMode::On => true,
+        PagerMode::Off => false,
+        PagerMode::Auto => {
+            // In auto mode, activate pager when the table is wider than the terminal
+            let term_width = crossterm::terminal::size()
+                .map(|(w, _)| w as usize)
+                .unwrap_or(120);
+            estimate_table_width(&result_clone) > term_width
+        }
+    };
 
-    if pager_enabled {
+    if use_pager {
         // Sprint 30: Pass QueryResult directly to pager - no pre-formatting!
         // The pager calculates column widths at render time based on terminal size.
         let pager_config = PagerConfig::default();

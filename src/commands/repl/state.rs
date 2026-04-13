@@ -9,7 +9,29 @@
 
 use crate::db::{ConnectionConfig, MetadataCache, QueryResult};
 use crate::params::ParamStore;
+use std::fmt;
 use std::time::Instant;
+
+/// Pager activation mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PagerMode {
+    /// Pager activates automatically when result is wider than terminal
+    Auto,
+    /// Pager is always used for qualifying result sets
+    On,
+    /// Pager is never used
+    Off,
+}
+
+impl fmt::Display for PagerMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PagerMode::Auto => write!(f, "auto"),
+            PagerMode::On => write!(f, "on"),
+            PagerMode::Off => write!(f, "off"),
+        }
+    }
+}
 
 /// State of the REPL session
 #[derive(Debug)]
@@ -38,8 +60,8 @@ pub struct ReplState {
     /// Whether last result was limited by default REPL limit (Sprint 12)
     was_limited: bool,
 
-    /// Whether result paging is enabled (Sprint 6)
-    pager_enabled: bool,
+    /// Pager activation mode (auto/on/off)
+    pager_mode: PagerMode,
 
     /// Whether colored output is enabled (Sprint 6)
     colors_enabled: bool,
@@ -70,7 +92,7 @@ impl ReplState {
             last_result: None,
             last_sql: None,
             was_limited: false,
-            pager_enabled: false, // Sprint 33: Disabled by default (Issue #14 - pager still broken)
+            pager_mode: PagerMode::Auto,
             colors_enabled: atty::is(atty::Stream::Stdout), // Enable colors for TTY
             metadata_cache: MetadataCache::new(database),
             connection_string: None,
@@ -188,14 +210,14 @@ impl ReplState {
         self.was_limited
     }
 
-    /// Set pager enabled/disabled (Sprint 6)
-    pub fn set_pager(&mut self, enabled: bool) {
-        self.pager_enabled = enabled;
+    /// Set pager mode (auto/on/off)
+    pub fn set_pager_mode(&mut self, mode: PagerMode) {
+        self.pager_mode = mode;
     }
 
-    /// Check if pager is enabled (Sprint 6)
-    pub fn is_pager_enabled(&self) -> bool {
-        self.pager_enabled
+    /// Get current pager mode
+    pub fn pager_mode(&self) -> PagerMode {
+        self.pager_mode
     }
 
     /// Set colors enabled/disabled (Sprint 6)
@@ -263,7 +285,7 @@ impl ReplState {
         self.connection_info = new_config;
         self.connection_string = new_connection_string;
 
-        // Note: We preserve pager_enabled and colors_enabled settings
+        // Note: We preserve pager_mode and colors_enabled settings
         // Note: We preserve query count and session start for session statistics
         log::debug!("Connection updated, metadata cache cleared");
     }
@@ -370,7 +392,7 @@ mod tests {
 
         // Set some state
         state.record_query(10);
-        state.set_pager(false);
+        state.set_pager_mode(PagerMode::Off);
         state.set_colors(false);
 
         // Create new connection config
@@ -395,7 +417,7 @@ mod tests {
         );
 
         // Settings should be preserved
-        assert!(!state.is_pager_enabled());
+        assert_eq!(state.pager_mode(), PagerMode::Off);
         assert!(!state.are_colors_enabled());
 
         // Query count should be preserved (session-level)
@@ -412,16 +434,11 @@ mod tests {
         assert!(!state.metadata_cache().has_tables());
     }
 
-    /// Sprint 33: Pager must be disabled by default (Issue #14)
     #[test]
-    fn test_pager_disabled_by_default() {
+    fn test_pager_auto_by_default() {
         let config = create_test_config();
         let state = ReplState::new(config);
 
-        // Pager should be DISABLED by default to protect users from rendering bugs
-        assert!(
-            !state.is_pager_enabled(),
-            "Pager must be disabled by default (Issue #14)"
-        );
+        assert_eq!(state.pager_mode(), PagerMode::Auto);
     }
 }

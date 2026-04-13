@@ -97,7 +97,7 @@ impl PagerConfig {
             self.page_size
         } else {
             terminal_size()
-                .map(|(_, h)| (h as usize).saturating_sub(5))
+                .map(|(_, h)| (h as usize).saturating_sub(6))
                 .unwrap_or(20)
         }
     }
@@ -460,7 +460,9 @@ impl Pager {
 
         border.push(right);
 
-        writeln!(stdout, "{}", border)
+        // Raw mode disables kernel ONLCR translation, so \n alone won't
+        // return the cursor to column 0. Use \r\n for proper line breaks.
+        write!(stdout, "{}\r\n", border)
     }
 
     /// Render the header row
@@ -509,7 +511,7 @@ impl Pager {
             write!(stdout, "│")?;
         }
 
-        writeln!(stdout)
+        write!(stdout, "\r\n")
     }
 
     /// Render a data row
@@ -565,7 +567,7 @@ impl Pager {
             write!(stdout, "│")?;
         }
 
-        writeln!(stdout)
+        write!(stdout, "\r\n")
     }
 
     /// Render the status bar
@@ -615,11 +617,11 @@ impl Pager {
 
         let nav_hints = nav_parts.join(" | ");
 
-        writeln!(stdout)?;
+        write!(stdout, "\r\n")?;
         execute!(stdout, SetForegroundColor(Color::DarkGrey))?;
-        writeln!(
+        write!(
             stdout,
-            "{} | {} | {} | {}",
+            "{} | {} | {} | {}\r\n",
             col_status, row_status, timing, nav_hints
         )?;
         execute!(stdout, ResetColor)?;
@@ -724,7 +726,9 @@ Exit:
 Press any key to return to results..."#;
 
         execute!(stdout, SetForegroundColor(Color::Cyan))?;
-        writeln!(stdout, "{}", help_text)?;
+        // In raw mode, \n alone won't CR. Replace \n with \r\n for help text.
+        let help_raw = help_text.replace('\n', "\r\n");
+        write!(stdout, "{}\r\n", help_raw)?;
         execute!(stdout, ResetColor)?;
         stdout.flush()?;
 
@@ -1009,6 +1013,40 @@ pub fn should_page(result: &QueryResult, config: &PagerConfig) -> bool {
         && estimated_width > visible_width;
 
     needs_vertical || needs_horizontal
+}
+
+/// Estimate the rendered table width for a QueryResult.
+///
+/// Computes the width the table would occupy using the same column-width
+/// logic as `TableData::from_query_result`. Used by auto-pager mode to
+/// decide whether the result needs horizontal scrolling.
+pub fn estimate_table_width(result: &QueryResult) -> usize {
+    if result.columns.is_empty() {
+        return 0;
+    }
+
+    // Leading border
+    let mut width: usize = 1;
+
+    for (col_idx, col_meta) in result.columns.iter().enumerate() {
+        let header_width = col_meta.name.trim().width();
+        let mut max_value_width = header_width;
+
+        for row in &result.rows {
+            let value = if col_idx < row.len() {
+                row[col_idx].display()
+            } else {
+                "[NULL]".to_string()
+            };
+            max_value_width = max_value_width.max(value.trim().width());
+        }
+
+        let display_width = max_value_width.max(MIN_COLUMN_WIDTH).min(MAX_COLUMN_WIDTH);
+        // Each column renders as: " " + content(display_width) + " " + "│"
+        width += display_width + 3;
+    }
+
+    width
 }
 
 /// Display QueryResult using the pager
