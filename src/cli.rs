@@ -655,6 +655,19 @@ pub struct SessionsArgs {
     /// If the file exists, it will be overwritten.
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+
+    /// Enable watch mode (auto-refresh display)
+    ///
+    /// Continuously refreshes the display at a fixed interval.
+    /// Press q or Ctrl-C to stop. Incompatible with --output.
+    #[arg(long, conflicts_with = "output")]
+    pub watch: bool,
+
+    /// Refresh interval in seconds for watch mode (default: 6)
+    ///
+    /// Minimum: 2 seconds. Maximum: 300 seconds.
+    #[arg(long, default_value = "6", value_name = "SECONDS", requires = "watch", value_parser = clap::value_parser!(u64).range(2..=300))]
+    pub interval: u64,
 }
 
 /// Arguments for the sysconfig command (Sprint 38)
@@ -705,6 +718,19 @@ pub struct LocksArgs {
     /// If the file exists, it will be overwritten.
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+
+    /// Enable watch mode (auto-refresh display)
+    ///
+    /// Continuously refreshes the display at a fixed interval.
+    /// Press q or Ctrl-C to stop. Incompatible with --output.
+    #[arg(long, conflicts_with = "output")]
+    pub watch: bool,
+
+    /// Refresh interval in seconds for watch mode (default: 6)
+    ///
+    /// Minimum: 2 seconds. Maximum: 300 seconds.
+    #[arg(long, default_value = "6", value_name = "SECONDS", requires = "watch", value_parser = clap::value_parser!(u64).range(2..=300))]
+    pub interval: u64,
 }
 
 /// Arguments for the query-inspect command (Sprint 39)
@@ -1103,6 +1129,19 @@ pub struct ResourcesArgs {
     /// Requires --page-size. Returns the specified page of results.
     #[arg(long, value_name = "P", default_value = "1", requires = "page_size")]
     pub page: Option<usize>,
+
+    /// Enable watch mode (auto-refresh display)
+    ///
+    /// Continuously refreshes the display at a fixed interval.
+    /// Press q or Ctrl-C to stop. Incompatible with --output.
+    #[arg(long, conflicts_with = "output")]
+    pub watch: bool,
+
+    /// Refresh interval in seconds for watch mode (default: 6)
+    ///
+    /// Minimum: 2 seconds. Maximum: 300 seconds.
+    #[arg(long, default_value = "6", value_name = "SECONDS", requires = "watch", value_parser = clap::value_parser!(u64).range(2..=300))]
+    pub interval: u64,
 }
 
 /// Arguments for the sample command (Sprint 33)

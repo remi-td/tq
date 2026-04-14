@@ -527,9 +527,15 @@ pub fn handle_metacommand_with_state<W: Write>(
             }
         }
 
-        // Sprint 26: Sessions command
+        // Sprint 26: Sessions command (watch mode supported)
         "sessions" => {
-            crate::commands::sessions::execute_for_repl(completion_state.client(), writer)?;
+            if let Some(interval) = crate::commands::watch::parse_watch_args(&args, 6) {
+                crate::commands::watch::run_watch(interval, |buf| {
+                    crate::commands::sessions::execute_for_repl(completion_state.client(), buf)
+                })?;
+            } else {
+                crate::commands::sessions::execute_for_repl(completion_state.client(), writer)?;
+            }
         }
 
         // Sprint 33: Data sampling commands
@@ -614,9 +620,15 @@ pub fn handle_metacommand_with_state<W: Write>(
             crate::commands::sysconfig::execute_for_repl(completion_state.client(), writer)?;
         }
 
-        // Sprint 38: Lock information command
+        // Sprint 38: Lock information command (watch mode supported)
         "locks" | "lk" => {
-            crate::commands::locks::execute_for_repl(completion_state.client(), writer)?;
+            if let Some(interval) = crate::commands::watch::parse_watch_args(&args, 6) {
+                crate::commands::watch::run_watch(interval, |buf| {
+                    crate::commands::locks::execute_for_repl(completion_state.client(), buf)
+                })?;
+            } else {
+                crate::commands::locks::execute_for_repl(completion_state.client(), writer)?;
+            }
         }
 
         // Sprint 39: Query inspection command
@@ -687,14 +699,24 @@ pub fn handle_metacommand_with_state<W: Write>(
             )?;
         }
 
-        // Resources command for PMON resource monitoring
+        // Resources command for PMON resource monitoring (watch mode supported)
         "resources" | "res" | "perf" => {
             let physical = args.iter().any(|a| a.eq_ignore_ascii_case("--physical"));
-            crate::commands::resources::execute_for_repl(
-                completion_state.client(),
-                physical,
-                writer,
-            )?;
+            if let Some(interval) = crate::commands::watch::parse_watch_args(&args, 6) {
+                crate::commands::watch::run_watch(interval, |buf| {
+                    crate::commands::resources::execute_for_repl(
+                        completion_state.client(),
+                        physical,
+                        buf,
+                    )
+                })?;
+            } else {
+                crate::commands::resources::execute_for_repl(
+                    completion_state.client(),
+                    physical,
+                    writer,
+                )?;
+            }
         }
 
         // Sprint 49: Abort session/query command

@@ -24,6 +24,7 @@ pub mod sessions;
 pub mod show_indexes;
 pub mod skew;
 pub mod sysconfig;
+pub mod watch;
 
 pub use abort::execute as abort;
 pub use explain::execute as explain;

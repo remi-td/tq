@@ -2229,9 +2229,11 @@ Use /reconnect to establish new connection
 
 **Syntax:**
 ```
-/sessions
-/s                  -- Short alias
+/sessions [--watch [N]]
+/s [--watch [N]]    -- Short alias
 ```
+
+`--watch` enables auto-refresh mode. The optional argument `N` sets the refresh interval in seconds (default: 6, min: 2, max: 300).
 
 **Output Format:**
 ```
@@ -2404,8 +2406,9 @@ The command SHALL be discoverable through standard REPL features:
 2. **REQ-SESS-006.2** - Tab completion: Typing `/sess<TAB>` SHALL auto-complete to `/sessions`
 3. **REQ-SESS-006.3** - Help text: `/help` SHALL list `/sessions` command with description
 4. **REQ-SESS-006.4** - Help text description: "List active Teradata sessions with performance metrics"
-5. **REQ-SESS-006.5** - Detailed help: `/help sessions` SHALL display extended help including column descriptions
+5. **REQ-SESS-006.5** - Detailed help: `/help sessions` SHALL display extended help including column descriptions and the `--watch` option
 6. **REQ-SESS-006.6** - Command SHALL appear in metacommand list when typing `/<TAB>`
+7. **REQ-SESS-006.7** - Tab completion: After `/sessions ` (with space), SHALL suggest `--watch`
 
 **REQ-SESS-007: Output Format Compatibility**
 
@@ -2457,8 +2460,37 @@ The command SHALL execute efficiently and provide feedback:
 1. **REQ-SESS-008.1** - Target execution time: <1 second for systems with <1000 sessions
 2. **REQ-SESS-008.2** - Loading indicator: Display "Loading session information..." if query takes >500ms
 3. **REQ-SESS-008.3** - Result caching: NOT cached (each execution is fresh query for real-time monitoring)
-4. **REQ-SESS-008.4** - Query cancellation: Ctrl-C SHALL cancel query and return to prompt
+4. **REQ-SESS-008.4** - Query cancellation: In normal mode, Ctrl-C SHALL cancel the query and return to prompt. In watch mode, Ctrl-C SHALL exit watch mode and return to the REPL prompt.
 5. **REQ-SESS-008.5** - Resource impact: Query SHALL use read-only system views (no locks, no modifications)
+
+**REQ-SESS-010: Watch Mode**
+
+The `/sessions` command SHALL support a continuous auto-refresh mode:
+
+1. **REQ-SESS-010.1** - Syntax: `/sessions --watch` or `/sessions --watch N` where `N` is the interval in seconds
+2. **REQ-SESS-010.2** - Default interval: 6 seconds when `--watch` is specified without a value
+3. **REQ-SESS-010.3** - Interval range: minimum 2 seconds, maximum 300 seconds. Values outside this range SHALL display a usage error and return to the REPL prompt
+4. **REQ-SESS-010.4** - Watch mode forces table display format regardless of current `/set format` setting. A brief notice SHALL inform the user: `(Watch mode: displaying as table)`
+5. **REQ-SESS-010.5** - Each refresh SHALL clear the visible output area and redraw the complete table
+6. **REQ-SESS-010.6** - Footer line after the summary: `Last updated: HH:MM:SS | Refreshing every Ns | Press q or Ctrl-C to stop`
+7. **REQ-SESS-010.7** - Exit: pressing `q` or Ctrl-C SHALL stop watch mode and return to the REPL prompt
+8. **REQ-SESS-010.8** - Watch mode errors (e.g. query failure mid-loop) SHALL display the error in place of the table and continue retrying on the next interval
+
+**Watch mode output example:**
+```
+tq> /sessions --watch
+
+Active Sessions on prod-td01.company.com:
+┌───────────┬──────────┬────────────────────────┬─────────────┬──────────┬───────────┬───────┬─────────────┬────────────────┬──────────────┐
+│ SessionNo │ UserName │ LogonTime              │ PEstate     │ AMPState │ AMPCPUSec │ AMPIO │ ReqSpool    │ Amp CPU Skew % │ Amp IO Skew %│
+├───────────┼──────────┼────────────────────────┼─────────────┼──────────┼───────────┼───────┼─────────────┼────────────────┼──────────────┤
+│      1076 │ DBC      │ 2026/01/27 15:33:26.00 │ IDLE        │ IDLE     │         0 │     6 │           0 │           [--] │         [--] │
+│      1078 │ alice    │ 2026/01/27 16:15:42.00 │ ACTIVE      │ ACTIVE   │    15.234 │  3421 │   123456789 │           0.15 │         0.23 │
+└───────────┴──────────┴────────────────────────┴─────────────┴──────────┴───────────┴───────┴─────────────┴────────────────┴──────────────┘
+
+2 sessions found (Query time: 0.198s)
+Last updated: 10:42:15 | Refreshing every 6s | Press q or Ctrl-C to stop
+```
 
 **REQ-SESS-009: Skew Percentage Interpretation Guidelines**
 
@@ -2542,6 +2574,10 @@ SessionNo,UserName,LogonTime,PEstate,AMPState,AMPCPUSec,AMPIO,ReqSpool,Amp CPU S
 - Execute with `/set format json` and verify JSON output
 - Type `/s<TAB>` and verify tab completion suggestions include `/sessions`
 - Execute `/help` and verify `/sessions` appears in command list
+- Execute `/sessions --watch` and verify: table redraws on each interval, footer shows "Last updated: HH:MM:SS | Refreshing every 6s | Press q or Ctrl-C to stop", pressing `q` returns to REPL prompt
+- Execute `/sessions --watch 10` and verify footer shows "Refreshing every 10s"
+- Execute `/sessions --watch 1` and verify usage error for out-of-range interval, returns to prompt
+- Verify watch mode always displays table format regardless of current `/set format` setting
 
 ---
 

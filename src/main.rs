@@ -123,7 +123,11 @@ fn run(cli: Cli) -> Result<()> {
         }
         // Sprint 26: Sessions command for system monitoring
         Command::Sessions(args) => {
-            if let Some(ref output_path) = args.output {
+            if args.watch {
+                commands::watch::run_watch(args.interval, |buf| {
+                    commands::sessions(&client, &args, buf, use_color)
+                })?;
+            } else if let Some(ref output_path) = args.output {
                 let file = std::fs::File::create(output_path)?;
                 let mut writer = std::io::BufWriter::new(file);
                 commands::sessions(&client, &args, &mut writer, use_color)?;
@@ -167,7 +171,11 @@ fn run(cli: Cli) -> Result<()> {
         }
         // Sprint 38: Locks command for lock contention analysis
         Command::Locks(args) => {
-            if let Some(ref output_path) = args.output {
+            if args.watch {
+                commands::watch::run_watch(args.interval, |buf| {
+                    commands::locks(&client, &args, buf, use_color)
+                })?;
+            } else if let Some(ref output_path) = args.output {
                 let file = std::fs::File::create(output_path)?;
                 let mut writer = std::io::BufWriter::new(file);
                 commands::locks(&client, &args, &mut writer, use_color)?;
@@ -277,7 +285,11 @@ fn run(cli: Cli) -> Result<()> {
         }
         // Resources command for PMON resource monitoring
         Command::Resources(args) => {
-            if let Some(ref output_path) = args.output {
+            if args.watch {
+                commands::watch::run_watch(args.interval, |buf| {
+                    commands::resources(&client, &args, buf, use_color)
+                })?;
+            } else if let Some(ref output_path) = args.output {
                 let file = std::fs::File::create(output_path)?;
                 let mut writer = std::io::BufWriter::new(file);
                 commands::resources(&client, &args, &mut writer, use_color)?;

@@ -508,6 +508,8 @@ tq [GLOBAL_OPTIONS] --sessions [OPTIONS]
 |--------|-------|------|---------|-------------|
 | `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv` |
 | `--output` | `-o` | path | stdout | Write output to file |
+| `--watch` | - | flag | off | Auto-refresh display at a fixed interval |
+| `--interval` | - | integer | `6` | Refresh interval in seconds (min: 2, max: 300). Only valid with `--watch` |
 
 **Examples**:
 ```bash
@@ -529,6 +531,12 @@ tq sessions --format json | jq '.[] | select(.PEstate == "ACTIVE")'
 
 # Using connection profile
 tq --profile prod sessions
+
+# Watch mode: refresh every 6 seconds (default)
+tq sessions --watch
+
+# Watch mode: refresh every 10 seconds
+tq sessions --watch --interval 10
 ```
 
 **Output (Table Format)**:
@@ -617,6 +625,47 @@ SessionNo,UserName,LogonTime,PEstate,AMPState,AMPCPUSec,AMPIO,ReqSpool,Amp CPU S
 5. **Format Compatibility**: Works with `--format table`, `--format csv`, `--format json`
 6. **Output Destination**: Respects `--output` flag for file output, otherwise stdout
 7. **Summary Footer**: Includes row count and query execution time (table format only)
+8. **Watch Mode**: When `--watch` is specified, the display auto-refreshes at the given interval (see Watch Mode section below)
+
+**Watch Mode**:
+
+When `--watch` is specified, the command enters a continuous refresh loop:
+
+1. **Format enforcement**: Watch mode forces table output format. `--format csv` and `--format json` are incompatible with `--watch` and SHALL produce a usage error (exit code 2)
+2. **Output incompatibility**: `--output` (file output) is incompatible with `--watch` and SHALL produce a usage error (exit code 2)
+3. **Screen clearing**: Each refresh clears the terminal and redraws the full table from the top of the screen
+4. **Refresh interval**: Controlled by `--interval N` (default: 6 seconds, minimum: 2, maximum: 300). Values outside the allowed range SHALL produce a usage error (exit code 2)
+5. **Footer line**: After the summary footer, display: `Last updated: HH:MM:SS | Refreshing every Ns | Press Ctrl-C to stop`
+6. **Clean exit**: Ctrl-C exits watch mode cleanly, restoring terminal state, with exit code 0
+
+**Watch mode output example**:
+```
+Active Sessions on prod-td01.company.com:
+┌───────────┬──────────┬────────────────────────┬─────────────┬──────────┬───────────┬───────┬─────────────┬────────────────┬──────────────┐
+│ SessionNo │ UserName │ LogonTime              │ PEstate     │ AMPState │ AMPCPUSec │ AMPIO │ ReqSpool    │ Amp CPU Skew % │ Amp IO Skew %│
+├───────────┼──────────┼────────────────────────┼─────────────┼──────────┼───────────┼───────┼─────────────┼────────────────┼──────────────┤
+│      1076 │ DBC      │ 2026/01/27 15:33:26.00 │ IDLE        │ IDLE     │         0 │     6 │           0 │           [--] │         [--] │
+│      1078 │ DBC      │ 2026/01/27 15:33:28.00 │ DISPATCHING │ ACTIVE   │   366.736 │ 75335 │ 26753187840 │           2.87 │         3.78 │
+└───────────┴──────────┴────────────────────────┴─────────────┴──────────┴───────────┴───────┴─────────────┴────────────────┴──────────────┘
+
+2 sessions found (Query time: 0.198s)
+Last updated: 10:42:15 | Refreshing every 6s | Press Ctrl-C to stop
+```
+
+**Incompatible flag error**:
+```
+Error: --watch is incompatible with --format csv
+Watch mode requires table output format.
+
+Exit code: 2
+```
+
+**Invalid interval error**:
+```
+Error: --interval value must be between 2 and 300 seconds (got: 1)
+
+Exit code: 2
+```
 
 **Error Handling**:
 
@@ -657,9 +706,9 @@ Exit code: 1
 ```
 
 **Exit Codes**:
-- `0`: Sessions listed successfully
+- `0`: Sessions listed successfully (including clean Ctrl-C exit from watch mode)
 - `1`: Query error (privilege denied, connection failed, function not available)
-- `2`: Usage error (invalid format, invalid output path)
+- `2`: Usage error (invalid format, invalid output path, incompatible flags with `--watch`, invalid `--interval` value)
 
 **Integration with Scripting**:
 
@@ -708,6 +757,11 @@ The flag form (`--sessions`) provides compatibility with single-purpose invocati
 - Execute on system with no sessions besides current and verify 1 row displayed
 - Verify NULL skew percentages appear as `[--]` in table format, empty in CSV, `null` in JSON
 - Verify exit code 0 on success, 1 on privilege/connection errors
+- Execute `tq sessions --watch` and verify: table redraws on each interval, footer shows "Last updated: HH:MM:SS | Refreshing every 6s | Press Ctrl-C to stop", Ctrl-C exits cleanly with exit code 0
+- Execute `tq sessions --watch --interval 10` and verify footer shows "Refreshing every 10s"
+- Execute `tq sessions --watch --format csv` and verify usage error (exit code 2)
+- Execute `tq sessions --watch --output sessions.txt` and verify usage error (exit code 2)
+- Execute `tq sessions --watch --interval 1` and verify usage error for out-of-range interval (exit code 2)
 
 ---
 
@@ -861,6 +915,8 @@ tq [GLOBAL_OPTIONS] locks [OPTIONS]
 |--------|-------|------|---------|-------------|
 | `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv` |
 | `--output` | `-o` | path | stdout | Write output to file |
+| `--watch` | - | flag | off | Auto-refresh display at a fixed interval |
+| `--interval` | - | integer | `6` | Refresh interval in seconds (min: 2, max: 300). Only valid with `--watch` |
 
 **Examples**:
 ```bash
@@ -879,6 +935,12 @@ tq locks --format json | jq '.[] | select(.["Lock Mode"] == "EXCLUSIVE")'
 
 # Using connection profile
 tq --profile prod locks
+
+# Watch mode: refresh every 6 seconds (default)
+tq locks --watch
+
+# Watch mode: refresh every 15 seconds
+tq locks --watch --interval 15
 ```
 
 **Output (Table Format - Locks Present)**:
@@ -959,6 +1021,36 @@ PRODUCTION.employees,Row Hash,READ,1078,
 6. **No Locks**: Display "No locks currently held." message when query returns no rows
 7. **Format Compatibility**: Works with `--format table`, `--format csv`, `--format json`
 8. **Output Destination**: Respects `--output` flag for file output, otherwise stdout
+9. **Watch Mode**: When `--watch` is specified, the display auto-refreshes at the given interval (see Watch Mode section below)
+
+**Watch Mode**:
+
+When `--watch` is specified, the command enters a continuous refresh loop:
+
+1. **Format enforcement**: Watch mode forces table output format. `--format csv` and `--format json` are incompatible with `--watch` and SHALL produce a usage error (exit code 2)
+2. **Output incompatibility**: `--output` (file output) is incompatible with `--watch` and SHALL produce a usage error (exit code 2)
+3. **Screen clearing**: Each refresh clears the terminal and redraws the full output from the top of the screen, including the blocking chain section when present
+4. **Refresh interval**: Controlled by `--interval N` (default: 6 seconds, minimum: 2, maximum: 300). Values outside the allowed range SHALL produce a usage error (exit code 2)
+5. **Footer line**: After the summary footer (or "No locks currently held." line), display: `Last updated: HH:MM:SS | Refreshing every Ns | Press Ctrl-C to stop`
+6. **Clean exit**: Ctrl-C exits watch mode cleanly, restoring terminal state, with exit code 0
+
+**Watch mode output example (locks present)**:
+```
+Lock Information:
+┌──────────────────────┬───────────┬────────────┬──────────────┬──────────────┐
+│ Locked Object        │ Lock Type │ Lock Mode  │ Locking Sess │ Waiting Sess │
+├──────────────────────┼───────────┼────────────┼──────────────┼──────────────┤
+│ PRODUCTION.orders    │ Table     │ WRITE      │ 1023         │ 1045, 1067   │
+│ PRODUCTION.employees │ Row Hash  │ READ       │ 1078         │ (none)       │
+└──────────────────────┴───────────┴────────────┴──────────────┴──────────────┘
+
+2 lock(s) found - 1 blocking chain(s) detected (Query time: 0.091s)
+
+Blocking Chain:
+  Session 1023 blocks sessions: 1045, 1067
+
+Last updated: 10:42:15 | Refreshing every 6s | Press Ctrl-C to stop
+```
 
 **Lock Mode Reference**:
 
@@ -1008,9 +1100,9 @@ Exit code: 1
 ```
 
 **Exit Codes**:
-- `0`: Lock information displayed successfully (including the case of no active locks)
+- `0`: Lock information displayed successfully, including the case of no active locks and clean Ctrl-C exit from watch mode
 - `1`: Query error (privilege denied, connection failed, view not available)
-- `2`: Usage error (invalid format, invalid output path)
+- `2`: Usage error (invalid format, invalid output path, incompatible flags with `--watch`, invalid `--interval` value)
 
 **Integration with Scripting**:
 
@@ -1046,6 +1138,12 @@ fi
 - Execute `tq locks --output locks.txt` and verify file creation
 - Trigger privilege error and verify helpful error message with GRANT example
 - Verify exit code 0 on success (including no-locks case), 1 on privilege/connection errors
+- Execute `tq locks --watch` and verify: table redraws on each interval, footer shows "Last updated: HH:MM:SS | Refreshing every 6s | Press Ctrl-C to stop", Ctrl-C exits cleanly with exit code 0
+- Execute `tq locks --watch --interval 15` and verify footer shows "Refreshing every 15s"
+- Execute `tq locks --watch` when no locks exist and verify "No locks currently held." is shown with the watch footer
+- Execute `tq locks --watch --format csv` and verify usage error (exit code 2)
+- Execute `tq locks --watch --output locks.txt` and verify usage error (exit code 2)
+- Execute `tq locks --watch --interval 1` and verify usage error for out-of-range interval (exit code 2)
 
 ---
 
@@ -1067,8 +1165,11 @@ tq [GLOBAL_OPTIONS] resources [OPTIONS]
 | `--output` | `-o` | path | stdout | Write output to file |
 | `--page-size` | - | integer | 50 | Number of rows per page in table format |
 | `--page` | - | integer | 1 | Page number to display (1-based) |
+| `--watch` | - | flag | off | Auto-refresh display at a fixed interval |
+| `--interval` | - | integer | `6` | Refresh interval in seconds (min: 2, max: 300). Only valid with `--watch` |
 
 Note: `--virtual` and `--physical` are mutually exclusive. If both are specified, the command exits with a usage error (exit code 2).
+Note: `--watch` is incompatible with `--format csv`, `--format json`, and `--output`. `--page` and `--page-size` are also incompatible with `--watch` since the full dataset is shown on each refresh.
 
 **Examples**:
 ```bash
@@ -1096,6 +1197,12 @@ tq --profile prod resources
 
 # Page through large result sets
 tq resources --page-size 20 --page 2
+
+# Watch mode: refresh every 6 seconds (default)
+tq resources --watch
+
+# Watch mode in physical mode: refresh every 30 seconds
+tq resources --physical --watch --interval 30
 ```
 
 **Output (Table Format - Virtual Mode, default)**:
@@ -1232,6 +1339,36 @@ Note: The summary footer is omitted from CSV output. The collection period times
 10. **Format Compatibility**: Works with `--format table`, `--format csv`, `--format json`
 11. **Output Destination**: Respects `--output` flag for file output, otherwise stdout
 12. **Collection Timestamp**: Displayed as a header line in table format; present in JSON `collection_end` field; omitted from CSV
+13. **Watch Mode**: When `--watch` is specified, the display auto-refreshes at the given interval (see Watch Mode section below)
+
+**Watch Mode**:
+
+When `--watch` is specified, the command enters a continuous refresh loop:
+
+1. **Format enforcement**: Watch mode forces table output format. `--format csv` and `--format json` are incompatible with `--watch` and SHALL produce a usage error (exit code 2)
+2. **Output incompatibility**: `--output` (file output) is incompatible with `--watch` and SHALL produce a usage error (exit code 2)
+3. **Pagination incompatibility**: `--page` and `--page-size` are incompatible with `--watch`. The full dataset is always displayed on each refresh. Specifying them alongside `--watch` SHALL produce a usage error (exit code 2)
+4. **Screen clearing**: Each refresh clears the terminal and redraws the full table from the top of the screen, including the collection period header and the summary footer
+5. **Refresh interval**: Controlled by `--interval N` (default: 6 seconds, minimum: 2, maximum: 300). Values outside the allowed range SHALL produce a usage error (exit code 2)
+6. **Footer line**: After the summary footer, display: `Last updated: HH:MM:SS | Refreshing every Ns | Press Ctrl-C to stop`
+7. **Clean exit**: Ctrl-C exits watch mode cleanly, restoring terminal state, with exit code 0
+8. **Mode compatibility**: `--watch` can be combined with either `--virtual` (default) or `--physical`
+
+**Watch mode output example (virtual mode)**:
+```
+Resource Usage (Virtual Mode) — Collection period ending: 2026-04-14 10:15:00
+
+┌───────┬──────────┬──────────┬──────────┬──────────┬────────────┬───────────┐
+│ VPROC │ AvgCPU%  │ PeakCPU% │ AvgIO/s  │ PeakIO/s │ MemUsed MB │ MemAvl MB │
+├───────┼──────────┼──────────┼──────────┼──────────┼────────────┼───────────┤
+│     0 │    12.34 │    45.67 │   1023.4 │   4512.0 │      48234 │     15766 │
+│     2 │    35.71 │    82.45 │   3102.8 │   9231.6 │      52100 │     11900 │
+└───────┴──────────┴──────────┴──────────┴──────────┴────────────┴───────────┘
+
+2 VPROCs | Avg CPU: 24.0% | Peak CPU: 82.5% | CPU Skew: 57.8% ⚠ | IO Skew: 51.2% ⚠
+(Query time: 0.175s)
+Last updated: 10:42:15 | Refreshing every 6s | Press Ctrl-C to stop
+```
 
 **Error Handling**:
 
@@ -1281,9 +1418,9 @@ Exit code: 1
 ```
 
 **Exit Codes**:
-- `0`: Resource usage displayed successfully (including the case of no data)
+- `0`: Resource usage displayed successfully, including the case of no data and clean Ctrl-C exit from watch mode
 - `1`: Query error (privilege denied, connection failed, table not available)
-- `2`: Usage error (mutually exclusive flags, invalid format, invalid output path)
+- `2`: Usage error (mutually exclusive flags, invalid format, invalid output path, incompatible flags with `--watch`, invalid `--interval` value)
 
 **Integration with Scripting**:
 
@@ -1324,6 +1461,12 @@ tq resources --format json | \
 - Trigger privilege error and verify helpful error message with GRANT examples (exit code 1)
 - Verify rows are sorted ascending by VPROC ID in virtual mode and by Node in physical mode
 - Execute `tq resources --page-size 10 --page 2` and verify second page of rows is shown
+- Execute `tq resources --watch` and verify: table redraws on each interval, footer shows "Last updated: HH:MM:SS | Refreshing every 6s | Press Ctrl-C to stop", Ctrl-C exits cleanly with exit code 0
+- Execute `tq resources --physical --watch --interval 30` and verify physical mode redraws every 30 seconds
+- Execute `tq resources --watch --format csv` and verify usage error (exit code 2)
+- Execute `tq resources --watch --output resources.txt` and verify usage error (exit code 2)
+- Execute `tq resources --watch --page-size 10` and verify usage error (exit code 2)
+- Execute `tq resources --watch --interval 1` and verify usage error for out-of-range interval (exit code 2)
 
 ---
 
