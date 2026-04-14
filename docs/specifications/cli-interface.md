@@ -59,7 +59,7 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 - `inspect` - Comprehensive inspection of a database object (type, columns, indexes, size, dependencies)
 - `describe` - Show column structure and indexes for a table or view
 - `list` - List database objects: `databases`, `tables [pattern]`, `views`
-- `search` - Search for objects across all accessible databases: `tables <keyword>`, `columns <keyword>`, `views <keyword>`
+- `search` - Search for objects across all accessible databases: `tables <keyword>`, `columns <keyword>`, `views <keyword>`, `procedures <keyword>`
 - `show-indexes` - Show index structure for a table
 - `profiles` - List connection profiles
 - `profile` - Manage connection profiles (add, edit, delete, list)
@@ -2484,6 +2484,7 @@ tq [GLOBAL_OPTIONS] search <SUBCOMMAND> [OPTIONS] <KEYWORD>
 | `tables` | `<keyword>` | Search for tables whose name contains the keyword, across all accessible databases |
 | `columns` | `<keyword>` | Search for columns whose name contains the keyword, across all accessible tables and databases |
 | `views` | `<keyword>` | Search for views whose name contains the keyword, across all accessible databases |
+| `procedures` | `<keyword>` | Search for stored procedures whose name contains the keyword, across all accessible databases |
 
 **Options** (shared across all subcommands):
 | Option | Short | Type | Default | Description |
@@ -2500,6 +2501,7 @@ tq [GLOBAL_OPTIONS] search <SUBCOMMAND> [OPTIONS] <KEYWORD>
 - `tq search tables <keyword>` — searches for objects **across all** databases, filtered by a name keyword
 - `tq list views` — lists views in **one** database
 - `tq search views <keyword>` — searches for views **across all** databases, filtered by a name keyword
+- `tq search procedures <keyword>` — searches for stored procedures **across all** databases, filtered by a name keyword
 
 **Keyword Matching**:
 The keyword argument is matched against object names using SQL `LIKE` with automatic leading and trailing wildcards. A keyword of `emp` is equivalent to the SQL pattern `%emp%`. The match is case-insensitive.
@@ -2529,6 +2531,12 @@ tq search views summary
 
 # Search for views in a specific database
 tq search views summary --database reporting
+
+# Search for stored procedures containing "update" across all databases
+tq search procedures update
+
+# Search for procedures in a specific database
+tq search procedures update --database hr
 
 # JSON output (uses standard envelope) for agent/scripting use
 tq search tables emp --format json
@@ -2868,9 +2876,112 @@ reporting,weekly_summary,rpt_owner
 
 ---
 
-#### search — Pagination
+#### search procedures
 
-The `--page-size` and `--page` flags enable client-side pagination across all three search subcommands (`tables`, `columns`, `views`). When `--page-size` is specified, the tool fetches the full result set and slices it into pages in memory.
+**Purpose**: Find stored procedures whose names match a keyword, across all accessible databases (or one database when `--database` is specified). Stored procedures (`TableKind = 'P'` in `DBC.TablesV`) encapsulate reusable SQL logic. This subcommand complements `search tables` and `search views` for discovering procedural assets.
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] search procedures [OPTIONS] <KEYWORD>
+```
+
+**Arguments**:
+- `<KEYWORD>`: Required. A plain string. Automatically wrapped as `%keyword%` for SQL LIKE matching. Case-insensitive.
+
+**Output Columns**:
+| Column | Description |
+|--------|-------------|
+| Database | Database that contains the procedure |
+| Name | Procedure name |
+| Owner | Creator or owning user of the procedure |
+
+**Sorting**: Results are sorted first by Database name (ascending), then by Procedure name (ascending).
+
+**Output -- Table Format**:
+```
+Procedures matching 'update' (3):
+Database             Name                           Owner
+-------------------------------------------------------------------
+hr                   update_salary                  alice
+hr                   update_department              alice
+payroll              update_benefits                bob
+
+3 procedure(s)
+```
+
+**Output -- Table Format (no results)**:
+```
+Procedures matching 'xyz' (0):
+Database             Name                           Owner
+-------------------------------------------------------------------
+(no procedures found)
+
+0 procedure(s)
+```
+
+**Output -- JSON Format**:
+
+JSON output uses the standard envelope: `{"ok": true, "row_count": N, "data": [...]}`.
+
+```json
+{
+  "ok": true,
+  "row_count": 3,
+  "data": [
+    { "database": "hr",      "procedure_name": "update_salary",     "owner": "alice" },
+    { "database": "hr",      "procedure_name": "update_department", "owner": "alice" },
+    { "database": "payroll", "procedure_name": "update_benefits",   "owner": "bob"   }
+  ]
+}
+```
+
+When no results are found:
+```json
+{
+  "ok": true,
+  "row_count": 0,
+  "data": []
+}
+```
+
+When pagination is active, a `pagination` object is appended to the envelope:
+```json
+{
+  "ok": true,
+  "row_count": 25,
+  "data": [ ... ],
+  "pagination": {
+    "page": 1,
+    "page_size": 25,
+    "total_rows": 72,
+    "total_pages": 3,
+    "has_more": true
+  }
+}
+```
+
+**Output -- CSV Format**:
+```csv
+Database,ProcedureName,Owner
+hr,update_salary,alice
+hr,update_department,alice
+payroll,update_benefits,bob
+```
+
+**Output -- Markdown Format**:
+```markdown
+| Database | Name              | Owner |
+| :---     | :---              | :---  |
+| hr       | update_salary     | alice |
+| hr       | update_department | alice |
+| payroll  | update_benefits   | bob   |
+```
+
+---
+
+#### search -- Pagination
+
+The `--page-size` and `--page` flags enable client-side pagination across all search subcommands (`tables`, `columns`, `views`, `procedures`). When `--page-size` is specified, the tool fetches the full result set and slices it into pages in memory.
 
 **How pagination works**:
 - `--page-size <N>` activates pagination and sets the number of rows per page.

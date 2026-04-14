@@ -271,6 +271,13 @@ pub fn handle_metacommand<W: Write>(
                 "The /abort command requires full REPL mode with database connection."
             )?;
         }
+        // Sprint 61: Logoff idle (basic handler - no client available)
+        "logoff" => {
+            writeln!(
+                writer,
+                "The /logoff command requires full REPL mode with database connection."
+            )?;
+        }
         // Sprint 40: Params command (basic handler)
         "params" | "p" => {
             handle_params_basic(&args, state, writer)?;
@@ -508,20 +515,26 @@ pub fn handle_metacommand_with_state<W: Write>(
                     writer,
                     "  views <keyword>     Search views by name across databases"
                 )?;
+                writeln!(
+                    writer,
+                    "  procedures <keyword> Search stored procedures by name across databases"
+                )?;
                 writeln!(writer)?;
                 writeln!(writer, "Examples:")?;
                 writeln!(writer, "  /search tables emp")?;
                 writeln!(writer, "  /search columns salary")?;
                 writeln!(writer, "  /search views summary")?;
+                writeln!(writer, "  /search procedures update")?;
                 writeln!(writer, "  /search tables emp in hr")?;
                 writeln!(writer, "  /search columns salary in hr")?;
                 writeln!(writer, "  /search views summary in reporting")?;
+                writeln!(writer, "  /search procedures update in hr")?;
                 writeln!(writer)?;
-                writeln!(writer, "Aliases: /sf (short for /search)")?;
+                writeln!(writer, "Aliases: /sf (short for /search), procs/proc/p for procedures")?;
                 writeln!(writer)?;
             } else if args.len() < 2 {
                 writeln!(writer, "Error: Missing keyword.")?;
-                writeln!(writer, "Usage: /search <tables|columns|views> <keyword>")?;
+                writeln!(writer, "Usage: /search <tables|columns|views|procedures> <keyword>")?;
             } else {
                 execute_search(completion_state, &args, writer)?;
             }
@@ -719,19 +732,23 @@ pub fn handle_metacommand_with_state<W: Write>(
             }
         }
 
-        // Sprint 49: Abort session/query command
+        // Sprint 49/61: Abort session/query/user/host command
         "abort" => {
             if args.is_empty() {
                 writeln!(writer)?;
                 writeln!(writer, "Usage: /abort <session_id> [yes]")?;
                 writeln!(writer, "       /abort query <session_id> [yes]")?;
+                writeln!(writer, "       /abort user <username> [yes]")?;
+                writeln!(writer, "       /abort host <hostname> [yes]")?;
                 writeln!(writer)?;
-                writeln!(writer, "Abort a session or its running query.")?;
+                writeln!(writer, "Abort a session, running query, or all sessions for a user/host.")?;
                 writeln!(writer, "Append 'yes' to confirm the operation.")?;
                 writeln!(writer)?;
                 writeln!(writer, "Examples:")?;
-                writeln!(writer, "  /abort 1234 yes       Abort session 1234")?;
-                writeln!(writer, "  /abort query 1234 yes Abort running query on session 1234")?;
+                writeln!(writer, "  /abort 1234 yes        Abort session 1234")?;
+                writeln!(writer, "  /abort query 1234 yes  Abort running query on session 1234")?;
+                writeln!(writer, "  /abort user alice yes  Abort all sessions for user alice")?;
+                writeln!(writer, "  /abort host srv01 yes  Abort all sessions from host srv01")?;
                 writeln!(writer)?;
                 writeln!(writer, "Use /sessions to list active session IDs.")?;
                 writeln!(writer)?;
@@ -760,6 +777,34 @@ pub fn handle_metacommand_with_state<W: Write>(
                         }
                     }
                 }
+            } else if args[0].eq_ignore_ascii_case("user") {
+                // /abort user <username> [yes]
+                if args.len() < 2 {
+                    writeln!(writer, "Usage: /abort user <username> [yes]")?;
+                } else {
+                    let username = args[1];
+                    let confirmed = args.len() > 2 && args[2].eq_ignore_ascii_case("yes");
+                    crate::commands::abort::execute_user_for_repl(
+                        completion_state.client(),
+                        username,
+                        confirmed,
+                        writer,
+                    )?;
+                }
+            } else if args[0].eq_ignore_ascii_case("host") {
+                // /abort host <hostname> [yes]
+                if args.len() < 2 {
+                    writeln!(writer, "Usage: /abort host <hostname> [yes]")?;
+                } else {
+                    let hostname = args[1];
+                    let confirmed = args.len() > 2 && args[2].eq_ignore_ascii_case("yes");
+                    crate::commands::abort::execute_host_for_repl(
+                        completion_state.client(),
+                        hostname,
+                        confirmed,
+                        writer,
+                    )?;
+                }
             } else {
                 // /abort <session_id> [yes]
                 match args[0].parse::<i64>() {
@@ -776,9 +821,10 @@ pub fn handle_metacommand_with_state<W: Write>(
                     Err(_) => {
                         writeln!(
                             writer,
-                            "Error: '{}' is not a valid session ID. Expected a number.",
+                            "Error: '{}' is not a valid session ID or subcommand.",
                             args[0]
                         )?;
+                        writeln!(writer, "Expected: a number, 'query', 'user', or 'host'.")?;
                     }
                 }
             }
@@ -824,6 +870,32 @@ pub fn handle_metacommand_with_state<W: Write>(
                         writeln!(writer, "       /skew 1234      Analyze specific session")?;
                     }
                 }
+            }
+        }
+
+        // Sprint 61: Logoff idle sessions command
+        "logoff" => {
+            if args.is_empty() {
+                writeln!(writer)?;
+                writeln!(writer, "Usage: /logoff idle [--older-than <duration>] [yes]")?;
+                writeln!(writer)?;
+                writeln!(writer, "Log off idle sessions older than a threshold (default: 1h).")?;
+                writeln!(writer, "Append 'yes' to confirm the operation.")?;
+                writeln!(writer)?;
+                writeln!(writer, "Examples:")?;
+                writeln!(writer, "  /logoff idle yes              Log off idle sessions older than 1h")?;
+                writeln!(writer, "  /logoff idle --older-than 2h yes  Log off idle sessions older than 2h")?;
+                writeln!(writer)?;
+            } else if args[0].eq_ignore_ascii_case("idle") {
+                let remaining: Vec<&str> = args[1..].to_vec();
+                crate::commands::logoff_idle::execute_for_repl(
+                    completion_state.client(),
+                    &remaining,
+                    writer,
+                )?;
+            } else {
+                writeln!(writer, "Unknown subcommand: /logoff {}", args[0])?;
+                writeln!(writer, "Did you mean: /logoff idle")?;
             }
         }
 
@@ -909,6 +981,10 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
         writer,
         "  /search views <kw>     Search views by name across databases"
     )?;
+    writeln!(
+        writer,
+        "  /search procedures <kw> Search stored procedures across databases"
+    )?;
     writeln!(writer, "  /dt                    Shortcut for /list tables")?;
     writeln!(writer, "  /dv                    Shortcut for /list views")?;
     writeln!(writer, "  /di <table>            Shortcut for /show indexes")?;
@@ -948,6 +1024,18 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(
         writer,
         "  /abort query <id> [yes] Abort running query on a session"
+    )?;
+    writeln!(
+        writer,
+        "  /abort user <name> [yes] Abort all sessions for a user"
+    )?;
+    writeln!(
+        writer,
+        "  /abort host <name> [yes] Abort all sessions from a host"
+    )?;
+    writeln!(
+        writer,
+        "  /logoff idle [--older-than <dur>] [yes] Log off idle sessions"
     )?;
     writeln!(
         writer,
@@ -1177,7 +1265,7 @@ fn execute_search<W: Write>(
 ) -> Result<()> {
     if args.len() < 2 {
         writeln!(writer, "Error: Missing keyword.")?;
-        writeln!(writer, "Usage: /search <tables|columns> <keyword>")?;
+        writeln!(writer, "Usage: /search <tables|columns|views|procedures> <keyword>")?;
         return Ok(());
     }
 

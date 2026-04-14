@@ -419,7 +419,7 @@ tq> SELECT COUNT(*) FROM employees WHERE dept = 'IT';
 - `/query` - Show current SQL query for a session
 - `/resources` - Display CPU, I/O, and memory metrics from PMON resource usage tables
 - `/sample` - Show random sample
-- `/search` - Search for tables, columns, or views by keyword across all databases
+- `/search` - Search for tables, columns, views, or procedures by keyword across all databases
 - `/peek` - Show first rows and column info
 - `/export` - Export results
 - `/session` - Show session info
@@ -464,7 +464,7 @@ Available metacommands:
     /repeat      Re-execute last query
     /resources   Show CPU, I/O, and memory metrics from PMON resource usage tables
     /sample      Show random sample
-    /search      Search for tables, columns, or views by keyword across all databases
+    /search      Search for tables, columns, views, or procedures by keyword across all databases
     /session     Show session info
     /sessions    List active Teradata sessions with performance metrics
     /set         Set configuration
@@ -2043,24 +2043,29 @@ Reason: Insufficient privileges to query system catalog
 
 **`/search` Metacommand**
 
-**Requirement:** Search for tables, columns, or views by keyword across all accessible databases, without needing to know which database contains the target object. This is the discovery-oriented companion to `/list`, which operates within a single database. `/search` queries the system catalog globally and surfaces all matching objects along with their owning database.
+**Requirement:** Search for tables, columns, views, or procedures by keyword across all accessible databases, without needing to know which database contains the target object. This is the discovery-oriented companion to `/list`, which operates within a single database. `/search` queries the system catalog globally and surfaces all matching objects along with their owning database.
 
 **Syntax:**
 ```
-/search tables <keyword>           -- Search for tables matching keyword across all databases
-/search columns <keyword>          -- Search for columns matching keyword across all databases
-/search views <keyword>            -- Search for views matching keyword across all databases
-/search tables <keyword> in <db>   -- Scope table search to a specific database
-/search columns <keyword> in <db>  -- Scope column search to a specific database
-/search views <keyword> in <db>    -- Scope view search to a specific database
+/search tables <keyword>              -- Search for tables matching keyword across all databases
+/search columns <keyword>             -- Search for columns matching keyword across all databases
+/search views <keyword>               -- Search for views matching keyword across all databases
+/search procedures <keyword>          -- Search for stored procedures matching keyword across all databases
+/search tables <keyword> in <db>      -- Scope table search to a specific database
+/search columns <keyword> in <db>     -- Scope column search to a specific database
+/search views <keyword> in <db>       -- Scope view search to a specific database
+/search procedures <keyword> in <db>  -- Scope procedure search to a specific database
 ```
 
 **Aliases:**
-- `/search v <keyword>` — alias for `/search views <keyword>`
-- `/search view <keyword>` — alias for `/search views <keyword>`
+- `/search v <keyword>` --- alias for `/search views <keyword>`
+- `/search view <keyword>` --- alias for `/search views <keyword>`
+- `/search p <keyword>` --- alias for `/search procedures <keyword>`
+- `/search proc <keyword>` --- alias for `/search procedures <keyword>`
+- `/search procs <keyword>` --- alias for `/search procedures <keyword>`
 
 **Keyword Matching:**
-The keyword is matched using SQL `LIKE '%<keyword>%'` (case-insensitive). A keyword of `emp` matches any table, column, or view name that contains the string `emp` anywhere.
+The keyword is matched using SQL `LIKE '%<keyword>%'` (case-insensitive). A keyword of `emp` matches any table, column, view, or procedure name that contains the string `emp` anywhere.
 
 **`/search tables` Output Format:**
 ```
@@ -2140,6 +2145,33 @@ Search results for views matching 'summary' in database 'reporting':
 2 views found matching 'summary' in database 'reporting'
 ```
 
+**`/search procedures` Output Format:**
+```
+tq> /search procedures update
+
+Procedures matching 'update' (3):
+Database             Name                           Owner
+-------------------------------------------------------------------
+hr                   update_salary                  alice
+hr                   update_department              alice
+payroll              update_benefits                bob
+
+3 procedure(s)
+```
+
+**`/search procedures` with database scope:**
+```
+tq> /search procedures update in hr
+
+Procedures matching 'update' (2):
+Database             Name                           Owner
+-------------------------------------------------------------------
+hr                   update_salary                  alice
+hr                   update_department              alice
+
+2 procedure(s)
+```
+
 **No Results:**
 ```
 tq> /search tables xyz_nonexistent
@@ -2153,6 +2185,12 @@ tq> /search views xyz_nonexistent
 No views found matching 'xyz_nonexistent'.
 ```
 
+```
+tq> /search procedures xyz_nonexistent
+
+No procedures found matching 'xyz_nonexistent'.
+```
+
 **Missing Keyword:**
 ```
 tq> /search tables
@@ -2160,10 +2198,12 @@ tq> /search tables
 Usage: /search tables <keyword>
        /search columns <keyword>
        /search views <keyword>
+       /search procedures <keyword>
 
 Example: /search tables emp
          /search columns salary
          /search views summary
+         /search procedures update
 ```
 
 **Unknown Subcommand:**
@@ -2171,21 +2211,22 @@ Example: /search tables emp
 tq> /search macros emp
 
 Error: Unknown /search subcommand 'macros'
-Available: tables, columns, views
+Available: tables, columns, views, procedures
 ```
 
 **Behavior Requirements:**
 
-1. **REQ-REPL-SEARCH-001**: The `/search` metacommand SHALL accept three subcommands: `tables`, `columns`, and `views`. The aliases `v` and `view` SHALL be treated as `views`. Invoking `/search` with no subcommand or an unknown subcommand SHALL display usage guidance (not an error exit).
+1. **REQ-REPL-SEARCH-001**: The `/search` metacommand SHALL accept four subcommands: `tables`, `columns`, `views`, and `procedures`. The aliases `v` and `view` SHALL be treated as `views`. The aliases `p`, `proc`, and `procs` SHALL be treated as `procedures`. Invoking `/search` with no subcommand or an unknown subcommand SHALL display usage guidance (not an error exit).
 2. **REQ-REPL-SEARCH-002**: The keyword argument is REQUIRED for all subcommands. Invoking a subcommand without a keyword SHALL display usage guidance.
 3. **REQ-REPL-SEARCH-003**: `tables` subcommand data source: `DBC.TablesV WHERE TableKind IN ('T', 'O')` joined with `DBC.TableSizeV`. Filter: `TableName LIKE '%<keyword>%'` (case-insensitive). Columns displayed: Database, Table, Type, Rows (Est.), Size.
 4. **REQ-REPL-SEARCH-004**: `columns` subcommand data source: `DBC.ColumnsV` joined with `DBC.TablesV WHERE TableKind IN ('T', 'O', 'V')`. Filter: `ColumnName LIKE '%<keyword>%'` (case-insensitive). Columns displayed: Database, Table, Column, Type, Nullable.
 5. **REQ-REPL-SEARCH-005**: The optional `in <database>` qualifier scopes results to a single database. Without it, all accessible databases are searched.
-6. **REQ-REPL-SEARCH-006**: Results SHALL be sorted by Database ascending, then Table ascending (for `search tables`), by Database ascending, Table ascending, Column ascending (for `search columns`), and by Database ascending, then View ascending (for `search views`).
+6. **REQ-REPL-SEARCH-006**: Results SHALL be sorted by Database ascending, then Table ascending (for `search tables`), by Database ascending, Table ascending, Column ascending (for `search columns`), by Database ascending, then View ascending (for `search views`), and by Database ascending, then Procedure ascending (for `search procedures`).
 7. **REQ-REPL-SEARCH-007**: The `/search` command executes read-only queries. It is safe to use in any session, including agent-safe sessions.
-8. **REQ-REPL-SEARCH-008**: Tab completion SHALL complete `/search` from a prefix (e.g., `/sea<TAB>` completes to `/search`). After the metacommand, completion SHALL suggest `tables`, `columns`, and `views` subcommands.
+8. **REQ-REPL-SEARCH-008**: Tab completion SHALL complete `/search` from a prefix (e.g., `/sea<TAB>` completes to `/search`). After the metacommand, completion SHALL suggest `tables`, `columns`, `views`, and `procedures` subcommands.
 9. **REQ-REPL-SEARCH-009**: Trailing semicolons SHALL be stripped per REQ-META-INPUT-001.
 10. **REQ-REPL-SEARCH-010**: `views` subcommand data source: `DBC.TablesV WHERE TableKind = 'V'`. Filter: `TableName LIKE '%<keyword>%'` (case-insensitive). Columns displayed: Database, View, Owner (mapped from `CreatorName`).
+11. **REQ-REPL-SEARCH-011**: `procedures` subcommand data source: `DBC.TablesV WHERE TableKind = 'P'`. Filter: `TableName LIKE '%<keyword>%'` (case-insensitive). Columns displayed: Database, Name, Owner (mapped from `CreatorName`).
 
 **Error Cases:**
 
@@ -2213,13 +2254,19 @@ Use /reconnect to establish new connection
 - Execute `/search views summary in reporting` and verify only views from the `reporting` database appear
 - Execute `/search v summary` and verify it behaves identically to `/search views summary`
 - Execute `/search view summary` and verify it behaves identically to `/search views summary`
+- Execute `/search procedures update` and verify table output with Database, Name, Owner columns
+- Execute `/search procedures update in hr` and verify only procedures from the `hr` database appear
+- Execute `/search p update` and verify it behaves identically to `/search procedures update`
+- Execute `/search proc update` and verify it behaves identically to `/search procedures update`
+- Execute `/search procs update` and verify it behaves identically to `/search procedures update`
 - Execute `/search tables xyz_nonexistent` and verify `No tables found matching 'xyz_nonexistent'.`
 - Execute `/search views xyz_nonexistent` and verify `No views found matching 'xyz_nonexistent'.`
+- Execute `/search procedures xyz_nonexistent` and verify `No procedures found matching 'xyz_nonexistent'.`
 - Execute `/search tables` (no keyword) and verify usage guidance is displayed
 - Execute `/search` (no subcommand) and verify usage guidance is displayed
 - Execute `/sea<TAB>` and verify completion to `/search`
-- Execute `/search <TAB>` and verify completion menu suggests `tables`, `columns`, and `views`
-- Verify results are sorted: database ascending, then table/view ascending
+- Execute `/search <TAB>` and verify completion menu suggests `tables`, `columns`, `views`, and `procedures`
+- Verify results are sorted: database ascending, then table/view/procedure ascending
 
 ---
 
@@ -2805,9 +2852,11 @@ tq> /sysconfig_
 
 **Syntax:**
 ```
-/locks
-/lk                 -- Short alias
+/locks [--watch [N]]
+/lk [--watch [N]]   -- Short alias
 ```
+
+`--watch` enables auto-refresh mode. The optional argument `N` sets the refresh interval in seconds (default: 6, min: 2, max: 300).
 
 **Output Format:**
 
@@ -3004,8 +3053,9 @@ The command SHALL be discoverable through standard REPL features:
 2. **REQ-LOCKS-007.2** - Tab completion: Typing `/lo<TAB>` SHALL suggest `/locks` and `/logon`
 3. **REQ-LOCKS-007.3** - Help text: `/help` SHALL list `/locks` command with description
 4. **REQ-LOCKS-007.4** - Help text description: "Display current lock contention and blocking chains"
-5. **REQ-LOCKS-007.5** - Detailed help: `/help locks` SHALL display extended help including lock mode definitions
+5. **REQ-LOCKS-007.5** - Detailed help: `/help locks` SHALL display extended help including lock mode definitions and the `--watch` option
 6. **REQ-LOCKS-007.6** - Command SHALL appear in metacommand list when typing `/<TAB>`
+7. **REQ-LOCKS-007.7** - Tab completion: After `/locks ` (with space), SHALL suggest `--watch`
 
 **Example Help Output:**
 ```sql
@@ -3049,8 +3099,41 @@ For more information, see documentation at: docs/user/metacommands.md
 1. **REQ-LOCKS-008.1** - Target execution time: <1 second for systems with typical lock activity
 2. **REQ-LOCKS-008.2** - Loading indicator: Display "Loading lock information..." if query takes >500ms
 3. **REQ-LOCKS-008.3** - Result caching: NOT cached (each execution is a fresh query for real-time monitoring)
-4. **REQ-LOCKS-008.4** - Query cancellation: Ctrl-C SHALL cancel query and return to prompt
+4. **REQ-LOCKS-008.4** - Query cancellation: In normal mode, Ctrl-C SHALL cancel the query and return to prompt. In watch mode, Ctrl-C SHALL exit watch mode and return to the REPL prompt.
 5. **REQ-LOCKS-008.5** - Resource impact: Query SHALL use read-only system views (no locks, no modifications)
+
+**REQ-LOCKS-009: Watch Mode**
+
+The `/locks` command SHALL support a continuous auto-refresh mode:
+
+1. **REQ-LOCKS-009.1** - Syntax: `/locks --watch` or `/locks --watch N` where `N` is the interval in seconds
+2. **REQ-LOCKS-009.2** - Default interval: 6 seconds when `--watch` is specified without a value
+3. **REQ-LOCKS-009.3** - Interval range: minimum 2 seconds, maximum 300 seconds. Values outside this range SHALL display a usage error and return to the REPL prompt
+4. **REQ-LOCKS-009.4** - Watch mode forces table display format regardless of current `/set format` setting. A brief notice SHALL inform the user: `(Watch mode: displaying as table)`
+5. **REQ-LOCKS-009.5** - Each refresh SHALL clear the visible output area and redraw the complete output, including the blocking chain section when present
+6. **REQ-LOCKS-009.6** - Footer line after the summary (or after "No locks currently held."): `Last updated: HH:MM:SS | Refreshing every Ns | Press q or Ctrl-C to stop`
+7. **REQ-LOCKS-009.7** - Exit: pressing `q` or Ctrl-C SHALL stop watch mode and return to the REPL prompt
+8. **REQ-LOCKS-009.8** - Watch mode errors (e.g. query failure mid-loop) SHALL display the error in place of the table and continue retrying on the next interval
+
+**Watch mode output example (locks present):**
+```
+tq> /locks --watch
+
+Lock Information:
+┌──────────────────────┬───────────┬────────────┬──────────────┬──────────────┐
+│ Locked Object        │ Lock Type │ Lock Mode  │ Locking Sess │ Waiting Sess │
+├──────────────────────┼───────────┼────────────┼──────────────┼──────────────┤
+│ PRODUCTION.orders    │ Table     │ WRITE      │ 1023         │ 1045, 1067   │
+│ PRODUCTION.employees │ Row Hash  │ READ       │ 1078         │ (none)       │
+└──────────────────────┴───────────┴────────────┴──────────────┴──────────────┘
+
+2 lock(s) found - 1 blocking chain(s) detected (Query time: 0.091s)
+
+Blocking Chain:
+  Session 1023 blocks sessions: 1045, 1067
+
+Last updated: 10:42:15 | Refreshing every 6s | Press q or Ctrl-C to stop
+```
 
 **Example Interaction:**
 
@@ -3123,6 +3206,11 @@ Matching metacommands:
 - Trigger privilege error and verify helpful error message with GRANT example
 - Type `/lk<TAB>` and verify tab completion resolves to `/locks`
 - Execute `/help locks` and verify extended help with lock mode definitions is displayed
+- Execute `/locks --watch` and verify: output redraws on each interval, footer shows "Last updated: HH:MM:SS | Refreshing every 6s | Press q or Ctrl-C to stop", pressing `q` returns to REPL prompt
+- Execute `/locks --watch 15` and verify footer shows "Refreshing every 15s"
+- Execute `/locks --watch` when no locks exist and verify "No locks currently held." is shown with the watch footer
+- Execute `/locks --watch 1` and verify usage error for out-of-range interval, returns to prompt
+- Verify watch mode always displays table format regardless of current `/set format` setting
 
 ---
 
@@ -3132,13 +3220,14 @@ Matching metacommands:
 
 **Syntax:**
 ```
-/resources [--virtual | --physical]
-/res [--virtual | --physical]    -- Short alias
-/perf [--virtual | --physical]   -- Performance alias
+/resources [--virtual | --physical] [--watch [N]]
+/res [--virtual | --physical] [--watch [N]]    -- Short alias
+/perf [--virtual | --physical] [--watch [N]]   -- Performance alias
 ```
 
 `--virtual` (default) shows per-VPROC metrics from `ResUsageSVPR`.
 `--physical` shows per-node metrics from `ResUsageSPMA`.
+`--watch` enables auto-refresh mode. The optional argument `N` sets the refresh interval in seconds (default: 6, min: 2, max: 300).
 
 **Output Format (Virtual Mode, default):**
 ```
@@ -3301,10 +3390,10 @@ Requirements:
 
 1. **REQ-RES-006.1** - Tab completion: Typing `/res<TAB>` SHALL suggest `/resources`
 2. **REQ-RES-006.2** - Tab completion: Typing `/perf<TAB>` SHALL auto-complete to `/perf` (alias)
-3. **REQ-RES-006.3** - Tab completion: After `/resources ` (with space), SHALL suggest `--virtual` and `--physical`
+3. **REQ-RES-006.3** - Tab completion: After `/resources ` (with space), SHALL suggest `--virtual`, `--physical`, and `--watch`
 4. **REQ-RES-006.4** - Help text: `/help` SHALL list `/resources` command with description
 5. **REQ-RES-006.5** - Help text description: "Show CPU, I/O, and memory metrics from PMON resource usage tables"
-6. **REQ-RES-006.6** - Detailed help: `/help resources` SHALL display extended help including column descriptions and skew interpretation
+6. **REQ-RES-006.6** - Detailed help: `/help resources` SHALL display extended help including column descriptions, skew interpretation, and the `--watch` option
 7. **REQ-RES-006.7** - Command SHALL appear in metacommand list when typing `/<TAB>`
 
 **REQ-RES-007: Output Format Compatibility**
@@ -3343,8 +3432,39 @@ The command SHALL work with all output format modes:
 1. **REQ-RES-008.1** - Target execution time: <2 seconds (ResUsage tables are historical log tables, not real-time views)
 2. **REQ-RES-008.2** - Loading indicator: Display "Loading resource usage data..." if query takes >500ms
 3. **REQ-RES-008.3** - Result caching: NOT cached (each execution fetches fresh data)
-4. **REQ-RES-008.4** - Query cancellation: Ctrl-C SHALL cancel query and return to prompt
+4. **REQ-RES-008.4** - Query cancellation: In normal mode, Ctrl-C SHALL cancel the query and return to prompt. In watch mode, Ctrl-C SHALL exit watch mode and return to the REPL prompt.
 5. **REQ-RES-008.5** - Resource impact: Query SHALL use read-only system tables (no locks, no modifications)
+
+**REQ-RES-010: Watch Mode**
+
+The `/resources` command SHALL support a continuous auto-refresh mode:
+
+1. **REQ-RES-010.1** - Syntax: `/resources --watch` or `/resources --watch N` where `N` is the interval in seconds. Mode flags (`--virtual`, `--physical`) can be combined with `--watch`
+2. **REQ-RES-010.2** - Default interval: 6 seconds when `--watch` is specified without a value
+3. **REQ-RES-010.3** - Interval range: minimum 2 seconds, maximum 300 seconds. Values outside this range SHALL display a usage error and return to the REPL prompt
+4. **REQ-RES-010.4** - Watch mode forces table display format regardless of current `/set format` setting. A brief notice SHALL inform the user: `(Watch mode: displaying as table)`
+5. **REQ-RES-010.5** - Each refresh SHALL clear the visible output area and redraw the complete table, including the collection period header and the summary footer
+6. **REQ-RES-010.6** - Footer line after the summary: `Last updated: HH:MM:SS | Refreshing every Ns | Press q or Ctrl-C to stop`
+7. **REQ-RES-010.7** - Exit: pressing `q` or Ctrl-C SHALL stop watch mode and return to the REPL prompt
+8. **REQ-RES-010.8** - Watch mode errors (e.g. query failure mid-loop) SHALL display the error in place of the table and continue retrying on the next interval
+
+**Watch mode output example (virtual mode):**
+```
+tq> /resources --watch
+
+Resource Usage (Virtual Mode) — Collection period ending: 2026-04-14 10:15:00
+
+┌───────┬──────────┬──────────┬──────────┬──────────┬────────────┬───────────┐
+│ VPROC │ AvgCPU%  │ PeakCPU% │ AvgIO/s  │ PeakIO/s │ MemUsed MB │ MemAvl MB │
+├───────┼──────────┼──────────┼──────────┼──────────┼────────────┼───────────┤
+│     0 │    12.34 │    45.67 │   1023.4 │   4512.0 │      48234 │     15766 │
+│     2 │    35.71 │    82.45 │   3102.8 │   9231.6 │      52100 │     11900 │
+└───────┴──────────┴──────────┴──────────┴──────────┴────────────┴───────────┘
+
+2 VPROCs | Avg CPU: 24.0% | Peak CPU: 82.5% | CPU Skew: 57.8% ⚠ | IO Skew: 51.2% ⚠
+(Query time: 0.175s)
+Last updated: 10:42:15 | Refreshing every 6s | Press q or Ctrl-C to stop
+```
 
 **REQ-RES-009: Skew Interpretation Guidelines**
 
@@ -3433,9 +3553,13 @@ tq> /resources <TAB>
 - Execute with `/set format json` and verify JSON output with `mode`, `collection_end`, `rows`, `summary` keys
 - Trigger privilege error and verify helpful error message with GRANT examples for both tables
 - Type `/res<TAB>` and verify auto-completion to `/resources`
-- Type `/resources <TAB>` and verify `--virtual` and `--physical` flag suggestions
+- Type `/resources <TAB>` and verify `--virtual`, `--physical`, and `--watch` flag suggestions
 - Execute `/help` and verify `/resources` appears in command list
-- Execute `/help resources` and verify extended help with column descriptions and skew interpretation
+- Execute `/help resources` and verify extended help with column descriptions, skew interpretation, and `--watch` option
+- Execute `/resources --watch` and verify: table redraws on each interval, footer shows "Last updated: HH:MM:SS | Refreshing every 6s | Press q or Ctrl-C to stop", pressing `q` returns to REPL prompt
+- Execute `/resources --physical --watch 30` and verify physical mode redraws every 30 seconds
+- Execute `/resources --watch 1` and verify usage error for out-of-range interval, returns to prompt
+- Verify watch mode always displays table format regardless of current `/set format` setting
 
 ---
 

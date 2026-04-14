@@ -358,6 +358,16 @@ pub enum Command {
     /// Example: tq resources
     ///          tq resources --physical
     Resources(ResourcesArgs),
+
+    /// Log off idle sessions older than a threshold
+    ///
+    /// Finds sessions in IDLE state whose logon time exceeds a specified
+    /// duration and terminates them. Useful for cleaning up stale connections.
+    ///
+    /// Example: tq logoff-idle --force
+    ///          tq logoff-idle --force --older-than 2h
+    #[command(name = "logoff-idle")]
+    LogoffIdle(LogoffIdleArgs),
 }
 
 impl Command {
@@ -382,6 +392,7 @@ impl Command {
             Command::Skew(a) => Some(a.format),
             Command::History(a) => Some(a.format),
             Command::Resources(a) => Some(a.format),
+            Command::LogoffIdle(a) => Some(a.format),
             Command::Ping(_) | Command::Repl(_) | Command::Help(_) | Command::Profiles | Command::Profile(_) => None,
         }
     }
@@ -916,6 +927,8 @@ pub enum SearchObjectType {
     Columns,
     /// Search for views by name
     Views,
+    /// Search for stored procedures by name
+    Procedures,
 }
 
 /// Arguments for the show-indexes command
@@ -945,19 +958,40 @@ pub struct ShowIndexesArgs {
     pub output: Option<PathBuf>,
 }
 
-/// Arguments for the abort command (Sprint 49)
+/// Arguments for the abort command (Sprint 49, Sprint 61)
+///
+/// Supports three modes:
+/// - Single session: `tq abort --force 1234`
+/// - All sessions for a user: `tq abort --force --user alice`
+/// - All sessions from a host: `tq abort --force --host myserver01`
 #[derive(Parser, Debug)]
 pub struct AbortArgs {
     /// Session ID to abort
     ///
     /// The Teradata session number to terminate.
-    #[arg(value_name = "SESSION_ID")]
-    pub session_id: i64,
+    /// Conflicts with --user and --host.
+    #[arg(value_name = "SESSION_ID", conflicts_with_all = ["user", "host"])]
+    pub session_id: Option<i64>,
+
+    /// Abort all sessions for a specific user
+    ///
+    /// Queries MonitorSession to find all active sessions owned by the
+    /// specified username, then aborts each one.
+    #[arg(long, value_name = "USERNAME", conflicts_with_all = ["session_id", "host"])]
+    pub user: Option<String>,
+
+    /// Abort all sessions from a specific hostname
+    ///
+    /// Queries MonitorSession to find all active sessions whose LogonSource
+    /// contains the specified hostname, then aborts each one.
+    #[arg(long, value_name = "HOSTNAME", conflicts_with_all = ["session_id", "user"])]
+    pub host: Option<String>,
 
     /// Abort only the running query, not the entire session
     ///
     /// Cancels the currently executing query while keeping the session alive.
-    #[arg(long)]
+    /// Only valid with a single session ID.
+    #[arg(long, conflicts_with_all = ["user", "host"])]
     pub query: bool,
 
     /// Confirm the abort operation (required in batch mode)
@@ -972,6 +1006,50 @@ pub struct AbortArgs {
     /// table: Human-readable message (default)
     /// json: JSON result object
     /// csv: Comma-separated result
+    /// markdown/md: GitHub-Flavored Markdown table
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for the logoff-idle command (Sprint 61)
+///
+/// Detects idle sessions older than a threshold and aborts them.
+/// Useful for cleaning up stale connections that waste resources.
+///
+/// Example: tq logoff-idle --force
+///          tq logoff-idle --force --older-than 2h
+#[derive(Parser, Debug)]
+pub struct LogoffIdleArgs {
+    /// Minimum idle duration before a session is eligible for logoff
+    ///
+    /// Sessions whose logon time is older than this threshold AND are in
+    /// IDLE state will be terminated. Default: 1h.
+    /// Supported formats: 30m, 1h, 2h, 24h, 7d.
+    #[arg(long, default_value = "1h", value_name = "DURATION")]
+    pub older_than: String,
+
+    /// Confirm the logoff operation (required in batch mode)
+    ///
+    /// This is a destructive operation. The --force flag is required to
+    /// prevent accidental termination of idle sessions.
+    #[arg(long)]
+    pub force: bool,
+
+    /// Output format
+    ///
+    /// table: Human-readable summary (default)
+    /// json: JSON result object
+    /// csv: Comma-separated results
     /// markdown/md: GitHub-Flavored Markdown table
     #[arg(
         short,

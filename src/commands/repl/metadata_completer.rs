@@ -299,6 +299,11 @@ const METACOMMANDS: &[MetacommandDef] = &[
         aliases: &[],
         description: "Search views by name across databases",
     },
+    MetacommandDef {
+        name: "search procedures",
+        aliases: &[],
+        description: "Search stored procedures across databases",
+    },
     // Sprint 26: Sessions command
     MetacommandDef {
         name: "sessions",
@@ -390,6 +395,12 @@ const METACOMMANDS: &[MetacommandDef] = &[
         name: "resources",
         aliases: &["res", "perf"],
         description: "System resource usage (CPU, I/O, memory)",
+    },
+    // Sprint 61: Logoff idle sessions command
+    MetacommandDef {
+        name: "logoff idle",
+        aliases: &[],
+        description: "Log off idle sessions older than threshold",
     },
 ];
 
@@ -552,7 +563,7 @@ fn complete_show_subcommands(
     suggestions
 }
 
-/// Complete /search subcommands (tables, columns)
+/// Complete /search subcommands (tables, columns, views, procedures)
 ///
 /// Sprint 55: Tab completion for /search subcommands.
 fn complete_search_subcommands(
@@ -564,6 +575,7 @@ fn complete_search_subcommands(
         ("tables", "Search tables by name across databases"),
         ("columns", "Search columns by name across databases"),
         ("views", "Search views by name across databases"),
+        ("procedures", "Search stored procedures across databases"),
     ];
 
     let partial = if parts.len() > 1 { parts[1] } else { "" };

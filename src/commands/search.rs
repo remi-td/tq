@@ -64,6 +64,15 @@ pub fn execute<W: Write>(
             pagination_args,
             writer,
         ),
+        SearchObjectType::Procedures => search_procedures(
+            client,
+            &args.keyword,
+            args.database.as_deref(),
+            args.format,
+            effective_limit,
+            pagination_args,
+            writer,
+        ),
     }
 }
 
@@ -88,9 +97,12 @@ pub fn execute_for_repl<W: Write>(
         "views" | "view" | "v" => {
             search_views(client, keyword, database, OutputFormat::Table, None, None, writer)?;
         }
+        "procedures" | "procs" | "proc" | "p" => {
+            search_procedures(client, keyword, database, OutputFormat::Table, None, None, writer)?;
+        }
         _ => {
             writeln!(writer, "Error: Unknown search subcommand: {}", subcommand)?;
-            writeln!(writer, "Available: tables, columns, views")?;
+            writeln!(writer, "Available: tables, columns, views, procedures")?;
         }
     }
     writeln!(writer)?;
@@ -898,6 +910,239 @@ fn render_view_search_markdown<W: Write>(
 }
 
 // =============================================================================
+// Procedure Search
+// =============================================================================
+
+/// Procedure search result entry
+struct ProcedureSearchResult {
+    database: String,
+    procedure_name: String,
+    owner: String,
+}
+
+fn search_procedures<W: Write>(
+    client: &DatabaseClient,
+    keyword: &str,
+    database: Option<&str>,
+    format: OutputFormat,
+    limit: Option<usize>,
+    pagination_args: Option<(usize, usize)>,
+    writer: &mut W,
+) -> Result<()> {
+    let escaped_keyword = escape_sql_string(keyword);
+
+    let db_filter = if let Some(db) = database {
+        format!("AND t.DatabaseName = '{}'", escape_sql_string(db))
+    } else {
+        String::new()
+    };
+
+    let row_limit = if pagination_args.is_some() {
+        MAX_SEARCH_FETCH
+    } else {
+        limit.unwrap_or(100)
+    };
+
+    let sql = format!(
+        "SELECT TOP {limit} TRIM(t.DatabaseName) AS db_name, \
+         TRIM(t.TableName) AS proc_name, \
+         TRIM(t.CreatorName) AS Owner \
+         FROM DBC.TablesV t \
+         WHERE UPPER(t.TableName) LIKE UPPER('%{keyword}%') \
+         AND t.TableKind = 'P' \
+         {db_filter} \
+         ORDER BY t.DatabaseName, t.TableName",
+        limit = row_limit,
+        keyword = escaped_keyword,
+        db_filter = db_filter
+    );
+
+    let result = client.execute(&sql)?;
+
+    let procedures: Vec<ProcedureSearchResult> = result
+        .rows
+        .iter()
+        .filter_map(|row| {
+            let database = row.first().map(|v| v.display())?;
+            let procedure_name = row.get(1).map(|v| v.display())?;
+
+            if database == "[NULL]" || procedure_name == "[NULL]" {
+                return None;
+            }
+
+            let owner = row
+                .get(2)
+                .map(|v| {
+                    let s = v.display().trim().to_string();
+                    if s == "[NULL]" {
+                        String::new()
+                    } else {
+                        s
+                    }
+                })
+                .unwrap_or_default();
+
+            Some(ProcedureSearchResult {
+                database: database.trim().to_string(),
+                procedure_name: procedure_name.trim().to_string(),
+                owner,
+            })
+        })
+        .collect();
+
+    // Apply pagination if requested
+    let pagination = pagination_args.map(|(page_size, page)| {
+        PaginationInfo::new(page, page_size, procedures.len())
+    });
+
+    let display_procs = if let Some(ref pg) = pagination {
+        let (start, end) = pg.row_range();
+        if start < procedures.len() {
+            &procedures[start..end.min(procedures.len())]
+        } else {
+            &procedures[0..0]
+        }
+    } else {
+        &procedures[..]
+    };
+
+    match format {
+        OutputFormat::Table => {
+            render_procedure_search_table(display_procs, keyword, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
+        OutputFormat::Json => render_procedure_search_json_with_pagination(display_procs, pagination.as_ref(), writer)?,
+        OutputFormat::Csv => {
+            render_procedure_search_csv(display_procs, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
+        OutputFormat::Markdown | OutputFormat::Md => {
+            render_procedure_search_markdown(display_procs, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn render_procedure_search_table<W: Write>(
+    procedures: &[ProcedureSearchResult],
+    keyword: &str,
+    writer: &mut W,
+) -> Result<()> {
+    writeln!(
+        writer,
+        "Procedures matching '{}' ({}):",
+        keyword,
+        procedures.len()
+    )?;
+    writeln!(
+        writer,
+        "{:<20} {:<30} {:<15}",
+        "Database", "Name", "Owner"
+    )?;
+    writeln!(writer, "{}", "-".repeat(67))?;
+
+    if procedures.is_empty() {
+        writeln!(writer, "(no procedures found)")?;
+    } else {
+        for p in procedures {
+            writeln!(
+                writer,
+                "{:<20} {:<30} {:<15}",
+                p.database, p.procedure_name, p.owner
+            )?;
+        }
+    }
+
+    writeln!(writer)?;
+    writeln!(writer, "{} procedure(s)", procedures.len())?;
+    Ok(())
+}
+
+/// Serde-serializable envelope for procedure search JSON output
+#[derive(Serialize)]
+struct ProcedureSearchJsonEnvelope<'a> {
+    ok: bool,
+    row_count: usize,
+    data: Vec<ProcedureSearchJsonRow<'a>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pagination: Option<PaginationJson>,
+}
+
+/// Single row in procedure search JSON output
+#[derive(Serialize)]
+struct ProcedureSearchJsonRow<'a> {
+    database: &'a str,
+    procedure_name: &'a str,
+    owner: &'a str,
+}
+
+fn render_procedure_search_json_with_pagination<W: Write>(
+    procedures: &[ProcedureSearchResult],
+    pagination: Option<&PaginationInfo>,
+    writer: &mut W,
+) -> Result<()> {
+    let envelope = ProcedureSearchJsonEnvelope {
+        ok: true,
+        row_count: procedures.len(),
+        data: procedures
+            .iter()
+            .map(|p| ProcedureSearchJsonRow {
+                database: &p.database,
+                procedure_name: &p.procedure_name,
+                owner: &p.owner,
+            })
+            .collect(),
+        pagination: pagination.map(PaginationJson::from_info),
+    };
+    serde_json::to_writer(&mut *writer, &envelope)?;
+    writeln!(writer)?;
+    Ok(())
+}
+
+fn render_procedure_search_csv<W: Write>(
+    procedures: &[ProcedureSearchResult],
+    writer: &mut W,
+) -> Result<()> {
+    writeln!(writer, "Database,ProcedureName,Owner")?;
+    for p in procedures {
+        writeln!(
+            writer,
+            "{},{},{}",
+            csv_escape(&p.database),
+            csv_escape(&p.procedure_name),
+            csv_escape(&p.owner)
+        )?;
+    }
+    Ok(())
+}
+
+fn render_procedure_search_markdown<W: Write>(
+    procedures: &[ProcedureSearchResult],
+    writer: &mut W,
+) -> Result<()> {
+    writeln!(writer, "| Database | Name | Owner |")?;
+    writeln!(writer, "| :--- | :--- | :--- |")?;
+    for p in procedures {
+        writeln!(
+            writer,
+            "| {} | {} | {} |",
+            markdown_escape_pipe(&p.database),
+            markdown_escape_pipe(&p.procedure_name),
+            markdown_escape_pipe(&p.owner)
+        )?;
+    }
+    Ok(())
+}
+
+// =============================================================================
 // Unit tests
 // =============================================================================
 
@@ -1535,5 +1780,154 @@ mod tests {
         assert!(output.contains("| Database | Name | Owner |"));
         assert!(output.contains("| :--- | :--- | :--- |"));
         assert!(output.contains("| hr | emp_summary | alice |"));
+    }
+
+    // =========================================================================
+    // Procedure search tests
+    // =========================================================================
+
+    #[test]
+    fn test_procedure_search_result_structure() {
+        let p = ProcedureSearchResult {
+            database: "mydb".to_string(),
+            procedure_name: "update_salary".to_string(),
+            owner: "admin".to_string(),
+        };
+        assert_eq!(p.database, "mydb");
+        assert_eq!(p.procedure_name, "update_salary");
+        assert_eq!(p.owner, "admin");
+    }
+
+    #[test]
+    fn test_render_procedure_search_table_format() {
+        let procs = vec![
+            ProcedureSearchResult {
+                database: "hr".to_string(),
+                procedure_name: "update_salary".to_string(),
+                owner: "alice".to_string(),
+            },
+            ProcedureSearchResult {
+                database: "payroll".to_string(),
+                procedure_name: "calc_bonus".to_string(),
+                owner: "bob".to_string(),
+            },
+        ];
+        let mut buf = Vec::new();
+        render_procedure_search_table(&procs, "sal", &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("Procedures matching 'sal' (2):"));
+        assert!(output.contains("Database"));
+        assert!(output.contains("Name"));
+        assert!(output.contains("Owner"));
+        assert!(output.contains("hr"));
+        assert!(output.contains("update_salary"));
+        assert!(output.contains("payroll"));
+        assert!(output.contains("calc_bonus"));
+        assert!(output.contains("2 procedure(s)"));
+    }
+
+    #[test]
+    fn test_render_procedure_search_table_empty() {
+        let procs: Vec<ProcedureSearchResult> = vec![];
+        let mut buf = Vec::new();
+        render_procedure_search_table(&procs, "xyz", &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("Procedures matching 'xyz' (0):"));
+        assert!(output.contains("(no procedures found)"));
+        assert!(output.contains("0 procedure(s)"));
+    }
+
+    #[test]
+    fn test_render_procedure_search_json() {
+        let procs = vec![ProcedureSearchResult {
+            database: "hr".to_string(),
+            procedure_name: "update_salary".to_string(),
+            owner: "alice".to_string(),
+        }];
+        let mut buf = Vec::new();
+        render_procedure_search_json_with_pagination(&procs, None, &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["row_count"], 1);
+        assert_eq!(v["data"][0]["database"], "hr");
+        assert_eq!(v["data"][0]["procedure_name"], "update_salary");
+        assert_eq!(v["data"][0]["owner"], "alice");
+        assert!(v.get("pagination").is_none());
+    }
+
+    #[test]
+    fn test_render_procedure_search_json_empty() {
+        let procs: Vec<ProcedureSearchResult> = vec![];
+        let mut buf = Vec::new();
+        render_procedure_search_json_with_pagination(&procs, None, &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["row_count"], 0);
+        assert_eq!(v["data"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_render_procedure_search_json_with_pagination() {
+        let procs = vec![ProcedureSearchResult {
+            database: "hr".to_string(),
+            procedure_name: "sp1".to_string(),
+            owner: "admin".to_string(),
+        }];
+        let pg = PaginationInfo::new(1, 5, 10);
+        let mut buf = Vec::new();
+        render_procedure_search_json_with_pagination(&procs, Some(&pg), &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(v["pagination"]["page"], 1);
+        assert_eq!(v["pagination"]["page_size"], 5);
+        assert_eq!(v["pagination"]["total_rows"], 10);
+        assert_eq!(v["pagination"]["total_pages"], 2);
+        assert_eq!(v["pagination"]["has_more"], true);
+    }
+
+    #[test]
+    fn test_render_procedure_search_json_special_chars() {
+        let procs = vec![ProcedureSearchResult {
+            database: "my\"db".to_string(),
+            procedure_name: "proc\\name".to_string(),
+            owner: "admin".to_string(),
+        }];
+        let mut buf = Vec::new();
+        render_procedure_search_json_with_pagination(&procs, None, &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(v["data"][0]["database"], "my\"db");
+        assert_eq!(v["data"][0]["procedure_name"], "proc\\name");
+    }
+
+    #[test]
+    fn test_render_procedure_search_csv() {
+        let procs = vec![ProcedureSearchResult {
+            database: "hr".to_string(),
+            procedure_name: "update_salary".to_string(),
+            owner: "alice".to_string(),
+        }];
+        let mut buf = Vec::new();
+        render_procedure_search_csv(&procs, &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("Database,ProcedureName,Owner"));
+        assert!(output.contains("hr,update_salary,alice"));
+    }
+
+    #[test]
+    fn test_render_procedure_search_markdown() {
+        let procs = vec![ProcedureSearchResult {
+            database: "hr".to_string(),
+            procedure_name: "update_salary".to_string(),
+            owner: "alice".to_string(),
+        }];
+        let mut buf = Vec::new();
+        render_procedure_search_markdown(&procs, &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("| Database | Name | Owner |"));
+        assert!(output.contains("| :--- | :--- | :--- |"));
+        assert!(output.contains("| hr | update_salary | alice |"));
     }
 }

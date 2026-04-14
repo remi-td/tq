@@ -298,6 +298,17 @@ fn run(cli: Cli) -> Result<()> {
                 commands::resources(&client, &args, &mut stdout, use_color)?;
             }
         }
+        // Sprint 61: Logoff idle sessions
+        Command::LogoffIdle(args) => {
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::logoff_idle(&client, &args, &mut writer, use_color)?;
+            } else {
+                let mut stdout = io::stdout();
+                commands::logoff_idle(&client, &args, &mut stdout, use_color)?;
+            }
+        }
         // Help, Profiles, and Profile already handled above
         Command::Help(_) | Command::Profiles | Command::Profile(_) => unreachable!(),
     }

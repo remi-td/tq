@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
-**Last Updated:** 2026-03-31
-**Current Version:** 1.37.0
-**Latest Sprint:** Sprint 56 Complete (Result Pagination & Tech Debt Cleanup)
+**Last Updated:** 2026-04-14
+**Current Version:** 1.43.0
+**Latest Sprint:** Sprint 61 Complete (Extended Session Control & Search Procedures)
 
 ---
 
@@ -523,17 +523,65 @@ All core features are complete and tested.
 | Result pagination | ✅ | Issue #37 part 6 | v1.37.0 (Sprint 56) |
 | Search views subcommand | ✅ | Sprint 57 | v1.38.0 (Sprint 57) |
 | Serde JSON in search renderers | ✅ | Sprint 57 tech debt | v1.38.0 (Sprint 57) |
+| Context-aware IntelliSense | ✅ | Sprint 58 | v1.40.0 (Sprint 58) |
+
+---
+
+## PMON Resource Monitoring
+
+| Feature | Status | Spec Reference | Since |
+|---------|--------|----------------|-------|
+| `/resources` command (REPL) | ✅ | [Admin User Stories](../specifications/admin-user-stories.md#performance-summary) | v1.41.0 (Sprint 59) |
+| `tq resources` (batch mode) | ✅ | [CLI Interface](../specifications/cli-interface.md#resources-command) | v1.41.0 (Sprint 59) |
+| Virtual mode (per-VPROC) | ✅ | Internal requirement | v1.41.0 (Sprint 59) |
+| Physical mode (per-node) | ✅ | Internal requirement | v1.41.0 (Sprint 59) |
+| CPU/IO skew calculation | ✅ | Internal requirement | v1.41.0 (Sprint 59) |
+
+---
+
+## Watch Mode
+
+| Feature | Status | Spec Reference | Since |
+|---------|--------|----------------|-------|
+| `--watch` flag (sessions) | ✅ | [CLI Interface](../specifications/cli-interface.md#sessions-command) | v1.42.0 (Sprint 60) |
+| `--watch` flag (locks) | ✅ | [CLI Interface](../specifications/cli-interface.md#locks-command) | v1.42.0 (Sprint 60) |
+| `--watch` flag (resources) | ✅ | [CLI Interface](../specifications/cli-interface.md#resources-command) | v1.42.0 (Sprint 60) |
+| `--interval` configuration | ✅ | Internal requirement | v1.42.0 (Sprint 60) |
+| REPL watch mode | ✅ | [REPL Mode](../specifications/repl.md#watch-mode) | v1.42.0 (Sprint 60) |
+
+---
+
+## Extended Session Control
+
+| Feature | Status | Spec Reference | Since |
+|---------|--------|----------------|-------|
+| `/abort user <username>` (REPL) | ✅ | [Admin User Stories](../specifications/admin-user-stories.md#control-functions) | v1.43.0 (Sprint 61) |
+| `tq abort --user <username>` (batch) | ✅ | [CLI Interface](../specifications/cli-interface.md#abort-command) | v1.43.0 (Sprint 61) |
+| `/abort host <hostname>` (REPL) | ✅ | [Admin User Stories](../specifications/admin-user-stories.md#control-functions) | v1.43.0 (Sprint 61) |
+| `tq abort --host <hostname>` (batch) | ✅ | [CLI Interface](../specifications/cli-interface.md#abort-command) | v1.43.0 (Sprint 61) |
+| `/logoff idle` (REPL) | ✅ | [Admin User Stories](../specifications/admin-user-stories.md#control-functions) | v1.43.0 (Sprint 61) |
+| `tq logoff-idle` (batch) | ✅ | [CLI Interface](../specifications/cli-interface.md#logoff-idle-command) | v1.43.0 (Sprint 61) |
+
+---
+
+## Search & Discovery
+
+| Feature | Status | Spec Reference | Since |
+|---------|--------|----------------|-------|
+| `tq search tables` | ✅ | [CLI Interface](../specifications/cli-interface.md#search-command) | v1.36.0 (Sprint 55) |
+| `tq search columns` | ✅ | [CLI Interface](../specifications/cli-interface.md#search-command) | v1.36.0 (Sprint 55) |
+| `tq search views` | ✅ | [CLI Interface](../specifications/cli-interface.md#search-command) | v1.38.0 (Sprint 57) |
+| `tq search procedures` | ✅ | [CLI Interface](../specifications/cli-interface.md#search-command) | v1.43.0 (Sprint 61) |
 
 ---
 
 ## Summary Statistics
 
-- **Total Features**: 110
-- **Implemented**: 110 (100%)
+- **Total Features**: 122
+- **Implemented**: 122 (100%)
 - **Planned**: 0 (0%)
-- **Test Pass Rate**: 100% (956 unit tests pass, integration tests require live DB)
-- **Code Coverage**: 40% (baseline established)
-- **Latest Sprint**: Sprint 57 - Search Quality & View Search
+- **Test Pass Rate**: 100% (1043 unit tests pass, integration tests require live DB)
+- **Latest Sprint**: Sprint 61 - Extended Session Control & Search Procedures
 
 ---
 
