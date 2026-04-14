@@ -525,4 +525,61 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["password"], "pass\"word\\with\\special");
     }
+
+    /// Test that check_file_permissions rejects insecure permissions (Sprint 62)
+    #[cfg(unix)]
+    #[test]
+    fn test_check_file_permissions_rejects_insecure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("insecure_pw");
+        fs::write(&path, "secret").unwrap();
+
+        // Set group-readable permissions (0644)
+        fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let config = ConnectionConfig {
+            host: "h".to_string(),
+            port: 1025,
+            database: "d".to_string(),
+            user: "u".to_string(),
+            password: None,
+            logmech: LogonMechanism::Td2,
+            timeout: Duration::from_secs(30),
+        };
+
+        let result = config.check_file_permissions(&path);
+        assert!(result.is_err(), "Should reject 0644 permissions");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("insecure permissions"));
+        assert!(err_msg.contains("0644"));
+    }
+
+    /// Test that check_file_permissions accepts secure permissions (Sprint 62)
+    #[cfg(unix)]
+    #[test]
+    fn test_check_file_permissions_accepts_secure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secure_pw");
+        fs::write(&path, "secret").unwrap();
+
+        // Set owner-only permissions (0600)
+        fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        let config = ConnectionConfig {
+            host: "h".to_string(),
+            port: 1025,
+            database: "d".to_string(),
+            user: "u".to_string(),
+            password: None,
+            logmech: LogonMechanism::Td2,
+            timeout: Duration::from_secs(30),
+        };
+
+        let result = config.check_file_permissions(&path);
+        assert!(result.is_ok(), "Should accept 0600 permissions");
+    }
 }
