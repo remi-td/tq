@@ -1,6 +1,6 @@
 [package]
 name = "tq"
-version = "1.43.0"
+version = "1.44.0"
 edition = "2021"
 authors = ["Teradata Query Contributors"]
 description = "A fast, lightweight command-line client for Teradata databases"
@@ -15,7 +15,7 @@ categories = ["command-line-utilities", "database"]
 clap = { version = "4.5", features = ["derive", "env", "wrap_help"] }
 
 # Database connectivity
-teradatarustapi = { git = "https://github.com/Teradata/teradatarustapi" }
+teradatarustapi = { git = "https://github.com/Teradata/teradatarustapi", rev = "046a8b0faaa6eefa597dbd9fcfc575b066465d74" }
 
 # Error handling
 anyhow = "1.0"

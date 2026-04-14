@@ -304,10 +304,10 @@ fn find_sessions_for_host(
     client: &DatabaseClient,
     hostname: &str,
 ) -> Result<Vec<i64>> {
-    let safe_host = hostname.replace('\'', "''");
+    let safe_host = crate::sql::escape_sql_like(hostname);
     let sql = format!(
         "SELECT SessionNo FROM TABLE (MonitorSession(-1, '*', 0)) AS t1 \
-         WHERE TRIM(LogonSource) LIKE '%{}%'",
+         WHERE TRIM(LogonSource) LIKE '%{}%' ESCAPE '\\'",
         safe_host
     );
     extract_session_ids(client, &sql)

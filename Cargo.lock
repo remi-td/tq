@@ -1449,7 +1449,7 @@ dependencies = [
 [[package]]
 name = "teradatarustapi"
 version = "0.0.0"
-source = "git+https://github.com/Teradata/teradatarustapi#046a8b0faaa6eefa597dbd9fcfc575b066465d74"
+source = "git+https://github.com/Teradata/teradatarustapi?rev=046a8b0faaa6eefa597dbd9fcfc575b066465d74#046a8b0faaa6eefa597dbd9fcfc575b066465d74"
 dependencies = [
  "libloading",
  "regex",

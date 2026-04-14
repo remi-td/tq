@@ -251,11 +251,13 @@ impl ConnectionConfig {
         let mode = metadata.permissions().mode() & 0o777;
 
         if mode & 0o077 != 0 {
-            log::warn!(
-                "Password file '{}' has insecure permissions {:o}. Recommended: 0600",
+            return Err(TqError::InvalidConfig(format!(
+                "Password file '{}' has insecure permissions {:04o}. Required: 0600.\n\
+                 Fix: chmod 0600 {}",
                 path.display(),
-                mode
-            );
+                mode,
+                path.display()
+            )));
         }
 
         Ok(())
@@ -269,10 +271,15 @@ impl ConnectionConfig {
             .map(|p| p.expose_secret().as_str())
             .unwrap_or("");
 
-        format!(
-            r#"{{"host":"{}","user":"{}","password":"{}","dbs_port":"{}","database":"{}","logmech":"{}"}}"#,
-            self.host, self.user, password, self.port, self.database, self.logmech
-        )
+        serde_json::json!({
+            "host": self.host,
+            "user": self.user,
+            "password": password,
+            "dbs_port": self.port.to_string(),
+            "database": self.database,
+            "logmech": self.logmech.to_string()
+        })
+        .to_string()
     }
 
     /// Validate an identifier (username, database name)
@@ -493,9 +500,29 @@ mod tests {
         .unwrap();
 
         let json = config.to_json_string();
-        assert!(json.contains(r#""host":"testhost""#));
-        assert!(json.contains(r#""user":"testuser""#));
-        assert!(json.contains(r#""password":"testpass""#));
-        assert!(json.contains(r#""dbs_port":"1025""#));
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["host"], "testhost");
+        assert_eq!(parsed["user"], "testuser");
+        assert_eq!(parsed["password"], "testpass");
+        assert_eq!(parsed["dbs_port"], "1025");
+        assert_eq!(parsed["database"], "testdb");
+        assert_eq!(parsed["logmech"], "TD2");
+    }
+
+    #[test]
+    fn test_to_json_string_special_characters() {
+        let config = ConnectionConfig {
+            host: "host".to_string(),
+            port: 1025,
+            database: "db".to_string(),
+            user: "user".to_string(),
+            password: Some(Secret::new("pass\"word\\with\\special".to_string())),
+            logmech: LogonMechanism::Td2,
+            timeout: Duration::from_secs(30),
+        };
+        let json = config.to_json_string();
+        // Must be valid JSON
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["password"], "pass\"word\\with\\special");
     }
 }

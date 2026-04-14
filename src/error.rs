@@ -546,18 +546,20 @@ impl TqError {
 
     /// Format this error as a JSON object string for structured error output
     pub fn to_json(&self) -> String {
-        let hint_json = match self.hint() {
-            Some(h) => format!(",\"hint\":\"{}\"", h.replace('"', "\\\"")),
-            None => String::new(),
-        };
-        format!(
-            "{{\"ok\":false,\"error\":{{\"code\":\"{}\",\"category\":\"{}\",\"retryable\":{},\"message\":\"{}\"{}}}}}",
-            self.error_code(),
-            self.error_category(),
-            self.is_retryable(),
-            self.to_string().replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n"),
-            hint_json
-        )
+        let mut error = serde_json::json!({
+            "code": self.error_code(),
+            "category": self.error_category(),
+            "retryable": self.is_retryable(),
+            "message": self.to_string()
+        });
+        if let Some(h) = self.hint() {
+            error["hint"] = serde_json::Value::String(h.to_string());
+        }
+        serde_json::json!({
+            "ok": false,
+            "error": error
+        })
+        .to_string()
     }
 
     /// Create a connection failed error from a string message
@@ -872,6 +874,19 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["ok"], false);
         assert_eq!(parsed["error"]["code"], "AGENT_SAFE_BLOCKED");
+    }
+
+    #[test]
+    fn test_to_json_with_control_characters() {
+        let err = TqError::QueryExecution("error with\ttab and\rcarriage return".into());
+        let json = err.to_json();
+        // Must be valid JSON even with control characters
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["ok"], false);
+        assert!(parsed["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("tab"));
     }
 
     #[test]

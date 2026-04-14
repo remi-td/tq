@@ -143,6 +143,37 @@ pub fn escape_sql_string(s: &str) -> String {
     s.replace('\'', "''")
 }
 
+/// Escape SQL LIKE pattern special characters
+///
+/// Escapes `%`, `_`, and `\` for use in LIKE patterns with `ESCAPE '\'`.
+/// Also escapes single quotes (like `escape_sql_string`).
+///
+/// Use with: `WHERE col LIKE '%<escaped>%' ESCAPE '\'`
+///
+/// # Arguments
+///
+/// * `s` - The string to escape for use in a LIKE pattern
+///
+/// # Returns
+///
+/// The escaped string, safe for use as a LIKE pattern value
+///
+/// # Examples
+///
+/// ```
+/// use tq::sql::identifiers::escape_sql_like;
+///
+/// assert_eq!(escape_sql_like("hello"), "hello");
+/// assert_eq!(escape_sql_like("100%"), "100\\%");
+/// assert_eq!(escape_sql_like("user_name"), "user\\_name");
+/// ```
+pub fn escape_sql_like(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+        .replace('\'', "''")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,5 +490,28 @@ mod tests {
             quoted,
             "\"DB\"\".\"\"EVIL\".\"TABLE\"\"; DROP TABLE USERS; --\""
         );
+    }
+
+    // =========================================================================
+    // escape_sql_like tests
+    // =========================================================================
+
+    #[test]
+    fn test_escape_sql_like_wildcards() {
+        assert_eq!(escape_sql_like("hello"), "hello");
+        assert_eq!(escape_sql_like("100%"), "100\\%");
+        assert_eq!(escape_sql_like("user_name"), "user\\_name");
+        assert_eq!(escape_sql_like("%all%"), "\\%all\\%");
+        assert_eq!(escape_sql_like("back\\slash"), "back\\\\slash");
+        assert_eq!(escape_sql_like("O'Brien"), "O''Brien");
+    }
+
+    #[test]
+    fn test_escape_sql_like_injection_prevention() {
+        // A % hostname should not become a match-all pattern
+        let escaped = escape_sql_like("%");
+        assert_eq!(escaped, "\\%");
+        // When used in LIKE '%<escaped>%', this becomes LIKE '%\%%' ESCAPE '\'
+        // which only matches strings containing a literal %
     }
 }

@@ -57,4 +57,4 @@ pub use parser::{has_multiple_statements, parse_statements, ParseError, ParsedSt
 pub use types::format_column_type;
 
 // Re-export identifier utilities
-pub use identifiers::{escape_sql_string, quote_identifier, quote_qualified_name};
+pub use identifiers::{escape_sql_like, escape_sql_string, quote_identifier, quote_qualified_name};
