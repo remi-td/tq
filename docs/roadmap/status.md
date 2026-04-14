@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-04-14
-**Current Version:** 1.43.0
-**Latest Sprint:** Sprint 61 Complete (Extended Session Control & Search Procedures)
+**Current Version:** 1.44.0
+**Latest Sprint:** Sprint 62 Complete (Security Hardening)
 
 ---
 
@@ -575,13 +575,26 @@ All core features are complete and tested.
 
 ---
 
+## Security Hardening
+
+| Feature | Status | Spec Reference | Since |
+|---------|--------|----------------|-------|
+| JSON injection fix (`to_json_string`) | ✅ | [Security](../specifications/security.md#output-integrity) | v1.44.0 (Sprint 62) |
+| SQL LIKE wildcard escaping (`escape_sql_like`) | ✅ | [Security](../specifications/security.md#sql-injection-prevention) | v1.44.0 (Sprint 62) |
+| Password file permission enforcement | ✅ | [Security](../specifications/security.md#credential-security) | v1.44.0 (Sprint 62) |
+| Error JSON structured serialization | ✅ | [Security](../specifications/security.md#output-integrity) | v1.44.0 (Sprint 62) |
+| Git dependency pinning | ✅ | [Security](../specifications/security.md#supply-chain) | v1.44.0 (Sprint 62) |
+| CI security workflow | ✅ | [Security](../specifications/security.md#ci-cd-security) | v1.44.0 (Sprint 62) |
+
+---
+
 ## Summary Statistics
 
-- **Total Features**: 122
-- **Implemented**: 122 (100%)
+- **Total Features**: 128
+- **Implemented**: 128 (100%)
 - **Planned**: 0 (0%)
-- **Test Pass Rate**: 100% (1043 unit tests pass, integration tests require live DB)
-- **Latest Sprint**: Sprint 61 - Extended Session Control & Search Procedures
+- **Test Pass Rate**: 100% (1049 unit tests pass, integration tests require live DB)
+- **Latest Sprint**: Sprint 62 - Security Hardening
 
 ---
 
