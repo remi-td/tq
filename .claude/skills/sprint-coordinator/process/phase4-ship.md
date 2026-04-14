@@ -26,9 +26,10 @@
 | Criterion | Check | Required |
 |-----------|-------|----------|
 | **Tests EXECUTED** | All tests ran and produced output? NOT just code reviewed? | ✅ MUST |
+| **All Targets Tested** | `cargo test --all-targets` passes (integration tests included)? | ✅ MUST |
 | **Functional Correctness** | All EXECUTED tests pass (100%)? | ✅ MUST |
 | **Interactive Tests Run** | Tests with `#[ignore]` executed with `--ignored` flag? | ✅ MUST |
-| **Code Quality** | No new `TODO`/`FIXME` comments? `cargo clippy` clean? | ✅ MUST |
+| **Code Quality** | No new `TODO`/`FIXME` comments? `cargo clippy --all-targets` clean (zero warnings)? | ✅ MUST |
 | **Documentation Sync** | Code matches specs? No drift? | ✅ MUST |
 | **Architecture Compliance** | Implementation follows `docs/design/*.md`? | ✅ MUST |
 | **Zero Technical Debt** | No workarounds introduced? | ✅ MUST |

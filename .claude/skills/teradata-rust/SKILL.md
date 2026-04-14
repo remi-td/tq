@@ -65,6 +65,41 @@ teradatarustapi::go_close_connection_wrapper(u_log, conn_handle)?;
 | `LDAP` | LDAP authentication |
 | `KRB5` | Kerberos |
 
+## tq Data Access Patterns
+
+In the tq codebase, query results are wrapped in typed structs defined in `src/db/types.rs`:
+
+```rust
+// Row is a Vec of Values — NOT a struct with fields
+pub type Row = Vec<Value>;
+
+pub struct QueryResult {
+    pub columns: Vec<ColumnMetadata>,
+    pub rows: Vec<Row>,       // Vec<Vec<Value>>
+    pub row_count: usize,
+    pub execution_time: Duration,
+}
+
+pub enum Value {
+    Null, Integer(i64), Decimal(f64), String(String),
+    Date(String), Timestamp(String), Time(String), Bytes(Vec<u8>),
+}
+```
+
+**Correct access pattern:**
+```rust
+// Access by index
+let id = match &row[0] { Value::Integer(v) => *v, _ => return None };
+let name = match &row[1] { Value::String(s) => s.trim().to_string(), _ => return None };
+
+// Or use monitoring_utils helpers:
+use crate::commands::monitoring_utils::{extract_integer, extract_decimal, extract_trimmed_string};
+let id = extract_integer(&row[0])?;    // Returns Option<i64>
+let cpu = extract_decimal(&row[1]).unwrap_or(0.0);  // Returns Option<f64>
+```
+
+**Common mistake:** `row.values.first()` — Row has NO `values` field. Use `row.first()` or `row[N]`.
+
 ## Detailed References
 
 - **[API Reference](references/api.md)**: All functions and data types

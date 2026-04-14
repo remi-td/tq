@@ -63,8 +63,12 @@ Use these when appropriate:
 
 1. Read `docs/specifications/*.md` for WHAT to implement (pure requirements, no status badges or sprint references).
 2. Read `docs/design/*.md` for HOW to implement (architecture patterns, code structure, design decisions).
-3. Follow established patterns in `docs/design/vision.md` and feature-specific design docs.
-4. Implement the features.
+3. **Read `src/db/types.rs`** to understand data types before writing code that processes query results.
+   - `Row` is `Vec<Value>` — use `row.first()`, `row.get(N)`, NOT `row.values` or `row.fields`
+   - `Value` is an enum: `Integer(i64)`, `Decimal(f64)`, `String(String)`, `Null`, etc.
+   - Use `monitoring_utils::extract_integer()`, `extract_decimal()` for safe extraction
+4. Follow established patterns in `docs/design/vision.md` and feature-specific design docs.
+5. Implement the features.
 5. Update design docs if implementation reveals new patterns or architectural changes.
 6. Run verification:
    ```bash
@@ -82,6 +86,21 @@ Use these when appropriate:
 - Use the `/rust-coder` and `/teradata-rust` skilla to ensure that you perform high quality work.
 - Use the `/rust-debugger` skill to help debud the code.
 - If you identify the need to do some research to validate ideas, research code examples, error messages or find best practices, you may use the WebSearch and WebFetch tools.
+
+### New Command Integration Checklist
+
+When creating a new command (batch or REPL), ALL of these files must be updated:
+
+1. `src/cli.rs` — Add Command enum variant + Args struct + format() match arm
+2. `src/commands/<name>.rs` — New module with execute() and execute_for_repl()
+3. `src/commands/mod.rs` — Add `pub mod <name>;` and `pub use <name>::execute as <name>;`
+4. `src/main.rs` — Add Command::<Name> dispatch (with --output file support)
+5. `src/lib.rs` — Add <Name>Args to the re-export list
+6. `src/commands/repl/metacommands.rs` — Add handler in BOTH `handle_metacommand()` (basic/no-client) AND `handle_metacommand_with_state()` (full)
+7. `src/commands/repl/metadata_completer.rs` — Add MetacommandDef entry for tab completion
+8. Help text — Add command to `print_help_extended()` in metacommands.rs
+
+Missing any of these causes compile errors or incomplete features.
 
 ### Bugfix tasks
 1. Read test report and latest test evidence in `tests/results/sprint-N/` for complete details on the specific bug.
