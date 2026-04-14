@@ -937,7 +937,7 @@ Press any key to return to results..."#;
             )?;
             writeln!(
                 writer,
-                "Use --format csv or --format json to see all columns"
+                "Use /format csv or /format json to see all columns"
             )?;
         }
 
@@ -1642,7 +1642,7 @@ mod tests {
 
         // Should contain the hint
         assert!(
-            output.contains("Use --format csv or --format json to see all columns"),
+            output.contains("Use /format csv or /format json to see all columns"),
             "Should show format hint"
         );
     }

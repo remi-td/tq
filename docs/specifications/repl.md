@@ -1586,9 +1586,9 @@ The exit snapshot SHALL exactly reproduce the last visible pager viewport in ter
 
 The snapshot table SHALL use the same box-drawing border characters as the interactive pager:
 
-1. **REQ-PAGER-EXIT-003.1** - Top border: `┌─┬─┐` characters
+1. **REQ-PAGER-EXIT-003.1** - Top border: `╭─┬─╮` characters
 2. **REQ-PAGER-EXIT-003.2** - Header separator: `├─┼─┤` characters
-3. **REQ-PAGER-EXIT-003.3** - Bottom border: `└─┴─┘` characters
+3. **REQ-PAGER-EXIT-003.3** - Bottom border: `╰─┴─╯` characters
 4. **REQ-PAGER-EXIT-003.4** - Column separators: `│` character
 5. **REQ-PAGER-EXIT-003.5** - The snapshot table structure is visually identical to the pager table grid (borders, header row, data rows in order)
 
@@ -1618,7 +1618,7 @@ When columns are hidden (viewport does not show all columns), the snapshot SHALL
 
 When hidden columns are present, the snapshot SHALL display a hint pointing the user to full-width output formats:
 
-1. **REQ-PAGER-EXIT-006.1** - Hint text: `Use --format csv or --format json to see all columns`
+1. **REQ-PAGER-EXIT-006.1** - Hint text: `Use /format csv or /format json to see all columns`
 2. **REQ-PAGER-EXIT-006.2** - Hint appears on its own line, immediately after the hidden columns footer line
 3. **REQ-PAGER-EXIT-006.3** - Hint is omitted when no columns are hidden
 
@@ -1636,14 +1636,14 @@ The snapshot SHALL display the standard row count and timing footer:
 tq> SELECT employee_id, first_name, last_name FROM employees;
 [Query executes, user navigates to rows 41-60, then presses 'q']
 
-┌─────────────┬──────────────┬──────────────┐
+╭─────────────┬──────────────┬──────────────╮
 │ employee_id │ first_name   │ last_name    │
 ├─────────────┼──────────────┼──────────────┤
 │ 41          │ Carol        │ Chen         │
 │ 42          │ David        │ Davis        │
 │ 43          │ Eve          │ Evans        │
 │ 44          │ Frank        │ Foster       │
-└─────────────┴──────────────┴──────────────┘
+╰─────────────┴──────────────┴──────────────╯
 
 500 row(s) in set (0.123s)
 
@@ -1655,15 +1655,15 @@ tq> _
 tq> SELECT * FROM employees;
 [Query executes, user has scrolled right to columns 3-6 of 12, rows 21-40, then presses 'q']
 
-┌────────────┬──────────────┬──────────────┬────────────┐
+╭────────────┬──────────────┬──────────────┬────────────╮
 │ dept       │ salary       │ hire_date    │ status     │
 ├────────────┼──────────────┼──────────────┼────────────┤
 │ Engineering│ 95000        │ 2019-03-15   │ active     │
 │ Marketing  │ 72000        │ 2021-07-22   │ active     │
 │ Engineering│ 110000       │ 2017-11-01   │ active     │
-└────────────┴──────────────┴──────────────┴────────────┘
+╰────────────┴──────────────┴──────────────┴────────────╯
 8 columns hidden: employee_id, first_name, last_name, email, phone, manager_id, location, notes
-Use --format csv or --format json to see all columns
+Use /format csv or /format json to see all columns
 
 500 row(s) in set (0.234s)
 
