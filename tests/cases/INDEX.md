@@ -1,15 +1,27 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.31.0 (Sprint 56 - Result Pagination & Sprint 55 Cleanup)
-**Last Updated:** 2026-03-31
-**Base Commit:** [Sprint 56 - In Progress]
+**Version:** 1.45.0 (Sprint 63 - Pager Exit Snapshot)
+**Last Updated:** 2026-04-14
+**Base Commit:** [Sprint 63 - In Progress]
 
 ## Overview
 
 This directory contains comprehensive test case definitions for the tq CLI tool. These test cases cover all implemented MVP features (FR-001 through FR-010) and provide detailed procedures for validating functionality, usability, error handling, and security.
 
 ## Test Case Categories
+
+### Sprint 63: Pager Exit Snapshot
+
+- **TC-063-001**: Pager Exit Snapshot Unit Tests — `render_exit_snapshot(&self, writer: &mut impl Write)` on `Pager`: viewport selection (row_offset/col_offset/page_size), box-drawing borders, header and data rows, hidden-columns footer format ("N columns hidden: col1, col2..."), --format csv/json hint, row-count/timing footer ("N row(s) in set (X.XXXs)"), no ANSI codes, `\n` line endings, CJK/Unicode-safe padding (Unit writer-injection `Vec<u8>`, no DB) — `TC-063-001.md`
+
+**Sprint 63 test case summary:**
+- Unit tests (no DB): TC-063-001 (10 tests)
+- Structural grep checks: 2 checks (render_exit_snapshot exists, no `\r\n` in method)
+- Interactive tests (recommended, DB required): 1 scenario (q/Esc trigger + terminal state)
+- Total: 10 unit tests + 2 structural checks
+
+---
 
 ### Sprint 56: Result Pagination & Sprint 55 Cleanup
 

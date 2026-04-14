@@ -1427,7 +1427,7 @@ Column indicators: (+N cols) ← means N hidden columns on left
 Note: Column position is preserved when scrolling vertically.
 
 Exit:
-  q, Esc       Exit pager, return to REPL prompt
+  q, Esc       Exit pager, print snapshot, return to REPL prompt
 
 Help:
   ?            Show this help
@@ -1451,6 +1451,9 @@ User scrolled to columns 15-20 of 30:
 (+14 cols) ← | Columns 15-20 of 30 | (+10 cols) →
 
 [Press 'q']
+
+[Exit snapshot printed — shows columns 15-20 of the last visible rows,
+ with hidden columns footer and row count]
 
 tq> _
 [Back at REPL prompt, pager state cleared]
@@ -1547,32 +1550,124 @@ Columns 19-23 of 23 | Rows 481-500 of 500
 #### Pager Exit Behavior (CRITICAL)
 
 **Exit Keys:**
-- `q` (lowercase): Exit pager, return to `tq>` prompt
-- `Escape`: Also exits pager
-- `Ctrl-C`: Cancel pager, return to prompt
+- `q` (lowercase): Exit pager, print exit snapshot, return to `tq>` prompt
+- `Escape`: Exit pager, print exit snapshot, return to `tq>` prompt
+- `Ctrl-C`: Cancel pager, return to prompt (no snapshot printed)
 
 **Exit Program (From REPL Only, NOT from Pager):**
 - `Ctrl-D`: Exit tq program (when at empty prompt)
 - `/quit`: Exit tq program (metacommand)
 
-**Exit Flow Example:**
+**REQ-PAGER-EXIT-001: Exit Snapshot on Pager Quit**
+
+When the user presses `q` or `Esc` to exit the pager, the pager SHALL print a static snapshot of the last visible viewport to the normal terminal before returning to the REPL prompt:
+
+1. **REQ-PAGER-EXIT-001.1** - Pressing `q` triggers the exit snapshot before returning to the REPL prompt
+2. **REQ-PAGER-EXIT-001.2** - Pressing `Esc` triggers the exit snapshot before returning to the REPL prompt
+3. **REQ-PAGER-EXIT-001.3** - Pressing `Ctrl-C` cancels the pager without printing a snapshot
+4. **REQ-PAGER-EXIT-001.4** - The snapshot is written to stdout on the normal screen buffer (after `LeaveAlternateScreen`)
+5. **REQ-PAGER-EXIT-001.5** - The snapshot appears between the previous terminal content and the new `tq>` prompt
+
+**Rationale:** When the pager closes its alternate screen buffer, all visible results disappear. Users frequently refer back to query results for copy-paste, analysis, or follow-up queries. The snapshot preserves the last view so results remain accessible in the scrollback buffer.
+
+**REQ-PAGER-EXIT-002: Snapshot Content — Rows and Columns**
+
+The exit snapshot SHALL exactly reproduce the last visible pager viewport in terms of row and column position:
+
+1. **REQ-PAGER-EXIT-002.1** - The snapshot renders the same rows that were visible on screen at exit time (honoring the current row offset and page size)
+2. **REQ-PAGER-EXIT-002.2** - The snapshot renders the same columns that were visible on screen at exit time (honoring the current column offset)
+3. **REQ-PAGER-EXIT-002.3** - Column widths in the snapshot match the widths used in the pager viewport
+4. **REQ-PAGER-EXIT-002.4** - Cell truncation (ellipsis on long values) is preserved exactly as shown in the pager
+5. **REQ-PAGER-EXIT-002.5** - The snapshot is a faithful reproduction of what the user last saw — not the full result set, not the first page
+
+**Rationale:** The snapshot must match the last seen view to have the expected contextual value. A user who navigated to rows 80-100 expects to see rows 80-100 in the snapshot, not rows 1-20.
+
+**REQ-PAGER-EXIT-003: Snapshot Format — Table Structure**
+
+The snapshot table SHALL use the same box-drawing border characters as the interactive pager:
+
+1. **REQ-PAGER-EXIT-003.1** - Top border: `┌─┬─┐` characters
+2. **REQ-PAGER-EXIT-003.2** - Header separator: `├─┼─┤` characters
+3. **REQ-PAGER-EXIT-003.3** - Bottom border: `└─┴─┘` characters
+4. **REQ-PAGER-EXIT-003.4** - Column separators: `│` character
+5. **REQ-PAGER-EXIT-003.5** - The snapshot table structure is visually identical to the pager table grid (borders, header row, data rows in order)
+
+**REQ-PAGER-EXIT-004: Snapshot Format — Plain Text, No ANSI**
+
+The snapshot output SHALL contain no ANSI escape codes or terminal control sequences:
+
+1. **REQ-PAGER-EXIT-004.1** - No color codes (no foreground, background, or attribute sequences)
+2. **REQ-PAGER-EXIT-004.2** - No cursor movement sequences
+3. **REQ-PAGER-EXIT-004.3** - No bold, italic, underline, or other text styling sequences
+4. **REQ-PAGER-EXIT-004.4** - Lines are terminated with `\n` (newline only, not `\r\n`)
+5. **REQ-PAGER-EXIT-004.5** - The output is safe to copy-paste into terminals, documents, and text editors without escape character artifacts
+
+**Rationale:** Plain text output is universally readable, copy-paste friendly, and matches the non-paged table output style. The alternate screen context for colors no longer applies once the pager has exited.
+
+**REQ-PAGER-EXIT-005: Snapshot Footer — Hidden Columns**
+
+When columns are hidden (viewport does not show all columns), the snapshot SHALL display a hidden columns footer matching the non-paged output style:
+
+1. **REQ-PAGER-EXIT-005.1** - Footer format: `N columns hidden: col1, col2, col3, ...` where N is the total count of all hidden columns (both left and right of the viewport)
+2. **REQ-PAGER-EXIT-005.2** - The hidden columns list includes ALL columns not visible in the snapshot: columns scrolled off the left AND columns not yet reached on the right
+3. **REQ-PAGER-EXIT-005.3** - Column names in the footer are listed in their original result set order (left-to-right schema order), not in hidden/visible order
+4. **REQ-PAGER-EXIT-005.4** - Footer appears immediately below the bottom table border, before the row count footer
+5. **REQ-PAGER-EXIT-005.5** - When all columns fit in the snapshot (no hidden columns), this footer is omitted
+
+**REQ-PAGER-EXIT-006: Snapshot Footer — Format Hint**
+
+When hidden columns are present, the snapshot SHALL display a hint pointing the user to full-width output formats:
+
+1. **REQ-PAGER-EXIT-006.1** - Hint text: `Use --format csv or --format json to see all columns`
+2. **REQ-PAGER-EXIT-006.2** - Hint appears on its own line, immediately after the hidden columns footer line
+3. **REQ-PAGER-EXIT-006.3** - Hint is omitted when no columns are hidden
+
+**REQ-PAGER-EXIT-007: Snapshot Footer — Row Count and Timing**
+
+The snapshot SHALL display the standard row count and timing footer:
+
+1. **REQ-PAGER-EXIT-007.1** - Footer format: `N row(s) in set (X.XXXs)` where N is the total result row count (not the number of visible rows in the snapshot) and X.XXX is the original query execution time
+2. **REQ-PAGER-EXIT-007.2** - The footer uses the exact same format as non-paged table output
+3. **REQ-PAGER-EXIT-007.3** - Footer appears as the last line of the snapshot output
+4. **REQ-PAGER-EXIT-007.4** - A blank line separates the bottom table border (or the format hint) from the row count footer, consistent with non-paged output
+
+**Exit Flow Example — Narrow Result (All Columns Fit):**
 ```
-tq> SELECT * FROM employees;
-[Query executes, enters pager mode with results displayed]
+tq> SELECT employee_id, first_name, last_name FROM employees;
+[Query executes, user navigates to rows 41-60, then presses 'q']
 
 ┌─────────────┬──────────────┬──────────────┐
 │ employee_id │ first_name   │ last_name    │
 ├─────────────┼──────────────┼──────────────┤
-│ 1           │ Alice        │ Anderson     │
-│ 2           │ Bob          │ Brown        │
+│ 41          │ Carol        │ Chen         │
+│ 42          │ David        │ Davis        │
+│ 43          │ Eve          │ Evans        │
+│ 44          │ Frank        │ Foster       │
 └─────────────┴──────────────┴──────────────┘
 
-Rows 1-20 of 500 | q: exit pager
-
-[User presses 'q']
+500 row(s) in set (0.123s)
 
 tq> _
-[Back at REPL prompt, session fully preserved]
+```
+
+**Exit Flow Example — Wide Result (Columns Hidden):**
+```
+tq> SELECT * FROM employees;
+[Query executes, user has scrolled right to columns 3-6 of 12, rows 21-40, then presses 'q']
+
+┌────────────┬──────────────┬──────────────┬────────────┐
+│ dept       │ salary       │ hire_date    │ status     │
+├────────────┼──────────────┼──────────────┼────────────┤
+│ Engineering│ 95000        │ 2019-03-15   │ active     │
+│ Marketing  │ 72000        │ 2021-07-22   │ active     │
+│ Engineering│ 110000       │ 2017-11-01   │ active     │
+└────────────┴──────────────┴──────────────┴────────────┘
+8 columns hidden: employee_id, first_name, last_name, email, phone, manager_id, location, notes
+Use --format csv or --format json to see all columns
+
+500 row(s) in set (0.234s)
+
+tq> _
 ```
 
 #### Complete Status Bar Design

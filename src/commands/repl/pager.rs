@@ -749,10 +749,8 @@ Press any key to return to results..."#;
 
     /// Render the current view to a string buffer for testing/debugging.
     ///
-    /// This method renders the table to a buffer instead of stdout,
-    /// allowing validation of rendered output width without terminal interaction.
-    ///
-    /// Sprint 31: Added to enable debugging of width calculation mismatch.
+    /// Thin wrapper around the plain rendering methods. Writing to Vec<u8>
+    /// is infallible, so unwrap() is safe here.
     #[cfg(test)]
     pub fn render_to_buffer(&self) -> String {
         let mut buffer = Vec::new();
@@ -761,29 +759,22 @@ Press any key to return to results..."#;
         let end_col = (self.col_offset + visible_cols).min(self.data.columns.len());
         let end_row = (self.row_offset + self.page_size).min(self.data.row_count);
 
-        // Render top border
-        self.render_border_to_buffer(&mut buffer, BorderType::Top);
-
-        // Render header row
-        self.render_header_to_buffer(&mut buffer, self.col_offset, end_col);
-
-        // Render header separator
-        self.render_border_to_buffer(&mut buffer, BorderType::Middle);
-
-        // Render data rows
+        self.render_border_plain(&mut buffer, BorderType::Top).unwrap();
+        self.render_header_plain(&mut buffer, self.col_offset, end_col).unwrap();
+        self.render_border_plain(&mut buffer, BorderType::Middle).unwrap();
         for row_idx in self.row_offset..end_row {
-            self.render_row_to_buffer(&mut buffer, row_idx, self.col_offset, end_col);
+            self.render_row_plain(&mut buffer, row_idx, self.col_offset, end_col).unwrap();
         }
-
-        // Render bottom border
-        self.render_border_to_buffer(&mut buffer, BorderType::Bottom);
+        self.render_border_plain(&mut buffer, BorderType::Bottom).unwrap();
 
         String::from_utf8_lossy(&buffer).to_string()
     }
 
-    /// Render a table border to buffer (no ANSI escapes)
-    #[cfg(test)]
-    fn render_border_to_buffer(&self, buffer: &mut Vec<u8>, border_type: BorderType) {
+    /// Render a table border as plain text (no ANSI escapes)
+    ///
+    /// Writes to a generic writer for both production use (exit snapshot)
+    /// and testing (Vec<u8> buffer).
+    fn render_border_plain(&self, writer: &mut impl Write, border_type: BorderType) -> io::Result<()> {
         let (left, middle, right, line) = match border_type {
             BorderType::Top => ('╭', '┬', '╮', '─'),
             BorderType::Middle => ('├', '┼', '┤', '─'),
@@ -822,15 +813,13 @@ Press any key to return to results..."#;
         }
 
         border.push(right);
-        border.push('\n');
-
-        buffer.extend(border.as_bytes());
+        writeln!(writer, "{}", border)
     }
 
-    /// Render header row to buffer (no ANSI escapes)
-    /// Sprint 33: Uses pad_to_display_width() for correct Unicode width handling
-    #[cfg(test)]
-    fn render_header_to_buffer(&self, buffer: &mut Vec<u8>, start_col: usize, end_col: usize) {
+    /// Render header row as plain text (no ANSI escapes)
+    ///
+    /// Uses pad_to_display_width() for correct Unicode width handling.
+    fn render_header_plain(&self, writer: &mut impl Write, start_col: usize, end_col: usize) -> io::Result<()> {
         let hidden_left = self.hidden_columns_left();
         let hidden_right = self.hidden_columns_right();
 
@@ -840,7 +829,6 @@ Press any key to return to results..."#;
         // Left indicator cell (if columns hidden to left)
         if hidden_left > 0 {
             let indicator = format!("(+{} cols)", hidden_left);
-            // Indicators are ASCII-only, format! is safe here
             let padded = format!(" {:^width$} ", indicator, width = INDICATOR_WIDTH);
             line.push_str(&padded);
             line.push('│');
@@ -856,26 +844,24 @@ Press any key to return to results..."#;
         // Right indicator cell (if columns hidden to right)
         if hidden_right > 0 {
             let indicator = format!("(+{} cols)", hidden_right);
-            // Indicators are ASCII-only, format! is safe here
             let padded = format!(" {:^width$} ", indicator, width = INDICATOR_WIDTH);
             line.push_str(&padded);
             line.push('│');
         }
 
-        line.push('\n');
-        buffer.extend(line.as_bytes());
+        writeln!(writer, "{}", line)
     }
 
-    /// Render data row to buffer (no ANSI escapes)
-    /// Sprint 33: Uses pad_to_display_width() for correct Unicode width handling
-    #[cfg(test)]
-    fn render_row_to_buffer(
+    /// Render data row as plain text (no ANSI escapes)
+    ///
+    /// Uses pad_to_display_width() for correct Unicode width handling.
+    fn render_row_plain(
         &self,
-        buffer: &mut Vec<u8>,
+        writer: &mut impl Write,
         row_idx: usize,
         start_col: usize,
         end_col: usize,
-    ) {
+    ) -> io::Result<()> {
         let hidden_left = self.hidden_columns_left();
         let hidden_right = self.hidden_columns_right();
 
@@ -893,7 +879,6 @@ Press any key to return to results..."#;
             let col_idx = start_col + vis_idx;
             let value = self.data.get_cell(row_idx, col_idx);
 
-            // Sprint 33: Use display-width-aware padding for correct Unicode handling
             let padded = pad_to_display_width(value, col.display_width, col.alignment);
             line.push_str(&padded);
             line.push('│');
@@ -906,8 +891,65 @@ Press any key to return to results..."#;
             line.push('│');
         }
 
-        line.push('\n');
-        buffer.extend(line.as_bytes());
+        writeln!(writer, "{}", line)
+    }
+
+    /// Render a static snapshot of the current pager viewport as plain text.
+    ///
+    /// Called after exiting the pager (after LeaveAlternateScreen and disable_raw_mode)
+    /// to leave a plain-text copy of the last viewed content on the user's terminal.
+    /// Output has no ANSI escape codes, uses \n line endings, and includes:
+    /// - Box-drawing table with the current viewport's rows and columns
+    /// - Hidden columns footer (if any columns are off-screen)
+    /// - Row count and timing footer
+    pub fn render_exit_snapshot(&self, writer: &mut impl Write) -> io::Result<()> {
+        let visible_cols = self.visible_column_count();
+        let end_col = (self.col_offset + visible_cols).min(self.data.columns.len());
+        let end_row = (self.row_offset + self.page_size).min(self.data.row_count);
+
+        // Render table
+        self.render_border_plain(writer, BorderType::Top)?;
+        self.render_header_plain(writer, self.col_offset, end_col)?;
+        self.render_border_plain(writer, BorderType::Middle)?;
+        for row_idx in self.row_offset..end_row {
+            self.render_row_plain(writer, row_idx, self.col_offset, end_col)?;
+        }
+        self.render_border_plain(writer, BorderType::Bottom)?;
+
+        // Hidden columns footer
+        let mut hidden_names: Vec<&str> = Vec::new();
+        // Columns hidden to the left (before current viewport)
+        for col in &self.data.columns[..self.col_offset] {
+            hidden_names.push(&col.name);
+        }
+        // Columns hidden to the right (after current viewport)
+        for col in &self.data.columns[end_col..] {
+            hidden_names.push(&col.name);
+        }
+
+        if !hidden_names.is_empty() {
+            writeln!(writer)?;
+            writeln!(
+                writer,
+                "{} columns hidden: {}",
+                hidden_names.len(),
+                hidden_names.join(", ")
+            )?;
+            writeln!(
+                writer,
+                "Use --format csv or --format json to see all columns"
+            )?;
+        }
+
+        // Row count and timing footer
+        writeln!(
+            writer,
+            "{} row(s) in set ({:.3}s)",
+            self.total_rows,
+            self.execution_time.as_secs_f64()
+        )?;
+
+        Ok(())
     }
 
     /// Calculate expected line width (for debugging/testing)
@@ -974,6 +1016,9 @@ Press any key to return to results..."#;
 
         execute!(stdout, Show, LeaveAlternateScreen)?;
         disable_raw_mode()?;
+
+        // Print a static snapshot of the last viewport so the user can refer to it
+        self.render_exit_snapshot(&mut stdout)?;
 
         Ok(())
     }
@@ -1515,5 +1560,244 @@ mod tests {
             MAX_COLUMN_WIDTH,
             cell_value
         );
+    }
+
+    // Sprint 63: Pager Exit Snapshot tests
+
+    /// Helper: render exit snapshot to a String
+    fn snapshot_to_string(pager: &Pager) -> String {
+        let mut buffer = Vec::new();
+        pager.render_exit_snapshot(&mut buffer).unwrap();
+        String::from_utf8(buffer).unwrap()
+    }
+
+    #[test]
+    fn test_exit_snapshot_basic_all_columns_visible() {
+        let result = create_test_result(3, 5);
+        let pager = create_pager_with_width(&result, 120);
+
+        let output = snapshot_to_string(&pager);
+
+        // Should contain table borders
+        assert!(output.contains('╭'), "Should have top border");
+        assert!(output.contains('╰'), "Should have bottom border");
+        assert!(output.contains('│'), "Should have column separators");
+
+        // Should contain all column headers
+        assert!(output.contains("col0"), "Should contain col0 header");
+        assert!(output.contains("col1"), "Should contain col1 header");
+        assert!(output.contains("col2"), "Should contain col2 header");
+
+        // Should contain data values
+        assert!(output.contains("val_0_0"), "Should contain first cell");
+        assert!(output.contains("val_4_2"), "Should contain last cell");
+
+        // Should NOT contain hidden columns footer (all visible)
+        assert!(
+            !output.contains("columns hidden"),
+            "Should not show hidden columns when all are visible"
+        );
+
+        // Should contain row count and timing
+        assert!(
+            output.contains("5 row(s) in set (0.100s)"),
+            "Should show total row count and timing"
+        );
+    }
+
+    #[test]
+    fn test_exit_snapshot_horizontal_scroll() {
+        let result = create_wide_test_result(15, 3);
+        let mut pager = create_pager_with_width(&result, 80);
+        pager.col_offset = 3;
+
+        let output = snapshot_to_string(&pager);
+
+        // Should NOT contain columns 0-2 in the table data
+        // (they are hidden to the left)
+        assert!(
+            output.contains("<--"),
+            "Should show left scroll indicator"
+        );
+
+        // Should contain hidden columns footer listing hidden column names
+        assert!(
+            output.contains("columns hidden:"),
+            "Should list hidden columns"
+        );
+
+        // The hidden names should include the first 3 columns
+        assert!(
+            output.contains("column_name_with_longer_text_0"),
+            "Should list col 0 as hidden"
+        );
+        assert!(
+            output.contains("column_name_with_longer_text_1"),
+            "Should list col 1 as hidden"
+        );
+        assert!(
+            output.contains("column_name_with_longer_text_2"),
+            "Should list col 2 as hidden"
+        );
+
+        // Should contain the hint
+        assert!(
+            output.contains("Use --format csv or --format json to see all columns"),
+            "Should show format hint"
+        );
+    }
+
+    #[test]
+    fn test_exit_snapshot_vertical_scroll() {
+        let result = create_test_result(3, 20);
+        let mut pager = create_pager_with_width(&result, 120);
+        pager.page_size = 5;
+        pager.row_offset = 10;
+
+        let output = snapshot_to_string(&pager);
+
+        // Should contain rows 10-14
+        assert!(output.contains("val_10_0"), "Should contain row 10");
+        assert!(output.contains("val_14_0"), "Should contain row 14");
+
+        // Should NOT contain rows outside the viewport
+        assert!(!output.contains("val_0_0"), "Should not contain row 0");
+        assert!(!output.contains("val_9_0"), "Should not contain row 9");
+        assert!(!output.contains("val_15_0"), "Should not contain row 15");
+
+        // Should show total row count (not just visible rows)
+        assert!(
+            output.contains("20 row(s) in set"),
+            "Should show total row count, not just visible"
+        );
+    }
+
+    #[test]
+    fn test_exit_snapshot_both_offsets() {
+        let result = create_wide_test_result(15, 20);
+        let mut pager = create_pager_with_width(&result, 80);
+        pager.col_offset = 2;
+        pager.row_offset = 5;
+        pager.page_size = 3;
+
+        let output = snapshot_to_string(&pager);
+
+        // Should show rows 5-7 only
+        assert!(output.contains("value_row5_col"), "Should contain row 5 data");
+        assert!(output.contains("value_row7_col"), "Should contain row 7 data");
+        assert!(!output.contains("value_row4_col"), "Should not contain row 4");
+        assert!(!output.contains("value_row8_col"), "Should not contain row 8");
+
+        // Should have hidden columns
+        assert!(
+            output.contains("columns hidden:"),
+            "Should show hidden columns footer"
+        );
+
+        // Total row count
+        assert!(
+            output.contains("20 row(s) in set"),
+            "Should show total row count"
+        );
+    }
+
+    #[test]
+    fn test_exit_snapshot_no_ansi_escapes() {
+        let result = create_test_result(3, 5);
+        let pager = create_pager_with_width(&result, 120);
+
+        let mut buffer = Vec::new();
+        pager.render_exit_snapshot(&mut buffer).unwrap();
+
+        // ANSI escape sequences start with 0x1B (ESC)
+        assert!(
+            !buffer.contains(&0x1B),
+            "Snapshot output must not contain ANSI escape codes"
+        );
+    }
+
+    #[test]
+    fn test_exit_snapshot_uses_newline_not_crlf() {
+        let result = create_test_result(3, 5);
+        let pager = create_pager_with_width(&result, 120);
+
+        let output = snapshot_to_string(&pager);
+
+        assert!(
+            !output.contains("\r\n"),
+            "Snapshot must use \\n line endings, not \\r\\n"
+        );
+        assert!(
+            output.contains('\n'),
+            "Snapshot must contain newlines"
+        );
+    }
+
+    #[test]
+    fn test_exit_snapshot_hidden_columns_in_schema_order() {
+        // Create a result where we scroll to the middle, hiding columns on both sides
+        let result = create_wide_test_result(10, 2);
+        let mut pager = create_pager_with_width(&result, 80);
+        pager.col_offset = 3;
+
+        let output = snapshot_to_string(&pager);
+
+        // Find the hidden columns line
+        let hidden_line = output
+            .lines()
+            .find(|l| l.contains("columns hidden:"))
+            .expect("Should have hidden columns line");
+
+        // Columns 0, 1, 2 are hidden left; some columns are hidden right
+        // All should appear in schema order (0, 1, 2 first, then right-hidden)
+        let col0_pos = hidden_line.find("column_name_with_longer_text_0").unwrap();
+        let col1_pos = hidden_line.find("column_name_with_longer_text_1").unwrap();
+        let col2_pos = hidden_line.find("column_name_with_longer_text_2").unwrap();
+
+        assert!(col0_pos < col1_pos, "col0 should appear before col1");
+        assert!(col1_pos < col2_pos, "col1 should appear before col2");
+    }
+
+    #[test]
+    fn test_exit_snapshot_timing_format() {
+        let columns = vec![
+            ColumnMetadata::new("id", TeradataType::Integer, false),
+        ];
+        let rows = vec![vec![Value::Integer(42)]];
+        let result = QueryResult::new(columns, rows, Duration::from_millis(1234));
+
+        let config = PagerConfig::default();
+        let mut pager = Pager::new(&result, &config);
+        pager.term_width = 120;
+        pager.page_size = 10;
+
+        let output = snapshot_to_string(&pager);
+
+        assert!(
+            output.contains("1 row(s) in set (1.234s)"),
+            "Timing should use 3 decimal places. Got: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_exit_snapshot_box_drawing_characters() {
+        let result = create_test_result(2, 2);
+        let pager = create_pager_with_width(&result, 120);
+
+        let output = snapshot_to_string(&pager);
+
+        // Should use the same box-drawing characters as the pager
+        assert!(output.contains('╭'), "Top-left corner");
+        assert!(output.contains('╮'), "Top-right corner");
+        assert!(output.contains('╰'), "Bottom-left corner");
+        assert!(output.contains('╯'), "Bottom-right corner");
+        assert!(output.contains('┬'), "Top T-junction");
+        assert!(output.contains('┴'), "Bottom T-junction");
+        assert!(output.contains('├'), "Left T-junction");
+        assert!(output.contains('┤'), "Right T-junction");
+        assert!(output.contains('┼'), "Cross junction");
+        assert!(output.contains('─'), "Horizontal line");
+        assert!(output.contains('│'), "Vertical line");
     }
 }

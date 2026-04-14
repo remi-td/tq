@@ -6769,3 +6769,282 @@ The REPL metacommand handlers receive `CompletionState` which wraps the `Databas
 The extracted modules accept `&DatabaseClient` directly (obtained via `completion_state.client()`).
 The `/list databases` cache optimization in `CompletionState` is preserved for tab completion
 but is no longer used for the `/list databases` command output itself.
+
+## Pager Exit Snapshot
+
+When the user exits the pager (pressing `q` or `Esc`), the alternate screen is discarded and the terminal restores its previous content. The user loses all visual context of what they were looking at. The pager exit snapshot feature prints a static, plain-text reproduction of the last visible pager viewport to the normal terminal immediately after leaving the alternate screen.
+
+**Related Specification**: `docs/specifications/repl.md`
+
+### Architecture
+
+```
+Pager::run() event loop
+        |
+        v
+    User presses q/Esc
+        |
+        v
+    execute!(stdout, Show, LeaveAlternateScreen)
+    disable_raw_mode()
+        |
+        v
+    render_exit_snapshot(&mut io::stdout())   <-- NEW
+        |
+        v
+    Return Ok(()) to caller
+```
+
+The snapshot renders AFTER the alternate screen is closed and raw mode is disabled. This means:
+- Normal terminal semantics apply (newlines produce CR+LF automatically)
+- No crossterm commands are needed or allowed
+- The output is plain text that persists in the terminal scrollback
+
+### Design Approach
+
+The pager already has `#[cfg(test)]` methods (`render_border_to_buffer`, `render_header_to_buffer`, `render_row_to_buffer`) that produce plain-text output without ANSI escapes. The exit snapshot follows the same approach but is available in production builds and writes to a generic `&mut impl Write`.
+
+Rather than duplicating code, the design extracts the plain-text rendering logic into shared methods that are used by both the test buffer rendering and the exit snapshot. The `#[cfg(test)]` attribute is removed from these methods, and they are refactored to write to `&mut impl Write` instead of `&mut Vec<u8>`.
+
+### Method Signature
+
+```rust
+// src/commands/repl/pager.rs
+
+impl Pager {
+    /// Render a static snapshot of the current viewport to the given writer.
+    ///
+    /// Called after LeaveAlternateScreen and disable_raw_mode(), so normal
+    /// terminal semantics apply. Uses \n line endings (not \r\n).
+    /// No ANSI escape sequences. No crossterm commands.
+    ///
+    /// The snapshot includes:
+    /// 1. The table (borders, header, visible data rows) using box-drawing chars
+    /// 2. Hidden columns footer (if any columns are off-screen)
+    /// 3. Row count and timing footer
+    pub fn render_exit_snapshot(&self, writer: &mut impl Write) -> io::Result<()>
+}
+```
+
+### Rendering Logic
+
+The method computes the visible window from the pager's current state and renders each component sequentially.
+
+#### 1. Visible Window Calculation
+
+```rust
+let visible_cols = self.visible_column_count();
+let end_col = (self.col_offset + visible_cols).min(self.data.columns.len());
+let end_row = (self.row_offset + self.page_size).min(self.data.row_count);
+let hidden_left = self.hidden_columns_left();
+let hidden_right = self.hidden_columns_right();
+```
+
+These are the same calculations used by `render()` and the existing `render_to_buffer()`.
+
+#### 2. Table Body
+
+The table body is rendered using plain-text helper methods that write borders, headers, and data rows. Each helper writes directly to the `impl Write` parameter.
+
+**Border rendering** (`write_snapshot_border`):
+- Uses the same box-drawing characters as the pager: `╭─┬╮ ├─┼┤ ╰─┴╯`
+- Includes left/right indicator cell borders when columns are hidden
+- Uses `\n` line endings (not `\r\n`)
+
+**Header rendering** (`write_snapshot_header`):
+- Column names centered using `pad_to_display_width()` (same function as pager)
+- Left indicator shows `(+N cols)` when columns are hidden to the left
+- Right indicator shows `(+N cols)` when columns are hidden to the right
+- No color or styling
+
+**Data row rendering** (`write_snapshot_row`):
+- Cell values padded with `pad_to_display_width()` using each column's alignment
+- Left indicator shows `<--` arrows, right indicator shows `-->`
+- No NULL styling (plain `[NULL]` text)
+
+#### 3. Hidden Columns Footer
+
+When columns are hidden (either left or right), a footer message lists the hidden column names. This matches the format used by `src/format/table.rs`:
+
+```rust
+// Collect all hidden column names
+let total_hidden = hidden_left + hidden_right;
+if total_hidden > 0 {
+    writeln!(writer)?;
+    // Collect names from columns before col_offset and after end_col
+    let hidden_names: Vec<&str> = self.data.columns.iter().enumerate()
+        .filter(|(i, _)| *i < self.col_offset || *i >= end_col)
+        .map(|(_, col)| col.name.as_str())
+        .collect();
+    writeln!(writer, "{} columns hidden: {}", total_hidden, hidden_names.join(", "))?;
+    writeln!(writer, "Use \\format csv or \\format json to see all columns")?;
+}
+```
+
+Note: The REPL uses `\format` (backslash metacommand), not `--format` (batch flag), so the hint text adapts to the REPL context.
+
+#### 4. Row Count and Timing Footer
+
+```rust
+writeln!(writer, "{} row(s) in set ({:.3}s)", self.total_rows, self.execution_time.as_secs_f64())?;
+```
+
+This uses `self.total_rows` (the total result count, not just visible rows) and `self.execution_time` (already stored on the Pager struct).
+
+### Integration into `Pager::run()`
+
+The snapshot call is inserted after the alternate screen teardown:
+
+```rust
+pub fn run(&mut self) -> io::Result<()> {
+    let mut stdout = io::stdout();
+    enable_raw_mode()?;
+    execute!(stdout, EnterAlternateScreen, Hide)?;
+
+    // ... existing event loop ...
+
+    execute!(stdout, Show, LeaveAlternateScreen)?;
+    disable_raw_mode()?;
+
+    // NEW: Print static snapshot of last viewport
+    self.render_exit_snapshot(&mut io::stdout())?;
+
+    Ok(())
+}
+```
+
+### Refactoring: Shared Plain-Text Helpers
+
+The existing `#[cfg(test)]` methods (`render_border_to_buffer`, `render_header_to_buffer`, `render_row_to_buffer`) are refactored:
+
+1. Remove `#[cfg(test)]` attribute from the plain-text rendering helpers
+2. Change signature from `(&self, buffer: &mut Vec<u8>, ...)` to `(&self, writer: &mut impl Write, ...) -> io::Result<()>`
+3. The `render_to_buffer()` test method continues to exist as a thin wrapper that creates a `Vec<u8>` and calls the shared helpers
+4. The `render_exit_snapshot()` production method calls the same shared helpers plus the footer logic
+
+This eliminates code duplication and ensures the test rendering and production snapshot use identical logic.
+
+### Edge Cases
+
+| Scenario | Behavior |
+|----------|----------|
+| All columns visible | No hidden columns footer. No indicator cells in table. |
+| Scrolled to rightmost column | Left indicator shows `(+N cols)`, no right indicator. Hidden footer lists left-hidden columns. |
+| Scrolled to leftmost column (default) | No left indicator. Right indicator if columns overflow. Hidden footer lists right-hidden columns. |
+| Empty result set | Should not reach pager (pager activation requires rows > threshold). Defensive: render empty table with header only. |
+| Single row | Render normally. Row count shows "1 row(s) in set". |
+| Single column | Render normally. No hidden columns. |
+| Very wide terminal | All columns may fit. No indicators, no hidden footer. |
+
+### Unit Testing Strategy
+
+All snapshot tests write to a `Vec<u8>` buffer and verify the output string:
+
+```rust
+#[test]
+fn test_exit_snapshot_basic() {
+    let result = create_test_result(3, 5);
+    let pager = create_pager_with_width(&result, 120);
+    let mut buf = Vec::new();
+    pager.render_exit_snapshot(&mut buf).unwrap();
+    let output = String::from_utf8(buf).unwrap();
+
+    // Verify structure
+    assert!(output.starts_with("╭"));           // Top border
+    assert!(output.contains("col0"));            // Header
+    assert!(output.contains("val_0_0"));         // Data
+    assert!(output.contains("row(s) in set"));   // Timing footer
+}
+
+#[test]
+fn test_exit_snapshot_hidden_columns() {
+    let result = create_wide_test_result(15, 3);
+    let mut pager = create_pager_with_width(&result, 80);
+    pager.col_offset = 3;
+    let mut buf = Vec::new();
+    pager.render_exit_snapshot(&mut buf).unwrap();
+    let output = String::from_utf8(buf).unwrap();
+
+    assert!(output.contains("columns hidden:"));
+    assert!(output.contains("\\format csv or \\format json"));
+}
+
+#[test]
+fn test_exit_snapshot_all_columns_visible() {
+    let result = create_test_result(2, 2);
+    let pager = create_pager_with_width(&result, 200);
+    let mut buf = Vec::new();
+    pager.render_exit_snapshot(&mut buf).unwrap();
+    let output = String::from_utf8(buf).unwrap();
+
+    assert!(!output.contains("columns hidden"));
+    assert!(!output.contains("<--"));
+    assert!(!output.contains("-->"));
+}
+
+#[test]
+fn test_exit_snapshot_no_ansi() {
+    let result = create_test_result(3, 3);
+    let pager = create_pager_with_width(&result, 120);
+    let mut buf = Vec::new();
+    pager.render_exit_snapshot(&mut buf).unwrap();
+    let output = String::from_utf8(buf).unwrap();
+
+    // Must not contain ANSI escape sequences
+    assert!(!output.contains("\x1b["));
+}
+
+#[test]
+fn test_exit_snapshot_uses_newline_not_cr() {
+    let result = create_test_result(2, 2);
+    let pager = create_pager_with_width(&result, 120);
+    let mut buf = Vec::new();
+    pager.render_exit_snapshot(&mut buf).unwrap();
+    let output = String::from_utf8(buf).unwrap();
+
+    // Must use \n, not \r\n
+    assert!(!output.contains("\r\n"));
+    assert!(output.contains("\n"));
+}
+
+#[test]
+fn test_exit_snapshot_row_count_shows_total() {
+    // Verify that the footer shows total rows, not just visible page
+    let result = create_test_result(2, 100);
+    let mut pager = create_pager_with_width(&result, 120);
+    pager.page_size = 20;
+    let mut buf = Vec::new();
+    pager.render_exit_snapshot(&mut buf).unwrap();
+    let output = String::from_utf8(buf).unwrap();
+
+    assert!(output.contains("100 row(s) in set"));
+}
+```
+
+### Code Linkage
+
+| Component | File Path | Key Functions |
+|-----------|-----------|---------------|
+| Snapshot entry point | `src/commands/repl/pager.rs` | `Pager::render_exit_snapshot()` |
+| Plain-text border | `src/commands/repl/pager.rs` | `Pager::write_snapshot_border()` |
+| Plain-text header | `src/commands/repl/pager.rs` | `Pager::write_snapshot_header()` |
+| Plain-text row | `src/commands/repl/pager.rs` | `Pager::write_snapshot_row()` |
+| Integration point | `src/commands/repl/pager.rs` | `Pager::run()` (after LeaveAlternateScreen) |
+| Test buffer rendering | `src/commands/repl/pager.rs` | `Pager::render_to_buffer()` (test-only wrapper) |
+
+### Design Decisions
+
+**Why not reuse `format/table.rs`?**
+The table formatter in `format/table.rs` uses `comfy-table` style rendering and its own column selection logic that starts from column 0. The pager snapshot must render from an arbitrary `col_offset` using the pager's own column width calculations and indicator cells. Reusing the table formatter would require passing the pager's state through an incompatible interface. The code duplication is minimal since the plain-text helpers already exist in pager.rs for testing.
+
+**Why `&mut impl Write` instead of returning a `String`?**
+Writing to a generic `Write` implementor follows the established pattern in `format/table.rs` and enables:
+- Direct output to stdout without intermediate allocation
+- Unit testing via `Vec<u8>` buffer
+- Potential future use with file output
+
+**Why show `\format` instead of `--format` in the hint?**
+The pager only runs in REPL mode. In the REPL, users change format with the `\format` metacommand, not the `--format` CLI flag. The hint should match the available action.
+
+**Why not strip indicator cells from the snapshot?**
+The indicators (`(+N cols)`, `<--`, `-->`) provide valuable context about what portion of the result is visible. Stripping them would make the snapshot less informative than the pager view. The hidden columns footer provides the complete list of column names for reference.
