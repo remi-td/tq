@@ -301,7 +301,7 @@ fn test_query_pagination_json_envelope() {
 
         // Field 4: total_rows — must be present (integer or null)
         assert!(
-            !pagination.get("total_rows").is_none(),
+            pagination.get("total_rows").is_some(),
             "pagination must contain 'total_rows' field (may be null), got: {:?}",
             pagination
         );

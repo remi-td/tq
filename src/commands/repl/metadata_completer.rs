@@ -385,6 +385,12 @@ const METACOMMANDS: &[MetacommandDef] = &[
         aliases: &[],
         description: "View session logon/logoff history and trends",
     },
+    // Resources command for PMON resource monitoring
+    MetacommandDef {
+        name: "resources",
+        aliases: &["res", "perf"],
+        description: "System resource usage (CPU, I/O, memory)",
+    },
 ];
 
 /// Test helper: returns metacommand names matching a prefix

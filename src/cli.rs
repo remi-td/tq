@@ -347,6 +347,17 @@ pub enum Command {
     /// Example: tq history --last 24h
     ///          tq history --last 7d --user alice
     History(HistoryArgs),
+
+    /// Display system resource usage (CPU, I/O, memory)
+    ///
+    /// Shows resource metrics from Teradata ResUsage tables. Default mode
+    /// shows per-VPROC metrics (virtual). Use --physical for per-node metrics.
+    ///
+    /// Requires SELECT privilege on DBC.ResUsageSPMA/DBC.ResUsageSVPR.
+    ///
+    /// Example: tq resources
+    ///          tq resources --physical
+    Resources(ResourcesArgs),
 }
 
 impl Command {
@@ -370,6 +381,7 @@ impl Command {
             Command::Explain(a) => Some(a.format),
             Command::Skew(a) => Some(a.format),
             Command::History(a) => Some(a.format),
+            Command::Resources(a) => Some(a.format),
             Command::Ping(_) | Command::Repl(_) | Command::Help(_) | Command::Profiles | Command::Profile(_) => None,
         }
     }
@@ -1043,6 +1055,54 @@ pub struct HistoryArgs {
     /// Write output to file instead of stdout
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+}
+
+/// Arguments for the resources command
+///
+/// Displays system resource usage from Teradata ResUsage tables.
+/// Default mode shows per-VPROC metrics; use --physical for per-node metrics.
+#[derive(Parser, Debug)]
+pub struct ResourcesArgs {
+    /// Show per-node (physical) metrics instead of per-VPROC (virtual)
+    ///
+    /// Default: virtual mode using DBC.ResUsageSVPR
+    /// Physical mode uses DBC.ResUsageSPMA
+    #[arg(long)]
+    pub physical: bool,
+
+    /// Output format
+    ///
+    /// table: Human-readable ASCII table (default)
+    /// json: JSON object with resource metrics and skew
+    /// csv: Comma-separated values
+    /// markdown/md: GitHub-Flavored Markdown table
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    ///
+    /// If the file exists, it will be overwritten.
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+
+    /// Number of rows per page (enables pagination)
+    ///
+    /// When specified, results are split into pages of this size.
+    /// Use with --page to select which page to retrieve.
+    #[arg(long, value_name = "N")]
+    pub page_size: Option<usize>,
+
+    /// Page number to retrieve (1-based, default: 1)
+    ///
+    /// Requires --page-size. Returns the specified page of results.
+    #[arg(long, value_name = "P", default_value = "1", requires = "page_size")]
+    pub page: Option<usize>,
 }
 
 /// Arguments for the sample command (Sprint 33)

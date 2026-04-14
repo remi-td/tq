@@ -14,6 +14,7 @@
    - [sessions - List Active Sessions](#sessions---list-active-sessions)
    - [sysconfig - System Configuration Summary](#sysconfig---system-configuration-summary)
    - [locks - Lock and Blocking Information](#locks---lock-and-blocking-information)
+   - [resources - PMON Resource Usage](#resources---pmon-resource-usage)
    - [query-inspect - Inspect Session Query Text](#query-inspect---inspect-session-query-text)
    - [inspect - Inspect a Database Object](#inspect---inspect-a-database-object)
    - [describe - Describe Table Structure](#describe---describe-table-structure)
@@ -53,6 +54,7 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 - `sessions` - List active Teradata sessions
 - `sysconfig` - Display system configuration (version and AMP count)
 - `locks` - Display current lock contention and blocking chains
+- `resources` - Display CPU, I/O, and memory metrics from PMON resource usage tables
 - `query-inspect` - Show SQL text for a specific session
 - `inspect` - Comprehensive inspection of a database object (type, columns, indexes, size, dependencies)
 - `describe` - Show column structure and indexes for a table or view
@@ -1044,6 +1046,284 @@ fi
 - Execute `tq locks --output locks.txt` and verify file creation
 - Trigger privilege error and verify helpful error message with GRANT example
 - Verify exit code 0 on success (including no-locks case), 1 on privilege/connection errors
+
+---
+
+### resources - PMON Resource Usage
+
+**Purpose**: Display CPU, I/O, and memory metrics from Teradata's ResUsage tables for the most recent collection period, enabling DBAs to assess system-wide resource consumption and detect imbalances across VPROCs or physical nodes
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] resources [OPTIONS]
+```
+
+**Options**:
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--virtual` | - | flag | true | Show per-VPROC metrics from ResUsageSVPR (default mode) |
+| `--physical` | - | flag | false | Show per-node metrics from ResUsageSPMA |
+| `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv` |
+| `--output` | `-o` | path | stdout | Write output to file |
+| `--page-size` | - | integer | 50 | Number of rows per page in table format |
+| `--page` | - | integer | 1 | Page number to display (1-based) |
+
+Note: `--virtual` and `--physical` are mutually exclusive. If both are specified, the command exits with a usage error (exit code 2).
+
+**Examples**:
+```bash
+# Show per-VPROC resource metrics (default)
+tq resources
+
+# Show per-node (physical) resource metrics
+tq resources --physical
+
+# Explicitly request virtual mode (same as default)
+tq resources --virtual
+
+# JSON output for scripting
+tq resources --format json
+
+# Physical mode with CSV export
+tq resources --physical --format csv --output resources.csv
+tq resources --physical -f csv -o resources.csv
+
+# Pipe to processing tool
+tq resources --format json | jq '.rows[] | select(.["AvgCPU%"] > 80)'
+
+# Using connection profile
+tq --profile prod resources
+
+# Page through large result sets
+tq resources --page-size 20 --page 2
+```
+
+**Output (Table Format - Virtual Mode, default)**:
+```
+Resource Usage (Virtual Mode) — Collection period ending: 2026-04-14 10:15:00
+
+┌───────┬──────────┬──────────┬──────────┬──────────┬────────────┬───────────┐
+│ VPROC │ AvgCPU%  │ PeakCPU% │ AvgIO/s  │ PeakIO/s │ MemUsed MB │ MemAvl MB │
+├───────┼──────────┼──────────┼──────────┼──────────┼────────────┼───────────┤
+│     0 │    12.34 │    45.67 │   1023.4 │   4512.0 │      48234 │     15766 │
+│     1 │    11.89 │    38.22 │    987.1 │   3890.5 │      47901 │     16099 │
+│     2 │    35.71 │    82.45 │   3102.8 │   9231.6 │      52100 │     11900 │
+│     3 │    12.01 │    40.10 │    998.2 │   3754.0 │      48050 │     15950 │
+└───────┴──────────┴──────────┴──────────┴──────────┴────────────┴───────────┘
+
+4 VPROCs | Avg CPU: 18.0% | Peak CPU: 82.5% | CPU Skew: 31.2% ⚠ | IO Skew: 28.9% ⚠
+(Query time: 0.182s)
+```
+
+**Output (Table Format - Physical Mode)**:
+```
+Resource Usage (Physical Mode) — Collection period ending: 2026-04-14 10:15:00
+
+┌──────┬──────────┬──────────┬──────────────┬──────────────┬────────────┬───────────┐
+│ Node │ AvgCPU%  │ PeakCPU% │  AvgIOCnt    │  PeakIOCnt   │ MemUsed MB │ MemAvl MB │
+├──────┼──────────┼──────────┼──────────────┼──────────────┼────────────┼───────────┤
+│    0 │    14.23 │    48.90 │      2034567 │      8912345 │     192012 │     63988 │
+│    1 │    13.55 │    41.30 │      1987234 │      7823109 │     190341 │     65659 │
+│    2 │    37.88 │    85.10 │      6203450 │     18423000 │     208400 │     47600 │
+│    3 │    13.78 │    43.20 │      1998432 │      7504800 │     191200 │     64800 │
+└──────┴──────────┴──────────┴──────────────┴──────────────┴────────────┴───────────┘
+
+4 nodes | Avg CPU: 19.9% | Peak CPU: 85.1% | CPU Skew: 30.8% ⚠ | IO Skew: 29.4% ⚠
+(Query time: 0.204s)
+```
+
+**Summary Footer Format**:
+
+The footer always appears after the table and contains:
+- Count of VPROCs or nodes
+- System-wide average CPU%
+- System-wide peak CPU%
+- CPU skew indicator with warning symbol if skew exceeds threshold
+- IO skew indicator with warning symbol if skew exceeds threshold
+- Query execution time
+
+Skew warning thresholds:
+- `⚠` (warning): skew >= 20%
+- No symbol: skew < 20%
+
+**Output (JSON Format)**:
+```json
+{
+  "mode": "virtual",
+  "collection_end": "2026-04-14T10:15:00",
+  "rows": [
+    {
+      "VPROC": 0,
+      "AvgCPU%": 12.34,
+      "PeakCPU%": 45.67,
+      "AvgIO/s": 1023.4,
+      "PeakIO/s": 4512.0,
+      "MemUsedMB": 48234,
+      "MemAvailMB": 15766
+    },
+    {
+      "VPROC": 1,
+      "AvgCPU%": 11.89,
+      "PeakCPU%": 38.22,
+      "AvgIO/s": 987.1,
+      "PeakIO/s": 3890.5,
+      "MemUsedMB": 47901,
+      "MemAvailMB": 16099
+    }
+  ],
+  "summary": {
+    "count": 4,
+    "avg_cpu_pct": 18.0,
+    "peak_cpu_pct": 82.45,
+    "cpu_skew_pct": 31.2,
+    "io_skew_pct": 28.9
+  }
+}
+```
+
+For `--physical` mode, the `mode` field is `"physical"`, rows use `"Node"` instead of `"VPROC"`, and `"AvgIO/s"`/`"PeakIO/s"` become `"AvgIOCnt"`/`"PeakIOCnt"` (raw I/O counts from the physical table).
+
+**Output (CSV Format)**:
+```csv
+VPROC,AvgCPU%,PeakCPU%,AvgIO/s,PeakIO/s,MemUsedMB,MemAvailMB
+0,12.34,45.67,1023.4,4512.0,48234,15766
+1,11.89,38.22,987.1,3890.5,47901,16099
+2,35.71,82.45,3102.8,9231.6,52100,11900
+3,12.01,40.10,998.2,3754.0,48050,15950
+```
+
+Note: The summary footer is omitted from CSV output. The collection period timestamp is also omitted.
+
+**Column Descriptions (Virtual Mode)**:
+
+| Column | Type | Source | Description |
+|--------|------|--------|-------------|
+| VPROC | INTEGER | ResUsageSVPR.vproc | Virtual processor ID |
+| AvgCPU% | DECIMAL(5,2) | Derived from ResUsageSVPR | Average CPU utilization percentage during the collection period |
+| PeakCPU% | DECIMAL(5,2) | Derived from ResUsageSVPR | Peak CPU utilization percentage during the collection period |
+| AvgIO/s | DECIMAL(10,1) | Derived from ResUsageSVPR | Average I/O operations per second during the collection period |
+| PeakIO/s | DECIMAL(10,1) | Derived from ResUsageSVPR | Peak I/O operations per second during the collection period |
+| MemUsed MB | INTEGER | ResUsageSVPR | Memory used in megabytes at the end of the collection period |
+| MemAvl MB | INTEGER | ResUsageSVPR | Memory available in megabytes at the end of the collection period |
+
+**Column Descriptions (Physical Mode)**:
+
+| Column | Type | Source | Description |
+|--------|------|--------|-------------|
+| Node | INTEGER | ResUsageSPMA.nodenumber | Physical node number |
+| AvgCPU% | DECIMAL(5,2) | Derived from ResUsageSPMA | Average CPU utilization percentage during the collection period |
+| PeakCPU% | DECIMAL(5,2) | Derived from ResUsageSPMA | Peak CPU utilization percentage during the collection period |
+| AvgIOCnt | BIGINT | ResUsageSPMA | Average total I/O count during the collection period |
+| PeakIOCnt | BIGINT | ResUsageSPMA | Peak total I/O count during the collection period |
+| MemUsed MB | INTEGER | ResUsageSPMA | Memory used in megabytes at the end of the collection period |
+| MemAvl MB | INTEGER | ResUsageSPMA | Memory available in megabytes at the end of the collection period |
+
+**Behavior Requirements**:
+
+1. **Standalone Operation**: Does NOT require a SQL file argument
+2. **Default Mode**: Virtual mode (`--virtual`) is the default when neither `--virtual` nor `--physical` is specified
+3. **Data Source (Virtual)**: Queries `ResUsageSVPR` for the most recent collection period
+4. **Data Source (Physical)**: Queries `ResUsageSPMA` for the most recent collection period
+5. **Most Recent Period**: Both modes retrieve only the single most recent completed collection period (identified by the maximum `TheDate`/`TheTime` combination)
+6. **Row Ordering**: Rows are sorted ascending by VPROC ID (virtual mode) or Node number (physical mode)
+7. **Skew Calculation**: CPU skew and IO skew are computed as `(max - avg) / max * 100` across all VPROCs or nodes
+8. **Skew Warning**: The `⚠` symbol appears in the summary footer when skew >= 20%
+9. **Pagination**: `--page-size` and `--page` apply only to table format output. JSON and CSV always return all rows
+10. **Format Compatibility**: Works with `--format table`, `--format csv`, `--format json`
+11. **Output Destination**: Respects `--output` flag for file output, otherwise stdout
+12. **Collection Timestamp**: Displayed as a header line in table format; present in JSON `collection_end` field; omitted from CSV
+
+**Error Handling**:
+
+**Insufficient Privileges**:
+```
+Error: Unable to retrieve resource usage data
+Reason: SELECT permission denied on ResUsageSVPR
+
+This command requires SELECT access to ResUsage tables.
+Contact your DBA to request access or use the GRANT statement:
+  GRANT SELECT ON ResUsageSVPR TO <your_username>;
+  GRANT SELECT ON ResUsageSPMA TO <your_username>;
+
+Exit code: 1
+```
+
+**No Data Available**:
+```
+Resource Usage (Virtual Mode) — No data available
+
+No resource usage data found in ResUsageSVPR.
+The ResUsage logging may not be enabled on this system.
+Contact your DBA to enable ResUsage logging (PMON feature).
+
+(Query time: 0.041s)
+```
+
+**Mutually Exclusive Flags**:
+```
+Error: --virtual and --physical are mutually exclusive
+Usage: tq resources [--virtual | --physical]
+
+Exit code: 2
+```
+
+**Connection Failed**:
+```
+Error: Failed to connect to prod-td01.company.com:1025
+Reason: Connection refused
+
+Troubleshooting:
+  - Check that the hostname and port are correct
+  - Verify the database is running
+  - Check firewall settings
+
+Exit code: 1
+```
+
+**Exit Codes**:
+- `0`: Resource usage displayed successfully (including the case of no data)
+- `1`: Query error (privilege denied, connection failed, table not available)
+- `2`: Usage error (mutually exclusive flags, invalid format, invalid output path)
+
+**Integration with Scripting**:
+
+The `resources` command is designed for both interactive use and automation:
+
+```bash
+# Alert when any VPROC CPU exceeds 80%
+tq resources --format json | \
+  jq '.rows[] | select(.["AvgCPU%"] > 80) | .VPROC' | \
+  while read vp; do echo "High CPU on VPROC $vp"; done
+
+# Export snapshot for trending
+tq resources --physical --format csv \
+  --output "/var/log/td-resources/$(date +%Y%m%d_%H%M%S)_physical.csv"
+
+# Check system-wide CPU skew
+SKEW=$(tq resources --format json | jq '.summary.cpu_skew_pct')
+if (( $(echo "$SKEW > 25" | bc -l) )); then
+  echo "WARNING: High CPU skew detected ($SKEW%)"
+fi
+
+# Extract memory pressure across all VPROCs
+tq resources --format json | \
+  jq '.rows[] | {vproc: .VPROC, used_pct: (.MemUsedMB / (.MemUsedMB + .MemAvailMB) * 100)}'
+```
+
+**Acceptance Test**:
+- Execute `tq resources` with no flags and verify virtual mode output with all 7 columns: VPROC, AvgCPU%, PeakCPU%, AvgIO/s, PeakIO/s, MemUsed MB, MemAvl MB
+- Execute `tq resources --physical` and verify physical mode output with all 7 columns: Node, AvgCPU%, PeakCPU%, AvgIOCnt, PeakIOCnt, MemUsed MB, MemAvl MB
+- Verify collection period timestamp appears as a header line in table format
+- Verify summary footer includes VPROC/node count, avg CPU%, peak CPU%, CPU skew%, IO skew%
+- Verify `⚠` appears in footer when skew >= 20%, absent when skew < 20%
+- Execute `tq resources --format csv` and verify CSV output with correct column headers (no footer)
+- Execute `tq resources --format json` and verify valid JSON with `mode`, `collection_end`, `rows`, and `summary` keys
+- Execute `tq resources --output resources.txt` and verify file creation
+- Execute `tq resources --virtual --physical` and verify usage error (exit code 2)
+- Execute when ResUsageSVPR has no rows and verify "No data available" message (exit code 0)
+- Trigger privilege error and verify helpful error message with GRANT examples (exit code 1)
+- Verify rows are sorted ascending by VPROC ID in virtual mode and by Node in physical mode
+- Execute `tq resources --page-size 10 --page 2` and verify second page of rows is shown
 
 ---
 

@@ -1041,7 +1041,7 @@ pub fn estimate_table_width(result: &QueryResult) -> usize {
             max_value_width = max_value_width.max(value.trim().width());
         }
 
-        let display_width = max_value_width.max(MIN_COLUMN_WIDTH).min(MAX_COLUMN_WIDTH);
+        let display_width = max_value_width.clamp(MIN_COLUMN_WIDTH, MAX_COLUMN_WIDTH);
         // Each column renders as: " " + content(display_width) + " " + "│"
         width += display_width + 3;
     }

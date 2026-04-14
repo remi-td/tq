@@ -315,11 +315,14 @@ fn test_format_json_output() {
     json::write(&result, &mut output, &options).unwrap();
     let output_str = String::from_utf8(output).unwrap();
 
-    // Parse as JSON to validate
+    // Parse as JSON to validate - envelope format since Sprint 53
     let parsed: serde_json::Value = serde_json::from_str(&output_str).unwrap();
 
-    assert!(parsed.is_array());
-    let arr = parsed.as_array().unwrap();
+    assert!(parsed.is_object());
+    assert_eq!(parsed["ok"], true);
+    assert_eq!(parsed["row_count"], 2);
+
+    let arr = parsed["data"].as_array().unwrap();
     assert_eq!(arr.len(), 2);
 
     // Check first row
@@ -344,9 +347,12 @@ fn test_format_json_empty() {
     json::write(&result, &mut output, &options).unwrap();
     let output_str = String::from_utf8(output).unwrap();
 
+    // Envelope format since Sprint 53
     let parsed: serde_json::Value = serde_json::from_str(&output_str).unwrap();
-    assert!(parsed.is_array());
-    assert_eq!(parsed.as_array().unwrap().len(), 0);
+    assert!(parsed.is_object());
+    assert_eq!(parsed["ok"], true);
+    assert_eq!(parsed["row_count"], 0);
+    assert_eq!(parsed["data"].as_array().unwrap().len(), 0);
 }
 
 #[test]

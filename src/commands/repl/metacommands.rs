@@ -256,6 +256,14 @@ pub fn handle_metacommand<W: Write>(
             )?;
         }
 
+        // Resources command (basic handler - no client available)
+        "resources" | "res" | "perf" => {
+            writeln!(
+                writer,
+                "The /resources command requires full REPL mode with database connection."
+            )?;
+        }
+
         // Sprint 49: Session control (basic handler - no client available)
         "abort" => {
             writeln!(
@@ -679,6 +687,16 @@ pub fn handle_metacommand_with_state<W: Write>(
             )?;
         }
 
+        // Resources command for PMON resource monitoring
+        "resources" | "res" | "perf" => {
+            let physical = args.iter().any(|a| a.eq_ignore_ascii_case("--physical"));
+            crate::commands::resources::execute_for_repl(
+                completion_state.client(),
+                physical,
+                writer,
+            )?;
+        }
+
         // Sprint 49: Abort session/query command
         "abort" => {
             if args.is_empty() {
@@ -920,6 +938,10 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(
         writer,
         "  /history [--last <dur>] Session logon/logoff history"
+    )?;
+    writeln!(
+        writer,
+        "  /resources [--physical] System resource usage (CPU, I/O, memory)"
     )?;
     writeln!(writer)?;
     writeln!(writer, "Variable Substitution:")?;

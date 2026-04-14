@@ -1272,15 +1272,13 @@ mod tests {
             Some("SELECT * FROM t"),
         ];
         let mut definition = String::new();
-        for maybe_text in &rows {
-            if let Some(text) = maybe_text {
-                if *text != "[NULL]" {
-                    let trimmed = text.trim_end();
-                    if !definition.is_empty() && !trimmed.is_empty() {
-                        definition.push('\n');
-                    }
-                    definition.push_str(trimmed);
+        for text in rows.iter().flatten() {
+            if *text != "[NULL]" {
+                let trimmed = text.trim_end();
+                if !definition.is_empty() && !trimmed.is_empty() {
+                    definition.push('\n');
                 }
+                definition.push_str(trimmed);
             }
         }
         let result = definition.trim().to_string();

@@ -79,7 +79,7 @@ pub mod sql;
 pub use cli::{
     AbortArgs, Cli, Command, ExplainArgs, GlobalOpts, HelpArgs, HelpTopic,
     HistoryArgs, InspectArgs, ListArgs, ListObjectType, LogonMechanism, OutputFormat, PeekArgs,
-    PingArgs, ProfileAction, QueryArgs, ReplArgs, SampleArgs, ShowIndexesArgs,
+    PingArgs, ProfileAction, QueryArgs, ReplArgs, ResourcesArgs, SampleArgs, ShowIndexesArgs,
     SkewArgs,
 };
 pub use config::{Config, ConnectionSettings};

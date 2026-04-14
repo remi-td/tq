@@ -417,6 +417,7 @@ tq> SELECT COUNT(*) FROM employees WHERE dept = 'IT';
 - `/reconnect` - Reconnect to database
 - `/ping` - Test connection
 - `/query` - Show current SQL query for a session
+- `/resources` - Display CPU, I/O, and memory metrics from PMON resource usage tables
 - `/sample` - Show random sample
 - `/search` - Search for tables, columns, or views by keyword across all databases
 - `/peek` - Show first rows and column info
@@ -461,6 +462,7 @@ Available metacommands:
     /quit        Exit REPL
     /reconnect   Reconnect to database
     /repeat      Re-execute last query
+    /resources   Show CPU, I/O, and memory metrics from PMON resource usage tables
     /sample      Show random sample
     /search      Search for tables, columns, or views by keyword across all databases
     /session     Show session info
@@ -1783,6 +1785,7 @@ Suggestions:
 | `/sessions` | `/s` | List active Teradata sessions with performance metrics | `/sessions` |
 | `/sysconfig` | `/sc` | Display system configuration: version and AMP count | `/sysconfig` |
 | `/locks` | `/lk` | Display current lock contention and blocking chains | `/locks` |
+| `/resources` | `/res`, `/perf` | Show CPU, I/O, and memory metrics; `--physical` for node-level view | `/resources` |
 | `/query <session_id>` | `/qi` | Show the SQL text of a session's most recent query | `/query 1023` |
 
 **`/list databases` Metacommand**
@@ -3084,6 +3087,319 @@ Matching metacommands:
 - Trigger privilege error and verify helpful error message with GRANT example
 - Type `/lk<TAB>` and verify tab completion resolves to `/locks`
 - Execute `/help locks` and verify extended help with lock mode definitions is displayed
+
+---
+
+**`/resources` Metacommand**
+
+**Requirement:** Display CPU, I/O, and memory metrics from Teradata's ResUsage tables for the most recent collection period so DBAs can assess system-wide resource consumption and detect imbalances across VPROCs or physical nodes.
+
+**Syntax:**
+```
+/resources [--virtual | --physical]
+/res [--virtual | --physical]    -- Short alias
+/perf [--virtual | --physical]   -- Performance alias
+```
+
+`--virtual` (default) shows per-VPROC metrics from `ResUsageSVPR`.
+`--physical` shows per-node metrics from `ResUsageSPMA`.
+
+**Output Format (Virtual Mode, default):**
+```
+tq> /resources
+
+Resource Usage (Virtual Mode) — Collection period ending: 2026-04-14 10:15:00
+
+┌───────┬──────────┬──────────┬──────────┬──────────┬────────────┬───────────┐
+│ VPROC │ AvgCPU%  │ PeakCPU% │ AvgIO/s  │ PeakIO/s │ MemUsed MB │ MemAvl MB │
+├───────┼──────────┼──────────┼──────────┼──────────┼────────────┼───────────┤
+│     0 │    12.34 │    45.67 │   1023.4 │   4512.0 │      48234 │     15766 │
+│     1 │    11.89 │    38.22 │    987.1 │   3890.5 │      47901 │     16099 │
+│     2 │    35.71 │    82.45 │   3102.8 │   9231.6 │      52100 │     11900 │
+│     3 │    12.01 │    40.10 │    998.2 │   3754.0 │      48050 │     15950 │
+└───────┴──────────┴──────────┴──────────┴──────────┴────────────┴───────────┘
+
+4 VPROCs | Avg CPU: 18.0% | Peak CPU: 82.5% | CPU Skew: 31.2% ⚠ | IO Skew: 28.9% ⚠
+(Query time: 0.182s)
+```
+
+**Output Format (Physical Mode):**
+```
+tq> /resources --physical
+
+Resource Usage (Physical Mode) — Collection period ending: 2026-04-14 10:15:00
+
+┌──────┬──────────┬──────────┬──────────────┬──────────────┬────────────┬───────────┐
+│ Node │ AvgCPU%  │ PeakCPU% │  AvgIOCnt    │  PeakIOCnt   │ MemUsed MB │ MemAvl MB │
+├──────┼──────────┼──────────┼──────────────┼──────────────┼────────────┼───────────┤
+│    0 │    14.23 │    48.90 │      2034567 │      8912345 │     192012 │     63988 │
+│    1 │    13.55 │    41.30 │      1987234 │      7823109 │     190341 │     65659 │
+│    2 │    37.88 │    85.10 │      6203450 │     18423000 │     208400 │     47600 │
+│    3 │    13.78 │    43.20 │      1998432 │      7504800 │     191200 │     64800 │
+└──────┴──────────┴──────────┴──────────────┴──────────────┴────────────┴───────────┘
+
+4 nodes | Avg CPU: 19.9% | Peak CPU: 85.1% | CPU Skew: 30.8% ⚠ | IO Skew: 29.4% ⚠
+(Query time: 0.204s)
+```
+
+**Output Format (No Data):**
+```
+tq> /resources
+
+Resource Usage (Virtual Mode) — No data available
+
+No resource usage data found in ResUsageSVPR.
+The ResUsage logging may not be enabled on this system.
+Contact your DBA to enable ResUsage logging (PMON feature).
+
+(Query time: 0.041s)
+```
+
+**Column Descriptions (Virtual Mode):**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| VPROC | INTEGER | Virtual processor ID |
+| AvgCPU% | DECIMAL(5,2) | Average CPU utilization % during the collection period |
+| PeakCPU% | DECIMAL(5,2) | Peak CPU utilization % during the collection period |
+| AvgIO/s | DECIMAL(10,1) | Average I/O operations per second during the collection period |
+| PeakIO/s | DECIMAL(10,1) | Peak I/O operations per second during the collection period |
+| MemUsed MB | INTEGER | Memory used in megabytes at end of collection period |
+| MemAvl MB | INTEGER | Memory available in megabytes at end of collection period |
+
+**Column Descriptions (Physical Mode):**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| Node | INTEGER | Physical node number |
+| AvgCPU% | DECIMAL(5,2) | Average CPU utilization % during the collection period |
+| PeakCPU% | DECIMAL(5,2) | Peak CPU utilization % during the collection period |
+| AvgIOCnt | BIGINT | Average total I/O count during the collection period |
+| PeakIOCnt | BIGINT | Peak total I/O count during the collection period |
+| MemUsed MB | INTEGER | Memory used in megabytes at end of collection period |
+| MemAvl MB | INTEGER | Memory available in megabytes at end of collection period |
+
+**Behavior Requirements:**
+
+**REQ-RES-001: Command Availability and Aliases**
+
+The `/resources` command SHALL be available as a metacommand in REPL mode with the following characteristics:
+
+1. **REQ-RES-001.1** - Primary command: `/resources`
+2. **REQ-RES-001.2** - Short alias: `/res`
+3. **REQ-RES-001.3** - Performance alias: `/perf`
+4. **REQ-RES-001.4** - All three forms SHALL execute identically
+5. **REQ-RES-001.5** - Command SHALL be case-insensitive (`/Resources`, `/RESOURCES`, `/res`, `/perf` all valid)
+6. **REQ-RES-001.6** - Without arguments, defaults to virtual mode
+
+**REQ-RES-002: Mode Selection**
+
+The command supports two display modes controlled by optional flags:
+
+1. **REQ-RES-002.1** - `--virtual` flag (or no flag): Query `ResUsageSVPR` for per-VPROC metrics
+2. **REQ-RES-002.2** - `--physical` flag: Query `ResUsageSPMA` for per-node metrics
+3. **REQ-RES-002.3** - `--virtual` and `--physical` are mutually exclusive; specifying both SHALL produce an error and return to prompt
+4. **REQ-RES-002.4** - Flag SHALL be accepted with or without the `--` prefix consistent with REPL metacommand conventions
+
+**REQ-RES-003: Data Source and Query Execution**
+
+The command SHALL retrieve the most recent completed collection period:
+
+1. **REQ-RES-003.1** - Virtual mode data source: `ResUsageSVPR`
+2. **REQ-RES-003.2** - Physical mode data source: `ResUsageSPMA`
+3. **REQ-RES-003.3** - Only the single most recent collection period SHALL be shown (identified by the maximum `TheDate`/`TheTime` combination in the respective table)
+4. **REQ-RES-003.4** - Query execution time SHALL be displayed in summary footer
+5. **REQ-RES-003.5** - Queries SHALL be read-only (no side effects)
+6. **REQ-RES-003.6** - If the target table is unavailable, the command SHALL report the unavailability clearly rather than silently returning empty results
+
+**REQ-RES-004: Output Formatting and Display**
+
+1. **REQ-RES-004.1** - Default output format: Table (box-drawing characters)
+2. **REQ-RES-004.2** - Header line format: `Resource Usage (<Mode> Mode) — Collection period ending: YYYY-MM-DD HH:MM:SS`
+3. **REQ-RES-004.3** - Numeric columns SHALL be right-aligned
+4. **REQ-RES-004.4** - Column widths SHALL auto-adjust to content (minimum width: header width)
+5. **REQ-RES-004.5** - Rows SHALL be sorted ascending by VPROC ID (virtual mode) or Node number (physical mode)
+6. **REQ-RES-004.6** - Summary footer format: `N VPROCs | Avg CPU: X.X% | Peak CPU: X.X% | CPU Skew: X.X%[⚠] | IO Skew: X.X%[⚠]`
+   Physical mode uses `N nodes` instead of `N VPROCs`
+7. **REQ-RES-004.7** - Skew warning: The `⚠` symbol SHALL appear when skew >= 20%; absent when skew < 20%
+8. **REQ-RES-004.8** - Skew calculation: `(max_value - avg_value) / max_value * 100` across all VPROCs or nodes
+9. **REQ-RES-004.9** - When no data is available, display the no-data message instead of an empty table
+
+**REQ-RES-005: Error Handling and Edge Cases**
+
+**Privilege error:**
+```
+tq> /resources
+Error: Unable to retrieve resource usage data
+Reason: SELECT permission denied on ResUsageSVPR
+
+This command requires SELECT access to ResUsage tables.
+Contact your DBA to request access:
+  GRANT SELECT ON ResUsageSVPR TO <your_username>;
+  GRANT SELECT ON ResUsageSPMA TO <your_username>;
+```
+
+**Mutually exclusive flags:**
+```
+tq> /resources --virtual --physical
+Error: --virtual and --physical are mutually exclusive
+Usage: /resources [--virtual | --physical]
+```
+
+**Connection error:**
+```
+tq> /resources
+Error: Connection to prod-td01.company.com lost.
+Use /reconnect to re-establish the connection.
+```
+
+Requirements:
+
+1. **REQ-RES-005.1** - Privilege errors SHALL include helpful explanation and GRANT statement examples for both ResUsage tables
+2. **REQ-RES-005.2** - Mutually exclusive flag errors SHALL show correct usage
+3. **REQ-RES-005.3** - Connection errors SHALL suggest the `/reconnect` metacommand
+4. **REQ-RES-005.4** - All errors SHALL return to REPL prompt (non-fatal)
+5. **REQ-RES-005.5** - Table unavailability SHALL suggest enabling ResUsage logging via DBA contact
+
+**REQ-RES-006: Tab Completion and Help Integration**
+
+1. **REQ-RES-006.1** - Tab completion: Typing `/res<TAB>` SHALL suggest `/resources`
+2. **REQ-RES-006.2** - Tab completion: Typing `/perf<TAB>` SHALL auto-complete to `/perf` (alias)
+3. **REQ-RES-006.3** - Tab completion: After `/resources ` (with space), SHALL suggest `--virtual` and `--physical`
+4. **REQ-RES-006.4** - Help text: `/help` SHALL list `/resources` command with description
+5. **REQ-RES-006.5** - Help text description: "Show CPU, I/O, and memory metrics from PMON resource usage tables"
+6. **REQ-RES-006.6** - Detailed help: `/help resources` SHALL display extended help including column descriptions and skew interpretation
+7. **REQ-RES-006.7** - Command SHALL appear in metacommand list when typing `/<TAB>`
+
+**REQ-RES-007: Output Format Compatibility**
+
+The command SHALL work with all output format modes:
+
+1. **REQ-RES-007.1** - Table format (default): Box-drawing table as shown above with header and footer
+2. **REQ-RES-007.2** - CSV format: Standard CSV with headers; collection timestamp and summary footer are omitted
+   ```csv
+   VPROC,AvgCPU%,PeakCPU%,AvgIO/s,PeakIO/s,MemUsedMB,MemAvailMB
+   0,12.34,45.67,1023.4,4512.0,48234,15766
+   1,11.89,38.22,987.1,3890.5,47901,16099
+   ```
+3. **REQ-RES-007.3** - JSON format: Object with `mode`, `collection_end`, `rows` array, and `summary` object
+   ```json
+   {
+     "mode": "virtual",
+     "collection_end": "2026-04-14T10:15:00",
+     "rows": [
+       {"VPROC": 0, "AvgCPU%": 12.34, "PeakCPU%": 45.67, "AvgIO/s": 1023.4, "PeakIO/s": 4512.0, "MemUsedMB": 48234, "MemAvailMB": 15766}
+     ],
+     "summary": {
+       "count": 4,
+       "avg_cpu_pct": 18.0,
+       "peak_cpu_pct": 82.45,
+       "cpu_skew_pct": 31.2,
+       "io_skew_pct": 28.9
+     }
+   }
+   ```
+4. **REQ-RES-007.4** - Format selection: Command SHALL respect current output format setting (`/set format <fmt>`)
+5. **REQ-RES-007.5** - Format override: NOT supported inline (use `/set format` before running command)
+
+**REQ-RES-008: Performance and Resource Considerations**
+
+1. **REQ-RES-008.1** - Target execution time: <2 seconds (ResUsage tables are historical log tables, not real-time views)
+2. **REQ-RES-008.2** - Loading indicator: Display "Loading resource usage data..." if query takes >500ms
+3. **REQ-RES-008.3** - Result caching: NOT cached (each execution fetches fresh data)
+4. **REQ-RES-008.4** - Query cancellation: Ctrl-C SHALL cancel query and return to prompt
+5. **REQ-RES-008.5** - Resource impact: Query SHALL use read-only system tables (no locks, no modifications)
+
+**REQ-RES-009: Skew Interpretation Guidelines**
+
+1. **REQ-RES-009.1** - Skew metrics indicate resource distribution imbalance across VPROCs or physical nodes
+2. **REQ-RES-009.2** - Interpretation ranges:
+   - **0-10%**: Excellent balance (well-distributed workload)
+   - **10-20%**: Good balance (acceptable for most workloads)
+   - **20-30%**: Moderate imbalance (investigate if persistent; `⚠` shown)
+   - **>30%**: High imbalance (investigate data distribution, PERM space allocation, or hardware; `⚠` shown)
+3. **REQ-RES-009.3** - Actionable guidance for DBAs:
+   - High CPU skew: Check for data distribution issues, uneven session load, or AMP-intensive queries
+   - High IO skew: Investigate hot-spot tables, PERM space layout, or AMP fallback activity
+   - Persistent high skew in physical mode: May indicate a hardware or node-level issue
+4. **REQ-RES-009.4** - Interpretation guidance SHALL be included in `/help resources` output
+
+**Example Interaction:**
+
+**Default (virtual mode):**
+```sql
+tq> /resources
+
+Resource Usage (Virtual Mode) — Collection period ending: 2026-04-14 10:15:00
+
+┌───────┬──────────┬──────────┬──────────┬──────────┬────────────┬───────────┐
+│ VPROC │ AvgCPU%  │ PeakCPU% │ AvgIO/s  │ PeakIO/s │ MemUsed MB │ MemAvl MB │
+├───────┼──────────┼──────────┼──────────┼──────────┼────────────┼───────────┤
+│     0 │    12.34 │    45.67 │   1023.4 │   4512.0 │      48234 │     15766 │
+│     1 │    11.89 │    38.22 │    987.1 │   3890.5 │      47901 │     16099 │
+│     2 │    35.71 │    82.45 │   3102.8 │   9231.6 │      52100 │     11900 │
+│     3 │    12.01 │    40.10 │    998.2 │   3754.0 │      48050 │     15950 │
+└───────┴──────────┴──────────┴──────────┴──────────┴────────────┴───────────┘
+
+4 VPROCs | Avg CPU: 18.0% | Peak CPU: 82.5% | CPU Skew: 31.2% ⚠ | IO Skew: 28.9% ⚠
+(Query time: 0.182s)
+```
+
+**Physical mode:**
+```sql
+tq> /resources --physical
+
+Resource Usage (Physical Mode) — Collection period ending: 2026-04-14 10:15:00
+
+┌──────┬──────────┬──────────┬──────────────┬──────────────┬────────────┬───────────┐
+│ Node │ AvgCPU%  │ PeakCPU% │  AvgIOCnt    │  PeakIOCnt   │ MemUsed MB │ MemAvl MB │
+├──────┼──────────┼──────────┼──────────────┼──────────────┼────────────┼───────────┤
+│    0 │    14.23 │    48.90 │      2034567 │      8912345 │     192012 │     63988 │
+│    1 │    13.55 │    41.30 │      1987234 │      7823109 │     190341 │     65659 │
+│    2 │    37.88 │    85.10 │      6203450 │     18423000 │     208400 │     47600 │
+│    3 │    13.78 │    43.20 │      1998432 │      7504800 │     191200 │     64800 │
+└──────┴──────────┴──────────┴──────────────┴──────────────┴────────────┴───────────┘
+
+4 nodes | Avg CPU: 19.9% | Peak CPU: 85.1% | CPU Skew: 30.8% ⚠ | IO Skew: 29.4% ⚠
+(Query time: 0.204s)
+```
+
+**Using short alias:**
+```sql
+tq> /res
+[Same output as /resources]
+
+tq> /perf --physical
+[Same output as /resources --physical]
+```
+
+**Tab completion:**
+```sql
+tq> /res<TAB>
+tq> /resources _
+[Auto-completed]
+
+tq> /resources <TAB>
+    --physical   Show per-node metrics from ResUsageSPMA
+    --virtual    Show per-VPROC metrics from ResUsageSVPR (default)
+```
+
+**Acceptance Test:**
+- Execute `/resources` with no flags and verify virtual mode output with all 7 columns: VPROC, AvgCPU%, PeakCPU%, AvgIO/s, PeakIO/s, MemUsed MB, MemAvl MB
+- Execute `/resources --physical` and verify physical mode output with all 7 columns: Node, AvgCPU%, PeakCPU%, AvgIOCnt, PeakIOCnt, MemUsed MB, MemAvl MB
+- Execute `/res` and `/perf` (aliases) and verify identical behavior to `/resources`
+- Verify collection period timestamp appears as header line in table format
+- Verify summary footer includes count, avg CPU%, peak CPU%, CPU skew%, IO skew%
+- Verify `⚠` appears when skew >= 20%, absent when skew < 20%
+- Execute `/resources --virtual --physical` and verify error message with usage hint
+- Execute when ResUsageSVPR has no rows and verify no-data message
+- Execute with `/set format csv` and verify CSV output (no footer, no timestamp)
+- Execute with `/set format json` and verify JSON output with `mode`, `collection_end`, `rows`, `summary` keys
+- Trigger privilege error and verify helpful error message with GRANT examples for both tables
+- Type `/res<TAB>` and verify auto-completion to `/resources`
+- Type `/resources <TAB>` and verify `--virtual` and `--physical` flag suggestions
+- Execute `/help` and verify `/resources` appears in command list
+- Execute `/help resources` and verify extended help with column descriptions and skew interpretation
 
 ---
 

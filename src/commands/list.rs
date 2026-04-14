@@ -921,7 +921,7 @@ mod tests {
         // Verify that unknown list subcommand includes "Error:" prefix
         let mut buf = Vec::new();
         // Simulate what execute_for_repl does for unknown subcommand
-        writeln!(buf, "Error: Unknown list subcommand: {}", "foo").unwrap();
+        writeln!(buf, "Error: Unknown list subcommand: foo").unwrap();
         let output = String::from_utf8(buf).unwrap();
         assert!(output.starts_with("Error:"));
     }
