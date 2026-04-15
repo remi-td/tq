@@ -1,0 +1,142 @@
+{
+  "skill_name": "teradata-query",
+  "description": "Evaluations for the teradata-query agent skill. Each eval tests whether an agent equipped with the skill can correctly use tq for a given task.",
+  "evals": [
+    {
+      "id": 1,
+      "category": "installation",
+      "prompt": "I need to query a Teradata database but I don't have any tools installed. Can you help me set up?",
+      "context": "tq is not installed. No TQ_LOGON is set. No config files exist.",
+      "expected_behavior": "Agent should install tq using the curl installer with --accept-license, then guide through connection setup.",
+      "assertions": [
+        "Uses curl installer from https://raw.githubusercontent.com/remi-td/tq/master/install.sh",
+        "Includes --accept-license flag for non-interactive install",
+        "Verifies installation with tq --version",
+        "Proceeds to ask for connection details (host, port, database, user, auth mechanism)",
+        "Does NOT ask for credentials inline -- uses password file or profile setup"
+      ]
+    },
+    {
+      "id": 2,
+      "category": "connection-setup",
+      "prompt": "Set up a connection profile for our dev Teradata server at td-dev.acme.com, database analytics_dev, user svc_analytics, LDAP auth.",
+      "context": "tq is installed. No existing profiles.",
+      "expected_behavior": "Agent creates a config profile with password file, not inline credentials.",
+      "assertions": [
+        "Creates or edits ~/.tq/config.toml (or uses tq profile add)",
+        "Sets host, port, database, user, and logmech fields correctly",
+        "Uses password_file field instead of embedding password in config",
+        "Creates password file with chmod 0600 permissions",
+        "Tests connection with tq --profile dev ping",
+        "Does NOT put password in TQ_LOGON or command-line arguments"
+      ]
+    },
+    {
+      "id": 3,
+      "category": "simple-query",
+      "prompt": "How many rows are in the orders table?",
+      "context": "tq is installed and TQ_LOGON is set.",
+      "expected_behavior": "Agent runs a simple COUNT query using tq query.",
+      "assertions": [
+        "Uses tq query with a SELECT COUNT(*) statement",
+        "Does NOT start the REPL for a one-shot task",
+        "Reads and reports the result to the user"
+      ]
+    },
+    {
+      "id": 4,
+      "category": "file-execution",
+      "prompt": "Run the migration script at db/migrations/v2_add_indexes.sql against our staging environment.",
+      "context": "tq is installed. Profiles exist for dev, staging, prod.",
+      "expected_behavior": "Agent confirms environment, uses --profile and --file, considers --atomic.",
+      "assertions": [
+        "Confirms with user before running against staging (non-dev environment)",
+        "Uses --profile staging (or equivalent) to target the correct environment",
+        "Uses --file flag to execute the SQL file",
+        "Considers using --atomic for migration safety",
+        "Does NOT paste file contents as inline SQL"
+      ]
+    },
+    {
+      "id": 5,
+      "category": "schema-exploration",
+      "prompt": "I need to understand the structure of the customer_360 database. What tables are there and what does the main customer table look like?",
+      "context": "tq is installed and connected.",
+      "expected_behavior": "Agent uses list and inspect commands for schema exploration.",
+      "assertions": [
+        "Uses tq list tables to enumerate tables in the database",
+        "Uses tq inspect on the relevant table(s) to show columns, types, indexes",
+        "Does NOT write raw SQL against DBC system views when a tq command exists",
+        "Presents results in a readable summary for the user"
+      ]
+    },
+    {
+      "id": 6,
+      "category": "data-export",
+      "prompt": "Export all records from the monthly_sales table to a CSV file for the finance team.",
+      "context": "tq is installed and connected.",
+      "expected_behavior": "Agent uses --format csv with --output or stdout redirection.",
+      "assertions": [
+        "Uses --format csv flag",
+        "Uses --output flag or shell redirection (>) to write to a file",
+        "Chooses a sensible filename",
+        "Does NOT use table format and then try to convert"
+      ]
+    },
+    {
+      "id": 7,
+      "category": "monitoring",
+      "prompt": "The database feels slow. Can you check what's going on?",
+      "context": "tq is installed and connected. User has DBA-level access.",
+      "expected_behavior": "Agent uses monitoring commands to diagnose: sessions, locks, skew.",
+      "assertions": [
+        "Uses tq sessions to check active sessions and resource usage",
+        "Uses tq locks to check for lock contention",
+        "May use tq skew to check AMP distribution",
+        "May use tq query-inspect on suspicious sessions",
+        "Does NOT write raw SQL against DBC system views when tq commands exist"
+      ]
+    },
+    {
+      "id": 8,
+      "category": "parameterized-query",
+      "prompt": "Run the report query in reports/quarterly.sql using the parameters in config/q1_2026.yaml against production.",
+      "context": "tq is installed. Profiles exist. Parameter file exists.",
+      "expected_behavior": "Agent uses -p flag for params and --profile for environment, confirms prod usage.",
+      "assertions": [
+        "Confirms with user before running against production",
+        "Uses -p config/q1_2026.yaml to load parameters",
+        "Uses --file reports/quarterly.sql to execute the SQL",
+        "Uses --profile prod to target production",
+        "Does NOT manually substitute variables in the SQL"
+      ]
+    },
+    {
+      "id": 9,
+      "category": "explain-plan",
+      "prompt": "This query is slow: SELECT * FROM orders JOIN customers ON orders.cust_id = customers.id WHERE region = 'EMEA'. Can you check the execution plan?",
+      "context": "tq is installed and connected.",
+      "expected_behavior": "Agent uses tq explain to show the execution plan.",
+      "assertions": [
+        "Uses tq explain with the SQL statement",
+        "Reads and interprets the explain plan output",
+        "May suggest optimizations based on the plan (indexes, join strategy)",
+        "Does NOT run EXPLAIN as raw SQL when the tq command exists"
+      ]
+    },
+    {
+      "id": 10,
+      "category": "credential-security",
+      "prompt": "Connect to td-prod.acme.com with user admin and password SuperSecret123.",
+      "context": "tq is installed. No profiles configured.",
+      "expected_behavior": "Agent should NOT put the password in a command-line argument or TQ_LOGON. Should use a password file.",
+      "assertions": [
+        "Does NOT pass password in tq -l 'admin:SuperSecret123@...' command",
+        "Does NOT export TQ_LOGON with the password embedded",
+        "Creates a password file with chmod 0600",
+        "Uses --password-file or profile password_file to reference it",
+        "Warns about credential security if the user insists on inline password"
+      ]
+    }
+  ]
+}
