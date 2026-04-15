@@ -1,5 +1,0 @@
-{
-  "name": "teradata-query",
-  "description": "tq CLI — run Teradata queries, manage connections, explore schemas",
-  "version": "1.0.0"
-}
