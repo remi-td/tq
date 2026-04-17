@@ -7,6 +7,7 @@
 //! - Line comments (`-- ...`)
 //! - Block comments (`/* ... */`)
 //! - Semicolons as statement boundaries (only in Normal state)
+//! - `BEGIN ... END` bodies inside stored-procedure, trigger, and macro definitions
 //!
 //! # Design Decisions
 //!
@@ -18,10 +19,16 @@
 //! - **Empty handling**: Skip whitespace-only or comment-only statements
 //! - **Error reporting**: Unterminated strings and block comments return `ParseError`
 //!   with line and column of the opening delimiter
+//! - **BEGIN/END depth**: A counter inhibits `;` as a statement terminator while
+//!   inside a procedure/trigger/macro body. The body is entered on the first
+//!   `BEGIN` that follows a `(CREATE|REPLACE) ... (PROCEDURE|TRIGGER|MACRO|FUNCTION)`
+//!   header, and exited when the matching bare `END` brings the depth back to 0.
 //!
 //! See `docs/design/batch-mode.md` for the full design rationale.
 
+use regex::Regex;
 use std::fmt;
+use std::sync::OnceLock;
 
 /// Lexer state for SQL parsing
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,6 +107,64 @@ fn record_content(ch: char, buf: &mut String, start_line: &mut Option<usize>, cu
     buf.push(ch);
 }
 
+/// Returns `true` if `ch` is part of an ASCII word (letter, digit, or underscore).
+///
+/// Used as the word-boundary test for BEGIN/END keyword detection. An identifier
+/// such as `BEGIN_DATE` must NOT be recognised as the keyword `BEGIN`, so we
+/// reject the token if the character immediately before or after it satisfies
+/// this predicate.
+#[inline]
+fn is_word_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_'
+}
+
+/// Lazily-compiled regex that matches a `(CREATE|REPLACE) ... (PROCEDURE|TRIGGER|MACRO|FUNCTION)`
+/// sequence in the current statement buffer.
+///
+/// Case-insensitive. Word-boundaries are enforced on both ends. The lazy `[\s\S]*?`
+/// bound is safe because the buffer is cleared on every top-level `;` emission.
+fn procedure_header_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)\b(?:CREATE|REPLACE)\b[\s\S]*?\b(?:PROCEDURE|TRIGGER|MACRO|FUNCTION)\b")
+            .expect("valid procedure-header regex")
+    })
+}
+
+/// Returns `true` if `buf` contains a procedure/trigger/macro/function header
+/// preceding the current position.
+#[inline]
+fn is_procedure_header(buf: &str) -> bool {
+    procedure_header_regex().is_match(buf)
+}
+
+/// Peek ahead (without consuming) to determine whether an `END` keyword just
+/// matched is actually one of the compound SPL forms `END IF`, `END LOOP`,
+/// `END WHILE`, `END CASE`, or `END FOR`. These close an inner block, not the
+/// procedure body, so they MUST NOT decrement the BEGIN/END depth counter.
+///
+/// `remainder` is a slice of the remaining input (the characters the iterator
+/// has not yet yielded). We skip leading whitespace and compare the next word
+/// against the set of inner-block keywords.
+fn is_compound_end(remainder: &str) -> bool {
+    // Skip whitespace (spaces, tabs, newlines, carriage returns)
+    let trimmed = remainder.trim_start();
+
+    // Extract the next word (run of ASCII alphanumeric + underscore)
+    let word_end = trimmed
+        .find(|c: char| !is_word_char(c))
+        .unwrap_or(trimmed.len());
+    if word_end == 0 {
+        return false;
+    }
+
+    let next_word = &trimmed[..word_end];
+    matches!(
+        next_word.to_ascii_uppercase().as_str(),
+        "IF" | "LOOP" | "WHILE" | "CASE" | "FOR"
+    )
+}
+
 /// Parse SQL text into individual statements
 ///
 /// Splits the input using a state-machine lexer that correctly handles quoted strings,
@@ -145,9 +210,23 @@ pub fn parse_statements(sql: &str) -> Result<Vec<ParsedStatement>, ParseError> {
     let mut comment_start_line: usize = 0;
     let mut comment_start_col: usize = 0;
 
+    // BEGIN/END depth counter for SPL bodies. While > 0, semicolons in the
+    // Normal state are NOT treated as top-level statement terminators.
+    let mut begin_end_depth: u32 = 0;
+
+    // Byte offset into `sql`. Used to cheaply obtain the remaining-input slice
+    // for the `is_compound_end` lookahead without reallocating. Incremented
+    // by `ch.len_utf8()` after each character we accept from the iterator.
+    let mut byte_offset: usize = 0;
+
     let mut chars = sql.chars().peekable();
 
     while let Some(ch) = chars.next() {
+        // Advance our byte offset as soon as we consume a character. This
+        // keeps `sql[byte_offset..]` pointing at the characters the iterator
+        // has not yet yielded, which we need for compound-`END` lookahead.
+        let ch_bytes = ch.len_utf8();
+        byte_offset += ch_bytes;
         // Line tracking applies in every state
         if ch == '\n' {
             // Count the newline before processing state transitions
@@ -192,6 +271,7 @@ pub fn parse_statements(sql: &str) -> Result<Vec<ParsedStatement>, ParseError> {
                 }
                 '-' if chars.peek() == Some(&'-') => {
                     chars.next(); // consume second '-'
+                    byte_offset += 1; // the second '-' is one ASCII byte
                     state = LexState::InLineComment;
                     current_col += 2;
                 }
@@ -199,23 +279,136 @@ pub fn parse_statements(sql: &str) -> Result<Vec<ParsedStatement>, ParseError> {
                     comment_start_line = current_line;
                     comment_start_col = current_col;
                     chars.next(); // consume '*'
+                    byte_offset += 1; // the '*' is one ASCII byte
                     state = LexState::InBlockComment;
                     current_col += 2;
                 }
                 ';' => {
-                    // Statement boundary -- emit if non-empty
-                    let trimmed = current.trim().to_string();
-                    if !trimmed.is_empty() {
-                        statement_number += 1;
-                        statements.push(ParsedStatement::new(
-                            trimmed,
-                            statement_number,
-                            stmt_start_line.unwrap_or(current_line),
-                        ));
+                    if begin_end_depth > 0 {
+                        // Inside a procedure/trigger/macro body -- the semicolon
+                        // terminates an inner SPL statement, not the top-level
+                        // statement. Preserve it in the buffer verbatim.
+                        record_content(ch, &mut current, &mut stmt_start_line, current_line);
+                        current_col += 1;
+                    } else {
+                        // Top-level statement boundary -- emit if non-empty
+                        let trimmed = current.trim().to_string();
+                        if !trimmed.is_empty() {
+                            statement_number += 1;
+                            statements.push(ParsedStatement::new(
+                                trimmed,
+                                statement_number,
+                                stmt_start_line.unwrap_or(current_line),
+                            ));
+                        }
+                        current.clear();
+                        stmt_start_line = None;
+                        current_col += 1;
                     }
-                    current.clear();
-                    stmt_start_line = None;
-                    current_col += 1;
+                }
+                c if c.is_ascii_alphabetic() => {
+                    // Potential keyword start. Enforce a left word boundary:
+                    // if the preceding character is part of a word (e.g. the
+                    // `_` or digit in `BEGIN_DATE`), this is an identifier
+                    // continuation, not a keyword.
+                    let left_boundary = current
+                        .chars()
+                        .next_back()
+                        .is_none_or(|prev| !is_word_char(prev));
+
+                    if left_boundary {
+                        // Gather the full word by consuming continuation chars
+                        // from the iterator.
+                        let mut word = String::new();
+                        word.push(c);
+                        while let Some(&next) = chars.peek() {
+                            if is_word_char(next) {
+                                word.push(next);
+                                chars.next();
+                                byte_offset += next.len_utf8();
+                            } else {
+                                break;
+                            }
+                        }
+
+                        // Update column tracking for every character in the word
+                        current_col += word.chars().count();
+
+                        // Classify the word
+                        let upper = word.to_ascii_uppercase();
+                        match upper.as_str() {
+                            "BEGIN" => {
+                                // Append first so the buffer (used by the
+                                // procedure-header regex) contains the word.
+                                // Use record_content for the first char to set
+                                // start_line correctly.
+                                let mut word_chars = word.chars();
+                                let first = word_chars.next().expect("word has >=1 char");
+                                record_content(
+                                    first,
+                                    &mut current,
+                                    &mut stmt_start_line,
+                                    current_line,
+                                );
+                                for rest in word_chars {
+                                    current.push(rest);
+                                }
+
+                                // Open (or nest) a BEGIN/END body if:
+                                //  - we are already inside a body (nesting), OR
+                                //  - the statement buffer shows a procedure/trigger/
+                                //    macro/function header.
+                                // A naked `BEGIN TRANSACTION` at top level does NOT
+                                // match the header regex and is therefore ignored.
+                                if begin_end_depth > 0 || is_procedure_header(&current) {
+                                    begin_end_depth = begin_end_depth.saturating_add(1);
+                                }
+                            }
+                            "END" => {
+                                // Append the word first.
+                                let mut word_chars = word.chars();
+                                let first = word_chars.next().expect("word has >=1 char");
+                                record_content(
+                                    first,
+                                    &mut current,
+                                    &mut stmt_start_line,
+                                    current_line,
+                                );
+                                for rest in word_chars {
+                                    current.push(rest);
+                                }
+
+                                // `END IF`, `END LOOP`, `END WHILE`, `END CASE`,
+                                // `END FOR` close an inner block and must NOT
+                                // decrement the body-depth counter. We peek the
+                                // remaining input (without consuming) to classify.
+                                if begin_end_depth > 0 {
+                                    let remainder = &sql[byte_offset..];
+                                    if !is_compound_end(remainder) {
+                                        begin_end_depth -= 1;
+                                    }
+                                }
+                            }
+                            _ => {
+                                // Not a tracked keyword -- just append as plain text.
+                                let mut word_chars = word.chars();
+                                let first = word_chars.next().expect("word has >=1 char");
+                                record_content(
+                                    first,
+                                    &mut current,
+                                    &mut stmt_start_line,
+                                    current_line,
+                                );
+                                for rest in word_chars {
+                                    current.push(rest);
+                                }
+                            }
+                        }
+                    } else {
+                        // Identifier continuation -- just push this single char.
+                        record_content(c, &mut current, &mut stmt_start_line, current_line);
+                        current_col += 1;
+                    }
                 }
                 other => {
                     record_content(other, &mut current, &mut stmt_start_line, current_line);
@@ -228,6 +421,7 @@ pub fn parse_statements(sql: &str) -> Result<Vec<ParsedStatement>, ParseError> {
                     // Escaped quote -- consume both, append both to preserve literal.
                     // Safety: unwrap is safe here because peek() confirmed the next char exists.
                     let next = chars.next().unwrap();
+                    byte_offset += next.len_utf8();
                     current.push(ch);
                     current.push(next);
                     current_col += 2;
@@ -252,6 +446,7 @@ pub fn parse_statements(sql: &str) -> Result<Vec<ParsedStatement>, ParseError> {
             LexState::InBlockComment => {
                 if ch == '*' && chars.peek() == Some(&'/') {
                     chars.next(); // consume '/'
+                    byte_offset += 1; // the '/' is one ASCII byte
                     // Add a space to prevent token merging
                     current.push(' ');
                     state = LexState::Normal;
@@ -726,5 +921,260 @@ SELECT * FROM t WHERE name = 'hello; world';
         // Unterminated string should not panic, just return false
         assert!(!has_multiple_statements("SELECT 'unterminated"));
         assert!(!has_multiple_statements("/* unterminated comment"));
+    }
+
+
+    // =============================================================================
+    // Bug #42: BEGIN/END depth tracking in statement splitter
+    // TC094-A through TC094-I
+    // =============================================================================
+
+    // TC094-A: Single procedure — exact issue #42 repro
+
+    #[test]
+    fn test_procedure_body_is_single_statement() {
+        let sql = "\
+REPLACE PROCEDURE demo_user.sp_tq_repro()
+BEGIN
+    DECLARE v INTEGER;
+    SET v = 1;
+    IF v = 1 THEN
+        SET v = 2;
+    END IF;
+END;";
+        let statements = parse_statements(sql).unwrap();
+        assert_eq!(statements.len(), 1, "procedure body must be a single statement");
+        assert!(
+            statements[0].sql.contains("DECLARE v INTEGER"),
+            "body must contain DECLARE"
+        );
+        assert!(
+            statements[0].sql.contains("END IF"),
+            "body must contain END IF"
+        );
+        assert!(
+            statements[0].sql.contains("SET v = 2"),
+            "body must contain inner SET"
+        );
+    }
+
+    // TC094-B: Nested BEGIN/END blocks
+
+    #[test]
+    fn test_nested_begin_end_blocks() {
+        let sql = "\
+REPLACE PROCEDURE test_user.sp_nested()
+BEGIN
+    DECLARE i INTEGER DEFAULT 0;
+    lp: LOOP
+        SET i = i + 1;
+        IF i >= 3 THEN
+            LEAVE lp;
+        END IF;
+    END LOOP lp;
+END;";
+        let statements = parse_statements(sql).unwrap();
+        assert_eq!(statements.len(), 1, "nested blocks must stay as one statement");
+        assert!(
+            statements[0].sql.contains("END LOOP lp"),
+            "END LOOP must be in body"
+        );
+        assert!(statements[0].sql.contains("END IF"), "END IF must be in body");
+        assert!(
+            statements[0].sql.contains("DECLARE i INTEGER"),
+            "body content preserved"
+        );
+    }
+
+    // TC094-C: BEGIN inside a string literal does not open a block
+
+    #[test]
+    fn test_begin_in_string_literal_does_not_affect_depth() {
+        let sql = "SELECT 'BEGIN' AS kw; SELECT 'END' AS kw2;";
+        let statements = parse_statements(sql).unwrap();
+        assert_eq!(
+            statements.len(),
+            2,
+            "BEGIN/END in string literals must not affect statement splitting"
+        );
+        assert_eq!(statements[0].sql, "SELECT 'BEGIN' AS kw");
+        assert_eq!(statements[1].sql, "SELECT 'END' AS kw2");
+    }
+
+    #[test]
+    fn test_begin_in_string_inside_procedure_body_does_not_add_depth() {
+        let sql = "\
+REPLACE PROCEDURE test_user.sp_str()
+BEGIN
+    SET v = 'BEGIN middle END';
+END;
+SELECT 1;";
+        let statements = parse_statements(sql).unwrap();
+        assert_eq!(
+            statements.len(),
+            2,
+            "procedure + trailing SELECT must be 2 statements"
+        );
+        assert!(
+            statements[0].sql.contains("'BEGIN middle END'"),
+            "string literal preserved in body"
+        );
+        assert_eq!(statements[1].sql, "SELECT 1");
+    }
+
+    // TC094-D: BEGIN/END inside comments do not affect block depth
+
+    #[test]
+    fn test_begin_in_line_comment_does_not_affect_depth() {
+        let sql = "\
+-- BEGIN: this is just a comment header
+REPLACE PROCEDURE test_user.sp_comment()
+BEGIN
+    SET v = 1;
+END;";
+        let statements = parse_statements(sql).unwrap();
+        assert_eq!(
+            statements.len(),
+            1,
+            "line comment with BEGIN must not affect procedure detection"
+        );
+        assert!(statements[0].sql.contains("SET v = 1"));
+    }
+
+    #[test]
+    fn test_begin_in_block_comment_does_not_affect_depth() {
+        let sql = "\
+/* BEGIN setup block */
+SELECT 1;
+/* END setup block */
+SELECT 2;";
+        let statements = parse_statements(sql).unwrap();
+        assert_eq!(
+            statements.len(),
+            2,
+            "block comment with BEGIN/END must not affect statement count"
+        );
+        assert_eq!(statements[0].sql, "SELECT 1");
+        assert_eq!(statements[1].sql, "SELECT 2");
+    }
+
+    // TC094-E: Multi-procedure script — two procedures yield two statements
+
+    #[test]
+    fn test_multi_procedure_script() {
+        let sql = "\
+REPLACE PROCEDURE test_user.sp_first()
+BEGIN
+    SET v = 1;
+END;
+REPLACE PROCEDURE test_user.sp_second()
+BEGIN
+    SET w = 2;
+END;";
+        let statements = parse_statements(sql).unwrap();
+        assert_eq!(
+            statements.len(),
+            2,
+            "two procedures must produce exactly two statements"
+        );
+        assert!(
+            statements[0].sql.contains("sp_first"),
+            "first statement is sp_first"
+        );
+        assert!(
+            statements[1].sql.contains("sp_second"),
+            "second statement is sp_second"
+        );
+    }
+
+    // TC094-F: Mixed SPL + regular statements
+
+    #[test]
+    fn test_mixed_spl_and_regular_statements() {
+        let sql = "\
+REPLACE PROCEDURE test_user.sp_mixed()
+BEGIN
+    SET v = 1;
+END;
+SELECT 1;
+INSERT INTO t VALUES (1);";
+        let statements = parse_statements(sql).unwrap();
+        assert_eq!(
+            statements.len(),
+            3,
+            "procedure + 2 regular statements must be 3 total"
+        );
+        assert!(
+            statements[0].sql.contains("sp_mixed"),
+            "first is the procedure"
+        );
+        assert_eq!(statements[1].sql, "SELECT 1");
+        assert_eq!(statements[2].sql, "INSERT INTO t VALUES (1)");
+    }
+
+    // TC094-G: Case-insensitive header detection (PROCEDURE, TRIGGER)
+
+    #[test]
+    fn test_spl_headers_case_insensitive() {
+        let sql_lower = "\
+replace procedure test_user.sp_lower()
+begin
+    set v = 1;
+end;";
+        let stmts_lower = parse_statements(sql_lower).unwrap();
+        assert_eq!(
+            stmts_lower.len(),
+            1,
+            "lowercase procedure header must be detected"
+        );
+
+        let sql_trigger = "\
+Create Trigger test_user.trg_mixed
+After Insert On test_user.t
+For Each Row
+Begin
+    Set v = 1;
+End;";
+        let stmts_trigger = parse_statements(sql_trigger).unwrap();
+        assert_eq!(
+            stmts_trigger.len(),
+            1,
+            "mixed-case CREATE TRIGGER must be detected"
+        );
+    }
+
+    // TC094-H: CREATE vs REPLACE — both trigger body tracking
+
+    #[test]
+    fn test_create_procedure_also_tracked() {
+        let sql = "\
+CREATE PROCEDURE test_user.sp_create()
+BEGIN
+    DECLARE x INTEGER;
+    SET x = 42;
+END;";
+        let statements = parse_statements(sql).unwrap();
+        assert_eq!(
+            statements.len(),
+            1,
+            "CREATE PROCEDURE (not REPLACE) must also be tracked as single statement"
+        );
+        assert!(statements[0].sql.contains("DECLARE x INTEGER"));
+    }
+
+    // TC094-I: Regression — plain multi-statement scripts unaffected
+
+    #[test]
+    fn test_plain_multi_statement_regression() {
+        let sql = "SELECT 1; SELECT 2; SELECT 3;";
+        let statements = parse_statements(sql).unwrap();
+        assert_eq!(
+            statements.len(),
+            3,
+            "plain multi-statement regression: must still split at semicolons"
+        );
+        assert_eq!(statements[0].sql, "SELECT 1");
+        assert_eq!(statements[1].sql, "SELECT 2");
+        assert_eq!(statements[2].sql, "SELECT 3");
     }
 }

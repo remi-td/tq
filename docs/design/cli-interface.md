@@ -321,6 +321,211 @@ tq query "SELECT 1"  # Uses environment variable
 tq query --logon "other:..." "SELECT 1"  # Overrides
 ```
 
+## Stdin Input Source Detection
+
+### Problem
+
+`tq query` accepts SQL from three sources: positional argument, `--file`, or stdin. The stdin path is auto-detected by observing that the stdin file descriptor is not a TTY. Prior to Sprint 64, the detection logic was:
+
+```rust
+let stdin_is_pipe = !io::stdin().is_terminal();
+```
+
+This collapses two distinct conditions into one — stdin redirected AND stdin has bytes — and produces a false positive in common CI/agent/subshell scenarios where stdin is redirected from an empty source:
+
+```bash
+tq query "SELECT 1" < /dev/null              # Fails with "multiple input sources"
+tq query "SELECT 1" <<< ""                   # Fails
+# Any harness that defensively closes stdin fails
+```
+
+`is_terminal()` correctly reports "not a TTY" for `/dev/null`, `<<< ""`, closed descriptors, and pipes from non-interactive parents, but these cases have no payload to read. Flagging them as a second input source is wrong.
+
+### Design: Two-Condition Check (Non-TTY + Bytes Available)
+
+The fix is to treat stdin as an input source only when BOTH hold:
+
+1. Stdin is not a TTY (`!io::stdin().is_terminal()`), AND
+2. Stdin has bytes immediately available to read.
+
+Condition (2) is the new one. It must be implemented without consuming any bytes from stdin — the bytes are needed by the downstream reader when stdin IS the chosen input source.
+
+#### Implementation: `poll(2)` with Zero Timeout (Unix)
+
+On Unix, the portable non-destructive readiness check is `poll(2)` with `POLLIN` and `timeout = 0`. This returns `1` if there is data ready, `0` if none, without touching the read buffer. `libc` is already an existing dependency (see `Cargo.toml`, `[target.'cfg(unix)'.dependencies]`).
+
+```rust
+#[cfg(unix)]
+fn stdin_has_bytes_available() -> bool {
+    use std::os::fd::AsRawFd;
+    let fd = std::io::stdin().as_raw_fd();
+    let mut pfd = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: poll is a syscall with no Rust invariants to uphold; timeout 0
+    // is non-blocking; we own the pollfd struct.
+    let rc = unsafe { libc::poll(&mut pfd, 1, 0) };
+    // rc > 0 means at least one fd is ready
+    // rc == 0 means timeout (nothing ready)
+    // rc < 0 means error (EINTR, EBADF on closed fd, etc.) — be conservative: treat as "no data"
+    rc > 0 && (pfd.revents & (libc::POLLIN | libc::POLLHUP)) != 0
+}
+```
+
+Notes:
+- `POLLHUP` is included alongside `POLLIN`. A closed pipe (writer exited) delivers `POLLHUP` without `POLLIN`; we treat that the same as "no data" for our purposes (the read would return 0 bytes immediately). The mask catches both so we can disambiguate in the conditional if needed; the outer `rc > 0` guards against timeout.
+- `/dev/null` is a regular device that reports immediate readiness for read but returns 0 bytes on read. To handle this cleanly, we peek-read a single byte through a `BufReader::fill_buf()` check — but that consumes the byte if present. The cleaner approach is the one below.
+
+#### Refinement: `BufReader::fill_buf()` for Zero-Copy Peek
+
+`poll()` alone cannot distinguish "ready but EOF" (`/dev/null`) from "ready with data". To handle this cleanly, wrap stdin in a `BufReader` and call `fill_buf()` — this performs a single read into the internal buffer and returns the populated slice. The buffer is kept alive so the downstream reader sees the byte(s) when it reads:
+
+```rust
+use std::io::{BufRead, BufReader, Stdin, StdinLock};
+
+/// Returns (has_data, reader) — reader must be used if has_data is true.
+fn peek_stdin_has_data() -> (bool, BufReader<StdinLock<'static>>) {
+    let stdin = io::stdin();
+    let mut reader = BufReader::new(stdin.lock());
+    // fill_buf reads at most DEFAULT_BUF_SIZE bytes; on /dev/null this returns &[]
+    let has_data = match reader.fill_buf() {
+        Ok(buf) => !buf.is_empty(),
+        Err(_) => false,  // treat I/O error as no data
+    };
+    (has_data, reader)
+}
+```
+
+Problem: `StdinLock<'static>` is not directly constructible — `stdin.lock()` borrows from `stdin`. We must restructure `determine_input_source` to return either a resolved `InputSource` or a `(InputSource::Stdin, BufReader)` pair so the buffered reader is threaded through to `read_sql_stdin`.
+
+#### Chosen Design: Two-Phase with `poll()` + blocking `read_to_string`
+
+To keep the refactor minimal, use `poll()` on Unix for the detection phase, and continue using the existing `read_to_string()` path for the read phase:
+
+```rust
+#[cfg(unix)]
+fn stdin_has_data() -> bool {
+    use std::os::fd::AsRawFd;
+    let fd = std::io::stdin().as_raw_fd();
+    let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    // SAFETY: syscall with local stack-allocated pollfd, timeout 0 = non-blocking.
+    let rc = unsafe { libc::poll(&mut pfd, 1, 0) };
+    if rc <= 0 {
+        return false;
+    }
+    // POLLIN set AND not just POLLHUP: we still need to distinguish
+    // "ready but /dev/null will return 0" from "ready with data".
+    // Strategy: on POLLIN, do a single-byte MSG_PEEK-equivalent read via
+    // libc::recv — but stdin may not be a socket. Fall back to the actual
+    // fill_buf approach below, OR accept that /dev/null will return POLLIN
+    // with read returning 0 bytes and let read_sql_stdin's empty-check fire.
+    (pfd.revents & libc::POLLIN) != 0
+}
+
+#[cfg(not(unix))]
+fn stdin_has_data() -> bool {
+    // Windows: atty crate reports non-TTY; there is no direct poll equivalent
+    // for Console handles. Accept the legacy behavior: treat non-TTY as "has data".
+    // This matches pre-Sprint-64 behavior on Windows and is a conservative fallback.
+    true
+}
+```
+
+#### Definitive Choice: `poll()` + tolerate empty-read path
+
+The simplest robust design combines `poll()` with the existing `read_sql_stdin` empty-input handling:
+
+- `determine_input_source` uses `is_terminal()` AND `stdin_has_data()` (the `poll()` wrapper above) to decide.
+- When both a query argument AND `stdin_has_data()` are true, emit the "multiple input sources" error.
+- When only a query argument is provided and `stdin_has_data()` is false (including `< /dev/null`), resolve as `InputSource::Argument` and ignore stdin entirely.
+- When only stdin is available (no query arg, no `--file`) and `stdin_has_data()` is true, resolve as `InputSource::Stdin` and fall through to `read_sql_stdin` which reads the actual bytes. If stdin turns out to be empty after all (rare race), the existing empty-input error fires with a clear message.
+
+On `/dev/null`, `poll()` returns `POLLIN | POLLHUP` immediately (the fd is "ready" in that a read will not block), but `read()` returns 0 bytes. To avoid a false positive here, add a post-`poll()` check: if `revents & POLLHUP != 0 && revents & POLLIN == 0`, treat as no data. In practice, `/dev/null` on Linux/macOS reports `POLLIN` without `POLLHUP`, and read returns 0. We disambiguate by checking the `st_size` of the fd via `fstat` when it is a regular file or character device:
+
+```rust
+#[cfg(unix)]
+fn stdin_has_data() -> bool {
+    use std::os::fd::AsRawFd;
+    let fd = std::io::stdin().as_raw_fd();
+
+    // Step 1: poll for readability (non-blocking)
+    let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    let rc = unsafe { libc::poll(&mut pfd, 1, 0) };
+    if rc <= 0 {
+        return false;
+    }
+    if (pfd.revents & libc::POLLIN) == 0 {
+        return false;
+    }
+
+    // Step 2: distinguish "ready with data" from "ready at EOF" (/dev/null, empty file)
+    // fstat the fd. For regular files, st_size == 0 means empty.
+    // For char devices (/dev/null), st_size is 0 but that's coincidental —
+    // we additionally check S_ISCHR and compare device numbers against /dev/null.
+    //
+    // Simpler and more portable: use FIONREAD ioctl which returns bytes-available
+    // for pipes and sockets; on /dev/null and empty files it reports 0.
+    let mut n_available: libc::c_int = 0;
+    let ioctl_rc = unsafe { libc::ioctl(fd, libc::FIONREAD, &mut n_available) };
+    if ioctl_rc == 0 {
+        return n_available > 0;
+    }
+
+    // ioctl failed (e.g., regular file where FIONREAD is not supported on all platforms).
+    // Fall back: fstat and check st_size > position. For regular files,
+    // `read()` not yet performed means position 0, so st_size > 0 means data.
+    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe { libc::fstat(fd, &mut stat) } == 0 {
+        let mode = stat.st_mode & libc::S_IFMT;
+        if mode == libc::S_IFREG {
+            return stat.st_size > 0;
+        }
+    }
+
+    // Unknown fd type — conservative: assume data present (legacy behavior).
+    true
+}
+```
+
+#### Platform Matrix
+
+| Platform | `/dev/null` | Empty file `< empty.txt` | `<<< ""` | `echo x \|` | Pipe with bytes | TTY |
+|----------|-------------|--------------------------|----------|-------------|-----------------|-----|
+| Linux    | FIONREAD=0  | fstat size=0             | FIONREAD=0 | FIONREAD>0 | FIONREAD>0      | is_terminal()=true → short-circuit |
+| macOS    | FIONREAD=0  | fstat size=0             | FIONREAD=0 | FIONREAD>0 | FIONREAD>0      | same |
+| Windows  | N/A — fallback: treat non-TTY as has-data (legacy behavior preserved) | | | | | same |
+
+Windows is out of scope for this sprint (`tq` is primarily a Unix tool and the bug was reported on macOS). The `#[cfg(not(unix))]` branch preserves the prior behaviour so Windows users see no regression.
+
+#### Files Modified
+
+- **`src/commands/query.rs`** — `determine_input_source()`:
+  - Add the private helper `stdin_has_data()` gated on `#[cfg(unix)]` with a `#[cfg(not(unix))]` fallback that returns `true` (preserves legacy behaviour).
+  - Replace `let stdin_is_pipe = !io::stdin().is_terminal();` with `let stdin_is_pipe = !io::stdin().is_terminal() && stdin_has_data();`.
+  - No signature changes. No changes to `read_sql_stdin`.
+- **No changes** to `src/main.rs`, `src/cli.rs`, or any other file.
+
+#### New Tests
+
+Unit tests for `stdin_has_data()` are limited because cargo test inherits the test harness's stdin. Integration-level tests (spawning a `tq` subprocess with controlled stdin) are the right level:
+
+- `tests/cases/TCxxx.md` — new test case covering the four scenarios from the acceptance criteria:
+  1. `tq query "SELECT 1" < /dev/null` — succeeds
+  2. `tq query "SELECT 1" <<< ""` — succeeds
+  3. `echo "SELECT 2" | tq query` — succeeds (reads stdin)
+  4. `echo "SELECT 2" | tq query "SELECT 1"` — fails with "multiple input sources"
+  5. `tq query "SELECT 1"` in interactive terminal — succeeds (is_terminal()=true short-circuits before `stdin_has_data`)
+
+The `stdin_has_data()` function itself can have a basic unit test that verifies the `#[cfg(not(unix))]` branch returns `true` (trivial), but the behaviour on real fds must be validated via integration tests.
+
+#### Concerns / Risks
+
+- **`FIONREAD` support variance**: POSIX does not require `FIONREAD` for all fd types. Our fallback to `fstat` covers regular files; for character devices other than `/dev/null` (rare in practice for stdin) we default to the conservative "assume data" branch. Worst case this reproduces the old bug for exotic cases, which is no regression.
+- **Race condition between `poll()` and the actual read**: Between `determine_input_source` and `read_sql_stdin`, an upstream writer could close the pipe. The existing empty-check in `read_sql_stdin` already handles this cleanly with a clear error message.
+- **Namedpipe / socket stdin in CI**: `FIONREAD` works for pipes and sockets, so CI environments piping from Docker/container stdio are handled correctly.
+
 ## Completion Generation
 
 Clap can generate shell completions:

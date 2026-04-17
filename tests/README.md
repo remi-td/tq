@@ -173,6 +173,65 @@ fn test_live_database_feature() {
 }
 ```
 
+### Process Integration Tests (fd Redirection)
+
+Some features depend on OS-level file descriptor state (`isatty()`, bytes available on stdin pipe) that cannot be controlled from within the test process. These tests spawn the `tq` binary as a subprocess with explicit `Stdio` configuration.
+
+Add these tests in `tests/integration_tests.rs`. Use `env!("CARGO_BIN_EXE_tq")` to resolve the binary path:
+
+```rust
+#[test]
+fn test_feature_with_null_stdin() {
+    // Simulates: tq query "SQL" < /dev/null
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tq"))
+        .args(["query", "SELECT 1"])
+        .stdin(std::process::Stdio::null())    // < /dev/null
+        .output()
+        .expect("failed to spawn tq");
+    assert!(output.status.success());
+}
+
+#[test]
+fn test_feature_with_empty_pipe() {
+    // Simulates: tq query "SQL" <<< "" (empty heredoc / closed pipe)
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_tq"))
+        .args(["query", "SELECT 1"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to spawn tq");
+    drop(child.stdin.take()); // close write end without writing — empty pipe
+    let output = child.wait_with_output().expect("failed to wait");
+    assert!(output.status.success());
+}
+
+#[test]
+fn test_feature_with_data_on_stdin() {
+    // Simulates: echo "SELECT 1" | tq query
+    use std::io::Write;
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_tq"))
+        .args(["query"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to spawn tq");
+    if let Some(mut stdin_pipe) = child.stdin.take() {
+        stdin_pipe.write_all(b"SELECT 1\n").expect("write");
+    }
+    let output = child.wait_with_output().expect("failed to wait");
+    assert!(output.status.success());
+}
+```
+
+**Key differences from `Stdio::null()` vs empty `Stdio::piped()`:**
+- `Stdio::null()` opens `/dev/null` as an actual device fd (`is_terminal() == false`, `available_bytes == 0`, fd type = character device)
+- `Stdio::piped()` with writer dropped creates a pipe fd (`is_terminal() == false`, `available_bytes == 0`, fd type = pipe)
+- Both must be handled by the stdin detection logic; they arrive via different fd types at the OS level
+
+**No new crates required:** `std::process::Command` and `std::process::Stdio` are in the Rust standard library.
+
 ### Interactive Tests
 
 Add tests in `tests/interactive_tests.rs`:

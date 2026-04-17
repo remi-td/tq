@@ -398,7 +398,7 @@ tq [GLOBAL_OPTIONS] query [OPTIONS] < script.sql
 | `--limit` | `-n` | int | - | Limit number of rows returned |
 
 **Arguments**:
-- `<QUERY>`: SQL query string (mutually exclusive with `--file` and stdin)
+- `<QUERY>`: SQL query string. Mutually exclusive with `--file`. Also mutually exclusive with stdin when stdin is a non-TTY with bytes available (see REQ-CLI-STDIN-002). An empty or TTY stdin is silently ignored when a positional query is provided.
 
 **Examples**:
 ```bash
@@ -3790,10 +3790,86 @@ Profile management commands (`add`, `edit`, `delete`, `list`) do NOT connect to 
 
 | Context | stdin | stdout | stderr |
 |---------|-------|--------|--------|
-| Query from arg | Ignored | Results | Errors, warnings |
+| Query from arg (stdin TTY or empty) | Ignored | Results | Errors, warnings |
+| Query from arg + piped stdin with bytes | Conflict error | — | Conflict error |
 | Query from stdin | SQL query | Results | Errors, warnings |
 | REPL mode | User input | Results | Errors, warnings |
 | Piped output | Varies | Machine format | Human messages |
+
+### stdin Detection for `tq query`
+
+The following requirements govern how `tq query` decides whether stdin constitutes a second input source, in order to correctly distinguish an intentional SQL pipe from an accidental or empty redirection.
+
+**REQ-CLI-STDIN-001: Definition of "stdin as input source"**
+
+stdin is treated as a SQL input source if and only if ALL of the following conditions are true at startup:
+
+1. stdin is not a TTY (`isatty(0)` returns false).
+2. stdin has at least one byte available to read (a non-blocking peek or equivalent OS-level check confirms data is present).
+
+A redirected-but-empty stdin (e.g., `< /dev/null`, `< empty_file`, or a pipe whose write end was closed without writing) satisfies condition (1) but NOT condition (2) and MUST NOT be treated as a SQL input source.
+
+**REQ-CLI-STDIN-002: Conflict detection rule**
+
+A "multiple input sources" conflict exists when and only when a positional `<QUERY>` argument is present AND stdin satisfies both conditions in REQ-CLI-STDIN-001. Any combination where only one real input source is present MUST NOT produce a conflict error.
+
+Scenario truth table:
+
+| Positional `<QUERY>` arg | stdin is TTY | stdin has bytes | Result |
+|--------------------------|--------------|-----------------|--------|
+| Yes | Yes | N/A | Run arg query; stdin ignored (interactive terminal) |
+| Yes | No | No | Run arg query; stdin ignored (empty redirect) |
+| Yes | No | Yes | Error: multiple input sources |
+| No | Yes | N/A | Error: no query provided |
+| No | No | No | Error: no query provided (empty stdin) |
+| No | No | Yes | Run stdin query |
+
+**REQ-CLI-STDIN-003: Error message for legitimate conflict**
+
+When a genuine conflict is detected (positional arg AND stdin with bytes available), the error message is:
+
+```
+Error: Multiple input sources provided
+
+You specified both a query argument and piped stdin.
+Only one input source is allowed.
+
+Either provide SQL as argument OR pipe via stdin, not both.
+```
+
+Exit code: `2`
+
+**REQ-CLI-STDIN-004: No error for empty redirected stdin**
+
+The invocations below MUST all succeed without a conflict error when a positional query argument is present:
+
+```bash
+# Empty device
+tq query "SELECT 1" < /dev/null
+
+# Empty here-string
+tq query "SELECT 1" <<< ""
+
+# Empty file
+tq query "SELECT 1" < /tmp/empty_file
+
+# Agent or CI harness that closes stdin before invoking tq
+```
+
+These cases are indistinguishable from each other at the OS level: stdin is not a TTY and has zero bytes available. The tool MUST NOT produce a conflict error for any of them.
+
+**REQ-CLI-STDIN-005: Pipe with bytes still triggers conflict**
+
+When a positional query argument is present AND a pipe with actual content is attached to stdin, the tool MUST reject with the conflict error defined in REQ-CLI-STDIN-003. The presence of bytes distinguishes an intentional pipe from an accidental redirection.
+
+```bash
+# This MUST produce the conflict error:
+echo "SELECT 2" | tq query "SELECT 1"
+```
+
+**REQ-CLI-STDIN-006: Interactive terminal not affected**
+
+When stdin is a TTY (interactive terminal), the stdin availability check does not apply. A TTY stdin is never treated as a SQL input source regardless of whether the positional argument is present.
 
 ### Terminal Detection
 

@@ -1,15 +1,29 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.45.0 (Sprint 63 - Pager Exit Snapshot)
-**Last Updated:** 2026-04-14
-**Base Commit:** [Sprint 63 - In Progress]
+**Version:** 1.46.0 (Sprint 64 - Bug Fixes #42 #43)
+**Last Updated:** 2026-04-17
+**Base Commit:** [Sprint 64 - In Progress]
 
 ## Overview
 
 This directory contains comprehensive test case definitions for the tq CLI tool. These test cases cover all implemented MVP features (FR-001 through FR-010) and provide detailed procedures for validating functionality, usability, error handling, and security.
 
 ## Test Case Categories
+
+### Sprint 64: Bug Fixes — File Mode Parser & Stdin Detection
+
+- **TC094**: BEGIN/END Depth Tracking in Statement Splitter (Bug #42) — 9 unit tests covering: single procedure (exact #42 repro), nested BEGIN/END blocks, BEGIN inside string literal, BEGIN/END inside line/block comments, multi-procedure script, mixed SPL + regular statements, case-insensitive headers (PROCEDURE/TRIGGER/MACRO), CREATE vs REPLACE variant, plain multi-statement regression guard. Plus 1 `#[ignore]` integration test: end-to-end `tq query --file repro_sp.sql` against live DB. Location: unit tests in `src/sql/parser.rs`, integration test in `tests/integration_tests.rs` — `TC094.md`
+
+- **TC095**: Stdin Detection with Redirected Empty Stdin (Bug #43) — 3 `#[ignore]` process integration tests (live DB): `Stdio::null()` redirect (simulates `< /dev/null`), empty pipe with writer dropped (simulates `<<< ""`), stdin-only regression guard (`echo SQL | tq query`). 1 process integration test (no DB, no `#[ignore]`): real conflict still rejected (`echo SQL | tq query "SQL"`). 1 unit test: error message content verification. Manual-only: AC-5 TTY stdin path. Location: process tests in `tests/integration_tests.rs`, unit test in `src/commands/query.rs` — `TC095.md`
+
+**Sprint 64 test case summary:**
+- Unit tests (no DB): TC094 (9 tests in `src/sql/parser.rs`) + TC095 (1 test in `src/commands/query.rs`) = 10 unit tests
+- Process integration tests (no DB, runs in `cargo test`): TC095-D (1 test) = 1 test
+- Integration tests (live DB, `#[ignore]`): TC094 (1 test) + TC095 (3 tests) = 4 `#[ignore]` tests
+- Total: 11 unit/no-DB tests + 4 `#[ignore]` tests
+
+---
 
 ### Sprint 63: Pager Exit Snapshot
 

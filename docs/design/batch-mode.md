@@ -450,6 +450,136 @@ fn test_unterminated_block_comment_returns_parse_error() {
 
 The `ParsedStatement` struct, `parse_statements` signature, and `has_multiple_statements` signature are all unchanged. Call sites in `src/commands/query.rs` require no modification. The only observable behaviour change is that comment text no longer appears in `ParsedStatement::sql` — which is the correct behaviour per the updated specification.
 
+### BEGIN/END Block Tracking (Stored Procedure Bodies)
+
+Stored procedures, triggers, and macro bodies routinely contain internal `;` characters that terminate statements *inside the procedure body* but MUST NOT be treated as top-level statement boundaries by the file-mode splitter. The canonical example:
+
+```sql
+REPLACE PROCEDURE demo.sp()
+BEGIN
+    DECLARE v INTEGER;     -- internal ;
+    SET v = 1;             -- internal ;
+    IF v = 1 THEN
+        SET v = 2;         -- internal ;
+    END IF;                -- internal ;
+END;                       -- top-level ; (end of procedure)
+```
+
+The Sprint 42 state machine only tracks string/comment states, so the first internal `;` is interpreted as a top-level boundary and a truncated fragment is sent to Teradata.
+
+#### Approach: BEGIN/END Depth Counter + Header Gate
+
+Extend the existing state machine with a `begin_end_depth: u32` counter and a boolean latch `in_procedure_header: bool`. Top-level `;` remains a statement terminator only when BOTH:
+
+- `state == LexState::Normal`, AND
+- `begin_end_depth == 0`
+
+This is a pure composition with the existing string/comment states — the three existing states already inhibit `;` matching, and the depth counter adds a fourth inhibition condition.
+
+#### Procedure-Header Detection
+
+The naive approach (any `BEGIN` anywhere bumps the depth) is wrong: a `BEGIN` inside a regular `SELECT ... FROM t BEGIN_DATE` column name, or a free-standing `BEGIN TRANSACTION` statement, must not be treated as an SPL block opener.
+
+Detection gate: the parser arms a `procedure_header_seen` flag when it recognises the pattern `(CREATE | REPLACE) ... (PROCEDURE | TRIGGER | MACRO | FUNCTION)` in the current statement buffer. Only when this flag is armed does a subsequent top-level `BEGIN` increment `begin_end_depth` (and disarm the flag — the flag only matters for the first BEGIN that opens the body).
+
+To avoid a full SQL parser, the gate is implemented as a lightweight keyword-sequence matcher operating on the token stream already produced by the lexer. A minimal approach:
+
+- Maintain a rolling view of the last N tokens (N=8 is sufficient) of the current statement buffer, split on whitespace, uppercased for comparison.
+- At each `;` emission OR at the start of the buffer, reset the sequence tracker.
+- On each transition to `Normal` from a non-content state, scan the buffer tail for the pattern:
+  `(CREATE|REPLACE) (OR REPLACE)? [non-keyword-tokens]* (PROCEDURE|TRIGGER|MACRO|FUNCTION)`
+
+Practical implementation: check `procedure_header_seen` lazily right before a `BEGIN` match by scanning the current uppercased buffer for `/\b(CREATE|REPLACE)\b.*\b(PROCEDURE|TRIGGER|MACRO|FUNCTION)\b/` using a one-shot `str::contains`-style check on the buffer so far. The `regex` crate is already a dependency; a lazy-compiled `Regex` is the cleanest implementation.
+
+```rust
+use regex::Regex;
+use std::sync::OnceLock;
+
+fn procedure_header_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)\b(CREATE|REPLACE)\b[\s\S]*?\b(PROCEDURE|TRIGGER|MACRO|FUNCTION)\b")
+            .expect("valid procedure-header regex")
+    })
+}
+```
+
+The `[\s\S]*?` is non-greedy and bounded in practice by the current statement buffer, which is cleared at each top-level `;`. Case-insensitive matching is enabled via the `(?i)` inline flag.
+
+#### BEGIN/END Keyword Matching
+
+Inside the `LexState::Normal` branch of the main loop, after the existing `;` / `'` / `--` / `/*` checks, add keyword boundary detection:
+
+1. On encountering an ASCII alphabetic character in `Normal` state, extend an in-place word scan via `chars.peek()` lookahead to identify the next whole word (ASCII-letter run).
+2. Match the word against `BEGIN` / `END` case-insensitively using `eq_ignore_ascii_case`.
+3. For `BEGIN`: if `begin_end_depth > 0` OR the current statement buffer matches the procedure-header regex, increment `begin_end_depth`. Push the word to the buffer as usual.
+4. For `END`: if `begin_end_depth > 0`, decrement `begin_end_depth`. Push the word to the buffer.
+
+Important edge cases:
+
+- **`END IF`, `END LOOP`, `END WHILE`, `END CASE`**: These are composite SPL keywords that logically close an inner block, not the procedure. They ARE correctly handled by a pure depth counter because each is paired with a matching `IF`/`LOOP`/`WHILE`/`CASE` that increments the depth. **Correction: these DO NOT increment depth** — only `BEGIN` does. We must NOT decrement for `END IF` / `END LOOP` / `END WHILE` / `END CASE` / `END FOR`. The implementation therefore peeks ahead after matching `END`: if the next non-whitespace token is one of `IF | LOOP | WHILE | CASE | FOR`, treat the `END` as a non-counting keyword (do not decrement). Only a bare `END` (followed by `;` or whitespace-then-`;` or EOF) decrements the depth.
+- **Identifiers containing `BEGIN` / `END` substrings** (e.g., `BEGIN_DATE`, `APPEND`): rejected by the word-boundary scan — a trailing `_` or alphanumeric character means the word is not `BEGIN`/`END`. Use `char::is_ascii_alphanumeric` or `_` as continuation characters.
+- **`BEGIN` / `END` inside string literals**: The existing `LexState::InSingleQuotedString` already suppresses all keyword matching. This composes correctly.
+- **`BEGIN` / `END` inside comments**: Same — the `InLineComment` / `InBlockComment` states suppress keyword matching.
+- **`BEGIN TRANSACTION` at top level**: If `procedure_header_seen == false`, the `BEGIN` does not increment depth. The matching `COMMIT` / `ROLLBACK` / `END TRANSACTION` / `ET;` is never counted as a decrement either.
+- **Case sensitivity**: `Begin`, `BEGIN`, `begin` all match. Use `eq_ignore_ascii_case`.
+- **Nested `BEGIN ... END` blocks inside SPL**: `begin_end_depth` correctly tracks nesting — depth 2, 3, … are handled uniformly.
+- **Unterminated SPL body (no matching `END`)**: Input ends with `begin_end_depth > 0`. The final flush still emits the accumulated content as one statement (the user's SQL is syntactically invalid and Teradata will reject it with its own error). We do NOT return a parser error — the parser's job is splitting, not SPL validation.
+
+#### State Machine Update
+
+The state machine gains one new piece of mutable state but no new `LexState` variant. The four existing states remain sufficient; the depth counter is an orthogonal inhibition mechanism:
+
+```
+Top-level statement boundary fires when:
+  state == Normal
+  AND begin_end_depth == 0
+  AND ch == ';'
+```
+
+Alternative rejected: adding an `InProcedureBody` state variant. This was considered but adds coupling between SPL-awareness and the core string/comment lexer, and does not gracefully handle nested `BEGIN ... END` depth. A depth counter is the minimal and composable change.
+
+#### Files Modified
+
+- **`src/sql/parser.rs`** — Primary change. Extend `parse_statements()` with:
+  - A `begin_end_depth: u32` local variable (initialised to 0).
+  - A helper `fn consume_word(ch: char, chars: &mut Peekable<Chars>) -> String` that returns the uppercase ASCII word starting at `ch`, consuming alphanumeric/underscore continuation characters from the iterator.
+  - A helper `fn is_procedure_header(buf: &str) -> bool` using the lazy-initialised regex described above.
+  - A helper `fn peek_end_is_inner_keyword(chars: &Peekable<Chars>) -> bool` that looks ahead (without consuming) for whitespace-then-`IF|LOOP|WHILE|CASE|FOR`.
+  - Logic at the start of the `Normal` match arm: if the current char is ASCII alphabetic, peek-consume to build the word, match `BEGIN` / `END` case-insensitively, adjust `begin_end_depth`, and push the consumed chars to the buffer.
+  - Gate the existing `';'` emission on `begin_end_depth == 0`.
+- **No changes** to `src/commands/query.rs`, `src/sql/mod.rs`, or any other file. The parser API (`parse_statements`, `has_multiple_statements`, `ParsedStatement`) is unchanged.
+
+#### New Tests (in `src/sql/parser.rs`)
+
+```rust
+#[test] fn test_create_procedure_body_is_single_statement() { ... }
+#[test] fn test_replace_procedure_body_is_single_statement() { ... }
+#[test] fn test_nested_begin_end_blocks_handled() { ... }  // BEGIN ... BEGIN ... END; END;
+#[test] fn test_end_if_does_not_decrement_depth() { ... }
+#[test] fn test_end_loop_does_not_decrement_depth() { ... }
+#[test] fn test_end_case_does_not_decrement_depth() { ... }
+#[test] fn test_begin_inside_string_does_not_open_body() { ... }
+#[test] fn test_end_inside_string_does_not_close_body() { ... }
+#[test] fn test_begin_end_in_line_comment_ignored() { ... }
+#[test] fn test_begin_end_in_block_comment_ignored() { ... }
+#[test] fn test_begin_transaction_at_top_level_not_tracked() { ... }
+#[test] fn test_multi_procedure_script_splits_correctly() { ... }
+#[test] fn test_mixed_spl_and_regular_statements() { ... }
+#[test] fn test_identifier_beginning_with_begin_not_a_keyword() { ... }  // BEGIN_DATE column
+#[test] fn test_create_trigger_body_is_single_statement() { ... }
+#[test] fn test_create_macro_body_is_single_statement() { ... }
+#[test] fn test_case_insensitive_begin_end() { ... }  // lowercase begin/end
+```
+
+#### Concerns / Risks
+
+- **Teradata DDL flavours**: Some `CREATE FUNCTION` variants (e.g., SQL scalar functions) use `RETURNS ... RETURN expr;` syntax rather than `BEGIN ... END`. The regex arms on FUNCTION but `begin_end_depth` only increments on an actual `BEGIN`, so these are unaffected. Table functions with `BEGIN ... END` bodies ARE covered correctly.
+- **`CREATE TABLE ... AS ... END_OF_STATEMENT` false positives**: The regex requires both `(CREATE|REPLACE)` and one of the SPL object keywords. `CREATE TABLE` does not match. Safe.
+- **`BEGIN` keyword inside a `CASE` expression's `WHEN` clause** (`CASE WHEN col = 'BEGIN' THEN ...`): String literal, suppressed. Safe.
+- **`COMMIT` / `ROLLBACK` inside SPL body**: These do NOT affect `begin_end_depth` because we only count `BEGIN` / bare `END`. Safe.
+- **Windows line endings in procedure bodies**: `\r\n` is handled by the existing newline logic; the depth counter is unaffected. Safe.
+
 ---
 
 ## File Output (--output flag)

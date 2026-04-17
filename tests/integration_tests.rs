@@ -1005,3 +1005,234 @@ fn test_list_tables_error_handling() {
         );
     });
 }
+
+// =============================================================================
+// Sprint 64: Bug #42 & #43 integration tests
+// TC094-INTEGRATION, TC095-A, TC095-B, TC095-C, TC095-D
+// =============================================================================
+
+/// Resolve path to the compiled tq binary.
+/// Uses CARGO_BIN_EXE_tq which Cargo sets during `cargo test`.
+fn tq_bin() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_tq"))
+}
+
+/// Load TQ_LOGON from .env / environment for live-DB tests.
+fn load_logon() -> String {
+    dotenvy::dotenv().ok();
+    std::env::var("TQ_LOGON").expect("TQ_LOGON must be set for this test")
+}
+
+// -----------------------------------------------------------------------------
+// TC094-INTEGRATION: End-to-end deploy via `tq query --file` (Bug #42)
+// -----------------------------------------------------------------------------
+
+/// Test that `tq query --file` deploys a stored procedure without splitting
+/// its body at internal semicolons (exact repro from Issue #42).
+///
+/// Run with: cargo test test_file_mode_procedure_deploys_successfully -- --ignored
+#[test]
+#[ignore] // Requires live Teradata database (TQ_LOGON env var)
+fn test_file_mode_procedure_deploys_successfully() {
+    let logon = load_logon();
+
+    // Write the exact repro script from Issue #42 to a temp file.
+    // The schema must match a writable schema in the test DB.
+    // Uses demo_user as in the original issue; adjust via TQ_TEST_SCHEMA if needed.
+    let schema = std::env::var("TQ_TEST_SCHEMA").unwrap_or_else(|_| "demo_user".to_string());
+    let sql = format!(
+        "\
+REPLACE PROCEDURE {schema}.sp_tq_repro()
+BEGIN
+    DECLARE v INTEGER;
+    SET v = 1;
+    IF v = 1 THEN
+        SET v = 2;
+    END IF;
+END;"
+    );
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sql_file = dir.path().join("repro_sp.sql");
+    std::fs::write(&sql_file, &sql).expect("write sql file");
+
+    let output = std::process::Command::new(tq_bin())
+        .args(["query", "--file", sql_file.to_str().unwrap()])
+        .env("TQ_LOGON", &logon)
+        .output()
+        .expect("failed to spawn tq");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        output.status.success(),
+        "tq query --file must succeed; exit={}, stderr={stderr}, stdout={stdout}",
+        output.status
+    );
+    // Confirm no SQL splitting error in stderr
+    assert!(
+        !stderr.contains("syntax error") && !stderr.contains("Error at statement"),
+        "must not contain SQL error; stderr={stderr}"
+    );
+}
+
+// -----------------------------------------------------------------------------
+// TC095-A: /dev/null redirect — positional arg succeeds (Bug #43)
+// -----------------------------------------------------------------------------
+
+/// Test that `tq query "SELECT 1" < /dev/null` succeeds (Stdio::null() simulates
+/// `/dev/null` redirect). The fix must not raise "Multiple input sources" when
+/// stdin is null/empty and a positional arg is provided.
+///
+/// Run with: cargo test test_query_with_devnull_stdin_succeeds -- --ignored
+#[test]
+#[ignore] // Requires live Teradata database (TQ_LOGON env var)
+fn test_query_with_devnull_stdin_succeeds() {
+    let logon = load_logon();
+
+    let output = std::process::Command::new(tq_bin())
+        .args(["query", "SELECT 1 AS x"])
+        .env("TQ_LOGON", &logon)
+        .stdin(std::process::Stdio::null()) // < /dev/null
+        .output()
+        .expect("failed to spawn tq");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "tq query with Stdio::null() stdin must succeed; exit={}, stderr={stderr}",
+        output.status
+    );
+    assert!(
+        !stderr.contains("Multiple input sources"),
+        "must not trigger multiple-sources error; stderr={stderr}"
+    );
+}
+
+// -----------------------------------------------------------------------------
+// TC095-B: Empty heredoc pipe — positional arg succeeds (Bug #43)
+// -----------------------------------------------------------------------------
+
+/// Test that `tq query "SELECT 1" <<< ""` succeeds.
+/// Simulated by opening a pipe and immediately dropping the write end (no bytes written).
+/// This is the most important AC-2 scenario: a pipe with no data must not be treated
+/// as a second input source when a positional arg is present.
+///
+/// Run with: cargo test test_query_with_empty_pipe_stdin_succeeds -- --ignored
+#[test]
+#[ignore] // Requires live Teradata database (TQ_LOGON env var)
+fn test_query_with_empty_pipe_stdin_succeeds() {
+    let logon = load_logon();
+
+    let mut child = std::process::Command::new(tq_bin())
+        .args(["query", "SELECT 1 AS x"])
+        .env("TQ_LOGON", &logon)
+        .stdin(std::process::Stdio::piped()) // open a pipe
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to spawn tq");
+
+    // Drop the write end immediately — no bytes written (like <<< "")
+    drop(child.stdin.take());
+
+    let output = child.wait_with_output().expect("failed to wait");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "tq query with empty pipe stdin must succeed; exit={}, stderr={stderr}",
+        output.status
+    );
+    assert!(
+        !stderr.contains("Multiple input sources"),
+        "must not trigger multiple-sources error; stderr={stderr}"
+    );
+}
+
+// -----------------------------------------------------------------------------
+// TC095-C: Stdin-only (no positional arg) — regression guard (Bug #43)
+// -----------------------------------------------------------------------------
+
+/// Test that `echo "SELECT 1 AS x" | tq query` still works after the fix.
+/// This is the original working stdin-only use case that the fix must not break.
+///
+/// Run with: cargo test test_query_from_stdin_only_regression -- --ignored
+#[test]
+#[ignore] // Requires live Teradata database (TQ_LOGON env var)
+fn test_query_from_stdin_only_regression() {
+    let logon = load_logon();
+
+    let mut child = std::process::Command::new(tq_bin())
+        .args(["query"]) // no positional arg
+        .env("TQ_LOGON", &logon)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to spawn tq");
+
+    // Write SQL to stdin (like: echo "SELECT 1 AS x" | tq query)
+    use std::io::Write;
+    if let Some(mut stdin_pipe) = child.stdin.take() {
+        stdin_pipe
+            .write_all(b"SELECT 1 AS x\n")
+            .expect("write to stdin");
+    }
+
+    let output = child.wait_with_output().expect("failed to wait");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "stdin-only query must succeed; exit={}, stderr={stderr}",
+        output.status
+    );
+    assert!(
+        stdout.contains("1") || stdout.contains("x"),
+        "stdout must contain result data; stdout={stdout}"
+    );
+}
+
+// -----------------------------------------------------------------------------
+// TC095-D: Real conflict — non-empty pipe + positional arg — error emitted
+// (Bug #43 regression guard — NO DB required)
+// -----------------------------------------------------------------------------
+
+/// Test that `echo "SELECT 2" | tq query "SELECT 1"` still produces the
+/// "Multiple input sources" error after the fix.
+/// This test does NOT require a live DB (tq exits before connecting).
+/// It runs in the default `cargo test` (no --ignored needed).
+#[test]
+fn test_query_real_conflict_rejected() {
+    let mut child = std::process::Command::new(tq_bin())
+        .args(["query", "SELECT 1"]) // positional arg provided
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to spawn tq");
+
+    // Write non-empty SQL to stdin — creating a genuine conflict
+    use std::io::Write;
+    if let Some(mut stdin_pipe) = child.stdin.take() {
+        stdin_pipe
+            .write_all(b"SELECT 2\n")
+            .expect("write to stdin");
+    }
+
+    let output = child.wait_with_output().expect("failed to wait");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "conflict must cause non-zero exit; exit={}",
+        output.status
+    );
+    assert!(
+        stderr.contains("Multiple input sources"),
+        "conflict must produce 'Multiple input sources' error; stderr={stderr}"
+    );
+}

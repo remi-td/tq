@@ -6,6 +6,13 @@
 2. [Execution Modes](#execution-modes)
 3. [Multiple Statement Execution](#multiple-statement-execution)
 4. [SQL File Parser Requirements](#sql-file-parser-requirements)
+   - [Statement Boundary Rules](#statement-boundary-rules)
+   - [Quoted String Rules](#quoted-string-rules)
+   - [Line Comment Rules](#line-comment-rules)
+   - [Block Comment Rules](#block-comment-rules)
+   - [SPL Body Rules](#spl-body-rules-stored-procedures-triggers-macros)
+   - [Error Reporting and Line Numbers](#error-reporting-and-line-numbers)
+   - [Parser Correctness Examples](#parser-correctness-examples)
 5. [Output Destinations](#output-destinations)
 6. [Error Handling](#error-handling)
 7. [Scripting Integration](#scripting-integration)
@@ -40,8 +47,9 @@ When determining which input source to use:
 
 **Mutual Exclusivity:**
 - Only ONE input source can be used per invocation
-- Providing multiple sources results in an error
+- Providing multiple real sources results in an error
 - This prevents ambiguity and accidental data loss
+- An empty or TTY stdin is never counted as an input source; see [stdin Detection Requirements](../specifications/cli-interface.md#stdin-detection-for-tq-query) for the precise rules
 
 ### Inline Query (Argument)
 
@@ -129,18 +137,19 @@ tq query < <(echo "SELECT CURRENT_DATE")
 ```
 
 **Characteristics:**
-- Automatically detected (stdin is not a TTY)
+- Automatically detected: stdin is not a TTY AND has at least one byte available
 - Supports multi-statement execution
 - Ideal for shell scripts and pipelines
 - Works with pipes, redirects, and heredocs
+- An empty redirected stdin (e.g., `< /dev/null`) is NOT treated as a SQL input source
 
 **Error handling:**
 ```bash
-# Empty stdin
-$ echo "" | tq query
-Error: Empty query
+# Empty stdin (no bytes available — not treated as input)
+$ tq query < /dev/null
+Error: No query provided
 
-Provide SQL via argument, file, or stdin.
+Use 'tq query "SELECT ..."' or pipe SQL via stdin.
 
 # No input and TTY (interactive terminal)
 $ tq query
@@ -148,12 +157,18 @@ Error: No query provided
 
 Use 'tq query "SELECT ..."' or pipe SQL via stdin.
 
-# Multiple sources (conflict)
+# Multiple sources (conflict — pipe has actual data)
 $ echo "SELECT 1" | tq query "SELECT 2"
 Error: Multiple input sources provided
 
 You specified both a query argument and piped stdin.
 Only one input source is allowed.
+
+Either provide SQL as argument OR pipe via stdin, not both.
+
+# Empty redirect with positional arg — NOT a conflict
+$ tq query "SELECT 1" < /dev/null
+(executes SELECT 1 normally)
 ```
 
 ## Multiple Statement Execution
@@ -478,6 +493,142 @@ The following table summarises parser behaviour across representative inputs.
 | `SELECT\n1\nFROM\nt;` | 1 | Multi-line statement |
 | `;;;` | 0 | All empty, suppressed |
 | `-- comment only` | 0 | Comment only, no statement |
+| `REPLACE PROCEDURE p() BEGIN SET x=1; END;` | 1 | SPL body; inner `;` not a terminator |
+| `REPLACE PROCEDURE p() BEGIN IF c THEN BEGIN SET x=1; END; END IF; END;` | 1 | Nested BEGIN/END; depth tracked |
+| `REPLACE PROCEDURE p() BEGIN SET s='END'; END;` | 1 | END inside string ignored |
+| `REPLACE PROCEDURE p() BEGIN END;\nSELECT 1;` | 2 | SPL then plain statement |
+
+---
+
+### SPL Body Rules (Stored Procedures, Triggers, Macros)
+
+The following requirements govern how the parser handles `BEGIN … END` bodies inside stored-procedure, trigger, and macro definitions. These constructs contain semicolons that terminate inner statements within the body and must not be mistaken for top-level statement terminators.
+
+**REQ-BATCH-SPL-001: Body-Header Detection**
+
+The parser enters "SPL body" context when it encounters one of the following compound headers as the start of the current statement:
+
+- `CREATE PROCEDURE`
+- `REPLACE PROCEDURE`
+- `CREATE OR REPLACE PROCEDURE`
+- `CREATE TRIGGER`
+- `REPLACE TRIGGER`
+- `CREATE OR REPLACE TRIGGER`
+- `CREATE MACRO`
+- `REPLACE MACRO`
+- `CREATE OR REPLACE MACRO`
+
+Detection is case-insensitive. The header is recognised after all preceding whitespace and comments have been consumed. The parser enters body context at the moment it encounters the opening `BEGIN` keyword that follows the header (not at the header keyword itself).
+
+Compliant examples:
+
+```sql
+-- Single procedure — entirely one statement
+REPLACE PROCEDURE demo.sp_example()
+BEGIN
+    DECLARE v INTEGER;
+    SET v = 42;
+END;
+
+-- Macro — body semicolons are NOT statement boundaries
+CREATE MACRO demo.m_example AS (
+    SELECT 1;
+    SELECT 2;
+);
+
+-- Standard DML after procedure — parsed as separate statement
+REPLACE PROCEDURE demo.sp_example() BEGIN SET x = 1; END;
+INSERT INTO log VALUES (1);
+```
+
+**REQ-BATCH-SPL-002: Body Nesting**
+
+The parser tracks a nesting depth counter for `BEGIN` / `END` pairs. Each `BEGIN` that appears inside body context increments the counter; each `END` decrements it. The body context ends only when the counter returns to zero, at which point the immediately following `;` terminates the top-level statement.
+
+Nested construct examples that require depth tracking:
+
+```sql
+REPLACE PROCEDURE demo.sp_nested()
+BEGIN
+    -- depth = 1
+    IF condition THEN
+        BEGIN  -- depth = 2
+            SET x = 1;
+        END;   -- depth returns to 1; this semicolon is NOT a statement terminator
+    END IF;
+    -- depth still = 1
+END;           -- depth returns to 0; following ';' terminates the statement
+```
+
+The following keywords reset the depth counter toward zero at various nesting levels; the parser must handle their compound forms:
+
+- `END IF`
+- `END LOOP`
+- `END CASE`
+- `END WHILE`
+- `END FOR`
+
+Each `END <keyword>` pair counts as one decrement.
+
+**REQ-BATCH-SPL-003: Body Context and Quoted Strings**
+
+`BEGIN` and `END` tokens inside a single-quoted string (REQ-PARSE-005) are ignored by the body depth counter. The existing string context takes precedence.
+
+```sql
+REPLACE PROCEDURE demo.sp_str()
+BEGIN
+    SET msg = 'BEGIN this is not a depth change END';
+    -- depth remains 1 — the string content is ignored
+END;
+```
+
+**REQ-BATCH-SPL-004: Body Context and Comments**
+
+`BEGIN` and `END` tokens inside line comments (`--`, REQ-PARSE-008) and block comments (`/* */`, REQ-PARSE-010) are ignored by the body depth counter.
+
+```sql
+REPLACE PROCEDURE demo.sp_cmt()
+BEGIN
+    -- END does not close the body here
+    /* BEGIN does not open a nested level here */
+    SET x = 1;
+END;
+```
+
+**REQ-BATCH-SPL-005: Case Insensitivity of BEGIN and END**
+
+The body depth counter recognises `BEGIN`, `begin`, `Begin`, and all other mixed-case variants as the same token. The same applies to `END` and its compound forms (`END IF`, `end loop`, etc.).
+
+**REQ-BATCH-SPL-006: Non-Body Semicolons After Body End**
+
+Once the body depth counter reaches zero and the closing `;` terminates the SPL statement, the parser returns to standard mode. Any subsequent statements in the file are parsed normally, including plain DML, DDL, or additional SPL statements.
+
+```sql
+-- File with two procedures and a plain SELECT — three statements total
+REPLACE PROCEDURE demo.sp_one() BEGIN SET x = 1; END;
+
+REPLACE PROCEDURE demo.sp_two()
+BEGIN
+    SET y = 2;
+END;
+
+SELECT * FROM demo.config;
+```
+
+**REQ-BATCH-SPL-007: Unterminated SPL Body Error**
+
+If end-of-input is reached while still inside a body context (depth counter > 0), the parser must report an error identifying the line number where the unclosed `BEGIN` was opened and the statement number in which it appeared.
+
+```
+Error: Unterminated procedure/trigger/macro body
+
+  File:      deploy.sql
+  Statement: 2
+  Line:      8
+
+The BEGIN block opened on line 8 was never closed with a matching END.
+Check for a missing END; sequence.
+```
 
 ---
 

@@ -137,6 +137,20 @@ tq query < <(generate_query.py)
 - Multi-source concatenation
 - Integration with other tools
 
+**CI and agent harnesses (no interactive terminal):**
+
+When tq runs inside a CI job, GitHub Actions step, or an agent subprocess there is no TTY attached. Passing an inline query with stdin explicitly closed avoids any risk of the process blocking waiting for input:
+
+```bash
+# Redirect stdin from /dev/null — safe in headless environments
+tq query "SELECT COUNT(*) FROM orders" < /dev/null
+
+# Equivalent with explicit null-input for portability
+tq query "SELECT CURRENT_DATE" </dev/null --format csv
+```
+
+tq detects a non-interactive environment automatically and never prompts for input, so this is a belt-and-suspenders measure for harnesses that mandate closed stdin.
+
 ---
 
 ## Output to File
@@ -545,20 +559,42 @@ SELECT 2;
 SELECT 3;
 ```
 
-### Known Limitation: Semicolons in Strings
+### Semicolons in String Literals
 
-The simple semicolon splitting doesn't handle `;` inside strings:
+tq uses a quote-aware parser, so a semicolon inside a string literal is never treated as a statement boundary:
 
 ```sql
--- This will split incorrectly:
-INSERT INTO messages VALUES ('Hello; World');
--- tq sees two statements: "INSERT INTO..." and "World')"
+-- Parsed correctly as a single statement:
+INSERT INTO messages (id, body) VALUES (1, 'Hello; World');
+INSERT INTO logs (msg) VALUES ('it''s; fine');
 ```
 
-**Workarounds:**
-1. Use single-statement execution for complex strings
-2. Most real-world SQL doesn't have `;` in strings
-3. Escape or avoid semicolons in string literals
+### Stored Procedures, Triggers, and Macros
+
+`BEGIN ... END` bodies are handled transparently. The parser recognises `CREATE` and `REPLACE` headers for `PROCEDURE`, `TRIGGER`, `MACRO`, and `FUNCTION`, then suspends semicolon splitting until the matching `END;` — so the entire definition is sent to Teradata as a single statement.
+
+```sql
+-- deploy.sql
+
+REPLACE PROCEDURE mydb.sp_reset_counter()
+BEGIN
+    DECLARE v INTEGER DEFAULT 0;
+    SET v = v + 1;
+    IF v > 100 THEN
+        SET v = 0;
+    END IF;
+    UPDATE mydb.counters SET value = v;
+END;
+
+-- Regular statements after the procedure work as normal
+SELECT COUNT(*) FROM mydb.counters;
+```
+
+```bash
+tq query --file deploy.sql
+```
+
+Inner control-flow keywords (`END IF`, `END LOOP`, `END WHILE`, `END CASE`, `END FOR`) are distinguished from the body-closing `END`, so nested SPL constructs are parsed correctly. Multiple procedures in one file each become their own statement.
 
 ---
 
