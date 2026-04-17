@@ -23,7 +23,7 @@ Launch BOTH agents in a **single message with multiple Task calls**:
 2. **`quality-validator`**:
    - Instruction: "Design and implement tests for the features in Sprint N as per requirements in `docs/sprints/sprint-N-planning.md`. Use the specifications in `docs/specifications/*.md`. Document your strategy in `tests/strategy/` based on `tests/strategy/test-strategy-template.md`. Add test cases in `tests/cases` and use `tests/README.md`
 
-> **Note (Sprint 66):** `cli-ux-designer` is **NOT** launched in Phase 3. User-guide prose (`docs/user/*.md`) is an explicit Phase 4 step — authored AFTER code is merged so examples, column names, and error messages can be grep-verified against source literals. Launching the designer in parallel with the architect produced recurring doc drift across Sprints 22, 23, 38, 39, and 65; sequencing eliminates the race condition. See `phase4-ship.md` Step 1.7.
+> **Standing rule:** `cli-ux-designer` is **NOT** launched in Phase 3. User-guide prose (`docs/user/*.md`) is an explicit Phase 4 step — authored AFTER code is merged so examples, column names, and error messages can be grep-verified against source literals. Launching the designer in parallel with the architect causes doc-vs-code drift and is prohibited. See `phase4-ship.md` Step 1.7.
 
 ### Step 2: Collect Results
 

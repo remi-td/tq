@@ -32,7 +32,7 @@
 use std::fs;
 use std::io;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use expectrl::{Error as ExpectrlError, Session};
 
@@ -241,12 +241,33 @@ impl TqPty {
 
     /// Drain any bytes currently available on the session and append them
     /// to the rolling capture. Non-blocking.
+    ///
+    /// `expectrl::SyncSession::try_read` returns `Ok(0)` when no bytes are
+    /// available *at this instant*, which is NOT necessarily EOF — output
+    /// may still be in-flight from the child process. To avoid truncating
+    /// the dump on transient empty reads, we retry with a short bounded
+    /// window (~50 ms total) before giving up.
     fn drain_pending(&mut self) {
         let mut scratch = [0u8; 4096];
+        let deadline = Instant::now() + Duration::from_millis(50);
+        let mut empty_reads: u32 = 0;
         loop {
             match self.session.try_read(&mut scratch) {
-                Ok(0) => break,
-                Ok(n) => self.captured.extend_from_slice(&scratch[..n]),
+                Ok(0) => {
+                    if Instant::now() >= deadline {
+                        break;
+                    }
+                    // Short sleep before retrying; bounded by the deadline.
+                    std::thread::sleep(Duration::from_millis(5));
+                    empty_reads += 1;
+                    if empty_reads > 10 {
+                        break;
+                    }
+                }
+                Ok(n) => {
+                    self.captured.extend_from_slice(&scratch[..n]);
+                    empty_reads = 0;
+                }
                 Err(_) => break,
             }
         }

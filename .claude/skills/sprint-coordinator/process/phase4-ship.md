@@ -130,7 +130,7 @@ For each new command, compare ACTUAL output against documented output:
 2. **Grep-verification contract (enforced by the designer, verified by the coordinator):**
    - Column headers quoted in tables (e.g. `"Session ID"`) → `grep -rn '"Session ID"' src/` must find a literal source match.
    - Error message text → must match a `format!` / `println!` / error-type literal in `src/`.
-   - Interval/range bounds (e.g. "Refresh every 2-300 s") → must match a numeric constant or validation bound in `src/`.
+   - Interval/range bounds (e.g. "Refresh every 2-300 s") → must match a numeric constant or validation bound in `src/`. When the range is composed at runtime from named constants (e.g. `MIN_INTERVAL_SECS`, `MAX_INTERVAL_SECS`), grep for the constant NAMES, not the expanded numeric literals — the numbers may not appear as bare literals in source if they're computed. Example: guide says "1 to 3600 seconds" → grep `MIN_INTERVAL_SECS` and `MAX_INTERVAL_SECS`, confirm their declared values equal 1 and 3600 respectively.
    - Frame headers, border characters, status-bar text for TUI features → must match a literal emitted by the rendering code.
    - Help-text examples → must match the output of `cargo run --release -- <subcommand> --help`.
 
