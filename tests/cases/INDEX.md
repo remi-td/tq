@@ -1,15 +1,27 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.47.0 (Sprint 65 - /sessions --watch)
+**Version:** 1.48.0 (Sprint 66 - Tiered PTY Timeouts)
 **Last Updated:** 2026-04-17
-**Base Commit:** [Sprint 65 - In Progress]
+**Base Commit:** [Sprint 66 - In Progress]
 
 ## Overview
 
 This directory contains comprehensive test case definitions for the tq CLI tool. These test cases cover all implemented MVP features (FR-001 through FR-010) and provide detailed procedures for validating functionality, usability, error handling, and security.
 
 ## Test Case Categories
+
+### Sprint 66: Maintenance — Test Infra Hardening (Tiered PTY Timeouts + PTY Buffer Dump)
+
+- **TC098**: Tiered Interactive-Test Timeouts + PTY Buffer Dump — 4 unit tests (no DB, no PTY): `TieredTimeouts` default values (F1-AC-1), `PtyError` variant Display names (F1-AC-2), `dump_pty_buffer()` writes last 4096 bytes (F1-AC-3), env overrides parsed correctly (F1-AC-4). Plus 1 `#[ignore]` interactive regression test (live DB + PTY): `test_repl_startup_and_quit` migrated to tiered API (F1-AC-5). Location: unit tests in `tests/common/pty_harness.rs`, interactive test in `tests/interactive_tests.rs` — `TC098.md`
+
+**Sprint 66 test case summary:**
+- Unit tests (no DB, no PTY): TC098 (4 tests in `tests/common/pty_harness.rs`) = 4 unit tests
+- Interactive tests (live DB + PTY, `#[ignore]`): TC098-I01 (1 test in `tests/interactive_tests.rs`) = 1 `#[ignore]` test
+- Re-executed from Sprint 65: TC097-A..H (8 tests) — outcome in `tests/results/sprint-66/tc097-failure-analysis.md`
+- Total: 4 unit tests + 1 `#[ignore]` regression test
+
+---
 
 ### Sprint 65: Feature — `/sessions --watch` Dynamic Session Monitoring
 

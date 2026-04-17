@@ -17,6 +17,7 @@ Launch BOTH agents in a **single message with multiple Task calls**:
 
 1. **`cli-ux-designer`**:
    - Instruction: "Create or update pure specifications for features in Sprint N. Update `docs/specifications/*.md` with ONLY timeless requirements (no status badges, no sprint references). Break down into numbered requirements with zero ambiguity. Developers, testers, and writers will rely on this as the single source of truth. Return a summary of spec changes."
+   - **DO NOT edit `docs/user/*.md` in this phase.** (Sprint 66 lesson.) User-guide prose describes concrete output strings, column names, and error messages that only stabilise AFTER the architect's implementation lands. Writing user-guide content in parallel with implementation caused recurring doc drift across Sprints 22, 23, 38, 39, and 65. User-guide prose is authored in Phase 4 (Ship), AFTER code is merged, with grep-verification against source literals. Phase 2 UX scope is **specifications only**.
 
 2. **`rust-teradata-architect`**:
    - Instruction: "Assess technical feasibility for Sprint N. Read `docs/sprints/sprint-N-planning.md` for objectives and `docs/specifications/*.md` for requirements. Update `docs/design/*.md` to document the solution design for each feature. Use `docs/design/vision.md` as architectural reference and update it if patterns change. Create or update feature-specific design docs (e.g., `docs/design/repl.md`, `docs/design/cli-interface.md`) explaining HOW features are implemented with code references. Return a feasibility assessment and any concerns."

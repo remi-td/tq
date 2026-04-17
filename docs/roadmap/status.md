@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-04-17
-**Current Version:** 1.47.0
-**Latest Sprint:** Sprint 65 Complete (Watch Mode Hardening: RAII, alt-screen, exit snapshot)
+**Current Version:** 1.48.0
+**Latest Sprint:** Sprint 66 Complete (Maintenance: tiered PTY harness + UX sequencing process fix)
 
 ---
 

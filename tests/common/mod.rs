@@ -3,6 +3,9 @@
 //! This module provides shared test infrastructure, particularly for
 //! managing Teradata driver initialization in parallel test scenarios.
 
+#[allow(dead_code)]
+pub mod pty_harness;
+
 use std::sync::{Mutex, OnceLock};
 
 /// Global lock for tests that use the Teradata driver

@@ -5,10 +5,18 @@
 //!
 //! IMPORTANT: These tests require a live database connection configured in .env
 
+#[path = "common/mod.rs"]
+mod common;
+
+use common::pty_harness::{Stage, Timeouts, TqPty};
 use expectrl::spawn;
 use std::time::Duration;
 
-/// Helper to spawn tq REPL with standard test flags
+/// Helper to spawn tq REPL with standard test flags.
+///
+/// Retained for backward compatibility with existing `#[ignore]` tests. New
+/// tests should prefer [`spawn_tq_repl_tiered`] so timeouts are observable
+/// and staged.
 fn spawn_tq_repl() -> expectrl::Session {
     let bin_path = assert_cmd::cargo::cargo_bin!("tq");
     let cmd = format!(
@@ -16,33 +24,64 @@ fn spawn_tq_repl() -> expectrl::Session {
         bin_path.display()
     );
     let mut session = spawn(cmd).expect("Failed to spawn tq");
-    session.set_expect_timeout(Some(Duration::from_secs(20)));
+    // Sprint 66: default raised from 20s to 60s to accommodate cold
+    // Teradata connect + first-query latency (TLS + auth + catalog
+    // warm-up + DBC.SessionInfoV scan can exceed 30s on CI). Tests
+    // needing fine-grained staged diagnostics should use
+    // [`spawn_tq_repl_tiered`] instead.
+    session.set_expect_timeout(Some(Duration::from_secs(60)));
     session
+}
+
+/// Spawn tq REPL wrapped in a [`TqPty`] with tiered timeouts.
+///
+/// - `test_name` drives the dump file path
+///   (`tests/results/sprint-66/<test_name>.pty.log`) when any expect times
+///   out, making failures actionable instead of opaque.
+/// - Timeouts default to connect=45 s / prompt=15 s / query=60 s and honour
+///   `TQ_TEST_CONNECT_TIMEOUT`, `TQ_TEST_PROMPT_TIMEOUT`,
+///   `TQ_TEST_QUERY_TIMEOUT` (u64 seconds).
+#[allow(dead_code)]
+fn spawn_tq_repl_tiered(test_name: &str) -> TqPty {
+    let bin_path = assert_cmd::cargo::cargo_bin!("tq");
+    let cmd = format!(
+        "{} repl --no-syntax-highlight --no-pager",
+        bin_path.display()
+    );
+    let session = spawn(cmd).expect("Failed to spawn tq");
+    TqPty::new(session, test_name, Timeouts::from_env())
 }
 
 #[test]
 #[ignore]
 fn test_repl_startup_and_quit() {
-    let mut p = spawn_tq_repl();
+    // Migrated to the tiered harness (Sprint 66) as the integration proof
+    // for Feature 1. A timeout here now produces
+    // `tests/results/sprint-66/test_repl_startup_and_quit.pty.log` with
+    // the tail of the PTY buffer for diagnosis.
+    let mut p = spawn_tq_repl_tiered("test_repl_startup_and_quit");
 
-    // Expect the banner to verify startup
-    p.expect("Connected to").expect("Failed to find banner");
+    // Connect/auth stage — the banner proves the session is up.
+    p.expect_stage(Stage::Connect, "Connected to")
+        .expect("Failed to reach 'Connected to' banner within connect timeout");
 
-    // Wait for full initialization
+    // Wait for full initialization.
     std::thread::sleep(Duration::from_secs(1));
 
-    // Send quit command
-    p.send_line("/quit").expect("Failed to send quit");
+    // Send quit command.
+    p.session_mut()
+        .send_line("/quit")
+        .expect("Failed to send quit");
 
-    // Expect exit message - allow more time
+    // Exit message — treat as a query-latency wait (REPL finishes rendering
+    // any pending output before printing goodbye).
     std::thread::sleep(Duration::from_millis(500));
-    // The exit message might already be in the buffer, so we check with a reasonable timeout
-    match p.expect("Goodbye!") {
+    match p.expect_stage(Stage::Query, "Goodbye!") {
         Ok(_) => (),
         Err(e) => {
-            // If we don't find "Goodbye!", check if the process exited (which would be success)
+            // If we don't find "Goodbye!", the process may have exited
+            // cleanly before we got a chance to read — log and move on.
             eprintln!("Warning: Did not find Goodbye! message: {:?}", e);
-            // The test still passes if we got this far without errors
         }
     }
 }

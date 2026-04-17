@@ -30,7 +30,7 @@
 | **Functional Correctness** | All EXECUTED tests pass (100%)? | ✅ MUST |
 | **Interactive Tests Run** | Tests with `#[ignore]` executed with `--ignored` flag? | ✅ MUST |
 | **Code Quality** | No new `TODO`/`FIXME` comments? `cargo clippy --all-targets` clean (zero warnings)? | ✅ MUST |
-| **Documentation Sync** | Code matches specs? No drift? | ✅ MUST |
+| **Documentation Sync** | Code matches specs? No drift? User-guide example output strings **grep-verified** to exist verbatim in source literals (Sprint 66 rule — Step 1.7)? | ✅ MUST |
 | **Architecture Compliance** | Implementation follows `docs/design/*.md`? | ✅ MUST |
 | **Zero Technical Debt** | No workarounds introduced? | ✅ MUST |
 
@@ -79,6 +79,7 @@
 - **Error message text divergence**: User guide shows one error message, code produces a different one
 - **JSON/CSV field names mismatch**: Scripting examples use wrong field names for `jq` or parsing
 - **Help text describing unimplemented features**: Extended help mentions features not in the code (Sprint 39: sysconfig "nodes, PEs")
+- **User-guide example output strings missing from source** (Sprint 66 lesson): the user guide quotes a header line, column name, error message, or interval range (e.g. "Refresh every 2-300 s") that does not appear verbatim in any source literal. Caused by writing user-guide prose in parallel with the architect's implementation before output strings stabilised. Every quoted example MUST be `grep`-locatable in `src/` — see Step 1.7.
 
 **Output Schema Verification** (added Sprint 39):
 For each new command, compare ACTUAL output against documented output:
@@ -112,6 +113,32 @@ For each new command, compare ACTUAL output against documented output:
 - Tasks <30 min → Complete in this sprint
 - Tasks 30-60 min → Complete if time permits
 - Tasks >60 min → Document for next sprint (acceptable deferral)
+
+### Step 1.7: User-Guide Prose (Sequential)
+
+**PURPOSE:** Eliminate user-guide / code drift by writing user-guide prose AFTER implementation lands (Sprint 66 lesson).
+
+**Why sequential, not parallel:** Writing `docs/user/*.md` alongside the architect's implementation caused recurring drift across Sprints 22, 23, 38, 39, and 65 — the designer read the codebase mid-mutation and documented invented or superseded output strings, column names, intervals, and error messages. Sequencing removes the race condition at zero infrastructure cost.
+
+**Run AFTER** Step 1.5 (Doc Accuracy Verification) and Step 1.6 (Minor Task Completion), and **BEFORE** Step 2 (Decision).
+
+**Process:**
+
+1. **Launch `cli-ux-designer` (single sequential call — NOT in parallel with any other agent):**
+   - Instruction: "Code for Sprint N has landed and Phase 1.5 / 1.6 verification passed. Update `docs/user/*.md` for the features in `docs/sprints/sprint-N-planning.md`. Use `docs/specifications/*.md` as the source of truth for WHAT to document. Crucially, **every quoted example output string, column name, error message, flag, and numeric range MUST be grep-verified against `src/` source literals before it is written to the guide**. If a value is not in source, either the guide is wrong or the spec is wrong — fix that first, do not invent. Return the list of grep queries run and the file:line citations for each quoted example."
+
+2. **Grep-verification contract (enforced by the designer, verified by the coordinator):**
+   - Column headers quoted in tables (e.g. `"Session ID"`) → `grep -rn '"Session ID"' src/` must find a literal source match.
+   - Error message text → must match a `format!` / `println!` / error-type literal in `src/`.
+   - Interval/range bounds (e.g. "Refresh every 2-300 s") → must match a numeric constant or validation bound in `src/`.
+   - Frame headers, border characters, status-bar text for TUI features → must match a literal emitted by the rendering code.
+   - Help-text examples → must match the output of `cargo run --release -- <subcommand> --help`.
+
+3. **Verify the designer's grep citations (coordinator check):** Spot-check at least three grep queries from the designer's return message against the actual source to confirm citations are real. If any citation is invented, reject the designer's output and relaunch with explicit feedback.
+
+**Verdict:**
+- ✅ **PASS**: All user-guide quotes have verified source citations. Proceed to Step 2.
+- ❌ **FAIL**: Missing or invented citations → Relaunch designer with explicit feedback. Do NOT commit user-guide changes until all quotes are grep-verified.
 
 ### Step 2: Decision
 
