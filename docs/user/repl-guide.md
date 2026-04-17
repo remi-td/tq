@@ -1602,9 +1602,11 @@ Instead of running `/sessions` repeatedly, use `--watch` to let tq auto-refresh 
 tq> /sessions --watch
 ```
 
-The display clears and redraws itself automatically. Each frame looks like this:
+The display clears and redraws itself automatically. Each frame has a header line, the session table, and a footer:
 
 ```
+Updated 10:42:15 - refreshing every 6s
+
 ┌───────────┬──────────┬────────────────────────┬─────────────┬──────────┬───────────┬───────┬─────────────┬────────────────┬──────────────┐
 │ SessionNo │ UserName │ LogonTime              │ PEstate     │ AMPState │ AMPCPUSec │ AMPIO │ ReqSpool    │ Amp CPU Skew % │ Amp IO Skew %│
 ├───────────┼──────────┼────────────────────────┼─────────────┼──────────┼───────────┼───────┼─────────────┼────────────────┼──────────────┤
@@ -1612,12 +1614,10 @@ The display clears and redraws itself automatically. Each frame looks like this:
 │      1078 │ alice    │ 2026/01/27 16:15:42.00 │ ACTIVE      │ ACTIVE   │    15.234 │  3421 │   123456789 │           0.15 │         0.23 │
 └───────────┴──────────┴────────────────────────┴─────────────┴──────────┴───────────┴───────┴─────────────┴────────────────┴──────────────┘
 
-2 sessions found (Query time: 0.198s)
-
-Last updated: 10:42:15 | Refreshing every 6s | Press q or Ctrl-C to stop
+Press q, Esc, or Ctrl-C to stop (interval: 6s)
 ```
 
-The status footer at the bottom shows the time of the last refresh, the configured interval, and the keys to exit.
+The top line shows the time of the last refresh and the configured interval. The bottom line shows the keys to exit.
 
 **Configuring the refresh interval:**
 
@@ -1649,19 +1649,17 @@ When you press `q` or `Esc`, tq prints a clean, plain-text snapshot of the last 
 
 **What happens if the query fails mid-watch:**
 
-If a single refresh fails (for example, a network hiccup), watch mode does not exit. Instead it shows the error in the header and keeps the previous data on screen:
+If a single refresh fails (for example, a network hiccup), watch mode does not exit. Instead it shows the error at the top and keeps the previous data on screen:
 
 ```
-┌─ ... last known session data ... ─┐
-└─────────────────────────────────────────────────────────┘
+Error at 10:43:05: Query timeout after 30s - retrying in 6s
 
-2 sessions found (Query time: 0.198s)
+...last successful session table still visible below...
 
-Last updated: 10:43:02 | Refreshing every 6s | Press q or Ctrl-C to stop
-Error at 10:43:05: Query timeout after 30s — retrying in 6s
+Press q, Esc, or Ctrl-C to stop (interval: 6s)
 ```
 
-Watch mode automatically retries on the next tick. Once the query succeeds again, the normal footer is restored.
+Watch mode automatically retries on the next tick. Once the query succeeds again, the normal `Updated HH:MM:SS - refreshing every Ns` header returns.
 
 **Use cases:**
 
