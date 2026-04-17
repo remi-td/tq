@@ -1594,6 +1594,82 @@ The `/sessions` command displays ALL active sessions on the Teradata system, reg
 
 **Note:** This command requires SELECT permission on `DBC.MonitorSession`. If you see a permission error, contact your DBA.
 
+### Monitor Sessions Continuously (Watch Mode)
+
+Instead of running `/sessions` repeatedly, use `--watch` to let tq auto-refresh the session list at a configurable interval:
+
+```
+tq> /sessions --watch
+```
+
+The display clears and redraws itself automatically. Each frame looks like this:
+
+```
+┌───────────┬──────────┬────────────────────────┬─────────────┬──────────┬───────────┬───────┬─────────────┬────────────────┬──────────────┐
+│ SessionNo │ UserName │ LogonTime              │ PEstate     │ AMPState │ AMPCPUSec │ AMPIO │ ReqSpool    │ Amp CPU Skew % │ Amp IO Skew %│
+├───────────┼──────────┼────────────────────────┼─────────────┼──────────┼───────────┼───────┼─────────────┼────────────────┼──────────────┤
+│      1076 │ DBC      │ 2026/01/27 15:33:26.00 │ IDLE        │ IDLE     │         0 │     6 │           0 │           [--] │         [--] │
+│      1078 │ alice    │ 2026/01/27 16:15:42.00 │ ACTIVE      │ ACTIVE   │    15.234 │  3421 │   123456789 │           0.15 │         0.23 │
+└───────────┴──────────┴────────────────────────┴─────────────┴──────────┴───────────┴───────┴─────────────┴────────────────┴──────────────┘
+
+2 sessions found (Query time: 0.198s)
+
+Last updated: 10:42:15 | Refreshing every 6s | Press q or Ctrl-C to stop
+```
+
+The status footer at the bottom shows the time of the last refresh, the configured interval, and the keys to exit.
+
+**Configuring the refresh interval:**
+
+The default interval is 6 seconds. Use `--interval N` to set your own:
+
+```
+tq> /sessions --watch --interval 10    # refresh every 10 seconds
+tq> /sessions --watch --interval 30    # refresh every 30 seconds
+tq> /s --watch --interval 15           # short alias also works
+```
+
+You can also pass the interval directly after `--watch` as a shorthand:
+
+```
+tq> /sessions --watch 10              # same as --watch --interval 10
+```
+
+Valid interval range: 1 to 3600 seconds. Default: 6 seconds. Values outside this range are clamped silently to the nearest bound.
+
+**Exiting watch mode:**
+
+| Key | Behavior |
+|-----|----------|
+| `q` or `Q` | Exit and print a static copy of the last frame to your scrollback buffer |
+| `Esc` | Same as `q` — exit with a snapshot |
+| `Ctrl-C` | Exit without printing a snapshot |
+
+When you press `q` or `Esc`, tq prints a clean, plain-text snapshot of the last refresh before returning to the `tq>` prompt. This snapshot stays in your terminal's scrollback history so you can copy values from it after the live view closes. `Ctrl-C` exits immediately without the snapshot.
+
+**What happens if the query fails mid-watch:**
+
+If a single refresh fails (for example, a network hiccup), watch mode does not exit. Instead it shows the error in the header and keeps the previous data on screen:
+
+```
+┌─ ... last known session data ... ─┐
+└─────────────────────────────────────────────────────────┘
+
+2 sessions found (Query time: 0.198s)
+
+Last updated: 10:43:02 | Refreshing every 6s | Press q or Ctrl-C to stop
+Error at 10:43:05: Query timeout after 30s — retrying in 6s
+```
+
+Watch mode automatically retries on the next tick. Once the query succeeds again, the normal footer is restored.
+
+**Use cases:**
+
+- Keep an eye on a long-running batch job without repeatedly typing `/sessions`
+- Watch session counts climb and fall during peak loading windows
+- Monitor a specific workload for spool growth or CPU skew while troubleshooting
+- Leave running on a side terminal during DBA on-call duty
+
 ### Display System Configuration
 
 Check the Teradata version and AMP count at a glance:

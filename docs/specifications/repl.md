@@ -2371,11 +2371,11 @@ Use /reconnect to establish new connection
 
 **Syntax:**
 ```
-/sessions [--watch [N]]
-/s [--watch [N]]    -- Short alias
+/sessions [--watch [--interval N]]
+/s [--watch [--interval N]]    -- Short alias
 ```
 
-`--watch` enables auto-refresh mode. The optional argument `N` sets the refresh interval in seconds (default: 6, min: 2, max: 300).
+`--watch` enables auto-refresh mode. `--interval N` sets the refresh interval in seconds (default: 6, min: 1, max: 3600).
 
 **Output Format:**
 ```
@@ -2605,24 +2605,49 @@ The command SHALL execute efficiently and provide feedback:
 4. **REQ-SESS-008.4** - Query cancellation: In normal mode, Ctrl-C SHALL cancel the query and return to prompt. In watch mode, Ctrl-C SHALL exit watch mode and return to the REPL prompt.
 5. **REQ-SESS-008.5** - Resource impact: Query SHALL use read-only system views (no locks, no modifications)
 
-**REQ-SESS-010: Watch Mode**
+**REQ-SESS-010: Watch Mode — Syntax and Activation**
 
-The `/sessions` command SHALL support a continuous auto-refresh mode:
+The `/sessions` command SHALL support a continuous auto-refresh mode activated by the `--watch` flag.
 
-1. **REQ-SESS-010.1** - Syntax: `/sessions --watch` or `/sessions --watch N` where `N` is the interval in seconds
-2. **REQ-SESS-010.2** - Default interval: 6 seconds when `--watch` is specified without a value
-3. **REQ-SESS-010.3** - Interval range: minimum 2 seconds, maximum 300 seconds. Values outside this range SHALL display a usage error and return to the REPL prompt
-4. **REQ-SESS-010.4** - Watch mode forces table display format regardless of current `/set format` setting. A brief notice SHALL inform the user: `(Watch mode: displaying as table)`
-5. **REQ-SESS-010.5** - Each refresh SHALL clear the visible output area and redraw the complete table
-6. **REQ-SESS-010.6** - Footer line after the summary: `Last updated: HH:MM:SS | Refreshing every Ns | Press q or Ctrl-C to stop`
-7. **REQ-SESS-010.7** - Exit: pressing `q` or Ctrl-C SHALL stop watch mode and return to the REPL prompt
-8. **REQ-SESS-010.8** - Watch mode errors (e.g. query failure mid-loop) SHALL display the error in place of the table and continue retrying on the next interval
+**REQ-REPL-SESSIONS-WATCH-001: Command Syntax**
 
-**Watch mode output example:**
+1. **REQ-REPL-SESSIONS-WATCH-001.1** - Primary watch syntax: `/sessions --watch`
+2. **REQ-REPL-SESSIONS-WATCH-001.2** - Watch with custom interval: `/sessions --watch --interval N` where `N` is a positive integer representing seconds
+3. **REQ-REPL-SESSIONS-WATCH-001.3** - Short alias also supports watch: `/s --watch` and `/s --watch --interval N`
+4. **REQ-REPL-SESSIONS-WATCH-001.4** - `--interval` is only valid when `--watch` is also present; specifying `--interval` without `--watch` SHALL produce a usage error and return to the REPL prompt
+5. **REQ-REPL-SESSIONS-WATCH-001.5** - Watch mode is available exclusively in REPL mode; it is not available when running `tq` as a batch command
+
+**REQ-REPL-SESSIONS-WATCH-002: Interval Parameter**
+
+1. **REQ-REPL-SESSIONS-WATCH-002.1** - Default interval: 6 seconds when `--watch` is specified without `--interval`
+2. **REQ-REPL-SESSIONS-WATCH-002.2** - Minimum interval: 1 second
+3. **REQ-REPL-SESSIONS-WATCH-002.3** - Maximum interval: 3600 seconds (1 hour)
+4. **REQ-REPL-SESSIONS-WATCH-002.4** - Values outside the range [1, 3600] SHALL display a usage error and return to the REPL prompt without entering watch mode
+
+**Usage error example (out-of-range interval):**
 ```
-tq> /sessions --watch
+tq> /sessions --watch --interval 0
 
-Active Sessions on prod-td01.company.com:
+Error: --interval value must be between 1 and 3600 seconds (got: 0)
+Usage: /sessions --watch [--interval N]
+```
+
+**REQ-REPL-SESSIONS-WATCH-003: Frame Layout**
+
+Each rendered frame in watch mode SHALL follow this exact top-to-bottom structure:
+
+1. **REQ-REPL-SESSIONS-WATCH-003.1** - Line 1 (header): `Sessions on <hostname> — updated HH:MM:SS, every Ns` where `HH:MM:SS` is the local wall-clock time of this specific refresh and `N` is the configured interval
+2. **REQ-REPL-SESSIONS-WATCH-003.2** - Line 2: blank separator line
+3. **REQ-REPL-SESSIONS-WATCH-003.3** - Lines 3..M: the session table using the same columns, column order, alignment, and NULL handling rules as non-watch `/sessions` (REQ-SESS-003, REQ-SESS-004)
+4. **REQ-REPL-SESSIONS-WATCH-003.4** - Line after table: the standard summary footer `N sessions found (Query time: X.XXXs)`
+5. **REQ-REPL-SESSIONS-WATCH-003.5** - Final line (instruction): `Press q, Esc, or Ctrl-C to stop`
+6. **REQ-REPL-SESSIONS-WATCH-003.6** - The frame occupies the alternate screen buffer; the main screen buffer (including the REPL prompt) is not visible while watch mode is active
+7. **REQ-REPL-SESSIONS-WATCH-003.7** - Watch mode always renders using table format (box-drawing characters) regardless of the current `/set format` value; no notice is required
+
+**Frame layout example:**
+```
+Sessions on prod-td01.company.com — updated 10:42:15, every 6s
+
 ┌───────────┬──────────┬────────────────────────┬─────────────┬──────────┬───────────┬───────┬─────────────┬────────────────┬──────────────┐
 │ SessionNo │ UserName │ LogonTime              │ PEstate     │ AMPState │ AMPCPUSec │ AMPIO │ ReqSpool    │ Amp CPU Skew % │ Amp IO Skew %│
 ├───────────┼──────────┼────────────────────────┼─────────────┼──────────┼───────────┼───────┼─────────────┼────────────────┼──────────────┤
@@ -2631,8 +2656,99 @@ Active Sessions on prod-td01.company.com:
 └───────────┴──────────┴────────────────────────┴─────────────┴──────────┴───────────┴───────┴─────────────┴────────────────┴──────────────┘
 
 2 sessions found (Query time: 0.198s)
-Last updated: 10:42:15 | Refreshing every 6s | Press q or Ctrl-C to stop
+Press q, Esc, or Ctrl-C to stop
 ```
+
+**REQ-REPL-SESSIONS-WATCH-004: Refresh Behavior**
+
+1. **REQ-REPL-SESSIONS-WATCH-004.1** - On entry into watch mode, the first query executes immediately (no initial wait)
+2. **REQ-REPL-SESSIONS-WATCH-004.2** - Subsequent queries execute after each complete interval has elapsed from the end of the previous query execution
+3. **REQ-REPL-SESSIONS-WATCH-004.3** - Each refresh replaces the entire visible frame in-place on the alternate screen; the previous frame is not retained in the scrollback buffer during watch mode
+4. **REQ-REPL-SESSIONS-WATCH-004.4** - The terminal cursor SHALL not be visible while watch mode is active
+
+**REQ-REPL-SESSIONS-WATCH-005: Exit Triggers**
+
+1. **REQ-REPL-SESSIONS-WATCH-005.1** - Pressing `q` (lowercase) exits watch mode, prints the exit snapshot, and returns to the REPL prompt
+2. **REQ-REPL-SESSIONS-WATCH-005.2** - Pressing `Esc` exits watch mode, prints the exit snapshot, and returns to the REPL prompt
+3. **REQ-REPL-SESSIONS-WATCH-005.3** - Pressing `Ctrl-C` exits watch mode without printing an exit snapshot and returns to the REPL prompt
+4. **REQ-REPL-SESSIONS-WATCH-005.4** - All three exit triggers are active at all times during watch mode: during the inter-refresh wait, during query execution, and during screen redraw
+5. **REQ-REPL-SESSIONS-WATCH-005.5** - No other key produces an exit; unrecognized keypresses are silently ignored
+
+**REQ-REPL-SESSIONS-WATCH-006: Terminal State Management**
+
+1. **REQ-REPL-SESSIONS-WATCH-006.1** - On entry, watch mode SHALL enter the alternate screen buffer (equivalent to `EnterAlternateScreen`)
+2. **REQ-REPL-SESSIONS-WATCH-006.2** - On entry, watch mode SHALL enable raw input mode so individual keypresses are captured without waiting for Enter
+3. **REQ-REPL-SESSIONS-WATCH-006.3** - On exit (by any trigger: `q`, `Esc`, `Ctrl-C`, or error), watch mode SHALL leave the alternate screen buffer (equivalent to `LeaveAlternateScreen`) before writing any output to the normal screen
+4. **REQ-REPL-SESSIONS-WATCH-006.4** - On exit, watch mode SHALL disable raw input mode and restore the terminal to its previous cooked/line mode
+5. **REQ-REPL-SESSIONS-WATCH-006.5** - Terminal state (alternate screen + raw mode) SHALL be restored even when the process receives a panic or an unhandled signal; a drop guard or equivalent RAII mechanism is required
+6. **REQ-REPL-SESSIONS-WATCH-006.6** - After leaving the alternate screen, the normal screen content visible before `/sessions --watch` was entered SHALL be restored (this is the standard behavior of the alternate screen buffer)
+
+**REQ-REPL-SESSIONS-WATCH-007: Exit Snapshot**
+
+When the user exits watch mode with `q` or `Esc`, a static snapshot of the last rendered frame SHALL be printed to stdout on the normal screen buffer after `LeaveAlternateScreen`.
+
+1. **REQ-REPL-SESSIONS-WATCH-007.1** - The snapshot is printed after `LeaveAlternateScreen` completes, so it appears on the normal screen buffer in the terminal's scrollback history
+2. **REQ-REPL-SESSIONS-WATCH-007.2** - The snapshot reproduces the header line from the last frame: `Sessions on <hostname> — updated HH:MM:SS, every Ns`
+3. **REQ-REPL-SESSIONS-WATCH-007.3** - The snapshot reproduces the full session table as it appeared at the last refresh (all rows, same columns, same alignment)
+4. **REQ-REPL-SESSIONS-WATCH-007.4** - The snapshot reproduces the summary footer: `N sessions found (Query time: X.XXXs)`
+5. **REQ-REPL-SESSIONS-WATCH-007.5** - The snapshot contains no ANSI color codes, no cursor movement sequences, and no other terminal control sequences; it is plain text
+6. **REQ-REPL-SESSIONS-WATCH-007.6** - Lines are terminated with `\n` (newline only, not `\r\n`)
+7. **REQ-REPL-SESSIONS-WATCH-007.7** - The snapshot appears between the restored normal screen content and the new `tq>` prompt
+8. **REQ-REPL-SESSIONS-WATCH-007.8** - The instruction line (`Press q, Esc, or Ctrl-C to stop`) is NOT included in the snapshot
+
+**Exit snapshot example (after pressing `q`):**
+```
+Sessions on prod-td01.company.com — updated 10:42:21, every 6s
+
+┌───────────┬──────────┬────────────────────────┬─────────────┬──────────┬───────────┬───────┬─────────────┬────────────────┬──────────────┐
+│ SessionNo │ UserName │ LogonTime              │ PEstate     │ AMPState │ AMPCPUSec │ AMPIO │ ReqSpool    │ Amp CPU Skew % │ Amp IO Skew %│
+├───────────┼──────────┼────────────────────────┼─────────────┼──────────┼───────────┼───────┼─────────────┼────────────────┼──────────────┤
+│      1076 │ DBC      │ 2026/01/27 15:33:26.00 │ IDLE        │ IDLE     │         0 │     6 │           0 │           [--] │         [--] │
+│      1078 │ alice    │ 2026/01/27 16:15:42.00 │ ACTIVE      │ ACTIVE   │    15.234 │  3421 │   123456789 │           0.15 │         0.23 │
+└───────────┴──────────┴────────────────────────┴─────────────┴──────────┴───────────┴───────┴─────────────┴────────────────┴──────────────┘
+
+2 sessions found (Query time: 0.201s)
+
+tq> _
+```
+
+**REQ-REPL-SESSIONS-WATCH-008: Transient Error Handling**
+
+Watch mode SHALL tolerate intermittent query failures without exiting.
+
+1. **REQ-REPL-SESSIONS-WATCH-008.1** - When a refresh query fails (network hiccup, temporary DB unavailability, query timeout), the error is displayed in the header area of the current frame in place of the normal header line
+2. **REQ-REPL-SESSIONS-WATCH-008.2** - Error header format: `Error at HH:MM:SS: <error message> — retrying in Ns`
+3. **REQ-REPL-SESSIONS-WATCH-008.3** - When an error occurs, the previous successful table data SHALL remain visible below the error header so the user retains context
+4. **REQ-REPL-SESSIONS-WATCH-008.4** - The refresh timer continues normally after an error; the next tick attempts the query again
+5. **REQ-REPL-SESSIONS-WATCH-008.5** - When the next successful query completes, the error header is replaced with the normal header and the table is refreshed
+6. **REQ-REPL-SESSIONS-WATCH-008.6** - The instruction line remains visible at the bottom of the frame during error display
+7. **REQ-REPL-SESSIONS-WATCH-008.7** - Watch mode does NOT automatically exit on query error; only the exit triggers in REQ-REPL-SESSIONS-WATCH-005 exit watch mode
+8. **REQ-REPL-SESSIONS-WATCH-008.8** - A permanent connection loss (where reconnection is not possible) SHALL exit watch mode, restore terminal state, and display a connection error at the REPL prompt
+
+**Transient error frame example:**
+```
+Error at 10:43:05: Query timeout after 30s — retrying in 6s
+
+┌───────────┬──────────┬────────────────────────┬─────────────┬──────────┬───────────┬───────┬─────────────┬────────────────┬──────────────┐
+│ SessionNo │ UserName │ LogonTime              │ PEstate     │ AMPState │ AMPCPUSec │ AMPIO │ ReqSpool    │ Amp CPU Skew % │ Amp IO Skew %│
+├───────────┼──────────┼────────────────────────┼─────────────┼──────────┼───────────┼───────┼─────────────┼────────────────┼──────────────┤
+│      1076 │ DBC      │ 2026/01/27 15:33:26.00 │ IDLE        │ IDLE     │         0 │     6 │           0 │           [--] │         [--] │
+│      1078 │ alice    │ 2026/01/27 16:15:42.00 │ ACTIVE      │ ACTIVE   │    15.234 │  3421 │   123456789 │           0.15 │         0.23 │
+└───────────┴──────────┴────────────────────────┴─────────────┴──────────┴───────────┴───────┴─────────────┴────────────────┴──────────────┘
+
+2 sessions found (Query time: 0.198s)
+Press q, Esc, or Ctrl-C to stop
+```
+
+**REQ-REPL-SESSIONS-WATCH-009: Tab Completion and Help Integration**
+
+1. **REQ-REPL-SESSIONS-WATCH-009.1** - Tab completion: After `/sessions --watch ` (with trailing space), SHALL suggest `--interval`
+2. **REQ-REPL-SESSIONS-WATCH-009.2** - Detailed help: `/help sessions` SHALL describe the `--watch` flag and the `--interval` parameter including default, minimum, and maximum values
+3. **REQ-REPL-SESSIONS-WATCH-009.3** - Detailed help SHALL document the exit keys: `q`, `Esc`, `Ctrl-C`
+
+**REQ-SESS-010 (legacy sub-items retained for back-compat):**
+
+For clarity, the requirements formerly listed under REQ-SESS-010.1 through REQ-SESS-010.8 are fully superseded by REQ-REPL-SESSIONS-WATCH-001 through REQ-REPL-SESSIONS-WATCH-009 above.
 
 **REQ-SESS-009: Skew Percentage Interpretation Guidelines**
 
@@ -2706,6 +2822,8 @@ SessionNo,UserName,LogonTime,PEstate,AMPState,AMPCPUSec,AMPIO,ReqSpool,Amp CPU S
 ```
 
 **Acceptance Test:**
+
+*Non-watch mode (no regression):*
 - Execute `/sessions` and verify all active sessions are displayed with correct columns
 - Execute `/s` (alias) and verify identical behavior
 - Verify skew percentages show `[--]` for IDLE sessions
@@ -2716,10 +2834,34 @@ SessionNo,UserName,LogonTime,PEstate,AMPState,AMPCPUSec,AMPIO,ReqSpool,Amp CPU S
 - Execute with `/set format json` and verify JSON output
 - Type `/s<TAB>` and verify tab completion suggestions include `/sessions`
 - Execute `/help` and verify `/sessions` appears in command list
-- Execute `/sessions --watch` and verify: table redraws on each interval, footer shows "Last updated: HH:MM:SS | Refreshing every 6s | Press q or Ctrl-C to stop", pressing `q` returns to REPL prompt
-- Execute `/sessions --watch 10` and verify footer shows "Refreshing every 10s"
-- Execute `/sessions --watch 1` and verify usage error for out-of-range interval, returns to prompt
-- Verify watch mode always displays table format regardless of current `/set format` setting
+
+*Watch mode — activation and interval:*
+- Execute `/sessions --watch` and verify: alternate screen enters, header shows `Sessions on <hostname> — updated HH:MM:SS, every 6s`, table renders with correct columns, instruction line reads `Press q, Esc, or Ctrl-C to stop`
+- Execute `/sessions --watch --interval 10` and verify header shows `every 10s`
+- Execute `/sessions --watch --interval 2` and verify header shows `every 2s`
+- Execute `/sessions --watch --interval 0` and verify usage error is displayed and watch mode is NOT entered
+- Execute `/sessions --watch --interval 3601` and verify usage error is displayed and watch mode is NOT entered
+- Execute `/sessions --watch --interval 1` and verify watch mode enters normally with 1s interval
+- Execute `/sessions --watch --interval 3600` and verify watch mode enters normally with 3600s interval
+- Execute `--interval 5` without `--watch` and verify usage error
+
+*Watch mode — exit triggers and exit snapshot:*
+- Enter watch mode, wait one full tick, then press `q`: verify alternate screen is left, a plain-text snapshot of the last frame is printed (header + table + footer, no ANSI), and the `tq>` prompt returns
+- Enter watch mode, wait one full tick, then press `Esc`: verify same behavior as `q`
+- Enter watch mode, then press `Ctrl-C`: verify alternate screen is left, NO snapshot is printed, and `tq>` prompt returns
+- Verify snapshot contains correct hostname and timestamp matching the last frame
+- Verify snapshot contains no ANSI escape sequences (plain text only)
+
+*Watch mode — terminal safety:*
+- After any exit trigger, verify terminal is in cooked mode (keypresses require Enter again)
+- Verify the REPL continues to function normally after exiting watch mode
+
+*Watch mode — transient error:*
+- Simulate a query failure mid-watch: verify error header `Error at HH:MM:SS: <msg> — retrying in Ns` appears, previous table data remains visible, and watch continues without crashing
+- Verify that after a transient error, the next successful query restores the normal header
+
+*Watch mode — format isolation:*
+- Execute `/set format csv`, then `/sessions --watch`: verify watch mode renders table format (box-drawing) not CSV
 
 ---
 

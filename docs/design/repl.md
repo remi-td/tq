@@ -7048,3 +7048,260 @@ The pager only runs in REPL mode. In the REPL, users change format with the `\fo
 
 **Why not strip indicator cells from the snapshot?**
 The indicators (`(+N cols)`, `<--`, `-->`) provide valuable context about what portion of the result is visible. Stripping them would make the snapshot less informative than the pager view. The hidden columns footer provides the complete list of column names for reference.
+
+---
+
+## Watch Mode for Monitoring Commands
+
+**Related Specification**: `docs/specifications/repl.md` (monitoring commands), GitHub Issue #25
+
+### Overview
+
+Watch mode is an auto-refreshing display for monitoring metacommands. A monitoring command (e.g. `/sessions`, `/locks`, `/resources`) invoked with `--watch` re-renders its output at a configurable interval until the user presses `q`, `Esc`, or `Ctrl-C`. On exit, the last rendered frame is left on the terminal as a copy-paste friendly plain-text snapshot — a direct parallel to the pager exit snapshot pattern.
+
+Watch mode is shared infrastructure, not per-command. Each monitoring command supplies a render closure; `run_watch` owns the loop, the raw-mode lifecycle, keystroke handling, and the exit snapshot.
+
+### Architecture
+
+```
+User types "/sessions --watch --interval 10"
+        |
+        v
+metacommands.rs "sessions" handler
+        |
+        v
+parse_watch_args(&args, default=6)  --> Some(10)
+        |
+        v
+run_watch(10, |buf| sessions::execute_for_repl(client, buf))
+        |
+        v
+┌────────── run_watch ──────────────────────────────────┐
+│                                                       │
+│  RawModeGuard::enable()   (RAII; restores on drop)    │
+│                                                       │
+│  loop {                                               │
+│    clear screen, move to (0,0)                        │
+│    render(&mut frame_buf)                             │
+│    write frame_buf to stdout                          │
+│    write header line (timestamp | interval | hint)    │
+│                                                       │
+│    poll loop until tick elapsed:                      │
+│      event::poll(min(remaining, 100ms))               │
+│      if key in {q, Q, Esc, Ctrl-C} -> break           │
+│  }                                                    │
+│                                                       │
+│  <RawModeGuard drops here, even on panic>             │
+│                                                       │
+│  write last_frame_buf to stdout (exit snapshot)       │
+└───────────────────────────────────────────────────────┘
+        |
+        v
+Return to REPL prompt
+```
+
+### Implementation Location
+
+**Primary file**: `src/commands/watch.rs` (already present; Sprint 65 hardens it)
+
+**Callers** (all in `src/commands/repl/metacommands.rs`):
+- `/sessions` handler (line ~544)
+- `/locks` handler (line ~637)
+- `/resources` handler (line ~716)
+
+**Design principle**: All watch-mode behavior lives in `watch.rs`. The monitoring commands only supply a render closure; they know nothing about raw-mode, polling, or snapshots.
+
+### Argument Parsing
+
+`watch::parse_watch_args(&args, default_interval) -> Option<u64>` already exists and is reused as-is:
+
+- `--watch`                    -> `Some(default)` (6 for `/sessions`)
+- `--watch 10`                 -> `Some(10)` (positional shorthand)
+- `--watch --interval 10`      -> `Some(10)` (explicit form)
+- `--interval` without `--watch` -> `None` (watch mode not engaged)
+- Clamped to `[2, 300]` seconds — minimum 2s protects the DB from accidental `--watch 0`; 300s ceiling prevents a "forgotten terminal" from holding a cached session indefinitely without any visible lifecycle cue.
+
+**Why a dedicated `u64` seconds arg instead of the Sprint 61 `parse_duration`?** The `parse_duration` path supports `h`/`m`/`s` suffixes useful for *logoff thresholds* (which are in hours). Refresh intervals are always sub-minute; a plain integer is friction-free (`--interval 10`), and the existing `parse_watch_args` already ships with this contract. Reusing `parse_duration` would widen the grammar without a user-facing win.
+
+### Loop Architecture: Polling Keystrokes While Ticking
+
+The standard crossterm pattern — `event::poll(timeout)` in an inner loop until the tick interval elapses — is what `watch_loop` uses:
+
+```rust
+let start = Instant::now();
+while start.elapsed() < interval {
+    let remaining = interval.saturating_sub(start.elapsed());
+    let poll_timeout = remaining.min(Duration::from_millis(100));
+    if event::poll(poll_timeout)? {
+        if let Event::Key(key) = event::read()? {
+            if should_quit(&key) { return Ok(()); }
+        }
+    }
+}
+```
+
+**Why 100ms inner poll bound instead of the full remaining interval?** Responsiveness on `q`/`Ctrl-C`: with a 10-second refresh, a single blocking `poll(10s)` would make the exit key feel unresponsive. Capping at 100ms guarantees ≤100ms exit latency regardless of interval.
+
+**Why not also consume `Event::Resize`?** The next tick re-renders from scratch against the current terminal size, so resize events are naturally absorbed. No special handling needed, unlike the pager (which maintains persistent layout state between renders).
+
+### Raw-Mode / Alternate-Screen Lifecycle (RAII)
+
+**Current gap (Sprint 65 must fix)**: `run_watch` calls `terminal::enable_raw_mode()` and then relies on `let _ = terminal::disable_raw_mode()` at the end of the function. If `watch_loop` panics, the panic unwinds *past* the `let _ = ...` line and the user is left in a broken terminal. The pager has the same vulnerability but is better-isolated; watch mode is *more* exposed because it runs indefinitely.
+
+**Fix**: introduce a `RawModeGuard` RAII type whose `Drop` impl unconditionally disables raw mode and leaves the alternate screen. This is idiomatic Rust and is the only correct pattern for terminal state spanning potentially-panicking code.
+
+```rust
+// src/commands/watch.rs
+
+struct RawModeGuard;
+
+impl RawModeGuard {
+    fn enter() -> io::Result<Self> {
+        terminal::enable_raw_mode()?;
+        execute!(io::stdout(), EnterAlternateScreen, Hide)?;
+        Ok(Self)
+    }
+}
+
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        // Best-effort restore; ignore errors because Drop cannot propagate.
+        let _ = execute!(io::stdout(), Show, LeaveAlternateScreen);
+        let _ = terminal::disable_raw_mode();
+    }
+}
+```
+
+`run_watch` becomes:
+
+```rust
+pub fn run_watch<F>(interval_secs: u64, render: F) -> Result<()>
+where F: Fn(&mut Vec<u8>) -> Result<()> {
+    let _guard = RawModeGuard::enter()?;   // guard drops on any return path
+    let last_frame = watch_loop(interval_secs, &render)?;
+    drop(_guard);                           // explicit: leave alt-screen first
+    print_exit_snapshot(&last_frame)?;      // then snapshot on primary screen
+    Ok(())
+}
+```
+
+**Alternate screen**: Watch mode enters the alternate screen on start and leaves it on exit. This matches the pager contract and prevents the scrollback buffer from being spammed with dozens of stale frames. The exit snapshot is printed *after* leaving the alternate screen, so it lands in the user's persistent scrollback — exactly the Sprint 63 pattern.
+
+### Query Execution Per Tick
+
+Each tick, the render closure executes the command's existing `execute_for_repl` function against the shared `DatabaseClient`. No query caching, no delta computation — the monitoring queries (`MonitorSession`, lock view, `MonitorPhysicalResource`) are already cheap, and watch mode's whole point is fresh data.
+
+**Session reuse**: The `DatabaseClient` reference captured by the closure is the REPL's live connection. No reconnect per tick. If the session dies mid-watch, the closure returns an error — see error handling below.
+
+**Table formatting**: Each command's existing `execute_for_repl` already produces formatted output (comfy-table + footer). The watch loop does not touch this — it writes the rendered bytes to stdout verbatim. This guarantees watch-mode output matches non-watch output column-for-column.
+
+### Error Handling Per Tick
+
+**Current gap (Sprint 65 must fix)**: `watch_loop` propagates errors from `render(&mut buf)?` out of the loop, aborting watch mode on the first transient DB hiccup. Acceptance criterion explicitly requires: "If a refresh query fails … display the error in the frame header and keep trying on the next tick."
+
+**Fix**: catch the render error and display it in the frame header instead of propagating:
+
+```rust
+let mut buf = Vec::new();
+let render_status = match render(&mut buf) {
+    Ok(()) => None,
+    Err(e) => Some(format!("Query error: {} (retrying...)", e)),
+};
+
+execute!(stdout, Clear(ClearType::All), cursor::MoveTo(0, 0))?;
+if let Some(err_msg) = &render_status {
+    // Red header line
+    writeln!(stdout, "\x1b[31m[!] {}\x1b[0m", err_msg)?;
+}
+stdout.write_all(&buf)?;   // may be partial; that's fine
+```
+
+**Which errors count?** Any `crate::error::Error` returned from the closure is caught and displayed. I/O errors on stdout itself (from `write_all`) propagate — these indicate a broken terminal and watch mode cannot recover. Panics are caught by `RawModeGuard`'s `Drop` and then re-propagate past `run_watch`.
+
+### Exit Snapshot: Sharing the Pager Pattern
+
+The pager's `render_exit_snapshot` is specific to `Pager` state (column offsets, paging window). It cannot be called directly from watch mode, which has no such state. However, the *pattern* is identical: after leaving the alternate screen and disabling raw mode, print one last plain-text version of the content to the user's persistent scrollback.
+
+**Design choice**: **duplicate the pattern, not the code.** Watch mode's content is already plain text (produced by `execute_for_repl` — comfy-table output with no ANSI, no raw-mode-specific `\r\n`). We simply retain the last rendered frame buffer in memory and write it to stdout after the raw-mode guard drops.
+
+```rust
+// Inside watch_loop, keep the most recently rendered buffer
+let mut last_frame: Vec<u8> = Vec::new();
+loop {
+    let mut buf = Vec::new();
+    // ... render into buf, display ...
+    last_frame = buf;   // retain for snapshot
+    // ... poll for exit ...
+}
+// return last_frame from watch_loop; run_watch prints it after guard drops
+```
+
+**Why not wrap `Pager::render_exit_snapshot`?** That method owns formatting logic specific to Pager state. Watch mode's content is already formatted by the command's own formatter. Sharing code here would require either (a) passing a `QueryResult` into watch mode (violates the "watch mode is transport-only" boundary), or (b) extracting a generic "plain-text table" helper from the pager that neither caller actually needs. The current design keeps watch mode as pure transport and defers all formatting to the monitoring command.
+
+**Header line excluded from snapshot**: The `Last updated: HH:MM:SS | Refreshing every Ns | Press q ...` footer is watch-mode UI chrome, not data. It is written to the alternate screen only. The exit snapshot contains just the last frame's rendered command output plus a single `Exited watch mode at HH:MM:SS` line.
+
+### Frame Header Line (Within Alternate Screen)
+
+Acceptance criterion: "Each refresh shows … plus a header line with timestamp and the configured interval."
+
+```
+Last updated: 14:22:36 | Refreshing every 6s | Press q or Ctrl-C to stop
+```
+
+This is the *bottom* status line today; Sprint 65 keeps it there — users expect the freshest data at the top and the status chrome at the bottom (matches `top`, `watch(1)`, `htop`). The timestamp uses `chrono::Local::now().format("%H:%M:%S")` — already implemented in `format_timestamp()`.
+
+### Code Linkage
+
+| Component | File Path | Key Functions |
+|-----------|-----------|---------------|
+| Watch entry point | `src/commands/watch.rs` | `run_watch` |
+| RAII guard | `src/commands/watch.rs` | `RawModeGuard` (new) |
+| Inner loop | `src/commands/watch.rs` | `watch_loop` (returns last frame) |
+| Argument parsing | `src/commands/watch.rs` | `parse_watch_args` (reused unchanged) |
+| Exit key detection | `src/commands/watch.rs` | `should_quit` |
+| Session integration | `src/commands/repl/metacommands.rs` | `/sessions` arm (~L544) |
+| Locks integration | `src/commands/repl/metacommands.rs` | `/locks` arm (~L637) |
+| Resources integration | `src/commands/repl/metacommands.rs` | `/resources` arm (~L716) |
+
+### Unit Testing Strategy
+
+Headless interactive tests are notoriously flaky, so the testable surface is kept small:
+
+- `parse_watch_args`: already comprehensively tested; extend with `--interval 0` -> clamped to 2 (minimum), `--interval -5` -> rejected as non-u64.
+- `should_quit`: already tested for `q`/`Q`/`Esc`/`Ctrl-C`; extend with `Ctrl-D` (does not quit), `Shift+Q` (does quit).
+- `RawModeGuard` drop behavior: unit test cannot reliably toggle real raw mode, but a mockable variant (behind a trait) can verify Drop is called on panic via `std::panic::catch_unwind`.
+- Render-closure error propagation: inject a closure that returns `Err` on tick 1 and `Ok` on tick 2; assert the loop does NOT exit and that the error header is written to the output sink.
+- Last-frame retention: inject a closure that writes incrementing counters; after the loop exits, assert the returned last-frame buffer matches the final counter.
+
+For end-to-end exit-snapshot behavior, an integration test drives watch mode for 2 ticks via a scripted keystroke injection and verifies the exit snapshot contains the last frame's session data.
+
+### Edge Cases
+
+| Scenario | Behavior |
+|----------|----------|
+| Interval `0` / `1` via `--interval 0` | Clamped to 2 seconds (DB safety floor) |
+| Interval `9999` via `--interval 9999` | Clamped to 300 seconds |
+| Non-numeric interval (`--watch foo`) | Falls back to default (6) |
+| DB connection drops mid-watch | Error rendered in frame header; loop continues; next tick retries and recovers if DB is back |
+| Terminal resized mid-watch | Next tick re-renders at new size; no layout corruption |
+| `Ctrl-C` inside render closure | `watch_loop` catches the render error (if surfaced as `Err`), displays it, continues. Bare-process SIGINT signal handling is Rust/terminal default behavior; raw-mode disables the kernel Ctrl-C -> SIGINT translation so Ctrl-C becomes a keystroke and exits watch cleanly via `should_quit`. |
+| Panic inside render closure | Propagates up through `watch_loop`; `RawModeGuard::drop` restores terminal state before the panic continues unwinding |
+| Zero rows in result (no active sessions) | Command's own formatter handles this ("0 active sessions") |
+| Very large result set (1000+ sessions) | Rendered in full each tick; no pagination inside watch — user should filter via SQL if needed (deferred) |
+
+### Design Decisions
+
+**Why share `watch.rs` across `/sessions`, `/locks`, `/resources`?**
+All three are monitoring commands with the same interaction shape: re-render periodically, quit on keystroke. The closure-based design (`F: Fn(&mut Vec<u8>) -> Result<()>`) keeps the per-command cost to one line of wiring. Adding `/cpu` or `/gpu` in future sprints costs zero new watch infrastructure.
+
+**Why not `tokio` + async polling?**
+The rest of `tq` is synchronous — adding a Tokio runtime for this one feature pulls in a large dependency and a whole different error-handling idiom. Crossterm's `event::poll` with a timeout gives us the same behavior in 20 lines of synchronous code.
+
+**Why not a full TUI via `ratatui`?**
+Explicitly out of scope per sprint planning. Watch mode is an incremental, low-risk extension of the existing REPL. A ratatui TUI is a separate sprint if demand emerges.
+
+**Why retain the last frame in memory rather than re-querying on exit?**
+Re-querying on exit would show the user something *different* from what they just saw before pressing `q`, and would incur a final DB round-trip after the user has indicated they want to leave. The Sprint 63 pager pattern is clear: show the *exact last frame*, no surprises.
+
+**Why hide the cursor (`Hide`) during watch?**
+The cursor would blink over the rendered table, visually noisy. `Show` is restored by the RAII guard on exit.

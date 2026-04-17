@@ -1,15 +1,29 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.46.0 (Sprint 64 - Bug Fixes #42 #43)
+**Version:** 1.47.0 (Sprint 65 - /sessions --watch)
 **Last Updated:** 2026-04-17
-**Base Commit:** [Sprint 64 - In Progress]
+**Base Commit:** [Sprint 65 - In Progress]
 
 ## Overview
 
 This directory contains comprehensive test case definitions for the tq CLI tool. These test cases cover all implemented MVP features (FR-001 through FR-010) and provide detailed procedures for validating functionality, usability, error handling, and security.
 
 ## Test Case Categories
+
+### Sprint 65: Feature — `/sessions --watch` Dynamic Session Monitoring
+
+- **TC096**: `/sessions --watch` Interval Parsing Unit Tests — 8 unit tests (no DB, no PTY): no `--watch` flag returns `None` (AC-9), default interval 6 s (AC-1), `--interval 10` (AC-2), minimum boundary 1 s accepted (AC-3), interval 0 clamped to minimum (AC-3), maximum boundary 3600 s accepted (AC-3), above-max 3601 clamped to 3600 (AC-3), `--interval` alone without `--watch` returns `None` (AC-9). Location: `src/commands/watch.rs` `#[cfg(test)]` — `TC096.md`
+
+- **TC097**: `/sessions --watch` Interactive PTY Tests — 8 `#[ignore]` interactive tests (live DB + PTY, expectrl): `q` exits watch mode and REPL prompt returns (AC-5), frame header contains interval indicator (AC-4), `Esc` exits watch mode (AC-5), `Ctrl-C` exits watch but not REPL (AC-5), exit snapshot is readable plain text (AC-6), terminal state restored after exit (AC-7), watch loop survives 3 ticks without crash (AC-8), non-watch `/sessions` regression guard (AC-9). Helper `strip_ansi()` added to `tests/interactive_tests.rs`. Location: `tests/interactive_tests.rs` — `TC097.md`
+
+**Sprint 65 test case summary:**
+- Unit tests (no DB): TC096 (8 tests in `src/commands/watch.rs`) = 8 unit tests
+- Interactive tests (live DB + PTY, `#[ignore]`): TC097 (8 tests in `tests/interactive_tests.rs`) = 8 `#[ignore]` tests
+- Manual smoke test: AC-7 panic-path `Drop` guard (not automatable)
+- Total: 8 unit tests + 8 `#[ignore]` interactive tests
+
+---
 
 ### Sprint 64: Bug Fixes — File Mode Parser & Stdin Detection
 
