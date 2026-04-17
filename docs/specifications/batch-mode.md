@@ -517,6 +517,9 @@ The parser enters "SPL body" context when it encounters one of the following com
 - `CREATE MACRO`
 - `REPLACE MACRO`
 - `CREATE OR REPLACE MACRO`
+- `CREATE FUNCTION`
+- `REPLACE FUNCTION`
+- `CREATE OR REPLACE FUNCTION`
 
 Detection is case-insensitive. The header is recognised after all preceding whitespace and comments have been consumed. The parser enters body context at the moment it encounters the opening `BEGIN` keyword that follows the header (not at the header keyword itself).
 

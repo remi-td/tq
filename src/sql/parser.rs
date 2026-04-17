@@ -147,18 +147,40 @@ fn is_procedure_header(buf: &str) -> bool {
 /// has not yet yielded). We skip leading whitespace and compare the next word
 /// against the set of inner-block keywords.
 fn is_compound_end(remainder: &str) -> bool {
-    // Skip whitespace (spaces, tabs, newlines, carriage returns)
-    let trimmed = remainder.trim_start();
+    // Skip leading whitespace AND SQL comments (line `--` and block `/* */`)
+    // so that forms like `END -- note\n IF` and `END /* x */ IF` classify
+    // correctly. Without comment-skip we would mis-read a compound-END as a
+    // bare END and decrement the body-depth counter prematurely.
+    let mut s = remainder;
+    loop {
+        let before = s.len();
+        s = s.trim_start();
+        if let Some(rest) = s.strip_prefix("--") {
+            // Line comment runs to end-of-line (or end-of-input)
+            s = match rest.find('\n') {
+                Some(nl) => &rest[nl + 1..],
+                None => "",
+            };
+        } else if let Some(rest) = s.strip_prefix("/*") {
+            // Block comment runs to `*/` (or end-of-input — unterminated,
+            // in which case there is nothing further to classify)
+            s = match rest.find("*/") {
+                Some(end) => &rest[end + 2..],
+                None => "",
+            };
+        }
+        if s.len() == before {
+            break;
+        }
+    }
 
     // Extract the next word (run of ASCII alphanumeric + underscore)
-    let word_end = trimmed
-        .find(|c: char| !is_word_char(c))
-        .unwrap_or(trimmed.len());
+    let word_end = s.find(|c: char| !is_word_char(c)).unwrap_or(s.len());
     if word_end == 0 {
         return false;
     }
 
-    let next_word = &trimmed[..word_end];
+    let next_word = &s[..word_end];
     matches!(
         next_word.to_ascii_uppercase().as_str(),
         "IF" | "LOOP" | "WHILE" | "CASE" | "FOR"
@@ -213,6 +235,9 @@ pub fn parse_statements(sql: &str) -> Result<Vec<ParsedStatement>, ParseError> {
     // BEGIN/END depth counter for SPL bodies. While > 0, semicolons in the
     // Normal state are NOT treated as top-level statement terminators.
     let mut begin_end_depth: u32 = 0;
+    // Line where the outermost SPL body `BEGIN` was opened, for error reporting
+    // at end-of-input (REQ-BATCH-SPL-007).
+    let mut body_open_line: usize = 0;
 
     // Byte offset into `sql`. Used to cheaply obtain the remaining-input slice
     // for the `is_compound_end` lookahead without reallocating. Incremented
@@ -361,6 +386,9 @@ pub fn parse_statements(sql: &str) -> Result<Vec<ParsedStatement>, ParseError> {
                                 // A naked `BEGIN TRANSACTION` at top level does NOT
                                 // match the header regex and is therefore ignored.
                                 if begin_end_depth > 0 || is_procedure_header(&current) {
+                                    if begin_end_depth == 0 {
+                                        body_open_line = current_line;
+                                    }
                                     begin_end_depth = begin_end_depth.saturating_add(1);
                                 }
                             }
@@ -476,6 +504,17 @@ pub fn parse_statements(sql: &str) -> Result<Vec<ParsedStatement>, ParseError> {
             });
         }
         _ => {}
+    }
+
+    // If we reach end-of-input while still inside an SPL body, the BEGIN was
+    // never closed by a matching END. Report it with the opening line so the
+    // user can locate the unterminated block (REQ-BATCH-SPL-007).
+    if begin_end_depth > 0 {
+        return Err(ParseError {
+            message: "Unterminated procedure/trigger/macro body".to_string(),
+            line: body_open_line,
+            column: 1,
+        });
     }
 
     // Flush trailing statement (no terminating semicolon)
@@ -1176,5 +1215,82 @@ END;";
         assert_eq!(statements[0].sql, "SELECT 1");
         assert_eq!(statements[1].sql, "SELECT 2");
         assert_eq!(statements[2].sql, "SELECT 3");
+    }
+
+    // Sprint 64 review follow-ups
+    // - Compound-END must skip intervening comments (`END -- x\n IF`, `END /* x */ IF`)
+    // - Unterminated body at EOF must raise REQ-BATCH-SPL-007 error
+
+    #[test]
+    fn test_compound_end_with_line_comment_between() {
+        let sql = "\
+REPLACE PROCEDURE demo.sp_comment_between()
+BEGIN
+    IF 1 = 1 THEN
+        SET x = 1;
+    END -- closes the IF
+    IF;
+END;";
+        let statements = parse_statements(sql).unwrap();
+        assert_eq!(
+            statements.len(),
+            1,
+            "`END -- comment\\n IF` must still be recognised as compound END"
+        );
+    }
+
+    #[test]
+    fn test_compound_end_with_block_comment_between() {
+        let sql = "\
+REPLACE PROCEDURE demo.sp_block_between()
+BEGIN
+    IF 1 = 1 THEN
+        SET x = 1;
+    END /* closes the IF */ IF;
+END;";
+        let statements = parse_statements(sql).unwrap();
+        assert_eq!(
+            statements.len(),
+            1,
+            "`END /* comment */ IF` must still be recognised as compound END"
+        );
+    }
+
+    #[test]
+    fn test_unterminated_procedure_body_errors() {
+        let sql = "\
+REPLACE PROCEDURE demo.sp_bad()
+BEGIN
+    DECLARE v INTEGER;
+    SET v = 1;
+";
+        let err = parse_statements(sql).expect_err("unterminated body must error");
+        assert!(
+            err.message.contains("Unterminated procedure"),
+            "error message must identify unterminated procedure body, got: {}",
+            err.message
+        );
+        assert_eq!(
+            err.line, 2,
+            "error line must point at the opening BEGIN line"
+        );
+    }
+
+    #[test]
+    fn test_unterminated_nested_body_errors() {
+        let sql = "\
+REPLACE PROCEDURE demo.sp_nested_bad()
+BEGIN
+    BEGIN
+        SET x = 1;
+    END;
+";
+        let err =
+            parse_statements(sql).expect_err("outer BEGIN unterminated must error");
+        assert!(err.message.contains("Unterminated"));
+        assert_eq!(
+            err.line, 2,
+            "error should point at the OUTER (first-opened) BEGIN"
+        );
     }
 }
