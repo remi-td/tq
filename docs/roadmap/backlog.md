@@ -1,7 +1,7 @@
 # Feature Backlog
 
-**Last Updated:** 2026-03-31
-**Next Sprint:** Sprint 56
+**Last Updated:** 2026-04-19
+**Next Sprint:** Sprint 68
 
 ---
 
@@ -68,14 +68,6 @@ No P0 features currently in backlog. All critical features have been implemented
 - Validate profile connectivity
 - Security audit (check file permissions)
 - Spec: [Configuration - Validation](../specifications/configuration.md#validation)
-
-### REPL Enhancements
-
-**Search in Pager**
-- `/pattern` - Search forward in paged results
-- `n` - Next match
-- `N` - Previous match
-- Spec: [REPL Mode - Pager Search](../specifications/repl.md#pager-search)
 
 ### PMON - Performance Monitor Features
 

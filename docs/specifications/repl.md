@@ -1547,6 +1547,310 @@ Columns 19-23 of 23 | Rows 481-500 of 500
 - User at edge positions (first/last row AND first/last column): Appropriate keys disabled, others work
 - Terminal resize during navigation: Both horizontal and vertical viewports recalculate
 
+#### Pager Search
+
+The pager provides less-style forward search. Pressing `/` opens an inline search prompt in the status bar. The user types a literal substring pattern and presses ENTER; the pager scans the in-memory result set from the current row forward, scrolls to the first match, and highlights every visible match with reversed foreground/background colors. Subsequent `n` / `N` key presses step forward and backward through the full match list without re-entering the prompt.
+
+Search is case-insensitive by default. To request a case-sensitive match, the user appends `\c` to the pattern (e.g. `/Status\c` matches `Status` but not `STATUS`). This mirrors the `less` opt-in convention and keeps the common exploratory case frictionless: SQL values such as names, codes, and labels vary unpredictably in case across databases and users rarely care about case when scanning results.
+
+**UX Rationale for case-insensitive default:** Interactive SQL result exploration is oriented around finding a value, not verifying its exact casing. Case-insensitive matching as the default eliminates a frequent source of "not found" frustration when casing differs between what the user types and what the database stored. The `\c` suffix provides a low-friction opt-in for the rare case where case is semantically significant (e.g. distinguishing `Active` from `ACTIVE` in a status column), without burdening the common workflow with a flag or toggle.
+
+---
+
+**REQ-PAGER-SEARCH-001: Search Prompt Activation**
+
+Pressing `/` while in normal pager navigation SHALL open an inline search prompt in the status bar:
+
+1. **REQ-PAGER-SEARCH-001.1** - Pressing `/` immediately replaces the normal status bar with a prompt line starting with the `/` character, e.g. `/`
+2. **REQ-PAGER-SEARCH-001.2** - Characters typed after `/` are appended to the pattern and echoed in the prompt, e.g. `/foo`, `/foo bar`
+3. **REQ-PAGER-SEARCH-001.3** - Backspace deletes the last typed character; if the pattern becomes empty the prompt remains open showing `/`
+4. **REQ-PAGER-SEARCH-001.4** - ENTER submits the current pattern and closes the prompt, triggering a search
+5. **REQ-PAGER-SEARCH-001.5** - Esc cancels the prompt without triggering a search; the pager returns to the prior view with any previously active search pattern and match highlights retained unchanged
+6. **REQ-PAGER-SEARCH-001.6** - Submitting an empty pattern (ENTER with no characters typed) SHALL be treated as cancellation: no search is performed, no existing pattern is cleared, the pager returns to the prior view
+
+**Rationale:** The prompt must be lightweight and interruptible. Empty-pattern submit is equivalent to Esc because a zero-length search is meaningless; treating it as cancel avoids silently wiping a previous search result.
+
+**Example Interaction:**
+```
+[Press /]
+Status bar shows:  /
+
+[Type "foo"]
+Status bar shows:  /foo
+
+[Press Backspace]
+Status bar shows:  /fo
+
+[Press Esc]
+Status bar returns to normal; previous search (if any) remains active
+```
+
+---
+
+**REQ-PAGER-SEARCH-002: Forward Search Execution**
+
+After the user submits a non-empty pattern that matches at least one cell in the result set, the pager SHALL:
+
+1. **REQ-PAGER-SEARCH-002.1** - Scan all rows of the in-memory result set starting at the current row offset (inclusive) and wrapping through remaining rows if needed, comparing the pattern against the displayed cell text of every cell
+2. **REQ-PAGER-SEARCH-002.2** - Scroll the row viewport so the first matching row is visible (preferring to place it at or near the top of the viewport)
+3. **REQ-PAGER-SEARCH-002.3** - If the matching cell is in a column outside the current horizontal viewport, scroll the column viewport so the matched cell is visible (see REQ-PAGER-SEARCH-007)
+4. **REQ-PAGER-SEARCH-002.4** - Highlight the matched substring inside every visible cell that contains a match (see REQ-PAGER-SEARCH-008)
+5. **REQ-PAGER-SEARCH-002.5** - Update the status bar to show the match count (see REQ-PAGER-SEARCH-009)
+6. **REQ-PAGER-SEARCH-002.6** - Search operates on displayed cell text (the rendered string the user sees), not on the underlying typed value
+
+**Rationale:** Searching from the current position rather than from row 1 is consistent with `less` behavior and gives context to the position the user is already viewing.
+
+**Example Interaction:**
+```
+Result set: 500 rows, currently viewing rows 40-60
+[Type /active ENTER]
+
+Pager scrolls to first row at or after row 40 containing "active" (case-insensitive).
+Status bar: Pattern: active  (12 matches)
+Matched substrings highlighted in each visible cell.
+```
+
+---
+
+**REQ-PAGER-SEARCH-003: No Match Handling**
+
+When the submitted pattern matches no cell in the entire result set, the pager SHALL:
+
+1. **REQ-PAGER-SEARCH-003.1** - NOT scroll the viewport (row or column position remains unchanged)
+2. **REQ-PAGER-SEARCH-003.2** - NOT change the current match highlights
+3. **REQ-PAGER-SEARCH-003.3** - Display the following string verbatim in the status bar:
+
+   `Pattern: <pat>  not found`
+
+   where `<pat>` is replaced by the exact string the user submitted (including any `\c` suffix if present).
+
+4. **REQ-PAGER-SEARCH-003.4** - The no-match status persists until the user initiates a new search or exits the pager
+
+**Rationale:** When nothing matches the user must see an unambiguous signal — "not found" is the conventional phrase (`less`, `vim`) that sets correct expectations.
+
+**Example:**
+```
+[Type /xyzzy ENTER]
+Status bar: Pattern: xyzzy  not found
+Viewport unchanged.
+```
+
+---
+
+**REQ-PAGER-SEARCH-004: `n` — Navigate to Next Match**
+
+After a successful search, pressing `n` SHALL advance the highlight to the next match after the current cursor row:
+
+1. **REQ-PAGER-SEARCH-004.1** - `n` moves to the next match in the pre-computed match list (in row-then-column order)
+2. **REQ-PAGER-SEARCH-004.2** - The viewport scrolls vertically so the next matching row is visible
+3. **REQ-PAGER-SEARCH-004.3** - If the next matching cell is outside the horizontal viewport, the column viewport scrolls to bring it in view
+4. **REQ-PAGER-SEARCH-004.4** - The status bar continues to show `Pattern: <pat>  (M matches)` with M unchanged (total count does not decrement)
+5. **REQ-PAGER-SEARCH-004.5** - When the current match is the last match in the result set, `n` wraps to the first match and displays the following string verbatim in the status bar for one render frame before reverting to the match-count status:
+
+   `wrapped to first match`
+
+6. **REQ-PAGER-SEARCH-004.6** - `n` has no effect when no search is active (no pattern has been submitted since entering the pager)
+
+**Rationale:** Wrapping is the standard behavior in all pagers and editors; the one-frame notice tells the user the boundary was crossed without interrupting flow.
+
+**Example:**
+```
+Active pattern: "active"  (12 matches)
+[Currently on match 12 of 12]
+[Press n]
+Status bar (one frame): wrapped to first match
+Viewport scrolls to match 1.
+Status bar reverts to: Pattern: active  (12 matches)
+```
+
+---
+
+**REQ-PAGER-SEARCH-005: `N` — Navigate to Previous Match**
+
+After a successful search, pressing `N` (uppercase) SHALL move the highlight to the previous match before the current cursor row:
+
+1. **REQ-PAGER-SEARCH-005.1** - `N` moves to the previous match in the pre-computed match list (reverse row-then-column order)
+2. **REQ-PAGER-SEARCH-005.2** - The viewport scrolls vertically so the previous matching row is visible
+3. **REQ-PAGER-SEARCH-005.3** - If the previous matching cell is outside the horizontal viewport, the column viewport scrolls to bring it in view
+4. **REQ-PAGER-SEARCH-005.4** - The status bar continues to show `Pattern: <pat>  (M matches)` with M unchanged
+5. **REQ-PAGER-SEARCH-005.5** - When the current match is the first match in the result set, `N` wraps to the last match and displays the following string verbatim in the status bar for one render frame before reverting to the match-count status:
+
+   `wrapped to last match`
+
+6. **REQ-PAGER-SEARCH-005.6** - `N` has no effect when no search is active
+
+**Rationale:** Backward navigation mirrors `less` and `vim` conventions; users can sweep through matches in both directions without re-entering the prompt.
+
+**Example:**
+```
+Active pattern: "active"  (12 matches)
+[Currently on match 1 of 12]
+[Press N]
+Status bar (one frame): wrapped to last match
+Viewport scrolls to match 12.
+Status bar reverts to: Pattern: active  (12 matches)
+```
+
+---
+
+**REQ-PAGER-SEARCH-006: Case Sensitivity**
+
+1. **REQ-PAGER-SEARCH-006.1** - Search is case-insensitive by default: the pattern `/foo` matches cells containing `foo`, `Foo`, `FOO`, `FoO`, etc.
+2. **REQ-PAGER-SEARCH-006.2** - Appending the literal suffix `\c` to the pattern makes the search case-sensitive for that submission: `/Foo\c` matches `Foo` but NOT `foo` or `FOO`
+3. **REQ-PAGER-SEARCH-006.3** - The `\c` suffix is stripped from the pattern before matching and before display in the status bar: submitting `/Foo\c` stores the pattern as `Foo` and displays `Pattern: Foo  (M matches)`, not `Pattern: Foo\c  (M matches)`
+4. **REQ-PAGER-SEARCH-006.4** - Case sensitivity applies uniformly across all cells in the result set for that search
+5. **REQ-PAGER-SEARCH-006.5** - A new `/pattern` submission resets case sensitivity; the mode does not persist between searches
+
+**Rationale:** Case-insensitive default reduces friction in the typical exploratory workflow. `\c` is the `less` convention for case-sensitive override and is already familiar to power users.
+
+**Example:**
+```
+[Type /Status ENTER]   → matches "status", "Status", "STATUS"
+Status bar: Pattern: Status  (8 matches)
+
+[Type /Status\c ENTER] → matches "Status" only
+Status bar: Pattern: Status  (3 matches)
+```
+
+---
+
+**REQ-PAGER-SEARCH-007: Automatic Horizontal Scroll to Matched Cell**
+
+When a match is found in a cell that is outside the current horizontal column viewport, the pager SHALL scroll the column viewport automatically:
+
+1. **REQ-PAGER-SEARCH-007.1** - After a `/pattern` submission or `n`/`N` navigation, if the target match cell falls in a column with index less than `col_offset` or greater than or equal to `col_offset + visible_column_count`, the column viewport shifts to make the matched cell visible
+2. **REQ-PAGER-SEARCH-007.2** - The column offset adjusts to the minimum shift required to bring the matched column into view (prefer showing the matched column as the leftmost visible column when scrolling right, or as the rightmost when scrolling left)
+3. **REQ-PAGER-SEARCH-007.3** - After the automatic horizontal scroll, the column indicator (`(+N cols) ←` / `(+N cols) →`) and `Columns X-Y of Z` status update to reflect the new column position
+4. **REQ-PAGER-SEARCH-007.4** - Subsequent normal horizontal navigation (`←`, `→`, `h`, `l`, `H`, `L`) continues to work as documented in REQ-PAGER-HORIZ-* after the auto-scroll
+
+**Rationale:** A match that is off-screen is useless; the pager must bring the matched cell into the viewport automatically, consistent with the way vertical scrolling works for row matches.
+
+**Example:**
+```
+Current viewport: Columns 1-5 of 20
+[Type /secret ENTER]
+Match found in column 14, row 22.
+Pager scrolls vertically to row 22 AND horizontally so column 14 is visible.
+Status bar: Columns 10-14 of 20 | Rows 22-41 of 500 | Pattern: secret  (1 match)
+```
+
+---
+
+**REQ-PAGER-SEARCH-008: Match Highlight Rendering**
+
+Matched substrings SHALL be rendered with a visually distinct style within their cells:
+
+1. **REQ-PAGER-SEARCH-008.1** - The matched substring inside each visible cell is rendered with reversed foreground/background colors (terminal attribute `Reverse` or equivalent)
+2. **REQ-PAGER-SEARCH-008.2** - Every occurrence of the match in the current viewport is highlighted, not only the "current" match targeted by the last `n`/`N`
+3. **REQ-PAGER-SEARCH-008.3** - Cell content surrounding the matched substring (non-matching prefix and suffix) renders with the normal (unchanged) color attributes
+4. **REQ-PAGER-SEARCH-008.4** - When no search is active (no pattern submitted, or pattern was cleared by a new empty-pattern submission) no highlight attributes are applied to any cell
+5. **REQ-PAGER-SEARCH-008.5** - Highlights update on every render cycle: scrolling to new rows or columns reveals newly visible matches highlighted immediately
+
+**Rationale:** Highlighting all visible matches — not just the active one — gives the user a spatial sense of match density in the current view, consistent with `less` and `vim` behavior.
+
+**Example:**
+```
+Viewport shows 3 rows, pattern "active":
+
+│ Row 1 │ [active] account │ pending │
+│ Row 2 │ inactive account │ [active] │
+│ Row 5 │ [active] account │ [active] │
+
+([ ] denotes reversed-color highlight)
+```
+
+---
+
+**REQ-PAGER-SEARCH-009: Status Bar Match Count Display**
+
+After a successful search, the status bar SHALL display the active pattern and total match count:
+
+1. **REQ-PAGER-SEARCH-009.1** - The status bar displays the following format verbatim (replacing `<pat>` with the submitted pattern and `M` with the integer total match count):
+
+   `Pattern: <pat>  (M matches)`
+
+   Note: two spaces between the pattern and the opening parenthesis.
+
+2. **REQ-PAGER-SEARCH-009.2** - `M` is the total count of all matching cells across all rows in the full result set (not limited to the current viewport)
+3. **REQ-PAGER-SEARCH-009.3** - A single row containing the pattern in multiple cells contributes one count per matching cell
+4. **REQ-PAGER-SEARCH-009.4** - The match count string replaces (or supplements) the normal `Columns X-Y of Z | Rows X-Y of Z (P%)` status line; the exact layout of the combined status line is determined by the implementation within the existing status bar width
+5. **REQ-PAGER-SEARCH-009.5** - The match count string persists across `n`/`N` navigation and vertical/horizontal scrolling until the user initiates a new search, the pattern produces no matches, or the pager exits
+
+**Rationale:** Showing the total count upfront lets the user decide whether to page through all matches or refine the pattern — a standard affordance in all text pagers.
+
+**Example:**
+```
+Pattern: active  (12 matches)
+Pattern: Foo  (3 matches)
+Pattern: xyzzy  not found
+```
+
+---
+
+**REQ-PAGER-SEARCH-010: Search Across Full Result Set (Multi-Page)**
+
+Search and match navigation SHALL operate across the entire in-memory result set regardless of the current row viewport:
+
+1. **REQ-PAGER-SEARCH-010.1** - The match scan examines every row in the result set, including rows not currently visible (below or above the viewport)
+2. **REQ-PAGER-SEARCH-010.2** - `n` navigates to matches in rows beyond the initial viewport (e.g. row 300 in a 500-row result set is reachable)
+3. **REQ-PAGER-SEARCH-010.3** - The match count `M` in the status bar reflects all matches across all rows, not just the currently rendered page
+4. **REQ-PAGER-SEARCH-010.4** - The pre-computed match list is computed once per pattern submission and reused for all `n`/`N` navigation without re-scanning
+
+**Rationale:** A search that only covers the visible page is functionally useless for large result sets — the primary use case for search is finding values that are NOT currently on screen.
+
+**Example:**
+```
+Result set: 500 rows, page size 20.
+[Type /error ENTER]
+Match found at row 248 (not currently visible).
+Pager scrolls to row 248. Status bar: Pattern: error  (5 matches)
+[Press n] → scrolls to row 312
+[Press n] → scrolls to row 489
+[Press n] → wraps: "wrapped to first match", scrolls to row 248
+```
+
+---
+
+**REQ-PAGER-SEARCH-011: Pager Exit with Active Search**
+
+Exiting the pager while a search is active SHALL behave identically to exiting without a search:
+
+1. **REQ-PAGER-SEARCH-011.1** - `q` exits the pager and returns to the REPL prompt; any active search pattern and match state are discarded as part of the normal pager teardown
+2. **REQ-PAGER-SEARCH-011.2** - `Esc` (pressed during normal navigation, not during the search prompt) exits the pager identically to `q`
+3. **REQ-PAGER-SEARCH-011.3** - The exit snapshot (see REQ-PAGER-EXIT-001) is printed after the alternate screen closes; the snapshot rendering is unaffected by whether a search was active
+4. **REQ-PAGER-SEARCH-011.4** - Terminal raw mode cleanup (RawModeGuard or equivalent) completes successfully regardless of search state — no terminal state corruption
+5. **REQ-PAGER-SEARCH-011.5** - No search state persists between pager invocations; the next query result opens a fresh pager with no active pattern
+
+**Rationale:** Exit must be unconditionally reliable. Search state is scoped to a single pager session and must not interfere with terminal cleanup.
+
+---
+
+**REQ-PAGER-SEARCH-012: Search Keys in Help Text**
+
+The pager help overlay (activated by `?`) SHALL document the search keys alongside existing navigation keys:
+
+1. **REQ-PAGER-SEARCH-012.1** - The help overlay includes a "Search" section (separate from "Vertical Navigation" and "Horizontal Navigation" sections)
+2. **REQ-PAGER-SEARCH-012.2** - The Search section documents the following entries:
+   - `/pattern` — Search forward for pattern (case-insensitive)
+   - `n` — Jump to next match
+   - `N` — Jump to previous match
+   - `\c` suffix — Make search case-sensitive (e.g. `/Foo\c`)
+3. **REQ-PAGER-SEARCH-012.3** - The help overlay is accessible at any time, including while a search is active
+4. **REQ-PAGER-SEARCH-012.4** - After dismissing the help overlay (any key), the pager re-renders the current view with search highlights intact if a pattern was active before `?` was pressed
+
+**Rationale:** Discoverability is critical for infrequently used features. Search is a power feature; first-time users must be able to find it via `?` without leaving the pager.
+
+**Example Help Overlay (Search section):**
+```
+Search:
+  /pattern    Search forward (case-insensitive)
+  n           Jump to next match
+  N           Jump to previous match
+  \c suffix   Case-sensitive search (e.g. /Foo\c)
+```
+
+---
+
 #### Pager Exit Behavior (CRITICAL)
 
 **Exit Keys:**

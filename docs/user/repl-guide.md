@@ -2188,6 +2188,14 @@ When viewing query results, these additional keys are available:
 | L (uppercase) | Jump to last column |
 | H (uppercase) | Jump to first column |
 
+**Search:**
+
+| Key | Action |
+|-----|--------|
+| / | Open search prompt |
+| n | Jump to next match |
+| N | Jump to previous match |
+
 **Pager Control:**
 
 | Key | Action |
@@ -2463,6 +2471,126 @@ Columns 1-5 of 40 | Rows 15-16 of 5,234 (0%)
 ```sql
 tq> _
 ```
+
+## Searching in the Pager
+
+Once you are in the interactive pager, you can search for any value within the result set without leaving the pager or re-running your query. The search works like the `less` pager on Unix: press `/`, type a pattern, and press ENTER.
+
+### When it is useful
+
+You have pulled 5,000 rows of session data and need to find the one containing `LOCKED` without re-running the query. Or you are scrolling through a wide analytical result and want to jump directly to the row where `Region` contains `West Coast` rather than pressing `j` hundreds of times.
+
+### Opening the search prompt
+
+Press **/** from any point in the pager. The status bar immediately changes to show the search prompt:
+
+```
+/
+```
+
+Type your pattern; each character appears after the `/` as you type:
+
+```
+/LOCKED
+```
+
+Press **ENTER** to submit. The pager scrolls to the first matching row and the status bar shows how many matches were found:
+
+```
+Pattern: LOCKED  (3 matches)
+```
+
+If no cell contains the pattern, the viewport does not move and the status bar shows:
+
+```
+Pattern: LOCKED  not found
+```
+
+Note the double space before `(3 matches)` and before `not found` — that is the exact format the pager uses.
+
+To cancel the prompt without running a search, press **Esc**. Any previously active pattern and its highlights are kept.
+
+### Navigating between matches
+
+After a successful search, use these keys to move through all matches:
+
+| Key | Action |
+|-----|--------|
+| n | Jump to the next match |
+| N | Jump to the previous match |
+
+Both `n` and `N` scroll the row viewport (and the column viewport if the match falls in a hidden column). When you reach the end of all matches and press `n`, the pager wraps back to the first match and briefly shows:
+
+```
+wrapped to first match
+```
+
+Similarly, pressing `N` past the first match wraps to the last and shows:
+
+```
+wrapped to last match
+```
+
+These wrap notices clear automatically on the next keypress.
+
+### Case sensitivity
+
+By default, search is case-insensitive. `/locked` matches `LOCKED`, `Locked`, `locked`, and `LoCkEd`.
+
+To search with exact case, append `\c` to your pattern before pressing ENTER:
+
+```
+/Locked\c
+```
+
+The `\c` suffix is stripped before matching and before display — the status bar shows the clean pattern:
+
+```
+Pattern: Locked  (1 matches)
+```
+
+Case-sensitive mode applies only to that one submission. The next `/pattern` you type starts fresh as case-insensitive unless you add `\c` again.
+
+Note: Case-insensitive matching is ASCII-only. Characters outside ASCII (accented letters, CJK, etc.) are compared byte-for-byte in both modes.
+
+### What gets highlighted
+
+Every occurrence of the matched substring visible in the current viewport is rendered with reversed colors (inverted foreground and background). This applies to all matching cells on screen, not only the one you navigated to with `n`/`N`.
+
+If a match is in a column that is currently scrolled out of view, the pager scrolls the column viewport automatically so the matched cell comes into view. You can then continue normal horizontal navigation with `h`/`l`/`H`/`L`.
+
+The match count in the status bar reflects all matches across the entire result set, including rows not yet visible:
+
+```
+Pattern: LOCKED  (3 matches)
+```
+
+Scrolling through rows or columns does not change this count.
+
+### Limitations
+
+Search is literal-substring only — no regular expressions, no wildcards, no word boundaries. The pattern is treated as a plain text string. Case-insensitive folding is ASCII-only (bytes above 0x7F compare exactly). Only the text as it is displayed in the table cell is searched: if a cell value was truncated to fit the column width, the truncated portion is not searched. Finally, you can only initiate a search in the forward direction with `/`; pressing `N` immediately after a new search navigates backward through the forward-collected match list, but there is no separate backward-search prompt.
+
+### Exiting the pager while search is active
+
+Pressing `q` or `Esc` (during normal navigation, not inside the search prompt) exits the pager and returns to the REPL prompt regardless of whether a search is active. Terminal state is cleaned up fully; the search pattern does not persist to the next query result.
+
+### Help overlay
+
+Press **?** at any time to see the full key reference. The overlay includes a Search section:
+
+```
+Search:
+  /pattern    Search forward for pattern (case-insensitive)
+  /pattern\c  Search forward (case-sensitive)
+  n           Next match
+  N           Previous match
+
+Exit:
+  q / Esc     Exit pager and return to REPL prompt
+```
+
+Press any key to dismiss the overlay and return to the result with highlights intact.
 
 ## Next Steps
 

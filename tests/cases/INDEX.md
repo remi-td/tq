@@ -1,15 +1,29 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.48.0 (Sprint 66 - Tiered PTY Timeouts)
-**Last Updated:** 2026-04-17
-**Base Commit:** [Sprint 66 - In Progress]
+**Version:** 1.49.0 (Sprint 67 - Search in Pager)
+**Last Updated:** 2026-04-19
+**Base Commit:** [Sprint 67 - In Progress]
 
 ## Overview
 
 This directory contains comprehensive test case definitions for the tq CLI tool. These test cases cover all implemented MVP features (FR-001 through FR-010) and provide detailed procedures for validating functionality, usability, error handling, and security.
 
 ## Test Case Categories
+
+### Sprint 67: Feature — Search in Pager + `handle_tick_result` extraction
+
+- **TC099**: Pager Search (Feature 1) — 32 unit tests (no DB, no PTY): `parse_search_input` (AC-6 case suffix), `find_all_matches` (AC-2/3/6/8/9/10), `pick_initial_match` (AC-2/4), status-bar writer-injected rendering (AC-1/3/4/5/9), `submit_search` integration (AC-2/3/10), `jump_match` navigation (AC-4/5), help-text writer-injected rendering (AC-12). Location: `src/commands/repl/pager.rs` `#[cfg(test)]`. AC-1/AC-11 interactive PTY: skipped for reason — fallback to manual per sprint-67-strategy.md. AC-8 ANSI unit: skipped for reason — no writer-injected highlight path; ANSI bytes confirmed by source grep. — `TC099.md`
+
+- **TC100**: `handle_tick_result` extraction (Feature 2, Sprint 65 P2 follow-up) — 4 unit tests (no DB, no PTY): error path retains `last_body` (AC-3), success path replaces `last_body` (AC-4), empty-last_body edge case (AC-3 corollary), ownership transfer (AC-1 purity proof). Location: `src/commands/watch.rs` `#[cfg(test)]`. AC-2 behavioral identity: skipped for reason — TC097 pre-existing timeout; code inspection confirms behavioral identity. — `TC100.md`
+
+**Sprint 67 test case summary:**
+- Unit tests (no DB, no PTY): TC099 (32 tests in `src/commands/repl/pager.rs`) + TC100 (4 tests in `src/commands/watch.rs`) = 36 unit tests
+- Interactive tests (live DB + PTY, `#[ignore]`): none authored in Sprint 67 (AC-1/AC-11 skipped with fallback to manual)
+- Sprint 67 new unit test count: baseline 1096 → 1132 (+36 new)
+- Evidence: `tests/results/sprint-67/test-evidence-1.md`
+
+---
 
 ### Sprint 66: Maintenance — Test Infra Hardening (Tiered PTY Timeouts + PTY Buffer Dump)
 

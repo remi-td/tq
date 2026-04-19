@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
-**Last Updated:** 2026-04-17
-**Current Version:** 1.48.0
-**Latest Sprint:** Sprint 66 Complete (Maintenance: tiered PTY harness + UX sequencing process fix)
+**Last Updated:** 2026-04-19
+**Current Version:** 1.49.0
+**Latest Sprint:** Sprint 67 Complete (Pager Search: `/pattern`, `n`, `N`, `\c` — less-style forward search in the interactive pager)
 
 ---
 
@@ -61,6 +61,7 @@ All core features are complete and tested.
 | Result paging (horizontal) | ✅ | [REPL Mode](../specifications/repl.md#horizontal-column-navigation) | v1.3.0, refactored v1.13.0 (Sprint 30, disabled by default) |
 | Result paging (vertical) | ✅ | [REPL Mode](../specifications/repl.md#vertical-paging) | v1.3.0 |
 | Pager exit snapshot | ✅ | [REPL Mode](../specifications/repl.md#pager-exit-behavior) | v1.45.0 (Sprint 63) |
+| Pager search (`/pattern`, `n`, `N`, `\c`) | ✅ | [REPL Mode](../specifications/repl.md#pager-search) | v1.49.0 (Sprint 67) |
 | Query timing display | ✅ | [REPL Mode](../specifications/repl.md#timing-display) | v1.3.0 |
 
 ### Phase 3 - Advanced Features (Complete)

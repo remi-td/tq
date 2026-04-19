@@ -490,6 +490,242 @@ Press any key to return...
 }
 ```
 
+#### Pager Search
+
+Interactive less-style forward search layered on top of the existing
+horizontal-paging pager. Implements `REQ-PAGER-SEARCH-001..012` from
+`docs/specifications/repl.md`.
+
+**Scope:** literal substring search, case-insensitive by default with
+`\c` opt-in, forward-initiated (`/`), bidirectional navigation via `n` / `N`,
+highlights rendered via the terminal `Reverse` attribute, status-bar match
+count. Regex patterns, backward-initiated search (`?`), and cross-line matches
+are explicitly out of scope.
+
+##### Data model
+
+Private to `src/commands/repl/pager.rs`:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Match {
+    row: usize,
+    col: usize,
+    byte_start: usize,
+    byte_end: usize,
+}
+
+struct SearchState {
+    pattern: String,       // `\c` suffix stripped
+    case_sensitive: bool,  // informational; matches already resolved
+    matches: Vec<Match>,   // sorted by (row, col, byte_start)
+    current: Option<usize>,
+}
+
+enum SearchStatus { None, Matches, NotFound }
+
+enum InputMode {
+    Normal,
+    SearchPrompt { buffer: String },
+}
+```
+
+New fields on `Pager`:
+
+```rust
+mode: InputMode,                       // state machine for event loop
+search: Option<SearchState>,           // None until first submission
+search_status: SearchStatus,           // drives status-bar text
+transient_status: Option<String>,      // one-frame overlay (wrap notice)
+```
+
+`Match::byte_start` / `byte_end` index into the **post-truncation displayed
+cell text** returned by `TableData::get_cell`, not the underlying Teradata
+value. Matches in truncated tails are intentionally invisible — the user sees
+only what the pager renders, and search honors that.
+
+##### Match scanning
+
+`find_all_matches` is exposed as `pub(crate)` so unit tests can drive it with
+a raw `TableData` fixture:
+
+```rust
+pub(crate) fn find_all_matches(
+    data: &TableData,
+    pattern: &str,
+    case_sensitive: bool,
+) -> Vec<Match>;
+```
+
+Algorithm:
+
+1. Iterate every `(row_idx, col_idx)` in `data.cell_values`.
+2. For each cell's `&str`, scan byte-by-byte. Compare `&cell_bytes[start..start + pat_len]`
+   to the pattern bytes using either exact byte equality (case-sensitive) or
+   `eq_ignore_ascii_case` (case-insensitive).
+3. On hit, push a `Match` and advance `start` by `pat_len` (non-overlapping
+   matches). On miss, advance `start` by 1.
+
+**Case folding is ASCII-only by design.** `str::to_lowercase` would allocate
+and is Unicode-aware overkill for a SQL-result-text search; most Teradata
+data and identifiers are ASCII. Non-ASCII bytes require exact match.
+
+**Empty pattern** returns an empty match list — callers rely on this so that
+submitting `"/\c"` (pattern `""`, case-sensitive) routes through the normal
+`not found` flow without special-casing.
+
+##### Input-mode state machine
+
+`Pager::handle_key` branches on `self.mode`. A single flat event loop — no
+nested `event::read()` sub-loop — consistent with the Sprint 33 discipline:
+
+```rust
+match &mut self.mode {
+    InputMode::SearchPrompt { buffer } => match key.code {
+        KeyCode::Enter     => submit (empty buffer == cancel),
+        KeyCode::Esc       => cancel (keep prior search),
+        KeyCode::Backspace => buffer.pop(),  // stays open when empty
+        KeyCode::Char(c)   => buffer.push(c),
+        _ => {}                              // ignore other keys
+    },
+    InputMode::Normal => match key.code {
+        KeyCode::Char('/')                     => open prompt,
+        KeyCode::Char('n') if self.search.is_some() => jump_match(Next),
+        KeyCode::Char('N') if self.search.is_some() => jump_match(Prev),
+        // ... existing arms ...
+    },
+}
+```
+
+`transient_status` is cleared at the top of `handle_key` BEFORE processing the
+event, so the `wrapped to first match` overlay shows for exactly one render
+cycle after the triggering `n`/`N` and disappears on the next keypress.
+
+##### Scroll-to-match
+
+`scroll_to_match_index` reuses the existing `row_offset` / `col_offset`
+viewport fields:
+
+- **Vertical:** place the matched row at the top of the viewport, clamped to
+  `data.row_count.saturating_sub(page_size)` to avoid over-scrolling past the
+  last page.
+- **Horizontal:** if `match.col < col_offset`, set `col_offset = match.col`
+  (leftmost visible); if `match.col >= col_offset + visible_column_count`,
+  set `col_offset = match.col + 1 - visible_column_count` (rightmost visible).
+  Uses a fixed shift rather than iterating — the next render cycle settles
+  `visible_column_count` to the new offset.
+
+This design piggybacks on the existing `visible_column_count` calculation
+without extending it, keeping the column-windowing algorithm (from the
+Horizontal Paging section) unchanged.
+
+##### Highlight rendering
+
+Matches in the current viewport are rendered with the crossterm `Reverse`
+terminal attribute, NOT `SetBackgroundColor`:
+
+```rust
+execute!(stdout, SetAttribute(Attribute::Reverse))?;
+stdout.write_all(&cell_bytes[start..end])?;
+execute!(stdout, SetAttribute(Attribute::Reset))?;
+```
+
+`Reverse` composes cleanly on top of the existing foreground colors (cyan
+header, DarkGrey `[NULL]`) without a color-specific clash. `SetBackgroundColor`
+would hard-code a background that fights with terminal theming.
+
+Cells are rendered through `render_cell_with_highlights`, which reconstructs
+the padded layout (`" " + left_pad + value-with-highlights + right_pad + " "`)
+so match byte-ranges are applied to the value only, never to the padding
+whitespace. All visible matches — not just the active `current` match — are
+highlighted, consistent with `less` and `vim`.
+
+NULL cells (`value == "[NULL]"`) skip the highlight path entirely: they are
+formatting artifacts, not user data, and would never realistically match a
+search pattern.
+
+##### Status-bar extensions
+
+`render_status_bar_to_buffer` is a pure, writer-injected variant of the
+status rendering path. Priority order (highest first):
+
+1. **`InputMode::SearchPrompt`** — render `/{buffer}` literally. Empty buffer
+   shows `/` with nothing after it; the terminal's own cursor provides the
+   blink position.
+2. **`transient_status`** — the one-frame wrap notice (`wrapped to first match`
+   or `wrapped to last match`).
+3. **`SearchStatus::Matches`** — `"Pattern: {pattern}  ({M} matches)"` with
+   exactly two spaces before the `(`.
+4. **`SearchStatus::NotFound`** — `"Pattern: {pattern}  not found"` with
+   exactly two spaces before `not`.
+5. **Default** — the existing `Columns X-Y of Z | Rows X-Y of Z (P%)` status
+   plus a new `/: search` nav hint.
+
+The status line is emitted via `render_status_bar_to_buffer` so tests can
+assert on exact byte output without needing a terminal; the live
+`render_status_bar` wraps it in `SetForegroundColor(DarkGrey)` / `ResetColor`.
+
+##### Help-overlay integration
+
+`show_help` reads from a single `const HELP_TEXT` associated constant. A
+writer-injected `render_help_text(writer)` helper is exposed for tests
+(mirroring the `render_to_buffer` / `render_border_plain` pattern already in
+the file). The Search block is placed BEFORE the `Exit:` block:
+
+```
+Search:
+  /pattern    Search forward for pattern (case-insensitive)
+  /pattern\c  Search forward (case-sensitive)
+  n           Next match
+  N           Previous match
+
+Exit:
+  q / Esc     Exit pager and return to REPL prompt
+```
+
+##### Exclusions
+
+- **Regex patterns:** out of scope. Only literal substrings are matched.
+- **Backward-initiated search (`?pattern`):** out of scope. `N` already
+  navigates backward through forward-initiated matches.
+- **Highlights in the plain-text exit snapshot:** `render_exit_snapshot`
+  uses the existing plain-text helpers (`render_row_plain`, etc.) and does
+  not apply highlights. The snapshot is a copyable artifact; highlights
+  would leak terminal escape sequences into pasted content.
+- **Cross-cell or cross-line matches:** each cell is scanned independently.
+  A pattern spanning a cell boundary cannot match.
+
+##### Testability
+
+Three pure functions are `#[cfg(test)]`-accessible at the module level
+(tests in the same `mod tests` block):
+
+- `find_all_matches(&TableData, &str, bool) -> Vec<Match>` — scans a
+  fixture directly, asserting match byte-ranges, sort order, and
+  case sensitivity.
+- `parse_search_input(&str) -> (String, bool)` — `\c` suffix stripping and
+  edge cases (`""`, `"\\c"`, `"foo\\c\\c"`).
+- `pick_initial_match(&[Match], cursor_row) -> Option<usize>` — initial
+  match selection including past-all-matches wrap.
+
+Two writer-injected variants enable byte-level status / help assertions:
+
+- `render_status_bar_to_buffer(&self, &mut impl Write)` — AC-9 exact
+  format verification, including the double-space verbatim requirement.
+- `render_help_text(&mut impl Write)` — AC-12 Search-block presence and
+  placement (before `Exit:`).
+
+##### Exit-path interaction
+
+No change to `Pager::run` is required for exit. `q` / `Esc` in `InputMode::Normal`
+returns `Ok(false)` as before; the `RawModeGuard`-style cleanup is unchanged.
+`search: Option<SearchState>` is dropped with the `Pager`, so no state persists
+across pager invocations (REQ-PAGER-SEARCH-011.5).
+
+`Esc` in `InputMode::SearchPrompt` only closes the prompt (REQ-PAGER-SEARCH-001.5);
+a second `Esc` in `InputMode::Normal` exits the pager. Users exit a partially
+typed search with two `Esc` keystrokes — consistent with `less` and `vim`.
+
 #### Integration with Executor (Sprint 30)
 
 The executor passes `QueryResult` directly to the pager instead of pre-formatted strings:

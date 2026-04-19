@@ -163,13 +163,10 @@ where
         // Try to render this tick. On error, we keep the loop alive and show
         // the error in the frame header.
         let mut fresh_body: Vec<u8> = Vec::new();
-        let render_error: Option<String> = match render(&mut fresh_body) {
-            Ok(()) => {
-                last_body = fresh_body.clone();
-                None
-            }
-            Err(e) => Some(e.to_string()),
-        };
+        let render_result = render(&mut fresh_body).map(|()| fresh_body);
+        let outcome = handle_tick_result(render_result, last_body);
+        last_body = outcome.body;
+        let render_error = outcome.error_message;
 
         let timestamp = format_timestamp();
 
@@ -244,6 +241,46 @@ where
                 }
             }
         }
+    }
+}
+
+/// Outcome of a single watch-loop tick after the render closure runs.
+///
+/// Separates "what body to retain for future frames" from "what error header
+/// to display this frame" so the tick-handling logic is pure and testable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TickOutcome {
+    /// The body to retain as `last_body` for the next frame. On success this
+    /// is the freshly rendered body; on error the previous `last_body` is
+    /// returned unchanged so the user does not lose context.
+    body: Vec<u8>,
+    /// The formatted error header text for this frame, or `None` on success.
+    /// Contains only the error message itself — no ANSI, no trailing newline,
+    /// no `Error at ... - retrying in ...` framing (that's the caller's job).
+    error_message: Option<String>,
+}
+
+/// Pure tick-result handler. Decides:
+///   - what becomes the retained body going forward, and
+///   - whether this frame needs an error header.
+///
+/// AC-3: on `Err`, the retained body is the unchanged `last_body`.
+/// AC-4: on `Ok(new)`, the retained body is `new` (the freshly rendered body).
+///
+/// This function is pure (no I/O, no global state) and trivially unit-testable.
+fn handle_tick_result(
+    render_result: crate::error::Result<Vec<u8>>,
+    last_body: Vec<u8>,
+) -> TickOutcome {
+    match render_result {
+        Ok(new_body) => TickOutcome {
+            body: new_body,
+            error_message: None,
+        },
+        Err(e) => TickOutcome {
+            body: last_body,
+            error_message: Some(e.to_string()),
+        },
     }
 }
 
@@ -628,5 +665,96 @@ mod tests {
     #[test]
     fn watch_parse_interval_only_no_watch_returns_none() {
         assert_eq!(parse_watch_args(&["--interval", "5"], 6), None);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Sprint 67: handle_tick_result (Sprint 65 P2 follow-up)
+    //
+    // Feature 2 ACs:
+    //   AC-1: pure function, returns both display and retention data.
+    //   AC-2: byte-identical behaviour (covered by using the same function
+    //         from the live `watch_loop`, no behaviour divergence possible).
+    //   AC-3: test_handle_tick_result_error_retains_last_body
+    //   AC-4: test_handle_tick_result_success_replaces_body
+    // ---------------------------------------------------------------------------
+
+    /// AC-3: On Err(...) the retained body is exactly `last_body` and the
+    /// error message is populated with the error's string representation.
+    #[test]
+    fn test_handle_tick_result_error_retains_last_body() {
+        let last_body = b"previous frame content\n".to_vec();
+        let render_result: crate::error::Result<Vec<u8>> =
+            Err(crate::error::TqError::QueryExecution(
+                "simulated tick failure".into(),
+            ));
+
+        let outcome = handle_tick_result(render_result, last_body.clone());
+
+        assert_eq!(
+            outcome.body, last_body,
+            "On error, retained body must equal last_body unchanged"
+        );
+        let err_msg = outcome
+            .error_message
+            .expect("Error path must populate error_message");
+        assert!(
+            err_msg.contains("simulated tick failure"),
+            "Error message should contain the error text, got: {:?}",
+            err_msg
+        );
+    }
+
+    /// AC-4: On Ok(new) the retained body becomes `new` and there is no error.
+    #[test]
+    fn test_handle_tick_result_success_replaces_body() {
+        let last_body = b"previous frame content\n".to_vec();
+        let new_body = b"fresh frame content\n".to_vec();
+        let render_result: crate::error::Result<Vec<u8>> = Ok(new_body.clone());
+
+        let outcome = handle_tick_result(render_result, last_body);
+
+        assert_eq!(
+            outcome.body, new_body,
+            "On success, retained body must equal the freshly rendered body"
+        );
+        assert!(
+            outcome.error_message.is_none(),
+            "Success path must not populate error_message"
+        );
+    }
+
+    /// AC-3 corollary: the last_body is preserved even when it is empty
+    /// (first tick fails before any successful render).
+    #[test]
+    fn test_handle_tick_result_error_with_empty_last_body() {
+        let last_body: Vec<u8> = Vec::new();
+        let render_result: crate::error::Result<Vec<u8>> =
+            Err(crate::error::TqError::QueryExecution(
+                "first tick failed".into(),
+            ));
+
+        let outcome = handle_tick_result(render_result, last_body);
+
+        assert!(
+            outcome.body.is_empty(),
+            "Empty last_body stays empty on error"
+        );
+        assert!(
+            outcome.error_message.is_some(),
+            "Error message must be populated"
+        );
+    }
+
+    /// AC-4 corollary: ownership transfer — `handle_tick_result` takes ownership
+    /// of its inputs and returns a TickOutcome owning the body. Asserting we
+    /// can mutate outcome.body without touching anything else.
+    #[test]
+    fn test_handle_tick_result_ownership() {
+        let last_body = b"old".to_vec();
+        let new_body = b"new".to_vec();
+        let render_result: crate::error::Result<Vec<u8>> = Ok(new_body);
+        let mut outcome = handle_tick_result(render_result, last_body);
+        outcome.body.extend_from_slice(b"-more");
+        assert_eq!(outcome.body, b"new-more");
     }
 }
