@@ -838,7 +838,11 @@ impl Pager {
             }
             execute!(stdout, SetAttribute(Attribute::Reverse))?;
             stdout.write_all(&bytes[start..end])?;
-            execute!(stdout, SetAttribute(Attribute::Reset))?;
+            // Use NoReverse (SGR 27) instead of Reset (SGR 0) so any
+            // caller-set foreground color (e.g. DarkGrey on NULL cells)
+            // survives the highlight toggle. Reset strips ALL attributes
+            // including fg color.
+            execute!(stdout, SetAttribute(Attribute::NoReverse))?;
             cursor = end;
         }
         if cursor < bytes.len() {
@@ -880,11 +884,12 @@ impl Pager {
         match self.search_status {
             SearchStatus::Matches => {
                 if let Some(search) = &self.search {
+                    let n = search.matches.len();
+                    let noun = if n == 1 { "match" } else { "matches" };
                     return write!(
                         writer,
-                        "Pattern: {}  ({} matches)\r\n",
-                        search.pattern,
-                        search.matches.len()
+                        "Pattern: {}  ({} {})\r\n",
+                        search.pattern, n, noun
                     );
                 }
             }
@@ -959,9 +964,14 @@ impl Pager {
                 match key.code {
                     KeyCode::Enter => {
                         // REQ-PAGER-SEARCH-001.4: submit pattern.
-                        // REQ-PAGER-SEARCH-001.6: empty pattern == cancel
-                        // (no search performed, prior state untouched).
-                        if !buffer.is_empty() {
+                        // REQ-PAGER-SEARCH-001.6: empty pattern (or a pattern
+                        // that reduces to empty after stripping the `\c`
+                        // suffix, e.g. `\c` alone) is treated as cancel — no
+                        // search performed, prior state untouched. This
+                        // avoids rendering a visually broken
+                        // `Pattern:   not found` with a blank pattern.
+                        let (parsed, _) = parse_search_input(&buffer);
+                        if !parsed.is_empty() {
                             self.submit_search(&buffer);
                         }
                         // Back to normal mode either way.
@@ -1208,6 +1218,7 @@ Search:
   /pattern\c  Search forward (case-sensitive)
   n           Next match
   N           Previous match
+  Esc         Cancel prompt (keeps previous search)
 
 Exit:
   q / Esc     Exit pager and return to REPL prompt
@@ -1636,6 +1647,7 @@ pub fn display_with_pager(
 mod tests {
     use super::*;
     use crate::db::{ColumnMetadata, TeradataType, Value};
+    use crossterm::event::KeyModifiers;
     use std::time::Duration;
 
     fn create_test_result(num_cols: usize, num_rows: usize) -> QueryResult {
@@ -2552,16 +2564,36 @@ mod tests {
     #[test]
     fn status_bar_matches_format_exact() {
         // REQ-PAGER-SEARCH-009.1: `Pattern: <pat>  (M matches)` with two spaces.
+        // Use a pattern that hits multiple cells so plural `matches` is used.
         let mut pager = make_pager_with_data(5, 3);
-        pager.submit_search("val_0_0");
+        pager.submit_search("val_");
         let out = status_bar_to_string(&pager);
         // Must contain literal double space between pattern and `(`.
         assert!(
-            out.contains("Pattern: val_0_0  ("),
+            out.contains("Pattern: val_  ("),
             "Expected two spaces before `(`: {:?}",
             out
         );
-        assert!(out.contains("matches)"));
+        assert!(out.contains("matches)"), "Expected plural `matches)`: {:?}", out);
+    }
+
+    #[test]
+    fn status_bar_singular_match_uses_match_not_matches() {
+        // REQ-PAGER-SEARCH-009.1: `(1 match)` (singular) vs `(N matches)` (plural).
+        // A single hit must NOT read `(1 matches)`.
+        let mut pager = make_pager_with_data(5, 3);
+        pager.submit_search("val_2_1");
+        let out = status_bar_to_string(&pager);
+        assert!(
+            out.contains("(1 match)"),
+            "Singular match should read `(1 match)`, not `(1 matches)`: {:?}",
+            out
+        );
+        assert!(
+            !out.contains("(1 matches)"),
+            "Singular must not read `(1 matches)`: {:?}",
+            out
+        );
     }
 
     #[test]
@@ -2578,17 +2610,43 @@ mod tests {
     }
 
     #[test]
-    fn status_bar_empty_pattern_with_c_suffix_not_found() {
-        // Locked decision 3: `/\c` submits empty pattern with case sensitivity.
-        // Empty pattern -> zero matches -> `not found` status shown.
-        // Status renders with nothing between the two spaces after `Pattern:`.
+    fn status_bar_empty_pattern_submit_search_renders_not_found() {
+        // Defensive low-level behavior: if `submit_search` is called
+        // directly with a pattern that strips to empty (e.g. `\c`), the
+        // status shows `Pattern:   not found`. The ENTER handler in
+        // `handle_key` guards against this user-facing case by parsing
+        // the buffer first and cancelling when the post-parse pattern
+        // is empty — see `enter_on_c_only_buffer_cancels_instead_of_submitting`.
         let mut pager = make_pager_with_data(5, 3);
         pager.submit_search("\\c");
         let out = status_bar_to_string(&pager);
         assert!(
             out.contains("Pattern:   not found"),
-            "Expected `Pattern:   not found` (empty pattern renders as nothing): {:?}",
+            "Expected defensive `Pattern:   not found` at submit_search: {:?}",
             out
+        );
+    }
+
+    #[test]
+    fn enter_on_c_only_buffer_cancels_instead_of_submitting() {
+        // REQ-PAGER-SEARCH-001.6 extended: ENTER with a buffer that
+        // reduces to empty after stripping `\c` is treated as cancel,
+        // NOT submitted. Otherwise the status bar would render a
+        // broken-looking `Pattern:   not found` with a blank pattern.
+        let mut pager = make_pager_with_data(5, 3);
+        pager.mode = InputMode::SearchPrompt {
+            buffer: "\\c".to_string(),
+        };
+        let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        let cont = pager.handle_key(key).expect("handle_key should succeed");
+        assert!(cont, "Pager should continue running after cancel");
+        assert!(
+            matches!(pager.mode, InputMode::Normal),
+            "Mode should be Normal after cancel"
+        );
+        assert!(
+            pager.search.is_none(),
+            "No search state should be created on cancel"
         );
     }
 

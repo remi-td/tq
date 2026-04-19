@@ -1566,7 +1566,7 @@ Pressing `/` while in normal pager navigation SHALL open an inline search prompt
 3. **REQ-PAGER-SEARCH-001.3** - Backspace deletes the last typed character; if the pattern becomes empty the prompt remains open showing `/`
 4. **REQ-PAGER-SEARCH-001.4** - ENTER submits the current pattern and closes the prompt, triggering a search
 5. **REQ-PAGER-SEARCH-001.5** - Esc cancels the prompt without triggering a search; the pager returns to the prior view with any previously active search pattern and match highlights retained unchanged
-6. **REQ-PAGER-SEARCH-001.6** - Submitting an empty pattern (ENTER with no characters typed) SHALL be treated as cancellation: no search is performed, no existing pattern is cleared, the pager returns to the prior view
+6. **REQ-PAGER-SEARCH-001.6** - Submitting an empty pattern SHALL be treated as cancellation: no search is performed, no existing pattern is cleared, the pager returns to the prior view. "Empty" means ENTER pressed with no characters in the prompt buffer OR a buffer that reduces to an empty pattern after stripping the `\c` case-sensitivity suffix (e.g. a buffer containing only `\c`). This guard prevents the status bar from rendering a visually broken `Pattern:   not found` line with a blank pattern
 
 **Rationale:** The prompt must be lightweight and interruptible. Empty-pattern submit is equivalent to Esc because a zero-length search is meaningless; treating it as cancel avoids silently wiping a previous search result.
 
@@ -1743,7 +1743,7 @@ Matched substrings SHALL be rendered with a visually distinct style within their
 1. **REQ-PAGER-SEARCH-008.1** - The matched substring inside each visible cell is rendered with reversed foreground/background colors (terminal attribute `Reverse` or equivalent)
 2. **REQ-PAGER-SEARCH-008.2** - Every occurrence of the match in the current viewport is highlighted, not only the "current" match targeted by the last `n`/`N`
 3. **REQ-PAGER-SEARCH-008.3** - Cell content surrounding the matched substring (non-matching prefix and suffix) renders with the normal (unchanged) color attributes
-4. **REQ-PAGER-SEARCH-008.4** - When no search is active (no pattern submitted, or pattern was cleared by a new empty-pattern submission) no highlight attributes are applied to any cell
+4. **REQ-PAGER-SEARCH-008.4** - When no search is active (no pattern submitted this pager session, or the prompt was cancelled) no highlight attributes are applied to any cell
 5. **REQ-PAGER-SEARCH-008.5** - Highlights update on every render cycle: scrolling to new rows or columns reveals newly visible matches highlighted immediately
 
 **Rationale:** Highlighting all visible matches — not just the active one — gives the user a spatial sense of match density in the current view, consistent with `less` and `vim` behavior.
@@ -1765,9 +1765,10 @@ Viewport shows 3 rows, pattern "active":
 
 After a successful search, the status bar SHALL display the active pattern and total match count:
 
-1. **REQ-PAGER-SEARCH-009.1** - The status bar displays the following format verbatim (replacing `<pat>` with the submitted pattern and `M` with the integer total match count):
+1. **REQ-PAGER-SEARCH-009.1** - The status bar displays the following format verbatim, replacing `<pat>` with the submitted pattern and `M` with the integer total match count. The noun is singular (`match`) when `M == 1` and plural (`matches`) otherwise:
 
-   `Pattern: <pat>  (M matches)`
+   - `Pattern: <pat>  (1 match)` when exactly one match exists
+   - `Pattern: <pat>  (M matches)` when zero or more than one match exists (zero falls through to the not-found path per REQ-PAGER-SEARCH-003, so this only renders for M >= 2 in practice)
 
    Note: two spaces between the pattern and the opening parenthesis.
 
@@ -1832,9 +1833,10 @@ The pager help overlay (activated by `?`) SHALL document the search keys alongsi
 1. **REQ-PAGER-SEARCH-012.1** - The help overlay includes a "Search" section (separate from "Vertical Navigation" and "Horizontal Navigation" sections)
 2. **REQ-PAGER-SEARCH-012.2** - The Search section documents the following entries:
    - `/pattern` — Search forward for pattern (case-insensitive)
-   - `n` — Jump to next match
-   - `N` — Jump to previous match
-   - `\c` suffix — Make search case-sensitive (e.g. `/Foo\c`)
+   - `/pattern\c` — Search forward (case-sensitive)
+   - `n` — Next match
+   - `N` — Previous match
+   - `Esc` — Cancel prompt (keeps previous search)
 3. **REQ-PAGER-SEARCH-012.3** - The help overlay is accessible at any time, including while a search is active
 4. **REQ-PAGER-SEARCH-012.4** - After dismissing the help overlay (any key), the pager re-renders the current view with search highlights intact if a pattern was active before `?` was pressed
 
@@ -1843,10 +1845,11 @@ The pager help overlay (activated by `?`) SHALL document the search keys alongsi
 **Example Help Overlay (Search section):**
 ```
 Search:
-  /pattern    Search forward (case-insensitive)
-  n           Jump to next match
-  N           Jump to previous match
-  \c suffix   Case-sensitive search (e.g. /Foo\c)
+  /pattern    Search forward for pattern (case-insensitive)
+  /pattern\c  Search forward (case-sensitive)
+  n           Next match
+  N           Previous match
+  Esc         Cancel prompt (keeps previous search)
 ```
 
 ---

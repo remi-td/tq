@@ -2546,7 +2546,7 @@ To search with exact case, append `\c` to your pattern before pressing ENTER:
 The `\c` suffix is stripped before matching and before display — the status bar shows the clean pattern:
 
 ```
-Pattern: Locked  (1 matches)
+Pattern: Locked  (1 match)
 ```
 
 Case-sensitive mode applies only to that one submission. The next `/pattern` you type starts fresh as case-insensitive unless you add `\c` again.
