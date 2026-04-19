@@ -579,11 +579,9 @@ impl Pager {
         let hidden_right = self.hidden_columns_right();
 
         // Calculate progress percentage
-        let progress = if self.data.row_count == 0 {
-            100
-        } else {
-            (end_row * 100) / self.data.row_count
-        };
+        let progress = (end_row * 100)
+            .checked_div(self.data.row_count)
+            .unwrap_or(100);
 
         // Build status line with column and row positions
         let col_status = format!(
@@ -637,10 +635,10 @@ impl Pager {
             KeyCode::Char('q') | KeyCode::Esc => return Ok(false),
 
             // Vertical navigation
-            KeyCode::Char('j') | KeyCode::Down => {
-                if self.row_offset + self.page_size < self.data.row_count {
-                    self.row_offset += 1;
-                }
+            KeyCode::Char('j') | KeyCode::Down
+                if self.row_offset + self.page_size < self.data.row_count =>
+            {
+                self.row_offset += 1;
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.row_offset = self.row_offset.saturating_sub(1);
@@ -663,10 +661,10 @@ impl Pager {
             KeyCode::Left | KeyCode::Char('h') => {
                 self.col_offset = self.col_offset.saturating_sub(1);
             }
-            KeyCode::Right | KeyCode::Char('l') => {
-                if self.col_offset + self.visible_column_count() < self.data.columns.len() {
-                    self.col_offset += 1;
-                }
+            KeyCode::Right | KeyCode::Char('l')
+                if self.col_offset + self.visible_column_count() < self.data.columns.len() =>
+            {
+                self.col_offset += 1;
             }
 
             // Jump to first column

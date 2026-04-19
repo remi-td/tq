@@ -153,10 +153,20 @@ For each new command, compare ACTUAL output against documented output:
 
 ### Step 3: Commit and Push
 
+**BLOCKING pre-push gate — run `scripts/ci-check.sh` locally. If it fails, STOP and fix before committing. Do NOT push a commit that has not passed `scripts/ci-check.sh`.**
+
+`scripts/ci-check.sh` mirrors `.github/workflows/ci.yml` exactly (`cargo clippy --all-targets -- -D warnings` + `cargo test --lib`). Running it before every `git push` catches the recurring class of failure where a new stable-rust release introduces a clippy lint that `#![deny(warnings)]` immediately escalates to an error (e.g. `manual_checked_ops`, `collapsible_match` in rust 1.95.0 on master push 5d67c5a).
+
+**Toolchain drift caveat:** CI tracks the *latest* stable (`dtolnay/rust-toolchain@stable`). If your local rustc is older than CI's, `scripts/ci-check.sh` can still pass locally while CI fails on brand-new lints. Before relying on this gate, verify `rustc --version` is current (install/use `rustup` and `rustup update stable` if your rustc came from a package manager that lags).
+
 ```bash
+# Pre-push gate — BLOCKING
+scripts/ci-check.sh
+
+# Only if the gate passes:
 git add .
-git commit -m "Complete Sprint N: [Summary of features]
-git push origin main
+git commit -m "Complete Sprint N: [Summary of features]"
+git push origin master
 ```
 
 ### Step 3.1: Tag Release and Trigger Build
