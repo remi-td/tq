@@ -163,6 +163,34 @@ Before assigning sprint rating:
 - "Tests pass" as the primary evidence
 - "Code complete" without functionality demonstration
 - Defensive language ("mostly works", "edge cases remain")
+- **A test rated REQUIRED in the sprint strategy shows up as `skipped for reason: not authored` in the evidence** (Sprint 67 lesson — PTY tests for AC-1/AC-11 and ANSI-byte test for AC-8 were strategy-REQUIRED but went unwritten; the authoring was deprioritised, not technically blocked)
+- **A test labeled `run and passed` covered a different code path than the AC it claims to prove** (Sprint 67 lesson — AC-7 horizontal-scroll was "proven" by a vertical-scroll test until QV self-critique caught the mislabel)
+
+### The "REQUIRED-is-not-optional" Rule
+
+When Phase 2 strategy classifies a test as **REQUIRED**, that classification is binding. It can only be satisfied by authoring the test, not by any of the following substitutions:
+
+- Code inspection with a paragraph of prose
+- A "structural verification" that greps for the right call in the source
+- A different test that covers a related but not-quite-the-same code path
+- A claim that the harness is not ready (if the harness IS ready — as the Sprint 66 tiered PTY harness was for Sprint 67 — deferring authoring is a choice, not a blocker)
+
+If a REQUIRED test cannot be authored within the sprint, the evidence doc must:
+
+1. Label the AC as `skipped for reason: REQUIRED test not authored — <explicit reason>` (not `run and passed`, not `skipped for reason: accepted fallback`).
+2. Rate the gap at **MEDIUM severity** at minimum. Code inspection is supplementary evidence only; it does not downgrade a REQUIRED gap to LOW.
+3. Add a P2 follow-up item to the sprint review with the exact test to author and a time estimate.
+
+This rule exists because every time it has been relaxed (Sprint 65 AC-4..AC-9, Sprint 67 AC-1/AC-7/AC-8/AC-11), the next sprint inherits the gap as phantom coverage — the evidence record says "passed" or "accepted", the AC goes unexercised, and a bug in that code path can ship unnoticed.
+
+### Per-AC Assertion Citation
+
+An AC is proven by a *specific assertion on a specific code path*, not by a test function whose name happens to contain a related keyword. The test-evidence format must cite, for each AC, the exact assertion that exercises the code path the AC specifies — not just the test function name. If no such assertion exists in any authored test, the AC is `skipped for reason`, regardless of how many neighbouring tests passed.
+
+Example (Sprint 67 AC-7 mislabel):
+- **Wrong:** AC-7 (horizontal scroll to matched column) → `run and passed` via `submit_search_scrolls_to_first_match`.
+  - Test does exist and passes. But its fixture has 3 cols, all visible — the `col_offset` branch in `scroll_to_match_index` never fires. The AC is untouched.
+- **Right:** AC-7 → `skipped for reason: no multi-column fixture test authored; horizontal col_offset branch not exercised by any passing test`.
 
 ### Building Trust Through Honesty
 
