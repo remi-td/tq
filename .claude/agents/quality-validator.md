@@ -39,12 +39,31 @@ or
 Read specification files from `docs/specifications/` to understand what needs to be tested. These contain pure requirements without implementation status.
 
 ### Step 2: Design Tests
-For each feature, design once or more tests that proves it works:
+For each feature, design one or more tests that prove it works:
 - Integration tests for end-to-end flows
 - Edge case tests for error handling
 
+**CRITICAL: Enumerate all tests by number (Sprint 69 Rule).**
+
+Your test strategy MUST list each planned test with a unique identifier:
+
+```
+TC108 - Pager Search Status Bar
+  - TC108-U01: Wide terminal composed format
+  - TC108-U02: Narrow terminal drops row context  
+  - TC108-U03: Row context no `%`, separator exact
+  - TC108-U04: Scroll persistence
+  - TC108-U05: Very narrow truncation
+  - TC108-U06: Not-found no row context
+  - TC108-U07: Search segment width guard
+
+**Total planned: 7 tests**
+```
+
+During Phase 3 execution, verify every numbered test is implemented. If a test is skipped, document the reason in evidence. This prevents the Sprint 69 pattern where "7 tests" were planned but only 2 were initially implemented.
+
 Specify the overall test strategy in `tests/strategy` using `tests/strategy/test-strategy-template.md`
-Reflect if you need new tools that may need to be developed to test specific features or accelerate your test strategy. If this is the case, you should communicate this to the coordinator so they are developped.
+Reflect if you need new tools that may need to be developed to test specific features or accelerate your test strategy. If this is the case, you should communicate this to the coordinator so they are developed.
 
 ### Step 3: Implement Tests
 Write the fully detailed individual test cases in `tests/cases` (one file per feature ,there may be more than one test per feature).

@@ -88,7 +88,28 @@ Creates `docs/sprints/sprint-<N>-metrics.md` with:
 
 ## Important Notes
 
-- ✅ This skill only collects data
-- ❌ This skill does NOT analyze or recommend changes
-- ⚡ Fast execution (~2-3 minutes)
-- 📊 Provides factual baseline for optimization
+- This skill only collects data
+- This skill does NOT analyze or recommend changes
+- Fast execution (~2-3 minutes)
+- Provides factual baseline for optimization
+
+## Multi-Sprint Sessions (Sprint 69 Note)
+
+When multiple sprints run in a single Claude session, metrics are **session-cumulative**. The "Grand Total" includes all sprints in that session.
+
+**To compute per-sprint cost:**
+
+1. Find the previous sprint's "Grand Total" tokens from its metrics file
+2. Subtract from current sprint's "Grand Total"
+3. Apply same formula to compute cost
+
+**Example (Sprint 69):**
+```
+Session Grand Total: 63,653,746 tokens ($33.18)
+Sprint 68 baseline:  23,078,954 tokens ($12.23)
+Sprint 69 delta:     40,574,792 tokens (~$21)
+```
+
+**Best Practice:** When starting a new sprint in an existing session, note the current cumulative totals so delta computation is straightforward.
+
+**Future Enhancement:** Consider adding `--after <timestamp>` flag to filter agents by creation time for cleaner per-sprint metrics.

@@ -43,12 +43,30 @@ If the **`quality-validator`** rejects the implementation, provide the context a
 
 
 
-### Step 4: Synthesize
+### Step 5: Synthesize
 
 Review both outputs:
 - **Gaps?** Identify missing specifications or unclear architecture.
 - **Agreement?** Ensure that both accepted to deliver the features in this sprint (or move them to the backlog in `specifications.md` amd update `sprint-N-planning.md`)
-- **Ready?** Proceed to Phase 3.
+- **Ready?** Proceed to Step 6.
+
+### Step 6: Implementation Cross-Check (Sprint 69 Rule)
+
+Before proceeding to Phase 3, verify:
+
+1. **Spec-Code Alignment:** For each requirement updated or added in this sprint:
+   - Grep the codebase for the relevant function/feature
+   - Verify existing code matches the spec (if feature already partially exists)
+   - Flag divergences for Phase 3 architect attention
+   - Example: Sprint 69 found spec 009.4 required truncation but existing code didn't implement it
+   
+2. **Test Enumeration:** Quality-validator's test strategy must:
+   - Number all planned tests (e.g., "TC108-U01..U07")
+   - State total: "7 tests planned"
+   - Phase 3 validation will check all numbered tests are implemented
+   - Example: Sprint 69 strategy said "7 unit tests" but only 2 were initially implemented
+
+**Why this matters:** Sprint 69 retro found spec/code divergence and 5 missing tests. Early detection in Phase 2 would have prevented 5 retro fixes and ~$3-5 in rework.
 
 ## Output
 - Updated `docs/specifications/*.md` (pure requirements only).
