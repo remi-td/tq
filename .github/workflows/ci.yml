@@ -16,8 +16,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      # Pin to the toolchain declared in rust-toolchain.toml so a floating
+      # `stable` cannot introduce new clippy lints that fail the build.
+      # The version here MUST match rust-toolchain.toml.
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.0"
+          components: clippy, rustfmt
 
       - name: Cache cargo registry and build
         uses: actions/cache@v4

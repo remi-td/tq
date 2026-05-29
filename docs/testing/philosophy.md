@@ -130,6 +130,16 @@ The 40% automated coverage is **appropriate** for tq's architecture:
 
 ### Anti-Patterns to Avoid
 
+**Deferring a REQUIRED Test**:
+- A test classified REQUIRED in the sprint test strategy that is not authored by
+  the end of Phase 3 must be reported as a MEDIUM-severity gap in the quality
+  report. It is not resolved by code inspection or manual verification.
+- "The harness isn't ready" is only valid if the harness genuinely does not
+  exist; if the harness exists, deferring the test is a choice that must be
+  recorded as a gap, not hidden behind a `passed`/`accepted` label.
+- See [`approach.md`](approach.md#required-tests-are-not-optional) and the
+  authoritative rule in [`honest-assessment.md`](honest-assessment.md).
+
 **Test to Coverage Ratio**:
 - Don't write tests just to increase coverage percentage
 - Coverage is a byproduct of good testing, not the goal

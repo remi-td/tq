@@ -2810,4 +2810,124 @@ mod tests {
         assert!(!bytes_eq_ignore_ascii_case(b"foo", b"foos"));
         assert!(!bytes_eq_ignore_ascii_case(b"foos", b"foo"));
     }
+
+    // ---------------------------------------------------------------------------
+    // Sprint 68 AC-7: horizontal scroll on search snaps the matched column into
+    // view (exercises the `col_offset` right-shift branch in
+    // `scroll_to_match_index`). This is the branch the Sprint 67 fixture never
+    // hit because all its columns were visible.
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn scroll_to_match_snaps_to_rightmost_column() {
+        // 8 columns, all the same fixed display width so the visible-column
+        // arithmetic is deterministic and independent of the data.
+        let mut pager = make_pager_with_data(3, 8);
+        for col in pager.data.columns.iter_mut() {
+            col.display_width = 10; // each cell renders as display_width + 3 = 13
+        }
+        // Narrow the terminal so exactly 3 columns fit. With a left indicator
+        // absent (col_offset = 0) and a right indicator reserved (13), the
+        // layout is: leading border (1) + 3 * 13 = 40 <= available, while a
+        // 4th column (53) overflows. available = term_width - 13, so
+        // term_width = 55 -> available = 42 -> visible = 3.
+        pager.term_width = 55;
+        // Visible-column count at the initial offset (0); the right-shift in
+        // scroll_to_match_index aligns against THIS count.
+        let visible_at_start = pager.visible_column_count();
+        assert_eq!(
+            visible_at_start, 3,
+            "fixture must show exactly 3 columns for the off-screen-match case"
+        );
+
+        // The target value `val_0_6` lives only in row 0, column 6 — well to
+        // the right of the initial 3-column viewport [0, 3).
+        let match_col = 6usize;
+        pager.submit_search("val_0_6");
+
+        // The search found the off-screen column and shifted the viewport right
+        // so the matched column is now the rightmost visible one.
+        assert_eq!(pager.search_status, SearchStatus::Matches);
+        assert!(
+            pager.col_offset > 0,
+            "col_offset must advance to bring the off-screen match into view; got {}",
+            pager.col_offset
+        );
+        // Right-aligned against the pre-shift visible count:
+        // col_offset == match_col + 1 - visible_cols.
+        assert_eq!(
+            pager.col_offset,
+            match_col + 1 - visible_at_start,
+            "matched column should be right-aligned in the viewport"
+        );
+        // The matched column is now at-or-right-of the new left edge (the
+        // viewport scrolled toward it). Exact rightmost visibility settles on
+        // the next render — `scroll_to_match_index` deliberately takes a
+        // conservative fixed shift and lets render-time width recomputation
+        // finalize the window (see its doc comment), so we assert the column is
+        // no longer to the LEFT of the viewport rather than pinning an exact
+        // post-shift visible count.
+        assert!(
+            match_col >= pager.col_offset,
+            "matched column {} must not be left of the new viewport edge {}",
+            match_col,
+            pager.col_offset
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Sprint 68 AC-8: write_value_with_highlights emits the reverse-video SGR
+    // escape (`\x1b[7m`) before a matched substring and NoReverse (`\x1b[27m`)
+    // after it, leaving non-matching bytes verbatim. Closes the Sprint 67 gap
+    // where the ANSI byte sequence was never asserted.
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn write_value_with_highlights_wraps_match_in_reverse_sgr() {
+        let pager = make_pager_with_data(1, 1);
+        let value = "foobarbaz";
+        // Highlight the middle "bar" (bytes 3..6).
+        let matches = [(3usize, 6usize)];
+
+        let mut buf: Vec<u8> = Vec::new();
+        pager
+            .write_value_with_highlights(&mut buf, value, &matches)
+            .expect("write_value_with_highlights must succeed on a Vec<u8> writer");
+
+        // Reverse-video on (SGR 7) and off (SGR 27, NoReverse — confirmed in
+        // the pager design doc; Reset/SGR 0 would clobber any fg color).
+        const REVERSE_ON: &[u8] = b"\x1b[7m";
+        const REVERSE_OFF: &[u8] = b"\x1b[27m";
+
+        let on = find_subslice(&buf, REVERSE_ON).expect("reverse-on SGR must be present");
+        let off = find_subslice(&buf, REVERSE_OFF).expect("reverse-off SGR must be present");
+        let bar = find_subslice(&buf, b"bar").expect("matched substring bytes must be present");
+
+        // Ordering: \x1b[7m  before "bar"  before \x1b[27m.
+        assert!(
+            on < bar && bar < off,
+            "expected `\\x1b[7m` before `bar` before `\\x1b[27m`; on={on}, bar={bar}, off={off}"
+        );
+
+        // Non-matching prefix and suffix bytes survive verbatim.
+        assert!(
+            find_subslice(&buf, b"foo").is_some(),
+            "non-matching prefix `foo` must be present verbatim"
+        );
+        assert!(
+            find_subslice(&buf, b"baz").is_some(),
+            "non-matching suffix `baz` must be present verbatim"
+        );
+    }
+
+    /// Find the first occurrence of `needle` in `haystack`, returning its start
+    /// index. Small test-only helper (no regex crate dependency).
+    fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+        if needle.is_empty() || needle.len() > haystack.len() {
+            return None;
+        }
+        haystack
+            .windows(needle.len())
+            .position(|w| w == needle)
+    }
 }

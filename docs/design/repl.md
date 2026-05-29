@@ -619,6 +619,14 @@ This design piggybacks on the existing `visible_column_count` calculation
 without extending it, keeping the column-windowing algorithm (from the
 Horizontal Paging section) unchanged.
 
+The rightmost-snap branch (`m.col >= col_offset + visible`) is the harder
+branch to exercise in a unit test: it requires a fixture wide enough that the
+matched column starts off-screen to the right. A deterministic test sets a
+narrow `term_width` and many columns so `visible_column_count` returns a small
+number, places the unique match in a far-right column, submits the search, and
+asserts `col_offset == m.col + 1 - visible_column_count()` so the matched
+column lands at the rightmost visible position rather than the leftmost.
+
 ##### Highlight rendering
 
 Matches in the current viewport are rendered with the crossterm `Reverse`
@@ -627,7 +635,11 @@ terminal attribute, NOT `SetBackgroundColor`:
 ```rust
 execute!(stdout, SetAttribute(Attribute::Reverse))?;
 stdout.write_all(&cell_bytes[start..end])?;
-execute!(stdout, SetAttribute(Attribute::Reset))?;
+// NoReverse (SGR 27), NOT Reset (SGR 0): Reset clears ALL attributes,
+// including any caller-set foreground color (e.g. DarkGrey on NULL cells).
+// NoReverse cancels only the reverse-video toggle, so the surrounding
+// color survives the highlight span.
+execute!(stdout, SetAttribute(Attribute::NoReverse))?;
 ```
 
 `Reverse` composes cleanly on top of the existing foreground colors (cyan
@@ -637,7 +649,11 @@ would hard-code a background that fights with terminal theming.
 Cells are rendered through `render_cell_with_highlights`, which reconstructs
 the padded layout (`" " + left_pad + value-with-highlights + right_pad + " "`)
 so match byte-ranges are applied to the value only, never to the padding
-whitespace. All visible matches — not just the active `current` match — are
+whitespace. The byte-range emission itself lives in
+`write_value_with_highlights(&self, stdout, value, matches)`, which takes a
+`&mut impl Write` so unit tests can assert on the raw escape bytes (e.g. the
+`\x1b[7m` reverse-on / `\x1b[27m` reverse-off sequence pair) without a
+terminal. All visible matches — not just the active `current` match — are
 highlighted, consistent with `less` and `vim`.
 
 NULL cells (`value == "[NULL]"`) skip the highlight path entirely: they are
@@ -708,12 +724,25 @@ Three pure functions are `#[cfg(test)]`-accessible at the module level
 - `pick_initial_match(&[Match], cursor_row) -> Option<usize>` — initial
   match selection including past-all-matches wrap.
 
-Two writer-injected variants enable byte-level status / help assertions:
+Three writer-injected variants enable byte-level status / help / highlight
+assertions:
 
 - `render_status_bar_to_buffer(&self, &mut impl Write)` — AC-9 exact
   format verification, including the double-space verbatim requirement.
 - `render_help_text(&mut impl Write)` — AC-12 Search-block presence and
   placement (before `Exit:`).
+- `write_value_with_highlights(&self, &mut impl Write, value, matches)` —
+  asserts the reverse-video escape pair (`\x1b[7m` … `\x1b[27m`) wraps the
+  matched byte-range and that non-matching prefix/suffix bytes are emitted
+  verbatim. Because the method takes `&mut impl Write`, a `Vec<u8>` capture
+  buffer substitutes for `io::stdout()` with no terminal required.
+
+Scroll-to-match horizontal behaviour is covered by integration-style unit
+tests that build a `Pager` directly (via the `make_pager_with_data` / wide
+fixture helpers), set `term_width`, submit a search, and assert on the
+resulting `col_offset` — exercising both the leftmost-snap branch
+(`m.col < col_offset`) and the rightmost-snap branch
+(`m.col >= col_offset + visible`).
 
 ##### Exit-path interaction
 
@@ -7510,6 +7539,50 @@ Headless interactive tests are notoriously flaky, so the testable surface is kep
 - Last-frame retention: inject a closure that writes incrementing counters; after the loop exits, assert the returned last-frame buffer matches the final counter.
 
 For end-to-end exit-snapshot behavior, an integration test drives watch mode for 2 ticks via a scripted keystroke injection and verifies the exit snapshot contains the last frame's session data.
+
+#### Tiered PTY harness for interactive watch tests (TC097-A..H)
+
+The end-to-end watch tests (`tests/interactive_tests.rs`, TC097-A..H, all
+`#[ignore]` because they need a live database + PTY) use the tiered harness in
+`tests/common/pty_harness.rs` (`TqPty`, `Stage`, `Timeouts`) rather than a
+single blanket `set_expect_timeout`. The harness assigns each phase of the
+interaction its own budget and, on `ExpectTimeout`, dumps the last 4 KiB of the
+PTY buffer to `tests/results/sprint-66/<test_name>.pty.log` so a failure
+produces actionable evidence instead of a bare `ExpectTimeout`.
+
+Canonical call pattern for a watch test:
+
+```rust
+let mut p = spawn_tq_repl_tiered("test_sessions_watch_q_exits_to_repl");
+// Connect/auth phase — slow (TLS + auth + catalog warm-up).
+p.expect_stage(Stage::Connect, "Connected to")
+    .expect("connect stage");
+p.session_mut()
+    .send_line("/sessions --watch --interval 1")
+    .expect("send /sessions --watch");
+// The first watch frame is a query-result wait — use the Query budget.
+p.expect_stage(Stage::Query, /* watch-frame needle */)
+    .expect("first watch frame");
+p.session_mut().send("q").expect("send q");
+// REPL prompt reappears — Prompt budget.
+p.expect_stage(Stage::Prompt, expectrl::Regex("tq>|tq >"))
+    .expect("prompt returns after watch exit");
+```
+
+Stage mapping for watch tests:
+
+- **`Stage::Connect`** — initial `"Connected to"` banner.
+- **`Stage::Query`** — first watch frame after `/sessions --watch` (the tick
+  runs a `DBC.SessionInfoV` query); also the non-watch `/sessions` result in
+  the TC097-H regression guard.
+- **`Stage::Prompt`** — REPL prompt re-appearing after `q` / `Esc` / `Ctrl-C`
+  exits watch mode, and after `/quit`.
+
+Keystroke sends (`send` for raw bytes like `"q"`, `"\x1b"`, `"\x03"`;
+`send_line` for commands) go through `p.session_mut()`. Tests should prefer
+`expect_stage` over a fixed `std::thread::sleep` + `read_available_output`
+where a deterministic needle exists, falling back to a drain only for
+content assertions (e.g. TC097-B's interval-indicator check).
 
 ### Edge Cases
 

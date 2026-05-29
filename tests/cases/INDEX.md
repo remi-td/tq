@@ -1,15 +1,38 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.49.0 (Sprint 67 - Search in Pager)
-**Last Updated:** 2026-04-19
-**Base Commit:** [Sprint 67 - In Progress]
+**Version:** 1.50.0 (Sprint 68 - Maintenance: TC097 + Test Debt + Toolchain Pin)
+**Last Updated:** 2026-05-29
+**Base Commit:** [Sprint 68 - In Progress]
 
 ## Overview
 
 This directory contains comprehensive test case definitions for the tq CLI tool. These test cases cover all implemented MVP features (FR-001 through FR-010) and provide detailed procedures for validating functionality, usability, error handling, and security.
 
 ## Test Case Categories
+
+### Sprint 68: Maintenance — TC097 Migration + Sprint 67 Test Gaps + Toolchain Pin
+
+- **TC101**: TC097-A..H Migration Validation — structural grep check (AC-OBJ1-1, AC-OBJ1-3) + 8 interactive `#[ignore]` watch tests (AC-OBJ1-2): each must pass or produce a PTY dump at `tests/results/sprint-66/<name>.pty.log`. Location: structural check via grep on `tests/interactive_tests.rs`; execution via `cargo test --test interactive_tests watch -- --ignored`. — `TC101.md`
+
+- **TC102**: `scroll_to_match_snaps_to_rightmost_column` Unit Test — 1 unit test (no DB, no PTY): 8-column fixture with `term_width` calibrated for 3 visible columns; asserts `col_offset > 0` after `submit_search("TARGET")` where match is at col 6. Closes Sprint 67 AC-7 REQUIRED gap. Location: `src/commands/repl/pager.rs` `#[cfg(test)]`. — `TC102.md`
+
+- **TC103**: `write_value_with_highlights_emits_reverse_video` Unit Test — 1 unit test (no DB, no PTY): `Vec<u8>` writer fixture; asserts `\x1b[7m` before matched substring and `\x1b[27m` after, with prefix/suffix written unmodified. Closes Sprint 67 AC-8 REQUIRED gap. Location: `src/commands/repl/pager.rs` `#[cfg(test)]`. — `TC103.md`
+
+- **TC104**: `test_pager_search_prompt_and_exit` PTY Test — 1 interactive `#[ignore]` test (live DB + PTY): uses `spawn_tq_repl_tiered_with_pager` (omits `--no-pager`); queries DBC.ColumnsV to trigger pager; sends `/`, enters `ColumnName\n`, asserts `Pattern:` in PTY; exits with `q`, asserts `tq>` returns. Closes Sprint 67 AC-1/AC-11 REQUIRED gap. Location: `tests/interactive_tests.rs`. — `TC104.md`
+
+- **TC105**: `rust-toolchain.toml` Validation — 4 checks: file exists with valid `[toolchain]` section (AC-OBJ4-1); `scripts/ci-check.sh` exits 0 locally (AC-OBJ4-2 local proxy); GitHub Actions CI green on sprint tag (AC-OBJ4-2 remote, deferred to Phase 5); `#![deny(warnings)]` decision documented (AC-OBJ4-3). — `TC105.md`
+
+- **TC106**: REQUIRED-Test Rule in Testing Docs — 3 checks: `docs/testing/approach.md` contains `MEDIUM-severity` gap statement (AC-OBJ3-1); `docs/testing/philosophy.md` aligned (AC-OBJ3-2); `docs/testing/honest-assessment.md` preserved from Sprint 67 (AC-OBJ3-3, RECOMMENDED). All verified by grep. — `TC106.md`
+
+**Sprint 68 test case summary:**
+- Unit tests (no DB, no PTY): TC102 (1 test in `src/commands/repl/pager.rs`) + TC103 (1 test in `src/commands/repl/pager.rs`) = 2 new unit tests
+- Interactive tests (live DB + PTY, `#[ignore]`): TC101-A..H (8 migrated tests) + TC104-I01 (1 new pager search test) = 9 `#[ignore]` tests
+- Structural checks (grep, no DB): TC101-code-check (3 greps) + TC105-file/local/doc (3 checks) + TC106-approach/philosophy/honest (3 greps) = 9 structural verifications
+- Remote CI: TC105-ci (1 observation, Phase 5)
+- Sprint 68 new unit test baseline: 1132 (Sprint 67) + 2 = 1134 minimum
+
+---
 
 ### Sprint 67: Feature — Search in Pager + `handle_tick_result` extraction
 

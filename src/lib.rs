@@ -1,3 +1,10 @@
+// Treat all warnings as hard errors. This is safe because the Rust toolchain
+// is pinned in `rust-toolchain.toml` (and mirrored in CI), so a floating
+// `stable` channel cannot silently introduce new lints that would break the
+// build. The CI `-D warnings` flag on `cargo clippy` is a redundant guard for
+// clippy-specific lints; this attribute covers rustc lints during `cargo build`
+// and `cargo test`. When bumping the pinned toolchain, run `scripts/ci-check.sh`
+// locally first to surface any new lints under the new compiler.
 #![deny(warnings)]
 //! # tq - Teradata Query
 //!

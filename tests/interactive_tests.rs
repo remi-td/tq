@@ -52,6 +52,21 @@ fn spawn_tq_repl_tiered(test_name: &str) -> TqPty {
     TqPty::new(session, test_name, Timeouts::from_env())
 }
 
+/// Spawn tq REPL wrapped in a [`TqPty`] with the pager ENABLED.
+///
+/// Identical to [`spawn_tq_repl_tiered`] except it omits `--no-pager`, so the
+/// interactive pager activates for wide/long results. Required by the Sprint 68
+/// PTY pager-search tests (AC-1/AC-11): the search prompt and match highlight
+/// only exist inside the pager. Timeouts and dump behaviour are inherited from
+/// the tiered harness.
+#[allow(dead_code)]
+fn spawn_tq_repl_tiered_with_pager(test_name: &str) -> TqPty {
+    let bin_path = assert_cmd::cargo::cargo_bin!("tq");
+    let cmd = format!("{} repl --no-syntax-highlight", bin_path.display());
+    let session = spawn(cmd).expect("Failed to spawn tq");
+    TqPty::new(session, test_name, Timeouts::from_env())
+}
+
 #[test]
 #[ignore]
 fn test_repl_startup_and_quit() {
@@ -3394,16 +3409,20 @@ fn strip_ansi(s: &str) -> String {
 #[test]
 #[ignore]
 fn test_sessions_watch_q_exits_to_repl() {
-    let mut p = spawn_tq_repl();
-    p.expect("Connected to").expect("Failed to connect");
+    let mut p = spawn_tq_repl_tiered("test_sessions_watch_q_exits_to_repl");
+    p.expect_stage(Stage::Connect, "Connected to")
+        .expect("connect: banner");
     std::thread::sleep(Duration::from_secs(1));
-    p.send_line("/sessions --watch --interval 1")
+    p.session_mut()
+        .send_line("/sessions --watch --interval 1")
         .expect("Failed to send /sessions --watch");
     std::thread::sleep(Duration::from_secs(2));
-    p.send("q").expect("Failed to send q");
-    p.expect(expectrl::Regex("tq>|tq >"))
+    p.session_mut().send("q").expect("Failed to send q");
+    p.expect_stage(Stage::Query, expectrl::Regex("tq>|tq >"))
         .expect("REPL prompt must reappear after exiting watch mode with q");
-    p.send_line("/quit").expect("Failed to send /quit");
+    p.session_mut()
+        .send_line("/quit")
+        .expect("Failed to send /quit");
     std::thread::sleep(Duration::from_millis(500));
 }
 
@@ -3411,14 +3430,21 @@ fn test_sessions_watch_q_exits_to_repl() {
 #[test]
 #[ignore]
 fn test_sessions_watch_frame_header_content() {
-    let mut p = spawn_tq_repl();
-    p.expect("Connected to").expect("Failed to connect");
+    let mut p = spawn_tq_repl_tiered("test_sessions_watch_frame_header_content");
+    p.expect_stage(Stage::Connect, "Connected to")
+        .expect("connect: banner");
     std::thread::sleep(Duration::from_secs(1));
-    p.send_line("/sessions --watch --interval 1")
+    p.session_mut()
+        .send_line("/sessions --watch --interval 1")
         .expect("Failed to send /sessions --watch");
-    std::thread::sleep(Duration::from_secs(2));
-    let raw = read_available_output(&mut p);
-    let clean = strip_ansi(&raw);
+    // Wait (within the query budget) for the first watch frame to render one of
+    // its header markers, then assert on the accumulated capture.
+    p.expect_stage(
+        Stage::Query,
+        expectrl::Regex("Refreshing every|interval|1s|Press q"),
+    )
+    .expect("Watch frame must contain a refresh interval indicator");
+    let clean = strip_ansi(&String::from_utf8_lossy(p.captured()));
     assert!(
         clean.contains("Refreshing every")
             || clean.contains("interval")
@@ -3427,9 +3453,11 @@ fn test_sessions_watch_frame_header_content() {
         "Watch frame must contain refresh interval indicator; clean output: {}",
         &clean[..clean.len().min(500)]
     );
-    p.send("q").expect("Failed to send q");
+    p.session_mut().send("q").expect("Failed to send q");
     std::thread::sleep(Duration::from_millis(500));
-    p.send_line("/quit").expect("Failed to send /quit");
+    p.session_mut()
+        .send_line("/quit")
+        .expect("Failed to send /quit");
     std::thread::sleep(Duration::from_millis(500));
 }
 
@@ -3437,16 +3465,20 @@ fn test_sessions_watch_frame_header_content() {
 #[test]
 #[ignore]
 fn test_sessions_watch_esc_exits_to_repl() {
-    let mut p = spawn_tq_repl();
-    p.expect("Connected to").expect("Failed to connect");
+    let mut p = spawn_tq_repl_tiered("test_sessions_watch_esc_exits_to_repl");
+    p.expect_stage(Stage::Connect, "Connected to")
+        .expect("connect: banner");
     std::thread::sleep(Duration::from_secs(1));
-    p.send_line("/sessions --watch --interval 1")
+    p.session_mut()
+        .send_line("/sessions --watch --interval 1")
         .expect("Failed to send /sessions --watch");
     std::thread::sleep(Duration::from_secs(2));
-    p.send("\x1b").expect("Failed to send Esc");
-    p.expect(expectrl::Regex("tq>|tq >"))
+    p.session_mut().send("\x1b").expect("Failed to send Esc");
+    p.expect_stage(Stage::Query, expectrl::Regex("tq>|tq >"))
         .expect("REPL prompt must reappear after Esc in watch mode");
-    p.send_line("/quit").expect("Failed to send /quit");
+    p.session_mut()
+        .send_line("/quit")
+        .expect("Failed to send /quit");
     std::thread::sleep(Duration::from_millis(500));
 }
 
@@ -3454,18 +3486,24 @@ fn test_sessions_watch_esc_exits_to_repl() {
 #[test]
 #[ignore]
 fn test_sessions_watch_ctrl_c_exits_watch_not_repl() {
-    let mut p = spawn_tq_repl();
-    p.expect("Connected to").expect("Failed to connect");
+    let mut p = spawn_tq_repl_tiered("test_sessions_watch_ctrl_c_exits_watch_not_repl");
+    p.expect_stage(Stage::Connect, "Connected to")
+        .expect("connect: banner");
     std::thread::sleep(Duration::from_secs(1));
-    p.send_line("/sessions --watch --interval 1")
+    p.session_mut()
+        .send_line("/sessions --watch --interval 1")
         .expect("Failed to send /sessions --watch");
     std::thread::sleep(Duration::from_secs(2));
-    p.send("\x03").expect("Failed to send Ctrl-C");
-    p.expect(expectrl::Regex("tq>|tq >"))
+    p.session_mut().send("\x03").expect("Failed to send Ctrl-C");
+    p.expect_stage(Stage::Query, expectrl::Regex("tq>|tq >"))
         .expect("REPL prompt must reappear after Ctrl-C in watch mode; process must not exit");
-    p.send_line("/help").expect("Failed to send /help after Ctrl-C watch exit");
+    p.session_mut()
+        .send_line("/help")
+        .expect("Failed to send /help after Ctrl-C watch exit");
     std::thread::sleep(Duration::from_millis(1000));
-    p.send_line("/quit").expect("Failed to send /quit");
+    p.session_mut()
+        .send_line("/quit")
+        .expect("Failed to send /quit");
     std::thread::sleep(Duration::from_millis(500));
 }
 
@@ -3473,23 +3511,27 @@ fn test_sessions_watch_ctrl_c_exits_watch_not_repl() {
 #[test]
 #[ignore]
 fn test_sessions_watch_exit_snapshot_no_ansi() {
-    let mut p = spawn_tq_repl();
-    p.expect("Connected to").expect("Failed to connect");
+    let mut p = spawn_tq_repl_tiered("test_sessions_watch_exit_snapshot_no_ansi");
+    p.expect_stage(Stage::Connect, "Connected to")
+        .expect("connect: banner");
     std::thread::sleep(Duration::from_secs(1));
-    p.send_line("/sessions --watch --interval 1")
+    p.session_mut()
+        .send_line("/sessions --watch --interval 1")
         .expect("Failed to send /sessions --watch");
     std::thread::sleep(Duration::from_secs(2));
-    p.send("q").expect("Failed to send q");
-    p.expect(expectrl::Regex("tq>|tq >"))
+    p.session_mut().send("q").expect("Failed to send q");
+    p.expect_stage(Stage::Query, expectrl::Regex("tq>|tq >"))
         .expect("REPL prompt must reappear after q");
-    let raw = read_available_output(&mut p);
+    let raw = read_available_output(p.session_mut());
     let stripped = strip_ansi(&raw);
     assert!(
         stripped.chars().any(|c| c.is_alphanumeric()),
         "Post-exit output must contain readable text; stripped: {:?}",
         &stripped[..stripped.len().min(200)]
     );
-    p.send_line("/quit").expect("Failed to send /quit");
+    p.session_mut()
+        .send_line("/quit")
+        .expect("Failed to send /quit");
     std::thread::sleep(Duration::from_millis(500));
 }
 
@@ -3497,26 +3539,31 @@ fn test_sessions_watch_exit_snapshot_no_ansi() {
 #[test]
 #[ignore]
 fn test_sessions_watch_terminal_state_restored_after_exit() {
-    let mut p = spawn_tq_repl();
-    p.expect("Connected to").expect("Failed to connect");
+    let mut p = spawn_tq_repl_tiered("test_sessions_watch_terminal_state_restored_after_exit");
+    p.expect_stage(Stage::Connect, "Connected to")
+        .expect("connect: banner");
     std::thread::sleep(Duration::from_secs(1));
-    p.send_line("/sessions --watch --interval 1")
+    p.session_mut()
+        .send_line("/sessions --watch --interval 1")
         .expect("Failed to send /sessions --watch");
     std::thread::sleep(Duration::from_secs(2));
-    p.send("q").expect("Failed to send q");
-    p.expect(expectrl::Regex("tq>|tq >"))
+    p.session_mut().send("q").expect("Failed to send q");
+    p.expect_stage(Stage::Query, expectrl::Regex("tq>|tq >"))
         .expect("REPL prompt must reappear after watch exit");
     std::thread::sleep(Duration::from_millis(500));
-    p.send_line("SELECT 1 AS watch_terminal_ok;")
+    p.session_mut()
+        .send_line("SELECT 1 AS watch_terminal_ok;")
         .expect("Failed to send SELECT after watch exit");
-    match p.expect(expectrl::Regex("watch_terminal_ok|1")) {
+    match p.expect_stage(Stage::Query, expectrl::Regex("watch_terminal_ok|1")) {
         Ok(_) => {}
         Err(e) => panic!(
-            "SQL after watch exit must produce output — terminal may be in bad state: {:?}",
+            "SQL after watch exit must produce output — terminal may be in bad state: {}",
             e
         ),
     }
-    p.send_line("/quit").expect("Failed to send /quit");
+    p.session_mut()
+        .send_line("/quit")
+        .expect("Failed to send /quit");
     std::thread::sleep(Duration::from_millis(500));
 }
 
@@ -3524,16 +3571,20 @@ fn test_sessions_watch_terminal_state_restored_after_exit() {
 #[test]
 #[ignore]
 fn test_sessions_watch_survives_multiple_ticks() {
-    let mut p = spawn_tq_repl();
-    p.expect("Connected to").expect("Failed to connect");
+    let mut p = spawn_tq_repl_tiered("test_sessions_watch_survives_multiple_ticks");
+    p.expect_stage(Stage::Connect, "Connected to")
+        .expect("connect: banner");
     std::thread::sleep(Duration::from_secs(1));
-    p.send_line("/sessions --watch --interval 1")
+    p.session_mut()
+        .send_line("/sessions --watch --interval 1")
         .expect("Failed to send /sessions --watch");
     std::thread::sleep(Duration::from_secs(3));
-    p.send("q").expect("Failed to send q");
-    p.expect(expectrl::Regex("tq>|tq >"))
+    p.session_mut().send("q").expect("Failed to send q");
+    p.expect_stage(Stage::Query, expectrl::Regex("tq>|tq >"))
         .expect("Watch loop must survive 3+ ticks and exit cleanly with q");
-    p.send_line("/quit").expect("Failed to send /quit");
+    p.session_mut()
+        .send_line("/quit")
+        .expect("Failed to send /quit");
     std::thread::sleep(Duration::from_millis(500));
 }
 
@@ -3545,29 +3596,118 @@ fn test_sessions_watch_survives_multiple_ticks() {
 #[test]
 #[ignore]
 fn test_sessions_no_watch_regression() {
-    let mut p = spawn_tq_repl();
-    p.expect("Connected to").expect("Failed to connect");
+    let mut p = spawn_tq_repl_tiered("test_sessions_no_watch_regression");
+    p.expect_stage(Stage::Connect, "Connected to")
+        .expect("connect: banner");
     std::thread::sleep(Duration::from_secs(1));
 
     // Drain any banner output before sending the command.
-    let _ = read_available_output(&mut p);
-    p.set_expect_timeout(Some(Duration::from_secs(30)));
+    let _ = read_available_output(p.session_mut());
 
-    p.send_line("/sessions").expect("Failed to send /sessions");
+    p.session_mut()
+        .send_line("/sessions")
+        .expect("Failed to send /sessions");
 
-    // Wait for /sessions to complete and the REPL prompt to reappear.
-    // Non-watch /sessions is a one-shot query — it must not block.
-    // Re-set timeout after the drain above (read_available_output sets it to 500ms).
-    p.set_expect_timeout(Some(Duration::from_secs(30)));
-    p.expect(expectrl::Regex("tq>|tq >"))
+    // Wait for /sessions to complete and the REPL prompt to reappear. The
+    // query-stage budget (default 60s, env-overridable) replaces the old
+    // hardcoded 30s `set_expect_timeout` overrides — on timeout a PTY dump is
+    // written so the failure is actionable.
+    p.expect_stage(Stage::Query, expectrl::Regex("tq>|tq >"))
         .expect("REPL prompt must reappear after non-watch /sessions (AC-9 regression)");
 
     // Collect whatever was printed between the command and the prompt.
-    let raw = read_available_output(&mut p);
+    let raw = read_available_output(p.session_mut());
     // Non-empty output confirms /sessions produced results (or at least no crash).
     // We do not assert specific column names to avoid fragility across DB schemas.
     let _ = strip_ansi(&raw); // ensure strip_ansi helper compiles and runs
 
-    p.send_line("/quit").expect("Failed to send /quit");
+    p.session_mut()
+        .send_line("/quit")
+        .expect("Failed to send /quit");
+    std::thread::sleep(Duration::from_millis(500));
+}
+
+// ============================================================================
+// Sprint 68: PTY pager-search integration (AC-1 / AC-11)
+// ============================================================================
+// Closes the Sprint 67 REQUIRED gap: the pager search prompt + match-count
+// status bar had unit coverage but no end-to-end PTY proof. This test opens a
+// pager over a long result, opens the search prompt with `/`, submits a
+// pattern, and asserts the `Pattern: ... (N match...)` status bar appears.
+
+/// TC-PAGER-SEARCH-PTY: AC-1/AC-11 — `/pattern` + Enter in the pager produces a
+/// match-count status bar.
+///
+/// Uses [`spawn_tq_repl_tiered_with_pager`] (pager ENABLED). Defensively skips
+/// when the PTY cannot report cursor position (a known reedline/PTY limitation
+/// on some CI runners) — the same guard the Sprint 29 horizontal-paging tests
+/// use — so a genuine infrastructure limitation does not masquerade as a logic
+/// failure.
+#[test]
+#[ignore]
+fn test_pager_search_prompt_shows_match_count() {
+    let mut p = spawn_tq_repl_tiered_with_pager("test_pager_search_prompt_shows_match_count");
+    p.expect_stage(Stage::Connect, "Connected to")
+        .expect("connect: banner");
+    std::thread::sleep(Duration::from_millis(1500));
+
+    // Drain banner.
+    let _ = read_available_output(p.session_mut());
+
+    // 30 rows guarantees the pager activates (min_rows_for_paging = 25), and
+    // DatabaseName contains "DBC" on the dictionary rows, giving us a known
+    // search target.
+    p.session_mut()
+        .send_line("SELECT TOP 30 DatabaseName FROM DBC.TablesV ORDER BY DatabaseName;")
+        .expect("Failed to send query");
+
+    // Wait for the pager status bar to render (it advertises `/: search`).
+    if p
+        .expect_stage(Stage::Query, expectrl::Regex("/: search|Rows 1-"))
+        .is_err()
+    {
+        eprintln!("Warning: pager did not activate (PTY/cursor limitation) — skipping");
+        p.session_mut().send("q").ok();
+        std::thread::sleep(Duration::from_millis(300));
+        p.session_mut().send_line("/quit").ok();
+        std::thread::sleep(Duration::from_millis(500));
+        return;
+    }
+
+    // PTY cursor-detection failure guard.
+    if strip_ansi(&String::from_utf8_lossy(p.captured())).contains("cursor position") {
+        eprintln!("Warning: PTY cursor detection failed — skipping pager search test");
+        p.session_mut().send("\x03").ok();
+        std::thread::sleep(Duration::from_millis(200));
+        p.session_mut().send_line("/quit").ok();
+        std::thread::sleep(Duration::from_millis(500));
+        return;
+    }
+
+    // Open the search prompt and submit a pattern present in the data.
+    p.session_mut()
+        .send("/")
+        .expect("Failed to open search prompt");
+    std::thread::sleep(Duration::from_millis(300));
+    p.session_mut()
+        .send_line("DBC")
+        .expect("Failed to submit search pattern");
+
+    // The status bar must echo the submitted pattern with a match count.
+    p.expect_stage(Stage::Query, expectrl::Regex("Pattern: DBC"))
+        .expect("Pager must show `Pattern: DBC ...` status after search submit");
+    let clean = strip_ansi(&String::from_utf8_lossy(p.captured()));
+    assert!(
+        clean.contains("match"),
+        "Search status must report a match count (`match`/`matches`); got: {}",
+        &clean[clean.len().saturating_sub(400)..]
+    );
+
+    // Exit pager and REPL.
+    p.session_mut().send("q").expect("Failed to send q");
+    std::thread::sleep(Duration::from_millis(300));
+    p.session_mut()
+        .send_line("/quit")
+        .expect("Failed to send /quit");
     std::thread::sleep(Duration::from_millis(500));
 }

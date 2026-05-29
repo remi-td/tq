@@ -146,6 +146,33 @@ Is it a REPL interactive feature?
     └─ NO → Unit Test
 ```
 
+## REQUIRED Tests Are Not Optional
+
+When the sprint test strategy classifies a test as **REQUIRED**, that
+classification is binding for the sprint. A REQUIRED test that is not authored
+by the end of Phase 3 (implementation) **must be reported as a MEDIUM-severity
+gap in the quality report**. It is not resolved by code inspection, manual
+verification, "structural verification" that greps the source, or a different
+test that exercises a related-but-not-identical code path.
+
+Concretely:
+
+- A REQUIRED test is satisfied **only** by authoring a test that asserts on the
+  exact code path the acceptance criterion specifies.
+- If a REQUIRED test cannot be authored within the sprint, the evidence doc
+  labels the AC `skipped for reason: REQUIRED test not authored — <reason>`
+  (never `run and passed`, never `skipped for reason: accepted fallback`) and
+  rates the gap at **MEDIUM severity minimum**.
+- A P2 follow-up item naming the exact test to author goes into the sprint
+  review.
+
+This rule prevents phantom coverage: every time it has been relaxed, the next
+sprint inherits an AC that the evidence record claims is "passed" or "accepted"
+while the code path goes unexercised. The authoritative, detailed statement of
+this rule — including the per-AC assertion-citation requirement and worked
+examples — lives in [`honest-assessment.md`](honest-assessment.md) under "The
+REQUIRED-is-not-optional Rule".
+
 ## Testing Strategy by Feature Area
 
 ### CLI Argument Parsing

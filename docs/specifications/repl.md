@@ -1568,18 +1568,23 @@ Pressing `/` while in normal pager navigation SHALL open an inline search prompt
 5. **REQ-PAGER-SEARCH-001.5** - Esc cancels the prompt without triggering a search; the pager returns to the prior view with any previously active search pattern and match highlights retained unchanged
 6. **REQ-PAGER-SEARCH-001.6** - Submitting an empty pattern SHALL be treated as cancellation: no search is performed, no existing pattern is cleared, the pager returns to the prior view. "Empty" means ENTER pressed with no characters in the prompt buffer OR a buffer that reduces to an empty pattern after stripping the `\c` case-sensitivity suffix (e.g. a buffer containing only `\c`). This guard prevents the status bar from rendering a visually broken `Pattern:   not found` line with a blank pattern
 
-**Rationale:** The prompt must be lightweight and interruptible. Empty-pattern submit is equivalent to Esc because a zero-length search is meaningless; treating it as cancel avoids silently wiping a previous search result.
+7. **REQ-PAGER-SEARCH-001.7** - While the search prompt is active the status bar line SHALL contain the literal text `/` followed immediately by the characters typed so far (the pattern buffer). This string is observable on the PTY output: a PTY-based test MUST be able to match the substring `/` (for an empty buffer) or `/<pattern>` (for a non-empty buffer) within the bytes written to the terminal after the `/` key is pressed. The prompt is rendered on the same line as the normal status bar, rewriting it in place; the implementation must write the prompt string such that it is readable as plain text in a PTY capture (no intermediate byte sequences that would split the observable `/` from the pattern characters).
+
+**Rationale:** The prompt must be lightweight and interruptible. Empty-pattern submit is equivalent to Esc because a zero-length search is meaningless; treating it as cancel avoids silently wiping a previous search result. The PTY observability requirement (REQ-PAGER-SEARCH-001.7) makes the prompt testable without mocking the terminal layer.
 
 **Example Interaction:**
 ```
 [Press /]
 Status bar shows:  /
+PTY output contains the substring:  /
 
 [Type "foo"]
 Status bar shows:  /foo
+PTY output contains the substring:  /foo
 
 [Press Backspace]
 Status bar shows:  /fo
+PTY output contains the substring:  /fo
 
 [Press Esc]
 Status bar returns to normal; previous search (if any) remains active
@@ -1719,7 +1724,7 @@ Status bar: Pattern: Status  (3 matches)
 When a match is found in a cell that is outside the current horizontal column viewport, the pager SHALL scroll the column viewport automatically:
 
 1. **REQ-PAGER-SEARCH-007.1** - After a `/pattern` submission or `n`/`N` navigation, if the target match cell falls in a column with index less than `col_offset` or greater than or equal to `col_offset + visible_column_count`, the column viewport shifts to make the matched cell visible
-2. **REQ-PAGER-SEARCH-007.2** - The column offset adjusts to the minimum shift required to bring the matched column into view (prefer showing the matched column as the leftmost visible column when scrolling right, or as the rightmost when scrolling left)
+2. **REQ-PAGER-SEARCH-007.2** - The column offset snaps to place the matched column as the **rightmost** visible column (i.e. `col_offset` is set to `match_col_index - (visible_column_count - 1)`, clamped to 0). This ensures the full horizontal context to the left of the match remains visible. When the match column is already visible, `col_offset` is unchanged.
 3. **REQ-PAGER-SEARCH-007.3** - After the automatic horizontal scroll, the column indicator (`(+N cols) ←` / `(+N cols) →`) and `Columns X-Y of Z` status update to reflect the new column position
 4. **REQ-PAGER-SEARCH-007.4** - Subsequent normal horizontal navigation (`←`, `→`, `h`, `l`, `H`, `L`) continues to work as documented in REQ-PAGER-HORIZ-* after the auto-scroll
 
@@ -1740,7 +1745,7 @@ Status bar: Columns 10-14 of 20 | Rows 22-41 of 500 | Pattern: secret  (1 match)
 
 Matched substrings SHALL be rendered with a visually distinct style within their cells:
 
-1. **REQ-PAGER-SEARCH-008.1** - The matched substring inside each visible cell is rendered with reversed foreground/background colors (terminal attribute `Reverse` or equivalent)
+1. **REQ-PAGER-SEARCH-008.1** - The matched substring inside each visible cell is rendered with reversed foreground/background colors using ANSI SGR attribute 7 (`\x1b[7m`). The reversed region is terminated with SGR reset (`\x1b[0m`) or the equivalent attribute-reset sequence immediately after the last character of the matched substring, before any non-matching suffix. No other highlight style (bold, color code, underline) is used — SGR 7 reverse video is the sole required attribute.
 2. **REQ-PAGER-SEARCH-008.2** - Every occurrence of the match in the current viewport is highlighted, not only the "current" match targeted by the last `n`/`N`
 3. **REQ-PAGER-SEARCH-008.3** - Cell content surrounding the matched substring (non-matching prefix and suffix) renders with the normal (unchanged) color attributes
 4. **REQ-PAGER-SEARCH-008.4** - When no search is active (no pattern submitted this pager session, or the prompt was cancelled) no highlight attributes are applied to any cell
