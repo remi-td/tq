@@ -34,11 +34,15 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      # Lint all targets (lib, bins, tests, examples) so warnings in
+      # integration test code also fail CI — matches scripts/ci-check.sh.
       - name: Run clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
+      # Run the full suite: unit + integration (tests/*.rs) + doc tests.
+      # #[ignore]d live-DB / PTY tests are skipped automatically (no --ignored).
       - name: Run tests
-        run: cargo test --lib
+        run: cargo test
 
   audit:
     name: Security Audit
