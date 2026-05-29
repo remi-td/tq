@@ -304,6 +304,40 @@ Add "Metadata System Architecture" section to design documentation explaining:
 
 ---
 
+### Pattern 9b: PTY Phantom Pass (Critical)
+
+**Symptoms:**
+- PTY test reports `1 passed` in <5 seconds (normal: 30-60s)
+- Test has early-return guard (e.g., cursor detection)
+- PTY dump shows incomplete interaction
+- No assertions actually executed
+- Evidence labels AC as `run and passed`
+
+**Detection:**
+- Compare test execution time to expected duration
+- Check PTY dump for guard activation indicators (`[6n` with no response)
+- Verify assertions were reached, not just guard code
+
+**Root Causes:**
+- PTY infrastructure limitation triggers early-return guard
+- Test framework reports success when guard exits cleanly
+- Evidence writer labels based on exit code, not assertion coverage
+
+**Solutions (CRITICAL - P0):**
+- Codify rule: PTY tests with early-return guards must be labeled `skipped for reason: <guard> fired` if guard activates
+- Add detection check to quality-validator: compare execution time, inspect PTY dumps
+- Consider adding `guard_fired: bool` assertion at guard site
+
+**Example (Sprint 68 TC104):**
+- Test: `test_pager_search_prompt_shows_match_count`
+- Guard: Cursor detection early-return
+- Evidence (wrong): `run and passed`
+- Evidence (correct): `skipped for reason: PTY cursor detection fired`
+
+**Typical Savings:** 10-20K tokens per sprint (prevents Phase 5 discovery and retro fixes)
+
+---
+
 ### Pattern 10: Low Cache Hit Rate
 
 **Symptoms:**

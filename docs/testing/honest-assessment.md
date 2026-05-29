@@ -183,6 +183,23 @@ If a REQUIRED test cannot be authored within the sprint, the evidence doc must:
 
 This rule exists because every time it has been relaxed (Sprint 65 AC-4..AC-9, Sprint 67 AC-1/AC-7/AC-8/AC-11), the next sprint inherits the gap as phantom coverage — the evidence record says "passed" or "accepted", the AC goes unexercised, and a bug in that code path can ship unnoticed.
 
+### PTY Tests with Early-Return Guards
+
+PTY tests often include early-return guards that bail out when infrastructure limitations are detected (e.g., reedline's `[6n` cursor-position queries going unanswered). When a guard fires, the test framework may report `1 passed` even though no assertions were exercised.
+
+**Rule:** A PTY test that exits via an early-return guard **must be labeled `skipped for reason: <guard name> fired` in test evidence**, not `passed` or `run and passed`.
+
+**Detection:** After any PTY test run, check the PTY dump (if produced) or test output for guard activation. Common indicators:
+- Test completes in <5 seconds when normal execution takes 30-60 seconds
+- PTY dump shows incomplete interaction (e.g., `[6n` sequence with no response)
+- Test log mentions "guard fired" or "early return"
+
+**Evidence Label:**
+- **Wrong:** `run and passed` (when guard fired)
+- **Right:** `skipped for reason: PTY cursor detection fired` with PTY dump reference
+
+This rule prevents phantom coverage where a test "passes" without exercising the code path it claims to validate. The Sprint 68 TC104 case demonstrated that this pattern can escape detection until Phase 5 review.
+
 ### Per-AC Assertion Citation
 
 An AC is proven by a *specific assertion on a specific code path*, not by a test function whose name happens to contain a related keyword. The test-evidence format must cite, for each AC, the exact assertion that exercises the code path the AC specifies — not just the test function name. If no such assertion exists in any authored test, the AC is `skipped for reason`, regardless of how many neighbouring tests passed.

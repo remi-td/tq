@@ -173,6 +173,14 @@ this rule — including the per-AC assertion-citation requirement and worked
 examples — lives in [`honest-assessment.md`](honest-assessment.md) under "The
 REQUIRED-is-not-optional Rule".
 
+### PTY Tests with Early-Return Guards
+
+PTY tests that include early-return guards (e.g., for cursor-detection failures)
+can report `1 passed` even when no assertions execute. **If a guard fires, the
+evidence must be labeled `skipped for reason: <guard> fired`, not `passed`.** See
+[`honest-assessment.md`](honest-assessment.md) under "PTY Tests with Early-Return
+Guards" for detection techniques and evidence format.
+
 ## Testing Strategy by Feature Area
 
 ### CLI Argument Parsing

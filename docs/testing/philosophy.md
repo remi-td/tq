@@ -140,6 +140,14 @@ The 40% automated coverage is **appropriate** for tq's architecture:
 - See [`approach.md`](approach.md#required-tests-are-not-optional) and the
   authoritative rule in [`honest-assessment.md`](honest-assessment.md).
 
+**Labeling Early-Return Guards as "Passed"**:
+- PTY tests with early-return guards (e.g., cursor-detection failures) may report
+  `1 passed` without exercising any assertions. If a guard fires, the evidence
+  must be labeled `skipped for reason`, not `passed`. This pattern caused the
+  Sprint 68 TC104 phantom pass, detected only at Phase 5.
+- See [`honest-assessment.md`](honest-assessment.md) under "PTY Tests with
+  Early-Return Guards" for detection and labeling rules.
+
 **Test to Coverage Ratio**:
 - Don't write tests just to increase coverage percentage
 - Coverage is a byproduct of good testing, not the goal
