@@ -1724,7 +1724,10 @@ Status bar: Pattern: Status  (3 matches)
 When a match is found in a cell that is outside the current horizontal column viewport, the pager SHALL scroll the column viewport automatically:
 
 1. **REQ-PAGER-SEARCH-007.1** - After a `/pattern` submission or `n`/`N` navigation, if the target match cell falls in a column with index less than `col_offset` or greater than or equal to `col_offset + visible_column_count`, the column viewport shifts to make the matched cell visible
-2. **REQ-PAGER-SEARCH-007.2** - The column offset snaps to place the matched column as the **rightmost** visible column (i.e. `col_offset` is set to `match_col_index - (visible_column_count - 1)`, clamped to 0). This ensures the full horizontal context to the left of the match remains visible. When the match column is already visible, `col_offset` is unchanged.
+2. **REQ-PAGER-SEARCH-007.2** - The column offset snaps as follows:
+   - **Scroll right** (match is to the right of the viewport): `col_offset` is set to `match_col_index - (visible_column_count - 1)`, clamped to 0, placing the matched column as the **rightmost** visible column. This ensures the full horizontal context to the left of the match remains visible.
+   - **Scroll left** (match is to the left of the viewport, i.e. `match_col_index < col_offset`): `col_offset` is set to `match_col_index`, placing the matched column as the **leftmost** visible column.
+   - **No-op guard:** If the matched column is already within `[col_offset, col_offset + visible_column_count - 1]`, `col_offset` is unchanged and no horizontal scroll occurs.
 3. **REQ-PAGER-SEARCH-007.3** - After the automatic horizontal scroll, the column indicator (`(+N cols) ←` / `(+N cols) →`) and `Columns X-Y of Z` status update to reflect the new column position
 4. **REQ-PAGER-SEARCH-007.4** - Subsequent normal horizontal navigation (`←`, `→`, `h`, `l`, `H`, `L`) continues to work as documented in REQ-PAGER-HORIZ-* after the auto-scroll
 
@@ -1745,7 +1748,7 @@ Status bar: Columns 10-14 of 20 | Rows 22-41 of 500 | Pattern: secret  (1 match)
 
 Matched substrings SHALL be rendered with a visually distinct style within their cells:
 
-1. **REQ-PAGER-SEARCH-008.1** - The matched substring inside each visible cell is rendered with reversed foreground/background colors using ANSI SGR attribute 7 (`\x1b[7m`). The reversed region is terminated with SGR reset (`\x1b[0m`) or the equivalent attribute-reset sequence immediately after the last character of the matched substring, before any non-matching suffix. No other highlight style (bold, color code, underline) is used — SGR 7 reverse video is the sole required attribute.
+1. **REQ-PAGER-SEARCH-008.1** - The matched substring inside each visible cell is rendered with reversed foreground/background colors using ANSI SGR attribute 7 (`\x1b[7m`). The reversed region is terminated with ANSI SGR attribute 27 (`\x1b[27m`, NoReverse) immediately after the last character of the matched substring, before any non-matching suffix. SGR 27 (not SGR 0 full-reset) is required because it removes only the reverse-video attribute while preserving any other cell-level attributes (e.g. the DarkGrey foreground applied to NULL cells). No other highlight style (bold, color code, underline) is used — SGR 7 reverse video is the sole required attribute.
 2. **REQ-PAGER-SEARCH-008.2** - Every occurrence of the match in the current viewport is highlighted, not only the "current" match targeted by the last `n`/`N`
 3. **REQ-PAGER-SEARCH-008.3** - Cell content surrounding the matched substring (non-matching prefix and suffix) renders with the normal (unchanged) color attributes
 4. **REQ-PAGER-SEARCH-008.4** - When no search is active (no pattern submitted this pager session, or the prompt was cancelled) no highlight attributes are applied to any cell

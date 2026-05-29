@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
-**Last Updated:** 2026-04-19
-**Current Version:** 1.49.0
-**Latest Sprint:** Sprint 67 Complete (Pager Search: `/pattern`, `n`, `N`, `\c` — less-style forward search in the interactive pager)
+**Last Updated:** 2026-05-29
+**Current Version:** 1.50.0
+**Latest Sprint:** Sprint 68 Complete (Maintenance: TC097 tiered-harness migration, AC-7/AC-8/AC-1 test gap closures, rust-toolchain.toml pin, REQUIRED-test rule docs)
 
 ---
 
