@@ -3528,10 +3528,18 @@ fn test_sessions_watch_exit_snapshot_no_ansi() {
     // consumed. Assert on the accumulated capture instead.
     let raw = String::from_utf8_lossy(p.captured()).into_owned();
     let stripped = strip_ansi(&raw);
+    // The accumulated buffer includes the watch frame and exit snapshot.
+    // Require watch-mode content: the interval indicator is emitted by every
+    // watch frame, so its absence means the exit snapshot is missing entirely.
     assert!(
-        stripped.chars().any(|c| c.is_alphanumeric()),
-        "Post-exit output must contain readable text; stripped: {:?}",
-        &stripped[..stripped.len().min(200)]
+        stripped.contains("interval") || stripped.contains("refreshing") || stripped.contains("Updated"),
+        "Post-exit capture must contain watch-frame content (interval/refreshing/Updated); stripped tail: {:?}",
+        &stripped[stripped.len().saturating_sub(400)..]
+    );
+    // And the output must be free of raw ANSI escape sequences.
+    assert!(
+        !stripped.contains('\x1b'),
+        "Stripped output must not contain ESC bytes; got ANSI in exit snapshot"
     );
     p.session_mut()
         .send_line("/quit")
@@ -3666,17 +3674,8 @@ fn test_pager_search_prompt_shows_match_count() {
         .expect("Failed to send query");
 
     // Wait for the pager status bar to render (it advertises `/: search`).
-    if p
-        .expect_stage(Stage::Query, expectrl::Regex("/: search|Rows 1-"))
-        .is_err()
-    {
-        eprintln!("Warning: pager did not activate (PTY/cursor limitation) — skipping");
-        p.session_mut().send("q").ok();
-        std::thread::sleep(Duration::from_millis(300));
-        p.session_mut().send_line("/quit").ok();
-        std::thread::sleep(Duration::from_millis(500));
-        return;
-    }
+    p.expect_stage(Stage::Query, expectrl::Regex("/: search|Rows 1-"))
+        .expect("Pager must activate — PTY cursor fix should make this reliable; if failing check TQ_LOGON and DB connectivity");
 
     // Open the search prompt and submit a pattern present in the data.
     p.session_mut()

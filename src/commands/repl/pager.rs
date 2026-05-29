@@ -899,7 +899,22 @@ impl Pager {
                     if search_seg.width() + row_seg.width() <= budget {
                         return write!(writer, "{}{}\r\n", search_seg, row_seg);
                     }
-                    return write!(writer, "{}\r\n", search_seg);
+                    // Truncate the search segment to the terminal budget
+                    // (prevents wrapping on very narrow terminals or very long patterns).
+                    let seg = if search_seg.width() > budget {
+                        let mut s = String::new();
+                        let mut w = 0usize;
+                        for ch in search_seg.chars() {
+                            let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                            if w + cw > budget { break; }
+                            s.push(ch);
+                            w += cw;
+                        }
+                        s
+                    } else {
+                        search_seg
+                    };
+                    return write!(writer, "{}\r\n", seg);
                 }
             }
             SearchStatus::NotFound => {
@@ -2625,6 +2640,98 @@ mod tests {
             !out.contains("Rows"),
             "Row context must be dropped on a narrow terminal: {:?}",
             out
+        );
+    }
+
+    #[test]
+    fn status_bar_search_row_context_format_no_percent() {
+        // TC108-U03: row context is compact `Rows X-Y of Z` — no percentage.
+        let mut pager = make_pager_with_data(40, 3);
+        pager.term_width = 200;
+        pager.page_size = 10;
+        pager.submit_search("val_");
+        let out = status_bar_to_string(&pager);
+        assert!(
+            out.contains("Rows 1-10 of 40"),
+            "Row context must be compact `Rows X-Y of Z`: {:?}",
+            out
+        );
+        assert!(
+            !out.contains('%'),
+            "Row context must not contain a percentage sign: {:?}",
+            out
+        );
+        assert!(
+            out.contains("  |  Rows"),
+            "Separator must be `  |  `: {:?}",
+            out
+        );
+    }
+
+    #[test]
+    fn status_bar_search_row_context_updates_after_scroll() {
+        // TC108-U06: row context reflects current row_offset after scrolling.
+        let mut pager = make_pager_with_data(40, 3);
+        pager.term_width = 200;
+        pager.page_size = 10;
+        pager.submit_search("val_");
+        // Initial position: rows 1-10.
+        let out_before = status_bar_to_string(&pager);
+        assert!(out_before.contains("Rows 1-10 of 40"), "before scroll: {:?}", out_before);
+        // Simulate scrolling down 10 rows.
+        pager.row_offset = 10;
+        let out_after = status_bar_to_string(&pager);
+        assert!(
+            out_after.contains("Rows 11-20 of 40"),
+            "After scroll: row context must update to rows 11-20: {:?}",
+            out_after
+        );
+    }
+
+    #[test]
+    fn status_bar_search_not_found_has_no_row_context() {
+        // TC108-U07: `Pattern: <pat>  not found` must not include row context.
+        let mut pager = make_pager_with_data(40, 3);
+        pager.term_width = 200;
+        pager.page_size = 10;
+        pager.submit_search("xyzzy_absolutely_not_in_data");
+        let out = status_bar_to_string(&pager);
+        assert!(
+            out.contains("not found"),
+            "Not-found status must say `not found`: {:?}",
+            out
+        );
+        assert!(
+            !out.contains("Rows"),
+            "Not-found status must NOT include row context: {:?}",
+            out
+        );
+    }
+
+    #[test]
+    fn status_bar_search_truncates_on_very_narrow_terminal() {
+        // TC108-U05: when even the search segment is wider than the budget,
+        // it is truncated to fit within term_width - 2.
+        let mut pager = make_pager_with_data(5, 3);
+        pager.term_width = 20;
+        pager.page_size = 5;
+        // "val_" produces a segment like `Pattern: val_  (N matches)`
+        // which is wider than 18 chars (budget = term_width - 2 = 18).
+        pager.submit_search("val_");
+        let out = status_bar_to_string(&pager);
+        // Strip trailing \r\n before measuring.
+        let visible = out.trim_end_matches(['\r', '\n']);
+        use unicode_width::UnicodeWidthStr;
+        assert!(
+            visible.width() <= 18,
+            "Truncated segment must fit within budget (18); got width {}: {:?}",
+            visible.width(),
+            visible
+        );
+        assert!(
+            !visible.contains("Rows"),
+            "Truncated output must not contain row context: {:?}",
+            visible
         );
     }
 

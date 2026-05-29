@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-05-29
-**Current Version:** 1.50.0
-**Latest Sprint:** Sprint 68 Complete (Maintenance: TC097 tiered-harness migration, AC-7/AC-8/AC-1 test gap closures, rust-toolchain.toml pin, REQUIRED-test rule docs)
+**Current Version:** 1.51.0
+**Latest Sprint:** Sprint 69 Complete (PTY cursor-position fix: TC097-A..H now pass; pager search status bar composed with row context)
 
 ---
 
