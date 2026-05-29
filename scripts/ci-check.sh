@@ -17,7 +17,7 @@ echo "[ci-check] rustc: $(rustc --version)"
 echo "[ci-check] cargo clippy --all-targets -- -D warnings"
 cargo clippy --all-targets -- -D warnings
 
-echo "[ci-check] cargo test --lib"
-cargo test --lib
+echo "[ci-check] cargo test"
+cargo test
 
 echo "[ci-check] OK"

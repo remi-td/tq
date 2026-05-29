@@ -271,13 +271,22 @@ impl ConnectionConfig {
             .map(|p| p.expose_secret().as_str())
             .unwrap_or("");
 
+        // Map the configured timeout onto the driver's `connect_timeout`
+        // parameter (whole seconds, as a string). The Teradata SQL driver
+        // expects integer seconds and treats "0" as "no timeout", so we round
+        // up sub-second timeouts and apply a 1-second floor to ensure a small
+        // `--timeout` (e.g. 500ms) still bounds the connect phase rather than
+        // disabling the limit entirely.
+        let connect_timeout_secs = self.timeout.as_secs_f64().ceil().max(1.0) as u64;
+
         serde_json::json!({
             "host": self.host,
             "user": self.user,
             "password": password,
             "dbs_port": self.port.to_string(),
             "database": self.database,
-            "logmech": self.logmech.to_string()
+            "logmech": self.logmech.to_string(),
+            "connect_timeout": connect_timeout_secs.to_string()
         })
         .to_string()
     }
@@ -507,6 +516,25 @@ mod tests {
         assert_eq!(parsed["dbs_port"], "1025");
         assert_eq!(parsed["database"], "testdb");
         assert_eq!(parsed["logmech"], "TD2");
+        // Timeout is mapped onto the driver's connect_timeout (whole seconds).
+        assert_eq!(parsed["connect_timeout"], "30");
+    }
+
+    #[test]
+    fn test_to_json_string_connect_timeout_rounds_up() {
+        // Sub-second timeouts round up to a 1-second floor so a small
+        // --timeout still bounds the connect phase (0 = "no timeout").
+        let config = ConnectionConfig {
+            host: "h".to_string(),
+            port: 1025,
+            database: "d".to_string(),
+            user: "u".to_string(),
+            password: None,
+            logmech: LogonMechanism::Td2,
+            timeout: Duration::from_millis(500),
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&config.to_json_string()).unwrap();
+        assert_eq!(parsed["connect_timeout"], "1");
     }
 
     #[test]

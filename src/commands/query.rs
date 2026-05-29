@@ -254,6 +254,19 @@ fn determine_input_source(args: &QueryArgs) -> Result<InputSource> {
     }
 }
 
+/// Validate query input sources for conflicts without consuming stdin.
+///
+/// This is a pure argument + stdin-readiness check that requires no database
+/// connection or driver, so `main.rs` can surface a "multiple input sources"
+/// error (e.g. piped stdin + a positional query argument) *before* building
+/// connection config. Argument errors should precede connection errors, and
+/// this conflict genuinely needs no connection. `determine_input_source` only
+/// peeks stdin readiness (the content is read later by `read_input_sql`), so
+/// calling it here and again in `execute` is safe and idempotent.
+pub fn validate_input_sources(args: &QueryArgs) -> Result<()> {
+    determine_input_source(args).map(|_| ())
+}
+
 /// Read SQL from the determined input source
 fn read_input_sql(source: &InputSource) -> Result<String> {
     match source {

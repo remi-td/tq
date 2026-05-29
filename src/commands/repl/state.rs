@@ -93,7 +93,7 @@ impl ReplState {
             last_sql: None,
             was_limited: false,
             pager_mode: PagerMode::Auto,
-            colors_enabled: atty::is(atty::Stream::Stdout), // Enable colors for TTY
+            colors_enabled: std::io::IsTerminal::is_terminal(&std::io::stdout()), // Enable colors for TTY
             metadata_cache: MetadataCache::new(database),
             connection_string: None,
             default_limit: 0,

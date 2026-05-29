@@ -10,7 +10,7 @@ use crate::commands::format_helpers::{
 use crate::commands::query_helpers;
 use crate::db::{DatabaseClient, Row, Value};
 use crate::error::Result;
-use crate::sql::escape_sql_string;
+use crate::sql::{escape_sql_string, quote_qualified_name};
 use std::io::Write;
 
 // =============================================================================
@@ -881,9 +881,13 @@ fn query_definition(
     obj: &str,
     kind: &str,
 ) -> Result<String> {
+    // Use the centralized identifier quoter so embedded double quotes in
+    // object names are doubled (cannot break out of the quoted identifier),
+    // consistent with the rest of the codebase.
+    let qualified = quote_qualified_name(db, obj);
     let show_cmd = match kind {
-        "V" => format!("SHOW VIEW \"{}\".\"{}\"", db, obj),
-        "M" => format!("SHOW MACRO \"{}\".\"{}\"", db, obj),
+        "V" => format!("SHOW VIEW {}", qualified),
+        "M" => format!("SHOW MACRO {}", qualified),
         _ => return Ok(String::new()),
     };
 
@@ -1322,20 +1326,25 @@ mod tests {
 
     #[test]
     fn test_ddl_show_view_sql_construction() {
-        // Verify SHOW VIEW SQL is constructed correctly
-        let db = "mydb";
-        let obj = "myview";
-        let show_cmd = format!("SHOW VIEW \"{}\".\"{}\"", db, obj);
-        assert_eq!(show_cmd, "SHOW VIEW \"mydb\".\"myview\"");
+        // Verify SHOW VIEW SQL is constructed via the centralized quoter
+        // (identifiers are uppercased and embedded quotes doubled).
+        let show_cmd = format!("SHOW VIEW {}", quote_qualified_name("mydb", "myview"));
+        assert_eq!(show_cmd, "SHOW VIEW \"MYDB\".\"MYVIEW\"");
     }
 
     #[test]
     fn test_ddl_show_macro_sql_construction() {
-        // Verify SHOW MACRO SQL is constructed correctly
-        let db = "mydb";
-        let obj = "mymacro";
-        let show_cmd = format!("SHOW MACRO \"{}\".\"{}\"", db, obj);
-        assert_eq!(show_cmd, "SHOW MACRO \"mydb\".\"mymacro\"");
+        // Verify SHOW MACRO SQL is constructed via the centralized quoter.
+        let show_cmd = format!("SHOW MACRO {}", quote_qualified_name("mydb", "mymacro"));
+        assert_eq!(show_cmd, "SHOW MACRO \"MYDB\".\"MYMACRO\"");
+    }
+
+    #[test]
+    fn test_ddl_show_view_quotes_are_doubled() {
+        // An object name containing a double quote cannot break out of the
+        // quoted identifier — the quote is doubled.
+        let show_cmd = format!("SHOW VIEW {}", quote_qualified_name("db", "ev\"il"));
+        assert_eq!(show_cmd, "SHOW VIEW \"DB\".\"EV\"\"IL\"");
     }
 
     #[test]
