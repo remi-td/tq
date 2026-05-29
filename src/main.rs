@@ -81,6 +81,14 @@ fn run(cli: Cli) -> Result<()> {
     // Build ParamStore from --params flag(s)
     let param_store = build_param_store(&cli.global.params)?;
 
+    // Validate query input sources before connection setup so argument
+    // conflicts (e.g. piped stdin + a positional query argument) are reported
+    // without requiring credentials or a driver. Argument errors should
+    // precede connection errors.
+    if let Command::Query(ref args) = cli.command {
+        commands::query::validate_input_sources(args)?;
+    }
+
     // Build connection configuration for database commands
     let password_override = read_password_if_needed(&cli.global)?;
     let conn_config = build_connection_config(&cli.global, &config, password_override)?;
