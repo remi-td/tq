@@ -886,11 +886,20 @@ impl Pager {
                 if let Some(search) = &self.search {
                     let n = search.matches.len();
                     let noun = if n == 1 { "match" } else { "matches" };
-                    return write!(
-                        writer,
-                        "Pattern: {}  ({} {})\r\n",
-                        search.pattern, n, noun
-                    );
+                    // Search segment (unchanged baseline format).
+                    let search_seg = format!("Pattern: {}  ({} {})", search.pattern, n, noun);
+                    // Row-context segment, appended only when it fits alongside
+                    // the search segment on the current terminal width.
+                    let start = self.row_offset + 1;
+                    let end = (self.row_offset + self.page_size).min(self.total_rows);
+                    let row_seg = format!("  |  Rows {}-{} of {}", start, end, self.total_rows);
+                    // Reserve 2 columns of slack (mirrors the trailing margin the
+                    // default status line leaves for the terminal cursor).
+                    let budget = self.term_width.saturating_sub(2);
+                    if search_seg.width() + row_seg.width() <= budget {
+                        return write!(writer, "{}{}\r\n", search_seg, row_seg);
+                    }
+                    return write!(writer, "{}\r\n", search_seg);
                 }
             }
             SearchStatus::NotFound => {
@@ -2575,6 +2584,48 @@ mod tests {
             out
         );
         assert!(out.contains("matches)"), "Expected plural `matches)`: {:?}", out);
+    }
+
+    #[test]
+    fn status_bar_search_active_composes_row_context_on_wide_terminal() {
+        // Sprint 69: on a wide terminal the search status bar appends the
+        // row-context segment `  |  Rows X-Y of Z` after the match count.
+        let mut pager = make_pager_with_data(40, 3);
+        pager.term_width = 200;
+        pager.page_size = 10;
+        pager.submit_search("val_");
+        let out = status_bar_to_string(&pager);
+        assert!(
+            out.contains("Pattern: val_  ("),
+            "Search segment should be present: {:?}",
+            out
+        );
+        assert!(
+            out.contains("  |  Rows 1-10 of 40"),
+            "Row context should be composed on a wide terminal: {:?}",
+            out
+        );
+    }
+
+    #[test]
+    fn status_bar_search_active_drops_row_context_on_narrow_terminal() {
+        // Sprint 69: when the composed line would overflow the terminal width,
+        // only the search segment is rendered (no row context).
+        let mut pager = make_pager_with_data(40, 3);
+        pager.term_width = 30;
+        pager.page_size = 10;
+        pager.submit_search("val_");
+        let out = status_bar_to_string(&pager);
+        assert!(
+            out.contains("Pattern: val_  ("),
+            "Search segment should still be present: {:?}",
+            out
+        );
+        assert!(
+            !out.contains("Rows"),
+            "Row context must be dropped on a narrow terminal: {:?}",
+            out
+        );
     }
 
     #[test]

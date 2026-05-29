@@ -31,10 +31,37 @@
 
 use std::fs;
 use std::io;
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use expectrl::{Error as ExpectrlError, Session};
+use expectrl::Session;
+
+// ---------------------------------------------------------------------------
+// Cursor Position Report (CPR) injection
+// ---------------------------------------------------------------------------
+//
+// Some REPL screens (e.g. the alternate-screen `\sessions --watch` viewer)
+// emit a Device Status Report cursor query (`ESC [ 6 n`, "DSR-CPR") and block
+// waiting for the terminal to reply with the current cursor position
+// (`ESC [ row ; col R`). A bare PTY has no terminal driver to answer, so the
+// child stalls and the test times out, often surfacing as a "cursor position"
+// error loop. The harness plays the terminal's role: whenever a chunk read
+// from the child contains the DSR cursor query, it writes back a canned CPR
+// reply so the child can proceed.
+
+/// Device Status Report — cursor-position query emitted by the child.
+const DSR_CURSOR_QUERY: &[u8] = b"\x1b[6n";
+
+/// Canned Cursor Position Report reply (`ESC [ 1 ; 1 R`, row 1 col 1).
+const CPR_REPLY: &[u8] = b"\x1b[1;1R";
+
+/// Returns true if `bytes` contains the DSR cursor-position query sequence.
+pub(crate) fn detect_cpr_query(bytes: &[u8]) -> bool {
+    bytes
+        .windows(DSR_CURSOR_QUERY.len())
+        .any(|w| w == DSR_CURSOR_QUERY)
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -215,28 +242,67 @@ impl TqPty {
     where
         N: expectrl::Needle,
     {
-        self.session
-            .set_expect_timeout(Some(self.timeouts.for_stage(stage)));
-
-        match self.session.expect(needle) {
-            Ok(captures) => {
-                let bytes = captures.as_bytes().to_vec();
-                self.captured.extend_from_slice(&bytes);
-                Ok(bytes)
+        // Manual, chunk-driven match loop. We poll `try_read` ourselves rather
+        // than delegating to `session.expect()` so that EVERY chunk passes
+        // through the CPR-answering path (`read_chunk_answering_cpr`). This is
+        // essential: the REPL emits a Device Status Report cursor query
+        // (`ESC [ 6 n`) and blocks waiting for a reply. If we relied on
+        // `session.expect()`, those query bytes would be buffered internally
+        // and we'd never get a chance to answer until after the whole stage
+        // timed out — by which point crossterm has already entered its
+        // "cursor position could not be read" retry loop.
+        let deadline = Instant::now() + self.timeouts.for_stage(stage);
+        // Index into `captured` from which the needle has not yet been checked.
+        // The needle scans the rolling tail so a match spanning chunk
+        // boundaries is still found.
+        let scan_start = self.captured.len();
+        let mut scratch = [0u8; 4096];
+        loop {
+            match self.session.try_read(&mut scratch) {
+                Ok(0) => {
+                    if Instant::now() >= deadline {
+                        return self.timeout_with_dump(stage);
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Ok(n) => {
+                    self.absorb_chunk(&scratch[..n]);
+                    // Check the accumulated tail for a match.
+                    if let Ok(matches) = needle.check(&self.captured[scan_start..], false) {
+                        if let Some(m) = matches.into_iter().max_by_key(|m| m.end()) {
+                            let abs_end = scan_start + m.end();
+                            return Ok(self.captured[scan_start..abs_end].to_vec());
+                        }
+                    }
+                }
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return self.timeout_with_dump(stage);
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(e) => return Err(PtyError::Io(e)),
             }
-            Err(ExpectrlError::ExpectTimeout) => {
-                // Drain whatever is pending so the dump reflects the state
-                // at timeout rather than the state before the expect call.
-                self.drain_pending();
-                let dump_path = dump_path_for(&self.test_name);
-                // Best-effort dump — if the filesystem rejects us we still
-                // surface the timeout so the test fails loudly.
-                let _ = write_dump_for_test(&self.test_name, &self.captured);
-                Err(PtyError::timeout_for(stage, dump_path))
-            }
-            Err(ExpectrlError::IO(e)) => Err(PtyError::Io(e)),
-            Err(other) => Err(PtyError::Io(io::Error::other(other.to_string()))),
         }
+    }
+
+    /// Append a chunk to the rolling capture, answering any CPR cursor query
+    /// it contains so the child does not stall waiting for a terminal reply.
+    fn absorb_chunk(&mut self, chunk: &[u8]) {
+        if detect_cpr_query(chunk) {
+            let _ = self.session.write_all(CPR_REPLY);
+            let _ = self.session.flush();
+        }
+        self.captured.extend_from_slice(chunk);
+    }
+
+    /// Build a stage-specific timeout error, draining any pending bytes and
+    /// dumping the rolling tail for diagnostics first.
+    fn timeout_with_dump<T>(&mut self, stage: Stage) -> Result<T, PtyError> {
+        self.drain_pending();
+        let dump_path = dump_path_for(&self.test_name);
+        let _ = write_dump_for_test(&self.test_name, &self.captured);
+        Err(PtyError::timeout_for(stage, dump_path))
     }
 
     /// Drain any bytes currently available on the session and append them
@@ -265,7 +331,7 @@ impl TqPty {
                     }
                 }
                 Ok(n) => {
-                    self.captured.extend_from_slice(&scratch[..n]);
+                    self.absorb_chunk(&scratch[..n]);
                     empty_reads = 0;
                 }
                 Err(_) => break,
@@ -408,6 +474,26 @@ mod tests {
         // IO variant formats the inner error.
         let io_err = PtyError::Io(io::Error::other("boom"));
         assert!(io_err.to_string().contains("boom"));
+    }
+
+    /// TC107 — `detect_cpr_query` recognises the DSR cursor-position query
+    /// (`ESC [ 6 n`) anywhere within a chunk, and ignores chunks without it.
+    #[test]
+    fn cpr_detection_returns_true_for_dsr_query_bytes() {
+        // Exact sequence.
+        assert!(detect_cpr_query(DSR_CURSOR_QUERY));
+        // Embedded in surrounding output.
+        assert!(detect_cpr_query(b"some output\x1b[6nmore output"));
+        // At the very end of a chunk.
+        assert!(detect_cpr_query(b"trailing\x1b[6n"));
+
+        // Negative cases: no query present.
+        assert!(!detect_cpr_query(b""));
+        assert!(!detect_cpr_query(b"no escape sequences here"));
+        // A different CSI sequence must not match.
+        assert!(!detect_cpr_query(b"\x1b[1;1R"));
+        // Partial / truncated query must not match.
+        assert!(!detect_cpr_query(b"\x1b[6"));
     }
 
     /// TC-66-U03 — `Timeouts::from_env` parses the three override variables

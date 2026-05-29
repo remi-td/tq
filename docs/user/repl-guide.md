@@ -2494,7 +2494,13 @@ Type your pattern; each character appears after the `/` as you type:
 /LOCKED
 ```
 
-Press **ENTER** to submit. The pager scrolls to the first matching row and the status bar shows how many matches were found:
+Press **ENTER** to submit. The pager scrolls to the first matching row and the status bar shows the match count composed with the current row range:
+
+```
+Pattern: LOCKED  (3 matches)  |  Rows 1-25 of 5000
+```
+
+On a narrow terminal where the composed line would not fit, the row context is dropped and only the match count is shown:
 
 ```
 Pattern: LOCKED  (3 matches)
@@ -2506,7 +2512,7 @@ If no cell contains the pattern, the viewport does not move and the status bar s
 Pattern: LOCKED  not found
 ```
 
-Note the double space before `(3 matches)` and before `not found` — that is the exact format the pager uses.
+Note the double space before `(3 matches)`, before `not found`, and before `|` — that is the exact format the pager uses.
 
 To cancel the prompt without running a search, press **Esc**. Any previously active pattern and its highlights are kept.
 
@@ -2543,10 +2549,10 @@ To search with exact case, append `\c` to your pattern before pressing ENTER:
 /Locked\c
 ```
 
-The `\c` suffix is stripped before matching and before display — the status bar shows the clean pattern:
+The `\c` suffix is stripped before matching and before display — the status bar shows the clean pattern composed with the row range (when the terminal is wide enough):
 
 ```
-Pattern: Locked  (1 match)
+Pattern: Locked  (1 match)  |  Rows 1-25 of 5000
 ```
 
 Case-sensitive mode applies only to that one submission. The next `/pattern` you type starts fresh as case-insensitive unless you add `\c` again.
@@ -2559,13 +2565,13 @@ Every occurrence of the matched substring visible in the current viewport is ren
 
 If a match is in a column that is currently scrolled out of view, the pager scrolls the column viewport automatically so the matched cell comes into view. You can then continue normal horizontal navigation with `h`/`l`/`H`/`L`.
 
-The match count in the status bar reflects all matches across the entire result set, including rows not yet visible:
+The match count in the status bar reflects all matches across the entire result set, including rows not yet visible. The row range in the composed status line updates as you scroll to always show the current viewport position:
 
 ```
-Pattern: LOCKED  (3 matches)
+Pattern: LOCKED  (3 matches)  |  Rows 26-50 of 5000
 ```
 
-Scrolling through rows or columns does not change this count.
+Scrolling through rows or columns does not change the match count; only the row range portion updates.
 
 ### Limitations
 

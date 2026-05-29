@@ -670,16 +670,99 @@ status rendering path. Priority order (highest first):
    blink position.
 2. **`transient_status`** — the one-frame wrap notice (`wrapped to first match`
    or `wrapped to last match`).
-3. **`SearchStatus::Matches`** — `"Pattern: {pattern}  ({M} matches)"` with
-   exactly two spaces before the `(`.
+3. **`SearchStatus::Matches`** — `"Pattern: {pattern}  ({M} matches)"` as the
+   *search segment*, followed by a width-aware *row-context segment*
+   `"  Rows {start}-{end} of {total}"` when the terminal is wide enough
+   (see "Composed match status" below). Exactly two spaces precede the `(`,
+   and exactly two spaces join the search segment to the row-context segment.
 4. **`SearchStatus::NotFound`** — `"Pattern: {pattern}  not found"` with
-   exactly two spaces before `not`.
+   exactly two spaces before `not`. No row context is appended (a failed
+   search has no useful position to report).
 5. **Default** — the existing `Columns X-Y of Z | Rows X-Y of Z (P%)` status
    plus a new `/: search` nav hint.
 
 The status line is emitted via `render_status_bar_to_buffer` so tests can
 assert on exact byte output without needing a terminal; the live
 `render_status_bar` wraps it in `SetForegroundColor(DarkGrey)` / `ResetColor`.
+
+##### Composed match status (search segment + row context)
+
+When a search is active with matches, the status bar previously *replaced* the
+position context entirely, so the user lost track of where they were in the
+result while searching. The composed format restores position context by
+appending a compact row segment, dropping it only when the terminal is too
+narrow to hold both without wrapping.
+
+Segments (both `\r\n`-terminated as a single line):
+
+- **Search segment** (always shown): `Pattern: {pattern}  ({M} {noun})`,
+  where `noun` is `match` for `M == 1` else `matches`.
+- **Row-context segment** (conditional): `  Rows {start}-{end} of {total}`,
+  reusing the same `row_offset` / `page_size` / `total_rows` arithmetic the
+  default status line uses (`start = row_offset + 1`,
+  `end = (row_offset + page_size).min(data.row_count)`,
+  `total = total_rows`). The leading two spaces are the segment join.
+
+  *Note:* the percentage suffix (`(P%)`) used by the **default** status line is
+  intentionally omitted here to keep the composed line short — the search
+  segment already consumes width, and the `start-end of total` triple is the
+  load-bearing position information.
+
+**Width rule.** Let
+
+- `search_len  = display width of the search segment`
+- `row_len     = display width of "  Rows {start}-{end} of {total}"`
+
+The row-context segment is appended **iff**
+`search_len + row_len <= term_width`. Otherwise only the search segment is
+rendered (graceful degradation: the search status always takes priority; row
+context is the first thing dropped). Width is measured with
+`UnicodeWidthStr::width` (already imported in `pager.rs`) so wide patterns are
+accounted for correctly; `term_width` is read from the existing
+`self.term_width` field (captured at pager construction from
+`terminal_size()`).
+
+The threshold is exact, not a fixed `>= 80` constant: a wide terminal with a
+very long pattern can still drop the row context, and a sub-80 terminal with a
+short pattern can still keep it. This is strictly better than a hardcoded
+column count and avoids the failure mode where an 80-col rule lets a long
+pattern overflow into a wrapped second line. The planning doc's "≥80 cols"
+phrasing is the *typical* outcome of this rule for short patterns, not the
+mechanism.
+
+Worked example (typical `Pattern: DBC  (4 matches)` on a 30-row result,
+showing rows 1–20 of 30):
+
+- search segment `Pattern: DBC  (4 matches)` = 25 cols
+- row segment `  Rows 1-20 of 30` = 17 cols
+- total = 42 cols → fits any terminal ≥ 42 cols; both shown.
+  On a 40-col terminal, `42 > 40` → only the search segment renders.
+
+Pseudocode for the `SearchStatus::Matches` arm:
+
+```rust
+let search_seg = format!("Pattern: {}  ({} {})", pattern, n, noun);
+let row_seg = format!(
+    "  Rows {}-{} of {}",
+    self.row_offset + 1,
+    (self.row_offset + self.page_size).min(self.data.row_count),
+    self.total_rows,
+);
+let composed = if search_seg.width() + row_seg.width() <= self.term_width {
+    format!("{search_seg}{row_seg}")
+} else {
+    search_seg
+};
+return write!(writer, "{composed}\r\n");
+```
+
+**Interaction with transient overlays and not-found.** The `transient_status`
+overlay (`wrapped to first/last match`) and the `SearchStatus::NotFound` arm
+both have higher/independent priority and are *not* composed with row context —
+they render as before. Only `SearchStatus::Matches` gains the row segment.
+This satisfies AC-3 (wrap notices and not-found notices remain correct
+alongside the composed status) because those states never reach the
+composition branch.
 
 ##### Help-overlay integration
 
@@ -728,7 +811,12 @@ Three writer-injected variants enable byte-level status / help / highlight
 assertions:
 
 - `render_status_bar_to_buffer(&self, &mut impl Write)` — AC-9 exact
-  format verification, including the double-space verbatim requirement.
+  format verification, including the double-space verbatim requirement and
+  (Sprint 69) the composed `Pattern: ...  ({M} matches)  Rows X-Y of Z`
+  format with its width-aware truncation. Unit tests construct a `Pager` with
+  a known `term_width` (wide and narrow) and an active `SearchStatus::Matches`
+  state, then assert the row-context segment is present at width and absent
+  below threshold.
 - `render_help_text(&mut impl Write)` — AC-12 Search-block presence and
   placement (before `Exit:`).
 - `write_value_with_highlights(&self, &mut impl Write, value, matches)` —
@@ -7583,6 +7671,80 @@ Keystroke sends (`send` for raw bytes like `"q"`, `"\x1b"`, `"\x03"`;
 `expect_stage` over a fixed `std::thread::sleep` + `read_available_output`
 where a deterministic needle exists, falling back to a drain only for
 content assertions (e.g. TC097-B's interval-indicator check).
+
+##### Cursor-position (DSR/CPR) response injection
+
+reedline's painter calls `crossterm::cursor::position()?` once per
+`read_line` invocation (in `initialize_prompt_position`). On Unix,
+`crossterm` implements `position()` by writing the ANSI **Device Status
+Report** query `ESC [ 6 n` to the terminal and then polling stdin for up to
+2000 ms for a **Cursor Position Report** reply of the form
+`ESC [ {row} ; {col} R`. A real terminal answers automatically; the PTY
+created by `expectrl` does **not** — no process plays the terminal's role —
+so the poll times out and `position()` returns
+`Err("The cursor position could not be read within a normal duration")`.
+Because `initialize_prompt_position` propagates that error with `?`, reedline's
+`read_line` fails, the REPL loop retries, and the harness sees a repeating
+`cursor position could not be read` error loop. This blocked every interactive
+test (TC097-A..H, TC104) for four sprints.
+
+**Fix: the harness answers the DSR query itself.** Whenever the harness reads
+bytes from the PTY, it scans the chunk for the `ESC [ 6 n` (`\x1b[6n`) query
+and, on a hit, immediately writes a canned CPR reply `\x1b[1;1R` back into the
+PTY via `session.send()`. Row/column `1;1` is a safe constant: reedline only
+uses the reported position to pick the prompt's start row, and any valid
+position satisfies the `?` so `read_line` proceeds. The reply must arrive
+within crossterm's 2000 ms poll window, which the harness easily meets because
+it answers on the very next read cycle after the query bytes appear.
+
+This is implemented as a CPR-aware read primitive in `TqPty`:
+
+```rust
+/// ANSI Device Status Report (cursor-position query) emitted by crossterm.
+const DSR_CURSOR_QUERY: &[u8] = b"\x1b[6n";
+/// Canned Cursor Position Report reply (row 1, col 1).
+const CPR_REPLY: &[u8] = b"\x1b[1;1R";
+
+/// Scan a freshly-read chunk; if it contains the DSR query, answer it.
+fn answer_cursor_query_if_present(&mut self, chunk: &[u8]) {
+    if chunk.windows(DSR_CURSOR_QUERY.len()).any(|w| w == DSR_CURSOR_QUERY) {
+        let _ = self.session.send(CPR_REPLY); // best-effort
+    }
+}
+```
+
+`drain_pending` (and any other place that pulls bytes off the session) calls
+`answer_cursor_query_if_present` on each chunk it reads. `expect_stage` cannot
+respond *mid-`expect()`* — `expectrl::Session::expect` buffers internally and
+does not expose the bytes until it returns — but in practice the first
+`ESC [ 6 n` is emitted **after** the `"Connected to"` banner that the first
+`expect_stage(Stage::Connect, ...)` waits on, so the query is observed by the
+first post-connect drain/read, well inside the 2000 ms window. Empirical
+validation against a live endpoint confirmed the mechanism: a poll-read loop
+that answers `ESC [ 6 n` produced **0** `cursor position could not be read`
+errors, versus **3** without the response, with the prompt initialising
+cleanly.
+
+**Rejected alternatives:**
+
+- *reedline config flag to skip cursor detection* — reedline 0.38's painter
+  has no such option; `cursor::position()?` is unconditional. Upgrading
+  reedline to chase a hypothetical flag is out of scope and risks regressions
+  across completion/highlighting.
+- *`TERM=dumb` (or any `TERM`) on the spawned process* — `crossterm` 0.28's
+  `cursor/sys/unix.rs` writes `ESC [ 6 n` unconditionally with **no** `TERM`
+  inspection, so changing `TERM` does not suppress the query. (`expectrl`'s
+  `Session::spawn(Command)` *does* allow setting child env vars via
+  `Command::env`, so this approach was technically reachable — it simply has
+  no effect on the query.)
+
+The harness change is self-contained in `tests/common/pty_harness.rs`; the
+spawn helpers in `tests/interactive_tests.rs` are unchanged because they build
+a `TqPty`, which now responds automatically. Tests keep their defensive
+`cursor position` skip-guards as a belt-and-suspenders measure for runners
+where the mechanism might still be defeated (e.g. a CI PTY that buffers
+differently); with the fix in place those guards stop firing and the assertion
+bodies execute.
 
 ### Edge Cases
 

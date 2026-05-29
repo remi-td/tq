@@ -3522,7 +3522,11 @@ fn test_sessions_watch_exit_snapshot_no_ansi() {
     p.session_mut().send("q").expect("Failed to send q");
     p.expect_stage(Stage::Query, expectrl::Regex("tq>|tq >"))
         .expect("REPL prompt must reappear after q");
-    let raw = read_available_output(p.session_mut());
+    // `expect_stage` accumulates ALL PTY output (watch frames, exit snapshot,
+    // and the REPL prompt) into the harness's rolling capture buffer. Reading
+    // the raw session again would find nothing — those bytes were already
+    // consumed. Assert on the accumulated capture instead.
+    let raw = String::from_utf8_lossy(p.captured()).into_owned();
     let stripped = strip_ansi(&raw);
     assert!(
         stripped.chars().any(|c| c.is_alphanumeric()),
@@ -3669,16 +3673,6 @@ fn test_pager_search_prompt_shows_match_count() {
         eprintln!("Warning: pager did not activate (PTY/cursor limitation) — skipping");
         p.session_mut().send("q").ok();
         std::thread::sleep(Duration::from_millis(300));
-        p.session_mut().send_line("/quit").ok();
-        std::thread::sleep(Duration::from_millis(500));
-        return;
-    }
-
-    // PTY cursor-detection failure guard.
-    if strip_ansi(&String::from_utf8_lossy(p.captured())).contains("cursor position") {
-        eprintln!("Warning: PTY cursor detection failed — skipping pager search test");
-        p.session_mut().send("\x03").ok();
-        std::thread::sleep(Duration::from_millis(200));
         p.session_mut().send_line("/quit").ok();
         std::thread::sleep(Duration::from_millis(500));
         return;

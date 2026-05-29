@@ -1611,7 +1611,7 @@ Result set: 500 rows, currently viewing rows 40-60
 [Type /active ENTER]
 
 Pager scrolls to first row at or after row 40 containing "active" (case-insensitive).
-Status bar: Pattern: active  (12 matches)
+Status bar: Pattern: active  (12 matches)  |  Rows 42-61 of 500
 Matched substrings highlighted in each visible cell.
 ```
 
@@ -1649,7 +1649,7 @@ After a successful search, pressing `n` SHALL advance the highlight to the next 
 1. **REQ-PAGER-SEARCH-004.1** - `n` moves to the next match in the pre-computed match list (in row-then-column order)
 2. **REQ-PAGER-SEARCH-004.2** - The viewport scrolls vertically so the next matching row is visible
 3. **REQ-PAGER-SEARCH-004.3** - If the next matching cell is outside the horizontal viewport, the column viewport scrolls to bring it in view
-4. **REQ-PAGER-SEARCH-004.4** - The status bar continues to show `Pattern: <pat>  (M matches)` with M unchanged (total count does not decrement)
+4. **REQ-PAGER-SEARCH-004.4** - The status bar continues to show the composed format `Pattern: <pat>  (M matches)  |  Rows X-Y of Z` with M unchanged (total count does not decrement); the row context segment updates to reflect the newly visible row range
 5. **REQ-PAGER-SEARCH-004.5** - When the current match is the last match in the result set, `n` wraps to the first match and displays the following string verbatim in the status bar for one render frame before reverting to the match-count status:
 
    `wrapped to first match`
@@ -1665,7 +1665,7 @@ Active pattern: "active"  (12 matches)
 [Press n]
 Status bar (one frame): wrapped to first match
 Viewport scrolls to match 1.
-Status bar reverts to: Pattern: active  (12 matches)
+Status bar reverts to: Pattern: active  (12 matches)  |  Rows 1-20 of 500
 ```
 
 ---
@@ -1677,7 +1677,7 @@ After a successful search, pressing `N` (uppercase) SHALL move the highlight to 
 1. **REQ-PAGER-SEARCH-005.1** - `N` moves to the previous match in the pre-computed match list (reverse row-then-column order)
 2. **REQ-PAGER-SEARCH-005.2** - The viewport scrolls vertically so the previous matching row is visible
 3. **REQ-PAGER-SEARCH-005.3** - If the previous matching cell is outside the horizontal viewport, the column viewport scrolls to bring it in view
-4. **REQ-PAGER-SEARCH-005.4** - The status bar continues to show `Pattern: <pat>  (M matches)` with M unchanged
+4. **REQ-PAGER-SEARCH-005.4** - The status bar continues to show the composed format `Pattern: <pat>  (M matches)  |  Rows X-Y of Z` with M unchanged; the row context segment updates to reflect the newly visible row range
 5. **REQ-PAGER-SEARCH-005.5** - When the current match is the first match in the result set, `N` wraps to the last match and displays the following string verbatim in the status bar for one render frame before reverting to the match-count status:
 
    `wrapped to last match`
@@ -1693,7 +1693,7 @@ Active pattern: "active"  (12 matches)
 [Press N]
 Status bar (one frame): wrapped to last match
 Viewport scrolls to match 12.
-Status bar reverts to: Pattern: active  (12 matches)
+Status bar reverts to: Pattern: active  (12 matches)  |  Rows 481-500 of 500
 ```
 
 ---
@@ -1711,10 +1711,10 @@ Status bar reverts to: Pattern: active  (12 matches)
 **Example:**
 ```
 [Type /Status ENTER]   → matches "status", "Status", "STATUS"
-Status bar: Pattern: Status  (8 matches)
+Status bar: Pattern: Status  (8 matches)  |  Rows 1-20 of 200
 
 [Type /Status\c ENTER] → matches "Status" only
-Status bar: Pattern: Status  (3 matches)
+Status bar: Pattern: Status  (3 matches)  |  Rows 1-20 of 200
 ```
 
 ---
@@ -1739,7 +1739,7 @@ Current viewport: Columns 1-5 of 20
 [Type /secret ENTER]
 Match found in column 14, row 22.
 Pager scrolls vertically to row 22 AND horizontally so column 14 is visible.
-Status bar: Columns 10-14 of 20 | Rows 22-41 of 500 | Pattern: secret  (1 match)
+Status bar: Pattern: secret  (1 match)  |  Rows 22-41 of 500
 ```
 
 ---
@@ -1769,29 +1769,75 @@ Viewport shows 3 rows, pattern "active":
 
 ---
 
-**REQ-PAGER-SEARCH-009: Status Bar Match Count Display**
+**REQ-PAGER-SEARCH-009: Status Bar Composed Display (Search Active)**
 
-After a successful search, the status bar SHALL display the active pattern and total match count:
+When a search is active, the status bar SHALL compose the search status and the row position context into a single line. The search segment leads because it is the most immediately actionable information; the row context follows as secondary orientation.
 
-1. **REQ-PAGER-SEARCH-009.1** - The status bar displays the following format verbatim, replacing `<pat>` with the submitted pattern and `M` with the integer total match count. The noun is singular (`match`) when `M == 1` and plural (`matches`) otherwise:
+**REQ-PAGER-SEARCH-009.1 — Search segment format**
 
-   - `Pattern: <pat>  (1 match)` when exactly one match exists
-   - `Pattern: <pat>  (M matches)` when zero or more than one match exists (zero falls through to the not-found path per REQ-PAGER-SEARCH-003, so this only renders for M >= 2 in practice)
+The search segment has the following exact format, where `<pat>` is the submitted pattern and `M` is the integer total match count. The noun is singular (`match`) when `M == 1` and plural (`matches`) otherwise:
 
-   Note: two spaces between the pattern and the opening parenthesis.
+- `Pattern: <pat>  (1 match)` when exactly one match exists
+- `Pattern: <pat>  (M matches)` when M >= 2
 
-2. **REQ-PAGER-SEARCH-009.2** - `M` is the total count of all matching cells across all rows in the full result set (not limited to the current viewport)
-3. **REQ-PAGER-SEARCH-009.3** - A single row containing the pattern in multiple cells contributes one count per matching cell
-4. **REQ-PAGER-SEARCH-009.4** - The match count string replaces (or supplements) the normal `Columns X-Y of Z | Rows X-Y of Z (P%)` status line; the exact layout of the combined status line is determined by the implementation within the existing status bar width
-5. **REQ-PAGER-SEARCH-009.5** - The match count string persists across `n`/`N` navigation and vertical/horizontal scrolling until the user initiates a new search, the pattern produces no matches, or the pager exits
+Note: two spaces separate the pattern from the opening parenthesis.
 
-**Rationale:** Showing the total count upfront lets the user decide whether to page through all matches or refine the pattern — a standard affordance in all text pagers.
+**REQ-PAGER-SEARCH-009.2 — Row context segment format**
 
-**Example:**
+The row context segment uses the compact form `Rows X-Y of Z` (no percentage), where X is the first visible row number (1-based), Y is the last visible row number, and Z is the total row count. This segment does NOT include the column range; column context is omitted from the search-active status bar.
+
+**REQ-PAGER-SEARCH-009.3 — Composed format (enough width)**
+
+When the terminal is wide enough to display the full composed string, the status bar SHALL render:
+
+```
+Pattern: <pat>  (M matches)  |  Rows X-Y of Z
+```
+
+The separator between the two segments is `  |  ` (two spaces, pipe, two spaces). There is no trailing content after the row context segment.
+
+**REQ-PAGER-SEARCH-009.4 — Width-aware composition rule**
+
+The status bar renderer SHALL apply the following composition algorithm:
+
+1. Build the full composed string: `Pattern: <pat>  (M matches)  |  Rows X-Y of Z`
+2. Measure its display width in columns (character count, treating all characters as single-width)
+3. If `full_composed_width <= terminal_width - 2` (leaving a 2-column right margin): render the full composed string
+4. Otherwise: render only the search segment `Pattern: <pat>  (M matches)`, truncated to `terminal_width - 2` if even the search segment alone is wider than the terminal
+
+The row context segment is dropped entirely when there is insufficient width. It is never partially shown. The search segment is never dropped in favour of the row context — search information always takes priority.
+
+**REQ-PAGER-SEARCH-009.5 — Match count scope**
+
+`M` is the total count of all matching cells across all rows in the full result set (not limited to the current viewport). A single row containing the pattern in multiple columns contributes one count per matching cell.
+
+**REQ-PAGER-SEARCH-009.6 — Persistence**
+
+The composed status bar persists across `n`/`N` navigation and vertical/horizontal scrolling until the user initiates a new search, the pattern produces no matches (see REQ-PAGER-SEARCH-003), or the pager exits.
+
+**REQ-PAGER-SEARCH-009.7 — No column range in search-active state**
+
+The `Columns X-Y of Z` segment that appears in the normal (no active search) status bar is omitted from the search-active status bar. The row context segment `Rows X-Y of Z` updates live as the user scrolls vertically, identically to the normal state.
+
+**Rationale:** Showing the total count upfront lets the user decide whether to page through all matches or refine the pattern. Preserving the row context prevents disorientation when navigating a large result set — users need to know where in the dataset they are even while a search is active. The search segment leads because it is the new information the user just requested; the row context is supporting orientation. The column range is dropped because horizontal auto-scroll (REQ-PAGER-SEARCH-007) has already positioned the viewport and the status bar width budget is limited.
+
+**Examples:**
+
+Wide terminal (>= 50 cols available):
+```
+Pattern: active  (12 matches)  |  Rows 1-20 of 500
+Pattern: Foo  (3 matches)  |  Rows 241-260 of 500
+Pattern: xyzzy  not found
+```
+
+Narrow terminal (search segment fits, row context does not):
 ```
 Pattern: active  (12 matches)
-Pattern: Foo  (3 matches)
-Pattern: xyzzy  not found
+```
+
+Single match:
+```
+Pattern: secret  (1 match)  |  Rows 22-41 of 500
 ```
 
 ---
@@ -1812,7 +1858,7 @@ Search and match navigation SHALL operate across the entire in-memory result set
 Result set: 500 rows, page size 20.
 [Type /error ENTER]
 Match found at row 248 (not currently visible).
-Pager scrolls to row 248. Status bar: Pattern: error  (5 matches)
+Pager scrolls to row 248. Status bar: Pattern: error  (5 matches)  |  Rows 248-267 of 500
 [Press n] → scrolls to row 312
 [Press n] → scrolls to row 489
 [Press n] → wraps: "wrapped to first match", scrolls to row 248

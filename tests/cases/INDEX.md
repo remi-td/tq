@@ -1,15 +1,41 @@
 # Test Case Index for tq (Teradata Query)
 
 **Project:** tq - Teradata Query CLI Tool
-**Version:** 1.50.0 (Sprint 68 - Maintenance: TC097 + Test Debt + Toolchain Pin)
+**Version:** 1.51.0 (Sprint 69 - PTY Cursor-Position Fix + Status Bar Composition)
 **Last Updated:** 2026-05-29
-**Base Commit:** [Sprint 68 - In Progress]
+**Base Commit:** [Sprint 69 - In Progress]
 
 ## Overview
 
 This directory contains comprehensive test case definitions for the tq CLI tool. These test cases cover all implemented MVP features (FR-001 through FR-010) and provide detailed procedures for validating functionality, usability, error handling, and security.
 
 ## Test Case Categories
+
+### Sprint 69: Feature — PTY Cursor-Position Fix + Pager Search Status Bar Composition
+
+- **TC107**: PTY Cursor-Position Fix Validation — (a) Unit test for the `[6n` → `[1;1R` CPR
+  responder mechanism (TC107-U01, no DB); (b) structural grep confirming the early-return cursor
+  guard is removed from `test_pager_search_prompt_shows_match_count` (TC107-structural); (c) 8
+  interactive `#[ignore]` watch tests TC107-A..H (= TC097-A..H on live DB) now expected to PASS
+  outright — "PTY dump = acceptable" bar from Sprint 68 is retired; (d) TC107-TC104 = live run of
+  `test_pager_search_prompt_shows_match_count` without early-return, must reach `Pattern: DBC`
+  assertion. Location: TC107-U01 in `tests/common/pty_harness.rs`; TC107-A..H + TC107-TC104 in
+  `tests/interactive_tests.rs`. — `TC107.md`
+
+- **TC108**: Composed Search Status Bar Unit Tests — 7 new unit tests
+  (TC108-U01..U07, no DB, no PTY) in `src/commands/repl/pager.rs` `#[cfg(test)]` covering:
+  full composed format on wide terminal; separator `  |  ` exact; compact `Rows X-Y of Z` (no `%`);
+  row context dropped when narrow; search segment truncated when very narrow; row numbers update
+  after scroll; not-found path unchanged. Also validates existing pre-Sprint-69 status bar tests
+  still pass after the implementation change. — `TC108.md`
+
+**Sprint 69 test case summary:**
+- Unit tests (no DB, no PTY): TC107-U01 (1 CPR mechanism test) + TC108-U01..U07 (7 status bar tests) = 8 new unit tests
+- Interactive tests (live DB + PTY, `#[ignore]`): TC107-A..H (8 watch tests, now must PASS) + TC107-TC104 (1 pager search, no early-return) = 9 `#[ignore]` tests
+- Structural checks: TC107-structural (1 grep for cursor guard removal) = 1 structural verification
+- Sprint 69 new unit test baseline: 1134 (Sprint 68) + 8 = 1142 minimum
+
+---
 
 ### Sprint 68: Maintenance — TC097 Migration + Sprint 67 Test Gaps + Toolchain Pin
 
