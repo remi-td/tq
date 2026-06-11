@@ -303,6 +303,103 @@ fn format_logmech(logmech: LogonMechanism) -> &'static str {
 }
 ```
 
+## Timeout Model
+
+`tq` distinguishes two independent timeouts. They map onto two different driver parameters
+and have different units, so they must never be conflated.
+
+### Connection Timeout (`--timeout`)
+
+Bounds **TCP connection establishment only**. Maps onto the driver's `connect_timeout`
+connection parameter. The vendored `teradatarustapi` driver documents `connect_timeout` as
+**milliseconds** (default `"10000"` = 10 s; `"0"` = no timeout), *not* seconds.
+
+> **Defect carried in from Sprint 70 (to be fixed under this work):** `ConnectionConfig::to_json_string`
+> currently emits `connect_timeout` as **whole seconds**
+> (`self.timeout.as_secs_f64().ceil().max(1.0) as u64`), so `--timeout 30s` is transmitted as
+> `connect_timeout=30`, which the driver interprets as **30 milliseconds**. The correct mapping is
+> milliseconds: `connect_timeout = ceil(timeout.as_secs_f64() * 1000)` with a small floor so a
+> sub-second `--timeout` still bounds the phase rather than disabling it. The two
+> `test_to_json_string*` assertions in `src/db/connection.rs` (expecting `"30"` and `"1"`) are
+> updated to the millisecond values (`"30000"` and `"500"`).
+
+### Query Timeout (`--query-timeout`)
+
+Bounds **execution of the SQL request** (and, in `tq`'s buffered model, the subsequent fetch).
+Distinct from `--timeout`. Maps onto the driver's native **`request_timeout`** connection
+parameter, which is documented in **seconds** (`"0"` = no timeout), and/or the per-request SQL
+escape function `{fn teradata_request_timeout(`*Seconds*`)}` which takes precedence over the
+connection parameter.
+
+#### Feasibility / Driver evidence
+
+Inspection of the vendored driver establishes that query timeout is enforceable **natively**:
+
+- `teradatarustapi` README documents both `request_timeout` (connection param, seconds) and the
+  `{fn teradata_request_timeout(N)}` request escape.
+- The FFI surface (`teradatarustapi::src/lib.rs`) exposes `goCancelRequest` →
+  `go_cancel_request_wrapper(u_log, conn_handle)`, i.e. the driver can cancel/abort the active
+  request on a connection handle (the same capability `tq abort --query` uses via
+  `MonitorCancelRequest`, but client-initiated).
+
+A live behavioural probe against the ClearScape trial system was attempted but the host in `.env`
+(`*.env.clearscape.teradata.com`) failed DNS resolution this session (environment expired), so the
+recommendation rests on the authoritative driver documentation and FFI surface rather than a live run.
+
+#### Recommendation: driver-native `request_timeout`, with client-side deadline as belt-and-braces
+
+**Recommended:** enforce `--query-timeout` by passing the value to the driver natively. Preferred
+mechanism is the connection parameter `request_timeout` (whole seconds), set alongside
+`connect_timeout` in `to_json_string`. The driver then aborts the request server-side and returns a
+timeout error — true cancellation, not just local abandonment, which is exactly what the issue asks
+for. This is preferred over the per-request escape prefix because it requires no rewriting of
+user SQL (the escape would have to be injected ahead of `LOCKING`/`WITH`/comment prologues, which
+the agent-safe classifier already has to reason about).
+
+Because `request_timeout` is integer **seconds**, sub-second `--query-timeout` values round up to a
+1 s floor (documented). For finer control or to guarantee `tq` returns even if a driver call blocks
+in native code, a **client-side execution deadline** wraps the native timeout as defense-in-depth:
+the query runs on a worker thread; the calling thread waits up to `query_timeout`; on expiry `tq`
+calls `go_cancel_request_wrapper(u_log, conn_handle)` to abort the request, closes the session, and
+returns the structured `QUERY_TIMEOUT` error. This requires threading `(u_log, conn_handle)` out of
+the `execute*` helpers in `src/db/client.rs` (currently they are local to one synchronous call) so
+the watchdog can reach them; the connection is still always closed via the existing
+`go_close_connection_wrapper` path.
+
+**What is feasible to enforce this session:** the native `request_timeout` plumbing, the agent-safe
+finite default, the structured error, and the `--max-rows` doc clarification — none of these depend
+on a live probe. The client-side cancel/close layer is implementable from the confirmed FFI surface;
+its end-to-end *abort* behaviour cannot be behaviourally proven until the trial DB is reachable, so
+that limitation is documented honestly per the sprint's scope guard.
+
+#### Agent-safe default
+
+In `--agent-safe` mode, if `--query-timeout` is not given explicitly, a conservative finite default
+(e.g. 30 s) is applied so an agent can never launch an unbounded request. Outside agent-safe mode the
+default is "no query timeout" (`request_timeout=0`), preserving current behaviour for interactive and
+batch users.
+
+#### `to_json_string` shape (post-change)
+
+```rust
+// connect_timeout: milliseconds (driver unit), floored so it still bounds the phase
+let connect_timeout_ms = (self.timeout.as_secs_f64() * 1000.0).ceil().max(1.0) as u64;
+let mut params = serde_json::json!({
+    "host": self.host, "user": self.user, "password": password,
+    "dbs_port": self.port.to_string(), "database": self.database,
+    "logmech": self.logmech.to_string(),
+    "connect_timeout": connect_timeout_ms.to_string(),
+});
+// request_timeout: whole seconds, only when a finite query timeout applies
+if let Some(qt) = self.query_timeout {
+    let secs = qt.as_secs_f64().ceil().max(1.0) as u64; // 1s floor
+    params["request_timeout"] = secs.to_string().into();
+}
+```
+
+`ConnectionConfig` gains `query_timeout: Option<Duration>` set from `--query-timeout` (and the
+agent-safe default), so the existing one-shot `execute` path transmits it without signature churn.
+
 ## Connection Modes
 
 ### One-Shot Mode (Default)
@@ -384,6 +481,14 @@ pub enum Error {
 
     #[error("Connection timeout after {timeout:?}")]
     ConnectionTimeout {
+        timeout: Duration,
+    },
+
+    /// Query execution exceeded the --query-timeout deadline. Distinct from
+    /// ConnectionTimeout (which bounds the connect phase). Surfaced as the
+    /// structured code QUERY_TIMEOUT and marked retryable.
+    #[error("Query timed out after {timeout:?}")]
+    QueryTimeout {
         timeout: Duration,
     },
 

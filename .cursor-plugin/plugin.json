@@ -1,0 +1,7 @@
+{
+  "name": "tq",
+  "version": "1.0.0",
+  "displayName": "tq — Teradata Query CLI",
+  "description": "Teradata query CLI skills for agentic frameworks.",
+  "category": "development"
+}

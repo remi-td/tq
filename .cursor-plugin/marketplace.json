@@ -1,0 +1,14 @@
+{
+  "name": "tq",
+  "owner": {
+    "name": "Remi Turpaud"
+  },
+  "plugins": [
+    {
+      "name": "teradata-query",
+      "description": "Install, configure, and use the tq CLI to run Teradata queries, explore schemas, monitor sessions, and manage database objects from the command line.",
+      "source": "agentic",
+      "category": "development"
+    }
+  ]
+}

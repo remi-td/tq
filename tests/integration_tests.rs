@@ -1197,25 +1197,27 @@ fn test_query_from_stdin_only_regression() {
 }
 
 // -----------------------------------------------------------------------------
-// TC095-D: Real conflict — non-empty pipe + positional arg — error emitted
-// (Bug #43 regression guard — NO DB required)
+// TC110-I10: Positional arg wins over ambient stdin — no conflict error
+// (Issue #45 deterministic input-selection regression guard — NO DB required)
 // -----------------------------------------------------------------------------
 
-/// Test that `echo "SELECT 2" | tq query "SELECT 1"` still produces the
-/// "Multiple input sources" error after the fix.
-/// This test does NOT require a live DB (tq exits before connecting).
-/// It runs in the default `cargo test` (no --ignored needed).
+/// Issue #45: explicit positional SQL takes precedence over ambient stdin
+/// (matching `psql -c`). `echo "SELECT 2" | tq query "SELECT 1"` must NOT
+/// produce a "Multiple input sources" error; stdin is ignored entirely and tq
+/// proceeds with the positional query (failing only at connection time, since
+/// no DB is configured here). This guards against a regression to the removed
+/// readiness-probe conflict model.
 #[test]
-fn test_query_real_conflict_rejected() {
+fn test_positional_arg_wins_over_stdin_no_conflict() {
     let mut child = std::process::Command::new(tq_bin())
-        .args(["query", "SELECT 1"]) // positional arg provided
+        .args(["query", "SELECT 1"]) // explicit positional arg provided
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("failed to spawn tq");
 
-    // Write non-empty SQL to stdin — creating a genuine conflict
+    // Write non-empty SQL to stdin — under the new contract this is ignored.
     use std::io::Write;
     if let Some(mut stdin_pipe) = child.stdin.take() {
         stdin_pipe
@@ -1226,13 +1228,10 @@ fn test_query_real_conflict_rejected() {
     let output = child.wait_with_output().expect("failed to wait");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
+    // The deterministic contract removes the conflict error entirely: the
+    // positional query wins and stdin is never inspected.
     assert!(
-        !output.status.success(),
-        "conflict must cause non-zero exit; exit={}",
-        output.status
-    );
-    assert!(
-        stderr.contains("Multiple input sources"),
-        "conflict must produce 'Multiple input sources' error; stderr={stderr}"
+        !stderr.contains("Multiple input sources"),
+        "explicit arg must win over stdin without a conflict error; stderr={stderr}"
     );
 }

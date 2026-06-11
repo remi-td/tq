@@ -547,6 +547,161 @@ pub fn has_multiple_statements(sql: &str) -> bool {
         .is_some_and(|stmts| stmts.len() > 1)
 }
 
+// ============================================================================
+// Significant token stream (shared lexical primitive)
+// ============================================================================
+
+/// A significant SQL token produced by [`significant_tokens`].
+///
+/// Whitespace, line comments (`-- ...`) and block comments (`/* ... */`) are
+/// skipped by the iterator and never surfaced as tokens. The remaining tokens
+/// are classified into the four cases below. This reuses the same quote/comment
+/// state transitions as [`parse_statements`] so the two cannot diverge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SqlToken {
+    /// An ASCII word run (letters, digits, underscore). Callers uppercase for
+    /// keyword tests. The first character is always a letter or underscore
+    /// because a leading digit run is yielded as a sequence of [`SqlToken::Other`].
+    Word(String),
+    /// A punctuation character relevant to CTE / LOCKING scanning: `(`, `)`,
+    /// `,`, or `.`.
+    Punct(char),
+    /// A single-quoted string literal. The content is opaque and irrelevant to
+    /// classification, so it is collapsed to this marker.
+    StringLiteral,
+    /// Any other single character (operators, other punctuation, digits, etc.).
+    Other(char),
+}
+
+/// Iterate the significant tokens of `sql`, skipping arbitrary interleaved
+/// whitespace, line comments (`-- ...`), and block comments (`/* ... */`).
+///
+/// The scanner mirrors the comment/quote handling of [`parse_statements`]:
+///
+/// - `--` starts a line comment that runs to the next `\n` (or end of input).
+/// - `/*` starts a block comment that runs to the next `*/` (or end of input).
+/// - `'` starts a single-quoted string; `''` is an embedded escaped quote. The
+///   whole literal is yielded as a single [`SqlToken::StringLiteral`].
+/// - A run of ASCII word characters becomes one [`SqlToken::Word`].
+/// - `(`, `)`, `,`, `.` become [`SqlToken::Punct`]; anything else is
+///   [`SqlToken::Other`].
+///
+/// An unterminated string or block comment simply ends the stream (the
+/// classifier treats a truncated stream as unclassifiable / read-only-safe per
+/// its own rules); no error is raised here because callers only need a best
+/// effort prefix.
+pub fn significant_tokens(sql: &str) -> impl Iterator<Item = SqlToken> + '_ {
+    SignificantTokens {
+        chars: sql.chars().peekable(),
+    }
+}
+
+struct SignificantTokens<'a> {
+    chars: std::iter::Peekable<std::str::Chars<'a>>,
+}
+
+impl Iterator for SignificantTokens<'_> {
+    type Item = SqlToken;
+
+    fn next(&mut self) -> Option<SqlToken> {
+        loop {
+            let &ch = self.chars.peek()?;
+
+            // Skip whitespace
+            if ch.is_whitespace() {
+                self.chars.next();
+                continue;
+            }
+
+            // Line comment: -- ... \n
+            if ch == '-' {
+                self.chars.next();
+                if self.chars.peek() == Some(&'-') {
+                    self.chars.next();
+                    // Consume to end of line (or input)
+                    for c in self.chars.by_ref() {
+                        if c == '\n' {
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                // A lone '-' is an operator token.
+                return Some(SqlToken::Other('-'));
+            }
+
+            // Block comment: /* ... */
+            if ch == '/' {
+                self.chars.next();
+                if self.chars.peek() == Some(&'*') {
+                    self.chars.next();
+                    // Consume to closing */
+                    let mut prev = '\0';
+                    let mut closed = false;
+                    for c in self.chars.by_ref() {
+                        if prev == '*' && c == '/' {
+                            closed = true;
+                            break;
+                        }
+                        prev = c;
+                    }
+                    if !closed {
+                        // Unterminated block comment: end the stream.
+                        return None;
+                    }
+                    continue;
+                }
+                return Some(SqlToken::Other('/'));
+            }
+
+            // Single-quoted string literal
+            if ch == '\'' {
+                self.chars.next();
+                loop {
+                    match self.chars.next() {
+                        Some('\'') => {
+                            // Embedded escaped quote ('') stays inside the literal.
+                            if self.chars.peek() == Some(&'\'') {
+                                self.chars.next();
+                                continue;
+                            }
+                            break;
+                        }
+                        Some(_) => continue,
+                        // Unterminated string: end the stream.
+                        None => return None,
+                    }
+                }
+                return Some(SqlToken::StringLiteral);
+            }
+
+            // ASCII word run (letter or underscore start)
+            if ch.is_ascii_alphabetic() || ch == '_' {
+                let mut word = String::new();
+                while let Some(&c) = self.chars.peek() {
+                    if is_word_char(c) {
+                        word.push(c);
+                        self.chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                return Some(SqlToken::Word(word));
+            }
+
+            // Relevant punctuation
+            if matches!(ch, '(' | ')' | ',' | '.') {
+                self.chars.next();
+                return Some(SqlToken::Punct(ch));
+            }
+
+            // Anything else (operators, digits, etc.)
+            self.chars.next();
+            return Some(SqlToken::Other(ch));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1292,5 +1447,97 @@ BEGIN
             err.line, 2,
             "error should point at the OUTER (first-opened) BEGIN"
         );
+    }
+
+    // =============================================================================
+    // Sprint 71: significant_tokens (shared lexical primitive)
+    // =============================================================================
+
+    fn words(sql: &str) -> Vec<String> {
+        significant_tokens(sql)
+            .filter_map(|t| match t {
+                SqlToken::Word(w) => Some(w.to_ascii_uppercase()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_significant_tokens_skips_whitespace() {
+        let toks: Vec<_> = significant_tokens("  SELECT   1 ").collect();
+        assert_eq!(
+            toks,
+            vec![SqlToken::Word("SELECT".to_string()), SqlToken::Other('1')]
+        );
+    }
+
+    #[test]
+    fn test_significant_tokens_skips_line_comment() {
+        assert_eq!(words("-- a comment\nSELECT 1"), vec!["SELECT"]);
+    }
+
+    #[test]
+    fn test_significant_tokens_skips_block_comment() {
+        assert_eq!(words("/* a */ /* b */ SELECT 1"), vec!["SELECT"]);
+    }
+
+    #[test]
+    fn test_significant_tokens_skips_interleaved_comments() {
+        assert_eq!(
+            words("-- one\n/* two */\n-- three\nUPDATE t"),
+            vec!["UPDATE", "T"]
+        );
+    }
+
+    #[test]
+    fn test_significant_tokens_collapses_string_literal() {
+        let toks: Vec<_> = significant_tokens("WHERE x = 'a; -- b /* c */'").collect();
+        // The string literal is opaque; its `;`, comment markers do not leak.
+        assert!(toks.contains(&SqlToken::StringLiteral));
+        assert_eq!(
+            toks.iter()
+                .filter(|t| matches!(t, SqlToken::StringLiteral))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_significant_tokens_escaped_quote_in_string() {
+        let toks: Vec<_> = significant_tokens("'it''s' END").collect();
+        assert_eq!(
+            toks,
+            vec![SqlToken::StringLiteral, SqlToken::Word("END".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_significant_tokens_punctuation() {
+        let toks: Vec<_> = significant_tokens("a.b, (c)").collect();
+        assert_eq!(
+            toks,
+            vec![
+                SqlToken::Word("a".to_string()),
+                SqlToken::Punct('.'),
+                SqlToken::Word("b".to_string()),
+                SqlToken::Punct(','),
+                SqlToken::Punct('('),
+                SqlToken::Word("c".to_string()),
+                SqlToken::Punct(')'),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_significant_tokens_unterminated_string_ends_stream() {
+        // No panic, stream simply ends at the unterminated literal.
+        let toks: Vec<_> = significant_tokens("SELECT 'oops").collect();
+        assert_eq!(toks, vec![SqlToken::Word("SELECT".to_string())]);
+    }
+
+    #[test]
+    fn test_significant_tokens_unterminated_block_comment_ends_stream() {
+        let toks: Vec<_> = significant_tokens("SELECT /* oops").collect();
+        assert_eq!(toks, vec![SqlToken::Word("SELECT".to_string())]);
     }
 }

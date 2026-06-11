@@ -25,8 +25,13 @@ pub struct ConnectionConfig {
     pub password: Option<Secret<String>>,
     /// Authentication mechanism
     pub logmech: LogonMechanism,
-    /// Connection timeout
+    /// Connection (TCP establishment) timeout. Maps onto the driver's
+    /// `connect_timeout` parameter (milliseconds).
     pub timeout: Duration,
+    /// Query/request execution timeout. `None` means no query timeout
+    /// (`request_timeout=0`). Maps onto the driver's `request_timeout`
+    /// parameter (whole seconds). Distinct from `timeout`.
+    pub query_timeout: Option<Duration>,
 }
 
 impl std::fmt::Debug for ConnectionConfig {
@@ -39,6 +44,7 @@ impl std::fmt::Debug for ConnectionConfig {
             .field("password", &"[REDACTED]")
             .field("logmech", &self.logmech)
             .field("timeout", &self.timeout)
+            .field("query_timeout", &self.query_timeout)
             .finish()
     }
 }
@@ -121,6 +127,7 @@ impl ConnectionConfig {
             password,
             logmech,
             timeout,
+            query_timeout: None,
         })
     }
 
@@ -271,24 +278,35 @@ impl ConnectionConfig {
             .map(|p| p.expose_secret().as_str())
             .unwrap_or("");
 
-        // Map the configured timeout onto the driver's `connect_timeout`
-        // parameter (whole seconds, as a string). The Teradata SQL driver
-        // expects integer seconds and treats "0" as "no timeout", so we round
-        // up sub-second timeouts and apply a 1-second floor to ensure a small
-        // `--timeout` (e.g. 500ms) still bounds the connect phase rather than
-        // disabling the limit entirely.
-        let connect_timeout_secs = self.timeout.as_secs_f64().ceil().max(1.0) as u64;
+        // Map the configured connection timeout onto the driver's
+        // `connect_timeout` parameter. The Teradata SQL driver documents
+        // `connect_timeout` in MILLISECONDS (default "10000" = 10s, "0" = no
+        // timeout) -- NOT seconds. We therefore convert seconds -> milliseconds
+        // and apply a small floor so a sub-second `--timeout` still bounds the
+        // connect phase rather than disabling the limit entirely.
+        let connect_timeout_ms = (self.timeout.as_secs_f64() * 1000.0).ceil().max(1.0) as u64;
 
-        serde_json::json!({
+        let mut params = serde_json::json!({
             "host": self.host,
             "user": self.user,
             "password": password,
             "dbs_port": self.port.to_string(),
             "database": self.database,
             "logmech": self.logmech.to_string(),
-            "connect_timeout": connect_timeout_secs.to_string()
-        })
-        .to_string()
+            "connect_timeout": connect_timeout_ms.to_string()
+        });
+
+        // Map the query timeout onto the driver's `request_timeout` parameter.
+        // This is documented in whole SECONDS, with "0" = no timeout. We always
+        // emit it so the driver-native deadline is explicit; `None` => "0".
+        // Sub-second timeouts round up to a 1-second floor.
+        let request_timeout_secs = match self.query_timeout {
+            Some(qt) => (qt.as_secs_f64().ceil().max(1.0)) as u64,
+            None => 0,
+        };
+        params["request_timeout"] = request_timeout_secs.to_string().into();
+
+        params.to_string()
     }
 
     /// Validate an identifier (username, database name)
@@ -516,14 +534,16 @@ mod tests {
         assert_eq!(parsed["dbs_port"], "1025");
         assert_eq!(parsed["database"], "testdb");
         assert_eq!(parsed["logmech"], "TD2");
-        // Timeout is mapped onto the driver's connect_timeout (whole seconds).
-        assert_eq!(parsed["connect_timeout"], "30");
+        // Connect timeout is mapped onto the driver's connect_timeout in
+        // MILLISECONDS (30s -> 30000ms).
+        assert_eq!(parsed["connect_timeout"], "30000");
+        // No query timeout set -> request_timeout "0" (no timeout).
+        assert_eq!(parsed["request_timeout"], "0");
     }
 
     #[test]
     fn test_to_json_string_connect_timeout_rounds_up() {
-        // Sub-second timeouts round up to a 1-second floor so a small
-        // --timeout still bounds the connect phase (0 = "no timeout").
+        // Sub-second timeouts round up in milliseconds: 500ms -> 500ms.
         let config = ConnectionConfig {
             host: "h".to_string(),
             port: 1025,
@@ -532,9 +552,45 @@ mod tests {
             password: None,
             logmech: LogonMechanism::Td2,
             timeout: Duration::from_millis(500),
+            query_timeout: None,
         };
         let parsed: serde_json::Value = serde_json::from_str(&config.to_json_string()).unwrap();
-        assert_eq!(parsed["connect_timeout"], "1");
+        assert_eq!(parsed["connect_timeout"], "500");
+    }
+
+    #[test]
+    fn test_to_json_string_request_timeout_set() {
+        // A finite query timeout maps onto request_timeout in whole seconds.
+        let config = ConnectionConfig {
+            host: "h".to_string(),
+            port: 1025,
+            database: "d".to_string(),
+            user: "u".to_string(),
+            password: None,
+            logmech: LogonMechanism::Td2,
+            timeout: Duration::from_secs(30),
+            query_timeout: Some(Duration::from_secs(30)),
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&config.to_json_string()).unwrap();
+        assert_eq!(parsed["request_timeout"], "30");
+        assert_eq!(parsed["connect_timeout"], "30000");
+    }
+
+    #[test]
+    fn test_to_json_string_request_timeout_subsecond_floor() {
+        // Sub-second query timeout rounds up to the 1-second floor.
+        let config = ConnectionConfig {
+            host: "h".to_string(),
+            port: 1025,
+            database: "d".to_string(),
+            user: "u".to_string(),
+            password: None,
+            logmech: LogonMechanism::Td2,
+            timeout: Duration::from_secs(30),
+            query_timeout: Some(Duration::from_millis(200)),
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&config.to_json_string()).unwrap();
+        assert_eq!(parsed["request_timeout"], "1");
     }
 
     #[test]
@@ -547,6 +603,7 @@ mod tests {
             password: Some(Secret::new("pass\"word\\with\\special".to_string())),
             logmech: LogonMechanism::Td2,
             timeout: Duration::from_secs(30),
+            query_timeout: None,
         };
         let json = config.to_json_string();
         // Must be valid JSON
@@ -575,6 +632,7 @@ mod tests {
             password: None,
             logmech: LogonMechanism::Td2,
             timeout: Duration::from_secs(30),
+            query_timeout: None,
         };
 
         let result = config.check_file_permissions(&path);
@@ -605,6 +663,7 @@ mod tests {
             password: None,
             logmech: LogonMechanism::Td2,
             timeout: Duration::from_secs(30),
+            query_timeout: None,
         };
 
         let result = config.check_file_permissions(&path);

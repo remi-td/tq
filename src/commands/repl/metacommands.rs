@@ -2688,6 +2688,7 @@ mod tests {
             password: None,
             logmech: LogonMechanism::Td2,
             timeout: Duration::from_secs(30),
+            query_timeout: None,
         }
     }
 

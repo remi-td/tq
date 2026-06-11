@@ -112,6 +112,7 @@ impl DatabaseClient {
             database: "mock".to_string(),
             logmech: crate::cli::LogonMechanism::Td2,
             timeout: std::time::Duration::from_secs(30),
+            query_timeout: None,
         };
         Self {
             config,
@@ -1067,6 +1068,7 @@ mod tests {
             database: "test".to_string(),
             logmech: crate::cli::LogonMechanism::Td2,
             timeout: std::time::Duration::from_secs(30),
+            query_timeout: None,
         };
         // Skip driver loading for unit tests
         DatabaseClient {
