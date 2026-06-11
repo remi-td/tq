@@ -232,6 +232,60 @@ fn test_feature_with_data_on_stdin() {
 
 **No new crates required:** `std::process::Command` and `std::process::Stdio` are in the Rust standard library.
 
+#### Delayed Producer Pattern (Sprint 71)
+
+Some acceptance criteria require that `tq` behave identically whether stdin data
+arrives immediately or after a delay. Use a writer thread to simulate the delayed
+producer:
+
+```rust
+#[test]
+fn test_feature_with_delayed_stdin_producer() {
+    // Simulates: (sleep 0.3; echo "SELECT 1") | tq query "SELECT 1"
+    // Tests that a positional arg ignores stdin even when data arrives late.
+    use std::io::Write;
+    use std::thread;
+    use std::time::Duration;
+
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_tq"))
+        .args(["query", "SELECT 1", "--format", "json"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("failed to spawn tq");
+
+    // Hand off the write end to a background thread that waits before writing
+    let mut pipe = child.stdin.take().unwrap();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(500));
+        let _ = pipe.write_all(b"SELECT 2\n"); // ignored by the new precedence logic
+        // pipe dropped here → EOF
+    });
+
+    let output = child.wait_with_output().expect("failed to wait");
+    // Under the new input-precedence rule, the binary selects the positional arg
+    // immediately without reading stdin, so it exits before the writer thread fires.
+    // Assert: no input-phase error.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("No query provided") && !stderr.contains("Empty query"),
+        "unexpected input-phase error: {}", stderr
+    );
+}
+```
+
+**Key point:** Under the new deterministic input-selection rule, a positional arg
+causes `determine_input_source` to return immediately without touching stdin.
+The child process reaches the connection phase and exits before the delayed
+writer thread fires. The test therefore completes quickly and deterministically.
+If the implementation regresses to a stdin probe, the process will hang or read
+stdin before the connection — detectable by a long wall-clock time or an
+incorrect error message.
+
+**No new crates required.** `std::thread` and `std::time::Duration` are in the
+Rust standard library.
+
 ### Interactive Tests
 
 Add tests in `tests/interactive_tests.rs`:

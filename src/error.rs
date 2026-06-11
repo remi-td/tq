@@ -29,6 +29,15 @@ pub enum TqError {
     #[error("Connection timeout after {timeout:?}")]
     ConnectionTimeout { timeout: Duration },
 
+    /// Query execution exceeded the --query-timeout deadline
+    ///
+    /// Distinct from `ConnectionTimeout` (which bounds the connect phase). The
+    /// active request is cancelled and the session closed before this is
+    /// returned. Surfaced as the structured code `QUERY_TIMEOUT`, category
+    /// `query`, and marked retryable.
+    #[error("Query timed out after {timeout:?}")]
+    QueryTimeout { timeout: Duration },
+
     /// Authentication failed
     #[error("Authentication failed for user '{user}' using {logmech}")]
     AuthenticationFailed {
@@ -200,6 +209,15 @@ pub enum TqError {
     /// Result set exceeds max rows in agent-safe mode
     #[error("Result exceeds max-rows limit ({limit}). Use --max-rows to increase or remove --agent-safe")]
     AgentSafeMaxRows { limit: usize },
+
+    /// Statement could not be classified by agent-safe mode (fail closed)
+    #[error("Agent-safe mode could not classify the statement{}: {reason}", token.as_ref().map(|t| format!(" (leading token '{}')", t)).unwrap_or_default())]
+    AgentSafeUnclassified {
+        /// First significant token seen, if any
+        token: Option<String>,
+        /// Why classification stopped
+        reason: String,
+    },
 
     // ========================================================================
     // Internal Errors
@@ -429,6 +447,7 @@ impl TqError {
         match self {
             TqError::ConnectionFailed { .. } => "CONNECTION_FAILED",
             TqError::ConnectionTimeout { .. } => "CONNECTION_TIMEOUT",
+            TqError::QueryTimeout { .. } => "QUERY_TIMEOUT",
             TqError::AuthenticationFailed { .. } => "AUTH_FAILED",
             TqError::DriverLoad { .. } => "DRIVER_LOAD_FAILED",
             TqError::SqlSyntaxError { .. } => "SQL_SYNTAX_ERROR",
@@ -458,6 +477,7 @@ impl TqError {
             TqError::SessionModeTransactionError { .. } => "TRANSACTION_FAILED",
             TqError::AgentSafeBlocked { .. } => "AGENT_SAFE_BLOCKED",
             TqError::AgentSafeMaxRows { .. } => "AGENT_SAFE_MAX_ROWS",
+            TqError::AgentSafeUnclassified { .. } => "AGENT_SAFE_UNCLASSIFIED",
             TqError::SqlParseError { .. } => "SQL_PARSE_ERROR",
             TqError::InternalError(_) => "INTERNAL_ERROR",
         }
@@ -475,6 +495,7 @@ impl TqError {
             | TqError::QueryExecution(_)
             | TqError::TableNotFound { .. }
             | TqError::PingFailed(_)
+            | TqError::QueryTimeout { .. }
             | TqError::SqlParseError { .. } => "query",
             TqError::RowFetch { .. }
             | TqError::ResultParsing { .. }
@@ -497,7 +518,8 @@ impl TqError {
             TqError::TransactionError { .. }
             | TqError::SessionModeTransactionError { .. } => "transaction",
             TqError::AgentSafeBlocked { .. }
-            | TqError::AgentSafeMaxRows { .. } => "agent_safe",
+            | TqError::AgentSafeMaxRows { .. }
+            | TqError::AgentSafeUnclassified { .. } => "agent_safe",
             TqError::InternalError(_) => "internal",
         }
     }
@@ -508,6 +530,7 @@ impl TqError {
             self,
             TqError::ConnectionFailed { .. }
                 | TqError::ConnectionTimeout { .. }
+                | TqError::QueryTimeout { .. }
                 | TqError::PingFailed(_)
                 | TqError::IoError(_)
         )
@@ -520,6 +543,9 @@ impl TqError {
                 Some("Check hostname, port, and network connectivity")
             }
             TqError::ConnectionTimeout { .. } => Some("Increase --timeout or check network"),
+            TqError::QueryTimeout { .. } => {
+                Some("Increase --query-timeout, or optimize the query (the request was cancelled)")
+            }
             TqError::AuthenticationFailed { .. } => {
                 Some("Check username, password, and logon mechanism")
             }
@@ -538,7 +564,10 @@ impl TqError {
                 Some("Use --allow-dml to enable write operations, or remove --agent-safe")
             }
             TqError::AgentSafeMaxRows { .. } => {
-                Some("Use --max-rows N to increase the limit, or add TOP/SAMPLE to your query")
+                Some("Use --max-rows N to increase the client fetch/output cap")
+            }
+            TqError::AgentSafeUnclassified { .. } => {
+                Some("tq could not prove this statement is safe; review the SQL or run without --agent-safe")
             }
             _ => None,
         }

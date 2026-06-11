@@ -46,12 +46,21 @@
 //! assert_eq!(escaped, "O''Brien");
 //! ```
 
+pub mod classifier;
 pub mod identifiers;
 pub mod parser;
 pub mod types;
 
 // Re-export commonly used types from parser
-pub use parser::{has_multiple_statements, parse_statements, ParseError, ParsedStatement};
+pub use parser::{
+    has_multiple_statements, parse_statements, significant_tokens, ParseError, ParsedStatement,
+    SqlToken,
+};
+
+// Re-export agent-safe classification
+pub use classifier::{
+    classify_statement, classify_statement_detailed, Classification, StatementSafety,
+};
 
 // Re-export type formatting
 pub use types::format_column_type;

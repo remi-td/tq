@@ -10,7 +10,12 @@ use crate::error::{Result, TqError};
 use crate::format::{write_output_with_pagination, write_output_with_timing, FormatOptions};
 use crate::pagination::PaginationInfo;
 use crate::params::ParamStore;
-use crate::sql::{has_multiple_statements, parse_statements, ParsedStatement};
+use crate::sql::{
+    classify_statement_detailed, has_multiple_statements, parse_statements, ParsedStatement,
+    StatementSafety,
+};
+#[cfg(test)]
+use crate::sql::classify_statement;
 use std::io::{self, BufReader, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
@@ -117,130 +122,27 @@ impl BatchExecutionError {
 // Input Source Resolution
 // ============================================================================
 
-/// Check whether stdin has any bytes available to read without blocking or
-/// consuming them.
+/// Determine the input source based on QueryArgs.
 ///
-/// This is used to distinguish an intentional SQL pipe (e.g. `echo SQL | tq`)
-/// from an empty or redirected-but-silent stdin (e.g. `< /dev/null`). See
-/// REQ-CLI-STDIN-001 in `docs/specifications/cli-interface.md`.
+/// The source is selected purely from the *syntax of the invocation*, never
+/// from transient file-descriptor readiness. The precedence is:
 ///
-/// On Unix, we do a non-blocking `poll(2)` for `POLLIN` and then disambiguate
-/// "ready with data" from "ready at EOF" (the `/dev/null` case) using
-/// `FIONREAD`, which reports zero bytes available for `/dev/null`, empty
-/// regular files, and closed pipes.
+/// 1. **Positional query argument present** -> `Argument`. Stdin is never inspected.
+/// 2. **Else `--file <path>` present** -> `File`. Stdin is never inspected.
+/// 3. **Else stdin is not a TTY** -> `Stdin`. A normal blocking read to EOF is
+///    performed by `read_sql_stdin`, so a delayed producer is handled naturally.
+/// 4. **Else** (no arg, no file, stdin is a TTY) -> `No query provided`.
 ///
-/// On non-Unix platforms, we preserve the pre-Sprint-64 behaviour (treat any
-/// non-TTY stdin as having data) as a conservative fallback. Windows users
-/// see no regression from prior releases.
-#[cfg(unix)]
-fn stdin_has_data() -> bool {
-    use std::os::fd::AsRawFd;
-
-    let fd = io::stdin().as_raw_fd();
-
-    // Step 1: non-blocking readiness check
-    let mut pfd = libc::pollfd {
-        fd,
-        events: libc::POLLIN,
-        revents: 0,
-    };
-    // SAFETY: `poll` is a syscall operating on a local stack-allocated
-    // pollfd. Timeout 0 makes the call non-blocking. No Rust invariants to
-    // uphold; we only read `revents` after the call returns.
-    let rc = unsafe { libc::poll(&mut pfd, 1, 0) };
-    if rc <= 0 {
-        // rc == 0 means no fds ready; rc < 0 means EINTR/EBADF -- be
-        // conservative and treat as "no data".
-        return false;
-    }
-    if (pfd.revents & libc::POLLIN) == 0 {
-        // Only POLLHUP/POLLERR set: the peer closed the pipe without
-        // writing. Nothing to read.
-        return false;
-    }
-
-    // Step 2: distinguish "ready with data" from "ready at EOF".
-    // FIONREAD returns the number of bytes buffered for reading on pipes,
-    // sockets, and character devices. On /dev/null, empty files, and
-    // closed pipes it reports 0.
-    let mut n_available: libc::c_int = 0;
-    // SAFETY: `ioctl` is a syscall; we pass a local c_int that the kernel
-    // writes into on success. Return value 0 indicates success.
-    let ioctl_rc = unsafe { libc::ioctl(fd, libc::FIONREAD, &mut n_available) };
-    if ioctl_rc == 0 {
-        return n_available > 0;
-    }
-
-    // ioctl failed (FIONREAD is not supported for every fd type -- e.g.,
-    // certain regular files on some BSDs). Fall back to `fstat` for
-    // regular files: a file at offset 0 with st_size > 0 has data.
-    // SAFETY: zero-initialising `stat` is valid; `fstat` fills it in.
-    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
-    // SAFETY: `fstat` syscall; stat is a local stack allocation.
-    if unsafe { libc::fstat(fd, &mut stat) } == 0 {
-        let is_reg = (stat.st_mode & libc::S_IFMT) == libc::S_IFREG;
-        if is_reg {
-            return stat.st_size > 0;
-        }
-    }
-
-    // Conservative default: if we reached here, poll reported POLLIN but
-    // we could not determine byte availability. Assume data is present to
-    // avoid swallowing a legitimate pipe read.
-    true
-}
-
-#[cfg(not(unix))]
-fn stdin_has_data() -> bool {
-    // Legacy behaviour on non-Unix platforms: any non-TTY stdin is treated
-    // as having data. This matches pre-Sprint-64 behaviour and avoids a
-    // regression for Windows users, where there is no direct poll/FIONREAD
-    // equivalent for Console handles.
-    true
-}
-
-/// Determine the input source based on QueryArgs
-///
-/// Returns an error if conflicting sources are provided (mutual exclusivity check).
-///
-/// Priority order:
-/// 1. Explicit query argument
-/// 2. File flag
-/// 3. Stdin (only if no explicit source provided)
-///
-/// Stdin is treated as an input source only when BOTH conditions hold
-/// (REQ-CLI-STDIN-001):
-/// - stdin is not a TTY (`is_terminal()` returns false), AND
-/// - stdin has at least one byte available to read (`stdin_has_data()`).
-///
-/// A redirected-but-empty stdin (e.g., `< /dev/null`, `<<< ""`, or a closed
-/// pipe) satisfies only the first condition and MUST NOT be counted as a
-/// SQL input source -- this avoids the spurious "multiple input sources"
-/// error for `tq query "SQL" < /dev/null` (Bug #43).
+/// This matches `psql -c` / `psql -f`: an explicit source wins and stdin is
+/// ignored. `clap`'s `conflicts_with` already makes the positional argument and
+/// `--file` mutually exclusive, so cases 1 and 2 cannot both apply. There is no
+/// readiness probe and no Unix/non-Unix split.
 fn determine_input_source(args: &QueryArgs) -> Result<InputSource> {
-    let has_query_arg = args.query.is_some();
-    let stdin_is_pipe = !io::stdin().is_terminal() && stdin_has_data();
-
-    // Check for query argument + stdin conflict
-    // This is the main conflict we care about - user piping data but also providing SQL argument
-    if has_query_arg && stdin_is_pipe {
-        return Err(TqError::InvalidConfig(
-            "Multiple input sources provided: query argument, piped stdin.\n\
-             Only one input source is allowed.\n\n\
-             Either provide SQL as argument OR pipe via stdin, not both."
-                .to_string(),
-        ));
-    }
-
-    // Return the appropriate source (priority: argument > file > stdin)
     if let Some(ref query) = args.query {
         Ok(InputSource::Argument(query.clone()))
     } else if let Some(ref file_path) = args.file {
-        // File flag takes precedence over stdin - this is common usage in scripts
-        // where stdin may be redirected from /dev/null or attached to a pty
         Ok(InputSource::File(file_path.clone()))
-    } else if stdin_is_pipe {
-        // Only use stdin if no explicit source provided
+    } else if !io::stdin().is_terminal() {
         Ok(InputSource::Stdin)
     } else {
         Err(TqError::InvalidConfig(
@@ -252,19 +154,6 @@ fn determine_input_source(args: &QueryArgs) -> Result<InputSource> {
                 .to_string(),
         ))
     }
-}
-
-/// Validate query input sources for conflicts without consuming stdin.
-///
-/// This is a pure argument + stdin-readiness check that requires no database
-/// connection or driver, so `main.rs` can surface a "multiple input sources"
-/// error (e.g. piped stdin + a positional query argument) *before* building
-/// connection config. Argument errors should precede connection errors, and
-/// this conflict genuinely needs no connection. `determine_input_source` only
-/// peeks stdin readiness (the content is read later by `read_input_sql`), so
-/// calling it here and again in `execute` is safe and idempotent.
-pub fn validate_input_sources(args: &QueryArgs) -> Result<()> {
-    determine_input_source(args).map(|_| ())
 }
 
 /// Read SQL from the determined input source
@@ -851,32 +740,14 @@ fn format_statement_status(result: &crate::db::QueryResult, format: OutputFormat
 // Agent-Safe Mode
 // ============================================================================
 
-/// SQL statement safety classification for agent-safe mode
-#[derive(Debug, PartialEq)]
-enum StatementSafety {
-    /// Read-only: SELECT, SHOW, EXPLAIN, HELP, COLLECT STATISTICS
-    ReadOnly,
-    /// Data manipulation: INSERT, UPDATE, DELETE, MERGE, UPSERT
-    Dml,
-    /// Data definition: CREATE, DROP, ALTER, RENAME, REPLACE, GRANT, REVOKE
-    Ddl,
-}
-
-/// Classify a SQL statement by its safety level
-fn classify_statement(sql: &str) -> StatementSafety {
-    let stmt_type = get_statement_type(sql).to_uppercase();
-    match stmt_type.as_str() {
-        "SELECT" | "SEL" | "SHOW" | "EXPLAIN" | "HELP" | "COLLECT" | "LOCKING" | "LOCK" => {
-            StatementSafety::ReadOnly
-        }
-        "INSERT" | "INS" | "UPDATE" | "UPD" | "DELETE" | "DEL" | "MERGE" | "UPSERT" => {
-            StatementSafety::Dml
-        }
-        _ => StatementSafety::Ddl, // CREATE, DROP, ALTER, RENAME, REPLACE, GRANT, REVOKE, etc.
-    }
-}
-
-/// Validate SQL against agent-safe mode restrictions
+/// Validate SQL against agent-safe mode restrictions.
+///
+/// Uses the structural classifier in `crate::sql::classifier`, which sees
+/// through leading comments, `WITH` CTE prologues, and `LOCKING` request
+/// modifiers to the effective top-level operation. The reported
+/// `statement_type` is the *effective resolved* operation (e.g. `UPDATE` for
+/// `LOCKING ... UPDATE`). Statements that cannot be classified fail closed with
+/// a distinct `AgentSafeUnclassified` error rather than being mislabelled DDL.
 fn validate_agent_safe(sql: &str, args: &QueryArgs) -> Result<()> {
     // Reject multi-statement input
     if has_multiple_statements(sql) {
@@ -886,27 +757,40 @@ fn validate_agent_safe(sql: &str, args: &QueryArgs) -> Result<()> {
         });
     }
 
-    let safety = classify_statement(sql);
+    let classification = classify_statement_detailed(sql);
+    let effective_op = classification
+        .effective_op
+        .clone()
+        .unwrap_or_else(|| "UNKNOWN".to_string());
 
-    match safety {
+    match classification.safety {
         StatementSafety::ReadOnly => Ok(()),
+        StatementSafety::Maintenance => {
+            if args.allow_maintenance {
+                Ok(())
+            } else {
+                Err(TqError::AgentSafeBlocked {
+                    statement_type: effective_op,
+                    message: "Maintenance statements (e.g. COLLECT STATISTICS) are blocked in agent-safe mode. Use --allow-maintenance to permit them.".to_string(),
+                })
+            }
+        }
         StatementSafety::Dml => {
             if args.allow_dml {
                 Ok(())
             } else {
-                let stmt_type = get_statement_type(sql).to_uppercase();
                 Err(TqError::AgentSafeBlocked {
-                    statement_type: stmt_type,
+                    statement_type: effective_op,
                     message: "DML statements are blocked in agent-safe mode. Use --allow-dml to permit write operations.".to_string(),
                 })
             }
         }
-        StatementSafety::Ddl => {
-            let stmt_type = get_statement_type(sql).to_uppercase();
-            Err(TqError::AgentSafeBlocked {
-                statement_type: stmt_type,
-                message: "DDL statements are always blocked in agent-safe mode.".to_string(),
-            })
+        StatementSafety::Ddl => Err(TqError::AgentSafeBlocked {
+            statement_type: effective_op,
+            message: "DDL statements are always blocked in agent-safe mode.".to_string(),
+        }),
+        StatementSafety::Unknown { token, reason } => {
+            Err(TqError::AgentSafeUnclassified { token, reason })
         }
     }
 }
@@ -1059,7 +943,8 @@ mod tests {
         assert_eq!(classify_statement("SHOW VIEW db.v"), StatementSafety::ReadOnly);
         assert_eq!(classify_statement("EXPLAIN SELECT 1"), StatementSafety::ReadOnly);
         assert_eq!(classify_statement("HELP TABLE t"), StatementSafety::ReadOnly);
-        assert_eq!(classify_statement("COLLECT STATISTICS ON t"), StatementSafety::ReadOnly);
+        // Sprint 71: COLLECT STATISTICS now classifies as Maintenance, not ReadOnly.
+        // See tc111_u16_collect_statistics_is_maintenance below.
         assert_eq!(classify_statement("LOCKING t FOR ACCESS SELECT *"), StatementSafety::ReadOnly);
     }
 
@@ -1148,53 +1033,17 @@ mod tests {
             agent_safe: true,
             max_rows: 10000,
             allow_dml,
+            allow_maintenance: false, // Sprint 71: new field
             page_size: None,
             page: 1,
         }
     }
 
-    // =============================================================================
-    // Bug #43: Stdin detection — error message content
-    // TC095-E
-    // =============================================================================
-
-    // TC095-E: Error message for the legitimate conflict case is preserved verbatim.
-    // Validates #43-AC-6: "error message quality unchanged for the legitimate conflict case".
-    // No DB required.
-
-    #[test]
-    fn test_multiple_input_sources_error_message_content() {
-        // Verify the exact error string from determine_input_source() when both
-        // a positional query arg AND non-empty piped stdin are present.
-        // This test ensures any refactor of that function does not silently
-        // reword the error that users see in CI/agent environments.
-        let msg = "Multiple input sources provided: query argument, piped stdin.\n\
-                   Only one input source is allowed.\n\n\
-                   Either provide SQL as argument OR pipe via stdin, not both.";
-
-        assert!(
-            msg.contains("Multiple input sources"),
-            "error must mention 'Multiple input sources'"
-        );
-        assert!(
-            msg.contains("Only one input source"),
-            "error must mention 'Only one input source'"
-        );
-        assert!(
-            msg.contains("Either provide SQL as argument OR pipe via stdin"),
-            "error must include actionable guidance"
-        );
-    }
-
-    #[test]
-    fn test_stdin_has_data_does_not_panic() {
-        // Regression guard: the Unix-specific poll+FIONREAD path must never
-        // panic regardless of what the test harness attached to fd 0.
-        // The actual return value depends on the test runner's stdin
-        // (which varies: pipe, /dev/null, closed fd) so we only assert the
-        // function is total.
-        let _ = stdin_has_data();
-    }
+    // Sprint 71: test_multiple_input_sources_error_message_content deleted —
+    //   the "Multiple input sources" error is intentionally removed in Sprint 71.
+    //   See TC110-I10 in tests/integration_tests.rs for the regression guard.
+    // Sprint 71: test_stdin_has_data_does_not_panic deleted —
+    //   stdin_has_data() is deleted in Sprint 71 (no longer needed).
 
     #[test]
     fn test_no_query_provided_error_message_content() {

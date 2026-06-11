@@ -301,6 +301,9 @@ impl Config {
             password,
             logmech,
             timeout,
+            // Query timeout is resolved centrally in run() (explicit flag or
+            // the agent-safe default), then assigned onto the built config.
+            query_timeout: None,
         })
     }
 }

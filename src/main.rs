@@ -81,17 +81,21 @@ fn run(cli: Cli) -> Result<()> {
     // Build ParamStore from --params flag(s)
     let param_store = build_param_store(&cli.global.params)?;
 
-    // Validate query input sources before connection setup so argument
-    // conflicts (e.g. piped stdin + a positional query argument) are reported
-    // without requiring credentials or a driver. Argument errors should
-    // precede connection errors.
-    if let Command::Query(ref args) = cli.command {
-        commands::query::validate_input_sources(args)?;
-    }
-
-    // Build connection configuration for database commands
+    // Build connection configuration for database commands.
+    //
+    // Input-source selection (positional arg vs --file vs stdin) is decided
+    // syntactically inside the query command itself; the only argument-level
+    // conflict (query + --file) is enforced by clap at parse time, before any
+    // connection is built. There is no pre-connection input-source probe.
     let password_override = read_password_if_needed(&cli.global)?;
-    let conn_config = build_connection_config(&cli.global, &config, password_override)?;
+    let mut conn_config = build_connection_config(&cli.global, &config, password_override)?;
+
+    // Resolve the query/request timeout (distinct from the connection
+    // timeout). An explicit --query-timeout always wins. In agent-safe query
+    // mode, apply a conservative finite default (30s) when none is given so an
+    // agent can never launch an unbounded request. Outside agent-safe mode the
+    // default is "no query timeout".
+    conn_config.query_timeout = resolve_query_timeout(&cli.global, &cli.command)?;
 
     // Create database client
     let client = DatabaseClient::new(conn_config, cli.global.driver_lib_dir.clone())?;
@@ -556,6 +560,28 @@ fn validate_password_file_permissions(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// Resolve the effective query/request timeout for this invocation.
+///
+/// Precedence:
+/// 1. An explicit `--query-timeout <DURATION>` (parsed) always applies.
+/// 2. Otherwise, in agent-safe query mode, a conservative finite default of
+///    30 seconds is applied so an agent cannot launch an unbounded request.
+/// 3. Otherwise `None` (no query timeout).
+fn resolve_query_timeout(
+    global: &GlobalOpts,
+    command: &Command,
+) -> Result<Option<std::time::Duration>> {
+    if let Some(ref qt) = global.query_timeout {
+        return Ok(Some(parse_duration(qt)?));
+    }
+    if let Command::Query(args) = command {
+        if args.agent_safe {
+            return Ok(Some(std::time::Duration::from_secs(30)));
+        }
+    }
+    Ok(None)
+}
+
 /// Build connection configuration from CLI args and config file
 fn build_connection_config(
     global: &GlobalOpts,
@@ -679,6 +705,9 @@ fn build_connection_from_profile(
         password,
         logmech,
         timeout,
+        // Query timeout is resolved centrally in run() (explicit flag or the
+        // agent-safe default), then assigned onto the built config.
+        query_timeout: None,
     })
 }
 

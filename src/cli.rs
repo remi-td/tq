@@ -132,7 +132,10 @@ pub struct GlobalOpts {
     #[arg(long, value_name = "DIR", global = true)]
     pub driver_lib_dir: Option<String>,
 
-    /// Connection timeout
+    /// Connection timeout (TCP connection establishment only)
+    ///
+    /// Bounds how long tq waits to establish the connection. Distinct from
+    /// --query-timeout, which bounds query execution.
     ///
     /// Duration format: 30s, 5m, 1h
     #[arg(
@@ -144,6 +147,23 @@ pub struct GlobalOpts {
         global = true
     )]
     pub timeout: String,
+
+    /// Query execution timeout (request/fetch deadline)
+    ///
+    /// Bounds how long a single query may run before tq cancels the request,
+    /// closes the session, and returns a QUERY_TIMEOUT error. Distinct from
+    /// --timeout (connection establishment). If unset, queries run without a
+    /// timeout, EXCEPT in --agent-safe mode where a conservative finite default
+    /// (30s) is applied automatically.
+    ///
+    /// Duration format: 30s, 5m, 1h
+    #[arg(
+        long,
+        env = "TQ_QUERY_TIMEOUT",
+        value_name = "DURATION",
+        global = true
+    )]
+    pub query_timeout: Option<String>,
 
     /// Verbose output (repeat for more: -v, -vv, -vvv)
     ///
@@ -604,29 +624,44 @@ pub struct QueryArgs {
 
     /// Enable agent-safe execution mode
     ///
-    /// Enforces safety guardrails for automated/LLM-driven usage:
-    /// - Blocks DDL (CREATE, DROP, ALTER, RENAME) and DML (INSERT, UPDATE, DELETE, MERGE)
-    /// - Allows only SELECT, SHOW, EXPLAIN, HELP, COLLECT STATISTICS
-    /// - Enforces single-statement-only (rejects multi-statement input)
-    /// - Enforces --max-rows limit (default 10000)
-    ///
-    /// Use --allow-dml to permit write operations in agent-safe mode.
+    /// Enforces defense-in-depth guardrails for automated/LLM-driven usage
+    /// (NOT a security boundary -- use database-side least privilege for that;
+    /// see `tq help` and the security guide):
+    /// - Allows read-only statements: SELECT/SEL, SHOW, HELP, EXPLAIN,
+    ///   including read-only WITH (CTE) and LOCKING forms.
+    /// - Blocks DML (INSERT, UPDATE, DELETE, MERGE, UPSERT) unless --allow-dml.
+    /// - Blocks maintenance (COLLECT STATISTICS) unless --allow-maintenance.
+    /// - Always blocks DDL/DCL (CREATE, DROP, ALTER, RENAME, GRANT, REVOKE, ...).
+    /// - Fails closed: statements it cannot classify are rejected, not run.
+    /// - Enforces single-statement-only (rejects multi-statement input).
+    /// - Applies a finite query timeout by default (see --query-timeout).
+    /// - Enforces the --max-rows client fetch/output cap.
     #[arg(long, env = "TQ_AGENT_SAFE")]
     pub agent_safe: bool,
 
-    /// Maximum rows to return in agent-safe mode (default: 10000)
+    /// Maximum rows for the client fetch/output cap in agent-safe mode (default: 10000)
     ///
-    /// When --agent-safe is active, the result set is limited to this many rows.
-    /// If the query returns more rows, execution fails with an error.
+    /// This is a CLIENT-side fetch/output cap, NOT a database workload limit:
+    /// tq fetches at most max_rows + 1 rows and fails with AGENT_SAFE_MAX_ROWS
+    /// if the extra row appears. No TOP/SAMPLE is injected into your SQL, so the
+    /// database may still scan the full table. To bound server-side work, add
+    /// TOP or SAMPLE to the query itself.
     #[arg(long, value_name = "N", default_value = "10000")]
     pub max_rows: usize,
 
     /// Allow DML operations in agent-safe mode
     ///
-    /// Permits INSERT, UPDATE, DELETE, and MERGE statements when
+    /// Permits INSERT, UPDATE, DELETE, MERGE, and UPSERT statements when
     /// --agent-safe is active. DDL operations remain blocked.
     #[arg(long)]
     pub allow_dml: bool,
+
+    /// Allow maintenance operations in agent-safe mode
+    ///
+    /// Permits COLLECT STATISTICS / COLLECT STATS when --agent-safe is active.
+    /// DDL operations remain blocked.
+    #[arg(long)]
+    pub allow_maintenance: bool,
 
     /// Number of rows per page (enables pagination)
     ///

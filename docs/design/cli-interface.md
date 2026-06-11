@@ -321,210 +321,271 @@ tq query "SELECT 1"  # Uses environment variable
 tq query --logon "other:..." "SELECT 1"  # Overrides
 ```
 
-## Stdin Input Source Detection
+## Deterministic Input-Source Selection
 
 ### Problem
 
-`tq query` accepts SQL from three sources: positional argument, `--file`, or stdin. The stdin path is auto-detected by observing that the stdin file descriptor is not a TTY. Prior to Sprint 64, the detection logic was:
+`tq query` accepts SQL from three sources: a positional argument, `--file`, or stdin.
+Earlier designs auto-detected the stdin source by probing file-descriptor *readiness*
+(`is_terminal()` plus a `poll(2)`/`FIONREAD`/`fstat` machinery). Readiness is a property
+of the runtime environment, not of the command the user typed, so the chosen source
+varied with timing and harness behaviour:
+
+- A harness that left an empty pipe attached while the user passed an explicit query
+  produced a spurious "multiple input sources" error.
+- A producer that wrote to stdin slightly later than `tq` probed it was missed entirely,
+  so behaviour differed between an "immediate" and a "delayed" producer.
+- The probe required a Unix/non-Unix split (`libc` on Unix, "assume data" on Windows),
+  giving two different contracts.
+
+### Design: Syntactic Precedence, No Readiness Probe
+
+The source is selected purely from the *syntax of the invocation*, never from transient
+fd state. The precedence is:
+
+1. **Positional query argument present** → `InputSource::Argument`. Stdin is never inspected.
+2. **Else `--file <path>` present** → `InputSource::File`. Stdin is never inspected.
+3. **Else stdin is not a TTY** (`!io::stdin().is_terminal()`) → `InputSource::Stdin`.
+   A normal **blocking** read to EOF is performed. A delayed producer is handled
+   naturally because the read blocks until the writer closes its end.
+4. **Else** (no arg, no file, stdin is a TTY) → `No query provided`.
+
+This matches `psql -c` / `psql -f`: an explicit `-c`/`-f` wins and stdin is ignored.
+`clap`'s `conflicts_with` already makes the positional argument and `--file` mutually
+exclusive (`src/cli.rs`: `QueryArgs.query` has `conflicts_with = "file"`), so case 1 and
+case 2 cannot both apply.
+
+The previous "Multiple input sources" conflict no longer exists — an explicit source
+simply suppresses stdin inspection — so its error variant and the pre-connection
+`validate_input_sources` guard are removed.
+
+### Implementation
+
+`determine_input_source` collapses to a straight precedence match with no platform split
+(`src/commands/query.rs`):
 
 ```rust
-let stdin_is_pipe = !io::stdin().is_terminal();
-```
-
-This collapses two distinct conditions into one — stdin redirected AND stdin has bytes — and produces a false positive in common CI/agent/subshell scenarios where stdin is redirected from an empty source:
-
-```bash
-tq query "SELECT 1" < /dev/null              # Fails with "multiple input sources"
-tq query "SELECT 1" <<< ""                   # Fails
-# Any harness that defensively closes stdin fails
-```
-
-`is_terminal()` correctly reports "not a TTY" for `/dev/null`, `<<< ""`, closed descriptors, and pipes from non-interactive parents, but these cases have no payload to read. Flagging them as a second input source is wrong.
-
-### Design: Two-Condition Check (Non-TTY + Bytes Available)
-
-The fix is to treat stdin as an input source only when BOTH hold:
-
-1. Stdin is not a TTY (`!io::stdin().is_terminal()`), AND
-2. Stdin has bytes immediately available to read.
-
-Condition (2) is the new one. It must be implemented without consuming any bytes from stdin — the bytes are needed by the downstream reader when stdin IS the chosen input source.
-
-#### Implementation: `poll(2)` with Zero Timeout (Unix)
-
-On Unix, the portable non-destructive readiness check is `poll(2)` with `POLLIN` and `timeout = 0`. This returns `1` if there is data ready, `0` if none, without touching the read buffer. `libc` is already an existing dependency (see `Cargo.toml`, `[target.'cfg(unix)'.dependencies]`).
-
-```rust
-#[cfg(unix)]
-fn stdin_has_bytes_available() -> bool {
-    use std::os::fd::AsRawFd;
-    let fd = std::io::stdin().as_raw_fd();
-    let mut pfd = libc::pollfd {
-        fd,
-        events: libc::POLLIN,
-        revents: 0,
-    };
-    // SAFETY: poll is a syscall with no Rust invariants to uphold; timeout 0
-    // is non-blocking; we own the pollfd struct.
-    let rc = unsafe { libc::poll(&mut pfd, 1, 0) };
-    // rc > 0 means at least one fd is ready
-    // rc == 0 means timeout (nothing ready)
-    // rc < 0 means error (EINTR, EBADF on closed fd, etc.) — be conservative: treat as "no data"
-    rc > 0 && (pfd.revents & (libc::POLLIN | libc::POLLHUP)) != 0
+fn determine_input_source(args: &QueryArgs) -> Result<InputSource> {
+    if let Some(ref query) = args.query {
+        Ok(InputSource::Argument(query.clone()))
+    } else if let Some(ref file_path) = args.file {
+        Ok(InputSource::File(file_path.clone()))
+    } else if !io::stdin().is_terminal() {
+        Ok(InputSource::Stdin)
+    } else {
+        Err(TqError::InvalidConfig(
+            "No query provided.\n\n\
+             Provide SQL via:\n  \
+             - Command argument: tq query \"SELECT 1\"\n  \
+             - File: tq query --file script.sql\n  \
+             - Stdin: echo \"SELECT 1\" | tq query"
+                .to_string(),
+        ))
+    }
 }
 ```
 
-Notes:
-- `POLLHUP` is included alongside `POLLIN`. A closed pipe (writer exited) delivers `POLLHUP` without `POLLIN`; we treat that the same as "no data" for our purposes (the read would return 0 bytes immediately). The mask catches both so we can disambiguate in the conditional if needed; the outer `rc > 0` guards against timeout.
-- `/dev/null` is a regular device that reports immediate readiness for read but returns 0 bytes on read. To handle this cleanly, we peek-read a single byte through a `BufReader::fill_buf()` check — but that consumes the byte if present. The cleaner approach is the one below.
-
-#### Refinement: `BufReader::fill_buf()` for Zero-Copy Peek
-
-`poll()` alone cannot distinguish "ready but EOF" (`/dev/null`) from "ready with data". To handle this cleanly, wrap stdin in a `BufReader` and call `fill_buf()` — this performs a single read into the internal buffer and returns the populated slice. The buffer is kept alive so the downstream reader sees the byte(s) when it reads:
+`read_sql_stdin` is unchanged in spirit: it performs a blocking `read_to_string` to EOF and
+maps the empty case to a distinct, actionable error. Empty stdin is reported as
+`Empty query received from stdin` (not `No query provided`), preserving the existing
+distinction so an agent can tell "you selected stdin but sent nothing" apart from
+"you selected no source at all".
 
 ```rust
-use std::io::{BufRead, BufReader, Stdin, StdinLock};
-
-/// Returns (has_data, reader) — reader must be used if has_data is true.
-fn peek_stdin_has_data() -> (bool, BufReader<StdinLock<'static>>) {
-    let stdin = io::stdin();
-    let mut reader = BufReader::new(stdin.lock());
-    // fill_buf reads at most DEFAULT_BUF_SIZE bytes; on /dev/null this returns &[]
-    let has_data = match reader.fill_buf() {
-        Ok(buf) => !buf.is_empty(),
-        Err(_) => false,  // treat I/O error as no data
-    };
-    (has_data, reader)
+fn read_sql_stdin() -> Result<String> {
+    let mut sql = String::new();
+    io::BufReader::new(io::stdin().lock()).read_to_string(&mut sql)?;
+    if sql.trim().is_empty() {
+        return Err(TqError::InvalidConfig(
+            "Empty query received from stdin.\nProvide valid SQL via stdin.".to_string(),
+        ));
+    }
+    Ok(sql)
 }
 ```
 
-Problem: `StdinLock<'static>` is not directly constructible — `stdin.lock()` borrows from `stdin`. We must restructure `determine_input_source` to return either a resolved `InputSource` or a `(InputSource::Stdin, BufReader)` pair so the buffered reader is threaded through to `read_sql_stdin`.
+### Removed Code
 
-#### Chosen Design: Two-Phase with `poll()` + blocking `read_to_string`
+- `stdin_has_data()` and both its `#[cfg(unix)]` / `#[cfg(not(unix))]` bodies
+  (the `poll`/`FIONREAD`/`fstat` machinery).
+- `validate_input_sources()` and its pre-connection call in `src/main.rs` (~line 88).
+  The remaining "argument before connection" guarantee is unaffected: `determine_input_source`
+  runs at the top of `execute`/`execute_to_file`, and the only argument-vs-argument conflict
+  (`query` + `--file`) is enforced by clap at parse time, before any connection is built.
+- The `Multiple input sources` `InvalidConfig` branch and its content test
+  (`test_multiple_input_sources_error_message_content`), plus `test_stdin_has_data_does_not_panic`.
 
-To keep the refactor minimal, use `poll()` on Unix for the detection phase, and continue using the existing `read_to_string()` path for the read phase:
+### `libc` Dependency
+
+`libc` is **retained** in `Cargo.toml`. Although the query-path `poll`/`FIONREAD`/`fstat`
+uses are deleted, `src/db/metadata.rs` still uses `libc` for stdout/stderr fd redirection
+(`libc::dup`, `libc::dup2`, `libc::open`, `libc::close`, `STDOUT_FILENO`/`STDERR_FILENO`).
+A pre-removal grep over `src/` confirms those remaining uses, so the dependency cannot be dropped.
+
+### Platform Contract
+
+Unix and Windows now follow the identical precedence. There is no readiness probe and no
+`#[cfg]` split in `determine_input_source`. On Windows, `is_terminal()` reports non-TTY for a
+redirected/piped stdin exactly as on Unix, and the blocking read behaves the same.
+
+### Behaviour Change (Intentional)
+
+`echo "ignored" | tq query "SELECT 1"` now executes `SELECT 1` (stdin ignored) instead of
+returning a "multiple input sources" error. This is a deliberate contract change that matches
+`psql -c`. It is called out in the specification, the sprint review, and the issue-closure comment.
+
+## Structural Agent-Safe Classification
+
+### Problem
+
+The original `classify_statement` derived the statement type from a first-keyword helper
+(`get_statement_type`) and mapped *any* unrecognised keyword to `Ddl`. That had three defects
+for agent-safe mode:
+
+1. It could not see through a `WITH` CTE prologue to the effective operation, nor through a
+   `LOCKING`/`LOCK` request modifier.
+2. Leading comment handling was ad-hoc (only a single leading `--` or `/* */`, not arbitrary
+   interleavings).
+3. **Fail-open mislabelling**: unknown syntax was reported as `Ddl` ("DDL is always blocked"),
+   which is the right *outcome* (blocked) but the wrong *reason* — an agent cannot distinguish
+   "this is DDL" from "tq could not classify this", which matters for diagnostics and trust.
+
+### Design: Comment-Skipping Token Stream over the In-Tree Lexer
+
+The classifier reuses the proven lexical machine in `src/sql/parser.rs` rather than adding a
+SQL-parser dependency (executive decision, Sprint 71). The parser already tracks quoted strings,
+line comments, and block comments correctly; we expose a *significant-token iterator* built from
+that same state model and classify a short prefix of tokens.
+
+#### New public API in `src/sql/`
+
+A new module `src/sql/classifier.rs` (re-exported from `src/sql/mod.rs`) provides:
 
 ```rust
-#[cfg(unix)]
-fn stdin_has_data() -> bool {
-    use std::os::fd::AsRawFd;
-    let fd = std::io::stdin().as_raw_fd();
-    let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
-    // SAFETY: syscall with local stack-allocated pollfd, timeout 0 = non-blocking.
-    let rc = unsafe { libc::poll(&mut pfd, 1, 0) };
-    if rc <= 0 {
-        return false;
-    }
-    // POLLIN set AND not just POLLHUP: we still need to distinguish
-    // "ready but /dev/null will return 0" from "ready with data".
-    // Strategy: on POLLIN, do a single-byte MSG_PEEK-equivalent read via
-    // libc::recv — but stdin may not be a socket. Fall back to the actual
-    // fill_buf approach below, OR accept that /dev/null will return POLLIN
-    // with read returning 0 bytes and let read_sql_stdin's empty-check fire.
-    (pfd.revents & libc::POLLIN) != 0
+/// Safety classification of a single SQL statement for agent-safe mode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StatementSafety {
+    /// SELECT/SEL, SHOW, HELP, EXPLAIN, and read-only WITH/LOCKING forms.
+    ReadOnly,
+    /// COLLECT STATISTICS / COLLECT STATS — blocked unless --allow-maintenance.
+    Maintenance,
+    /// INSERT/INS, UPDATE/UPD, DELETE/DEL, MERGE, UPSERT — blocked unless --allow-dml.
+    Dml,
+    /// CREATE, REPLACE, DROP, ALTER, RENAME, GRANT, REVOKE, … — always blocked.
+    Ddl,
+    /// Could not be classified; fail closed. `token` is the first significant
+    /// token seen (if any); `reason` explains why classification stopped.
+    Unknown { token: Option<String>, reason: String },
 }
 
-#[cfg(not(unix))]
-fn stdin_has_data() -> bool {
-    // Windows: atty crate reports non-TTY; there is no direct poll equivalent
-    // for Console handles. Accept the legacy behavior: treat non-TTY as "has data".
-    // This matches pre-Sprint-64 behavior on Windows and is a conservative fallback.
-    true
+/// Classify the effective top-level operation of a single SQL statement.
+pub fn classify_statement(sql: &str) -> StatementSafety;
+```
+
+To support this without duplicating the lexer, `src/sql/parser.rs` exposes a thin,
+comment-and-string-aware token reader:
+
+```rust
+/// A significant SQL token: an identifier/keyword word, a punctuation char
+/// (`(`, `)`, `,`, `.`), or a string literal placeholder. Whitespace and
+/// comments are skipped. This reuses the same state transitions as
+/// `parse_statements` so quoting/comment rules cannot diverge.
+pub enum SqlToken {
+    Word(String),       // ASCII word run; callers uppercase for keyword tests
+    Punct(char),        // one of ( ) , . relevant to CTE/LOCKING scanning
+    StringLiteral,      // opaque — content irrelevant to classification
+    Other,              // any other single character (operators, etc.)
+}
+
+/// Iterate significant tokens, skipping arbitrary interleaved whitespace,
+/// line comments (`-- ...`), and block comments (`/* ... */`).
+pub fn significant_tokens(sql: &str) -> impl Iterator<Item = SqlToken> + '_;
+```
+
+`significant_tokens` is implemented by factoring the comment/quote skipping already present in
+`parse_statements` into a reusable scanner; the existing parser keeps its current behaviour and
+simply consumes the same primitive.
+
+#### Classification algorithm
+
+`classify_statement` consumes `significant_tokens` and applies these rules in order:
+
+1. **Leading comments / whitespace** are already removed by the iterator, so the first yielded
+   token is the first significant keyword. If the stream is empty → `Unknown { token: None, reason: "no statement" }`.
+2. **`LOCKING` / `LOCK` request modifier**: consume the modifier clause up to and including its
+   terminating keyword set, then classify the operation it modifies. The modifier runs
+   `LOCKING [ROW|TABLE|DATABASE|VIEW] <object>? FOR <lock-type> [MODE|NOWAIT|OVERRIDE]*`
+   and is followed by the actual request. We scan forward, paren-aware, to the next top-level
+   keyword that is a recognised operation (`SELECT`/`SEL`, `INSERT`, `UPDATE`, `DELETE`, `MERGE`,
+   `WITH`, …) and classify that. Multiple stacked `LOCKING` modifiers are consumed in a loop.
+   If no recognised operation follows → `Unknown`.
+3. **`WITH` CTE prologue**: a top-level `WITH` is resolved to its final operation. Skip the CTE
+   definitions paren-aware: after `WITH`, repeatedly read `cte_name [ (col, …) ] AS ( … )`,
+   tracking parenthesis depth so commas and keywords *inside* a CTE body are ignored; CTE
+   definitions are separated by top-level commas. When the top-level comma list ends, the next
+   top-level keyword is the effective operation — classify it (it may be `SELECT`, `INSERT`,
+   `UPDATE`, `DELETE`, `MERGE`). `WITH RECURSIVE` is handled by skipping the `RECURSIVE` word.
+   If the prologue is malformed (unbalanced parens, no trailing operation) → `Unknown`.
+4. **Direct operation keyword** (first token, or the token resolved through 2/3):
+   - `SELECT`, `SEL`, `SHOW`, `HELP`, `EXPLAIN` → `ReadOnly`.
+   - `COLLECT` followed by `STATISTICS` or `STATS` → `Maintenance`. `COLLECT` followed by
+     anything else (or nothing) → `Unknown` (fail closed; do not assume read-only).
+   - `INSERT`, `INS`, `UPDATE`, `UPD`, `DELETE`, `DEL`, `MERGE`, `UPSERT` → `Dml`.
+   - `CREATE`, `REPLACE`, `DROP`, `ALTER`, `RENAME`, `GRANT`, `REVOKE`, `DATABASE`, `USER`,
+     `COMMENT`, `SET`, `BEGIN`, `END`, `GIVE`, `MODIFY`, `FLUSH`, `DUMP`, `RESTORE` → `Ddl`.
+   - Anything else → `Unknown { token: Some(word), reason: "unrecognised leading operation" }`.
+
+The classifier never maps "unknown" to `Ddl`. Unknown is its own terminal category, surfaced to
+the user as a distinct error so the diagnostic is honest.
+
+#### Validation flow (`validate_agent_safe` in `src/commands/query.rs`)
+
+```text
+if has_multiple_statements(sql)            -> AgentSafeBlocked { MULTI_STATEMENT }
+match classify_statement(sql) {
+  ReadOnly                                 -> Ok
+  Maintenance if args.allow_maintenance    -> Ok
+  Maintenance                              -> AgentSafeBlocked { effective_op, "maintenance … --allow-maintenance" }
+  Dml if args.allow_dml                    -> Ok
+  Dml                                      -> AgentSafeBlocked { effective_op, "DML … --allow-dml" }
+  Ddl                                      -> AgentSafeBlocked { effective_op, "DDL always blocked" }
+  Unknown { token, reason }                -> AgentSafeUnclassified { token, reason }
 }
 ```
 
-#### Definitive Choice: `poll()` + tolerate empty-read path
+The effective operation reported in the error is the operation the classifier *resolved to*
+(e.g. for `LOCKING … UPDATE` it reports `UPDATE`, not `LOCKING`), satisfying the issue's
+requirement that errors identify the effective operation and the rejection reason.
 
-The simplest robust design combines `poll()` with the existing `read_sql_stdin` empty-input handling:
+#### New CLI flag
 
-- `determine_input_source` uses `is_terminal()` AND `stdin_has_data()` (the `poll()` wrapper above) to decide.
-- When both a query argument AND `stdin_has_data()` are true, emit the "multiple input sources" error.
-- When only a query argument is provided and `stdin_has_data()` is false (including `< /dev/null`), resolve as `InputSource::Argument` and ignore stdin entirely.
-- When only stdin is available (no query arg, no `--file`) and `stdin_has_data()` is true, resolve as `InputSource::Stdin` and fall through to `read_sql_stdin` which reads the actual bytes. If stdin turns out to be empty after all (rare race), the existing empty-input error fires with a clear message.
-
-On `/dev/null`, `poll()` returns `POLLIN | POLLHUP` immediately (the fd is "ready" in that a read will not block), but `read()` returns 0 bytes. To avoid a false positive here, add a post-`poll()` check: if `revents & POLLHUP != 0 && revents & POLLIN == 0`, treat as no data. In practice, `/dev/null` on Linux/macOS reports `POLLIN` without `POLLHUP`, and read returns 0. We disambiguate by checking the `st_size` of the fd via `fstat` when it is a regular file or character device:
+`QueryArgs` gains `--allow-maintenance` (`src/cli.rs`), parallel to the existing `--allow-dml`:
 
 ```rust
-#[cfg(unix)]
-fn stdin_has_data() -> bool {
-    use std::os::fd::AsRawFd;
-    let fd = std::io::stdin().as_raw_fd();
-
-    // Step 1: poll for readability (non-blocking)
-    let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
-    let rc = unsafe { libc::poll(&mut pfd, 1, 0) };
-    if rc <= 0 {
-        return false;
-    }
-    if (pfd.revents & libc::POLLIN) == 0 {
-        return false;
-    }
-
-    // Step 2: distinguish "ready with data" from "ready at EOF" (/dev/null, empty file)
-    // fstat the fd. For regular files, st_size == 0 means empty.
-    // For char devices (/dev/null), st_size is 0 but that's coincidental —
-    // we additionally check S_ISCHR and compare device numbers against /dev/null.
-    //
-    // Simpler and more portable: use FIONREAD ioctl which returns bytes-available
-    // for pipes and sockets; on /dev/null and empty files it reports 0.
-    let mut n_available: libc::c_int = 0;
-    let ioctl_rc = unsafe { libc::ioctl(fd, libc::FIONREAD, &mut n_available) };
-    if ioctl_rc == 0 {
-        return n_available > 0;
-    }
-
-    // ioctl failed (e.g., regular file where FIONREAD is not supported on all platforms).
-    // Fall back: fstat and check st_size > position. For regular files,
-    // `read()` not yet performed means position 0, so st_size > 0 means data.
-    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
-    if unsafe { libc::fstat(fd, &mut stat) } == 0 {
-        let mode = stat.st_mode & libc::S_IFMT;
-        if mode == libc::S_IFREG {
-            return stat.st_size > 0;
-        }
-    }
-
-    // Unknown fd type — conservative: assume data present (legacy behavior).
-    true
-}
+/// Allow maintenance operations (COLLECT STATISTICS) in agent-safe mode.
+#[arg(long)]
+pub allow_maintenance: bool,
 ```
 
-#### Platform Matrix
+The `--agent-safe` help text is updated to list the categories and to point at the
+database-side least-privilege guidance (defense-in-depth framing).
 
-| Platform | `/dev/null` | Empty file `< empty.txt` | `<<< ""` | `echo x \|` | Pipe with bytes | TTY |
-|----------|-------------|--------------------------|----------|-------------|-----------------|-----|
-| Linux    | FIONREAD=0  | fstat size=0             | FIONREAD=0 | FIONREAD>0 | FIONREAD>0      | is_terminal()=true → short-circuit |
-| macOS    | FIONREAD=0  | fstat size=0             | FIONREAD=0 | FIONREAD>0 | FIONREAD>0      | same |
-| Windows  | N/A — fallback: treat non-TTY as has-data (legacy behavior preserved) | | | | | same |
+### `--max-rows` Clarification
 
-Windows is out of scope for this sprint (`tq` is primarily a Unix tool and the bug was reported on macOS). The `#[cfg(not(unix))]` branch preserves the prior behaviour so Windows users see no regression.
+`--max-rows` is documented (help text + JSON-error hint paths) as a **client fetch/output cap**:
+in agent-safe mode `tq` fetches at most `max_rows + 1` rows and fails with `AGENT_SAFE_MAX_ROWS`
+if the extra row appears. It does not impose any database-side workload limit (no `TOP`/`SAMPLE`
+is injected). This wording is added to the flag doc-comment in `src/cli.rs` and to the
+`AgentSafeMaxRows` hint.
 
-#### Files Modified
+### Risks
 
-- **`src/commands/query.rs`** — `determine_input_source()`:
-  - Add the private helper `stdin_has_data()` gated on `#[cfg(unix)]` with a `#[cfg(not(unix))]` fallback that returns `true` (preserves legacy behaviour).
-  - Replace `let stdin_is_pipe = !io::stdin().is_terminal();` with `let stdin_is_pipe = !io::stdin().is_terminal() && stdin_has_data();`.
-  - No signature changes. No changes to `read_sql_stdin`.
-- **No changes** to `src/main.rs`, `src/cli.rs`, or any other file.
-
-#### New Tests
-
-Unit tests for `stdin_has_data()` are limited because cargo test inherits the test harness's stdin. Integration-level tests (spawning a `tq` subprocess with controlled stdin) are the right level:
-
-- `tests/cases/TCxxx.md` — new test case covering the four scenarios from the acceptance criteria:
-  1. `tq query "SELECT 1" < /dev/null` — succeeds
-  2. `tq query "SELECT 1" <<< ""` — succeeds
-  3. `echo "SELECT 2" | tq query` — succeeds (reads stdin)
-  4. `echo "SELECT 2" | tq query "SELECT 1"` — fails with "multiple input sources"
-  5. `tq query "SELECT 1"` in interactive terminal — succeeds (is_terminal()=true short-circuits before `stdin_has_data`)
-
-The `stdin_has_data()` function itself can have a basic unit test that verifies the `#[cfg(not(unix))]` branch returns `true` (trivial), but the behaviour on real fds must be validated via integration tests.
-
-#### Concerns / Risks
-
-- **`FIONREAD` support variance**: POSIX does not require `FIONREAD` for all fd types. Our fallback to `fstat` covers regular files; for character devices other than `/dev/null` (rare in practice for stdin) we default to the conservative "assume data" branch. Worst case this reproduces the old bug for exotic cases, which is no regression.
-- **Race condition between `poll()` and the actual read**: Between `determine_input_source` and `read_sql_stdin`, an upstream writer could close the pipe. The existing empty-check in `read_sql_stdin` already handles this cleanly with a clear error message.
-- **Namedpipe / socket stdin in CI**: `FIONREAD` works for pipes and sockets, so CI environments piping from Docker/container stdio are handled correctly.
+- **CTE / LOCKING tokenisation edge cases** (nested parens, comments inside the modifier,
+  stacked modifiers): mitigated by reusing the proven lexer primitive and failing closed to
+  `Unknown` on anything not provably classified, plus unit tests covering the issue's example
+  table and the Teradata abbreviations `SEL`/`INS`/`UPD`/`DEL`.
+- **New keyword surface**: the DDL/DCL allow-list is explicit; any genuinely novel leading
+  keyword lands in `Unknown` (blocked) rather than being silently mis-bucketed.
 
 ## Completion Generation
 
