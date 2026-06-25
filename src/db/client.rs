@@ -586,10 +586,15 @@ impl DatabaseClient {
                 query: Some(sql.to_string()),
             }
         } else if error_lower.contains("does not exist") || error_lower.contains("not found") {
-            // Try to extract table name
-            TqError::TableNotFound {
-                table: extract_table_name(sql).unwrap_or_else(|| "unknown".to_string()),
-            }
+            // Extract object name from the error message first (e.g. Teradata 3807:
+            // "Object 'DBC.TableSizeV' does not exist."). Only fall back to parsing
+            // the SQL when the error message contains no quoted name, to avoid
+            // reporting the wrong table (e.g. the first FROM target instead of the
+            // actual missing object).
+            let table = extract_quoted_name_from_error(error)
+                .or_else(|| extract_table_name(sql))
+                .unwrap_or_else(|| "unknown".to_string());
+            TqError::TableNotFound { table }
         } else if error_lower.contains("permission") || error_lower.contains("privilege") {
             TqError::PermissionDenied(clean_error)
         } else {
@@ -714,6 +719,20 @@ fn map_type_name_to_teradata_type(type_name: &str) -> TeradataType {
             TeradataType::Unknown
         }
     }
+}
+
+/// Extract the first single-quoted name from a Teradata error message.
+///
+/// Teradata error 3807 looks like:
+///   `[Error 3807] Object 'DBC.TableSizeV' does not exist.`
+/// We extract the content of the first pair of single quotes so we can
+/// report the actual missing object instead of guessing from the SQL.
+fn extract_quoted_name_from_error(error: &str) -> Option<String> {
+    let start = error.find('\'')?;
+    let rest = &error[start + 1..];
+    let end = rest.find('\'')?;
+    let name = rest[..end].trim();
+    if name.is_empty() { None } else { Some(name.to_string()) }
 }
 
 /// Try to extract table name from SQL for error messages
@@ -1309,6 +1328,25 @@ mod tests {
         assert_eq!(
             extract_error_code("[Error 1234] followed by Error 5678"),
             Some(1234)
+        );
+    }
+
+    #[test]
+    fn test_extract_quoted_name_from_error() {
+        // Teradata 3807: Object 'DBC.TableSizeV' does not exist.
+        assert_eq!(
+            extract_quoted_name_from_error("[Error 3807] Object 'DBC.TableSizeV' does not exist."),
+            Some("DBC.TableSizeV".to_string())
+        );
+        // No single quotes in the message
+        assert_eq!(
+            extract_quoted_name_from_error("Object does not exist"),
+            None
+        );
+        // Empty quoted name
+        assert_eq!(
+            extract_quoted_name_from_error("Object '' does not exist"),
+            None
         );
     }
 }
