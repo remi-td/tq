@@ -149,7 +149,9 @@ fn search_tables<W: Write>(
         limit.unwrap_or(100)
     };
 
-    let sql = format!(
+    // DBC.TableSizeV is not available on all systems; fall back to a simpler
+    // query (no size/row-count columns) when it is inaccessible.
+    let sql_with_size = format!(
         "SELECT TOP {limit} TRIM(t.DatabaseName) AS db_name, \
          TRIM(t.TableName) AS table_name, t.TableKind, \
          COALESCE(CAST(s.RowCount AS VARCHAR(20)), '') AS RowCount, \
@@ -171,8 +173,30 @@ fn search_tables<W: Write>(
         keyword = escaped_keyword,
         db_filter = db_filter
     );
+    let db_filter_simple = if let Some(db) = database {
+        format!("AND DatabaseName = '{}'", escape_sql_string(db))
+    } else {
+        String::new()
+    };
+    let sql_no_size = format!(
+        "SELECT TOP {limit} TRIM(DatabaseName) AS db_name, \
+         TRIM(TableName) AS table_name, TableKind, \
+         '' AS RowCount, '' AS CurrentPerm, \
+         TRIM(CreatorName) AS Owner \
+         FROM DBC.TablesV \
+         WHERE UPPER(TableName) LIKE UPPER('%{keyword}%') \
+         AND TableKind IN ('T', 'O') \
+         {db_filter} \
+         ORDER BY DatabaseName, TableName",
+        limit = row_limit,
+        keyword = escaped_keyword,
+        db_filter = db_filter_simple
+    );
 
-    let result = client.execute(&sql)?;
+    let result = match client.execute(&sql_with_size) {
+        Ok(r) => r,
+        Err(_) => client.execute(&sql_no_size)?,
+    };
 
     let tables: Vec<TableSearchResult> = result
         .rows

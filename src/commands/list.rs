@@ -302,9 +302,16 @@ fn list_tables<W: Write>(
     } else {
         "t.DatabaseName = DATABASE".to_string()
     };
+    let db_clause_simple = if let Some(db) = database {
+        format!("DatabaseName = '{}'", escape_sql_string(db))
+    } else {
+        "DatabaseName = DATABASE".to_string()
+    };
 
-    // Query with size from TableSizeV and owner from CreatorName
-    let sql = format!(
+    // Query with size from TableSizeV and owner from CreatorName.
+    // DBC.TableSizeV is not available on all systems; fall back to a simpler
+    // query (no size/row-count columns) when it is inaccessible.
+    let sql_with_size = format!(
         "SELECT TRIM(t.TableName) AS table_name, t.TableKind, \
          COALESCE(CAST(s.RowCount AS VARCHAR(20)), '') AS RowCount, \
          COALESCE(CAST(s.CurrentPerm AS VARCHAR(20)), '') AS CurrentPerm, \
@@ -321,8 +328,20 @@ fn list_tables<W: Write>(
          ORDER BY t.TableName",
         db_clause
     );
+    let sql_no_size = format!(
+        "SELECT TRIM(TableName) AS table_name, TableKind, \
+         '' AS RowCount, '' AS CurrentPerm, \
+         TRIM(CreatorName) AS Owner \
+         FROM DBC.TablesV \
+         WHERE {} AND TableKind IN ('T', 'O') \
+         ORDER BY TableName",
+        db_clause_simple
+    );
 
-    let result = client.execute(&sql)?;
+    let result = match client.execute(&sql_with_size) {
+        Ok(r) => r,
+        Err(_) => client.execute(&sql_no_size)?,
+    };
 
     let tables: Vec<TableEntry> = result
         .rows
