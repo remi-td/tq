@@ -144,11 +144,26 @@ pub fn execute_sql_with_state<W: Write>(
 
     // Execute the query with or without limit
     let start = Instant::now();
-    let result = if apply_limit {
+    let result_or_err = if apply_limit {
         log::debug!("Applying default REPL limit: {} rows", default_limit);
-        client.execute_with_limit(sql_to_execute, default_limit)?
+        client.execute_with_limit(sql_to_execute, default_limit)
     } else {
-        client.execute(sql_to_execute)?
+        client.execute(sql_to_execute)
+    };
+
+    let result = match result_or_err {
+        Ok(res) => res,
+        Err(err) => {
+            if let Some(code) = err.teradata_error_code() {
+                if let Some(&severity) = state.error_levels.get(&code) {
+                    if severity <= crate::error::Severity::Warning {
+                        writeln!(writer, "Warning: [Error {}] {}", code, err)?;
+                        return Ok(0);
+                    }
+                }
+            }
+            return Err(err);
+        }
     };
     let execution_time = start.elapsed();
 

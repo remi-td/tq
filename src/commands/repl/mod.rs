@@ -64,6 +64,7 @@ pub fn execute<W: Write>(
     writer: &mut W,
     use_color: bool,
     _verbose: bool,
+    error_levels: std::collections::HashMap<u32, crate::error::Severity>,
 ) -> Result<()> {
     // Create shared completion state (thread-safe for reedline)
     let database = client.config().database.clone();
@@ -73,6 +74,7 @@ pub fn execute<W: Write>(
     let mut state = {
         let cs = completion_state.lock().unwrap();
         let mut s = ReplState::new(cs.client().config().clone());
+        s.error_levels = error_levels;
         // Sprint 36: Store default_limit so /repeat can re-use it
         s.set_default_limit(args.default_limit);
         if args.no_pager {

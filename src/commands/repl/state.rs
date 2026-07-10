@@ -9,6 +9,8 @@
 
 use crate::db::{ConnectionConfig, MetadataCache, QueryResult};
 use crate::params::ParamStore;
+use crate::error::Severity;
+use std::collections::HashMap;
 use std::fmt;
 use std::time::Instant;
 
@@ -77,6 +79,9 @@ pub struct ReplState {
 
     /// Parameter store for variable substitution (Sprint 40)
     pub params: ParamStore,
+
+    /// Custom error level overrides (error code to Severity)
+    pub error_levels: HashMap<u32, Severity>,
 }
 
 impl ReplState {
@@ -98,6 +103,7 @@ impl ReplState {
             connection_string: None,
             default_limit: 0,
             params: ParamStore::new(),
+            error_levels: HashMap::new(),
         }
     }
 

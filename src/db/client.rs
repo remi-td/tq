@@ -659,27 +659,7 @@ fn extract_transaction_operation(sql: &str) -> String {
     }
 }
 
-/// Extract Teradata error code from error message (e.g., "[Error 3706]" -> Some(3706))
-fn extract_error_code(error: &str) -> Option<u32> {
-    // Look for patterns like "[Error 3706]" or "Error 3706"
-    let patterns = ["[Error ", "Error "];
-
-    for pattern in patterns {
-        if let Some(start) = error.find(pattern) {
-            let after_pattern = &error[start + pattern.len()..];
-            // Find the end of the number (first non-digit or ']')
-            let end = after_pattern
-                .find(|c: char| !c.is_ascii_digit())
-                .unwrap_or(after_pattern.len());
-            if end > 0 {
-                if let Ok(code) = after_pattern[..end].parse::<u32>() {
-                    return Some(code);
-                }
-            }
-        }
-    }
-    None
-}
+use crate::error::extract_error_code;
 
 /// Map Teradata type name string to TeradataType enum
 fn map_type_name_to_teradata_type(type_name: &str) -> TeradataType {

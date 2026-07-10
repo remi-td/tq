@@ -283,6 +283,11 @@ pub fn handle_metacommand<W: Write>(
             handle_params_basic(&args, state, writer)?;
         }
 
+        // Custom severity overrides command
+        "errorlevel" | "errlvl" | "err" => {
+            handle_errorlevel_command(&args, state, writer)?;
+        }
+
         // Unknown command
         _ => {
             writeln!(writer, "Unknown command: /{}", command)?;
@@ -902,6 +907,11 @@ pub fn handle_metacommand_with_state<W: Write>(
         // Sprint 40: Params command (full handler)
         "params" | "p" => {
             handle_params_basic(&args, state, writer)?;
+        }
+
+        // Custom severity overrides command
+        "errorlevel" | "errlvl" | "err" => {
+            handle_errorlevel_command(&args, state, writer)?;
         }
 
         // Unknown command
@@ -2672,6 +2682,89 @@ fn handle_params_basic<W: Write>(
     Ok(())
 }
 
+/// Handle the /errorlevel metacommand
+fn handle_errorlevel_command<W: Write>(
+    args: &[&str],
+    state: &mut ReplState,
+    writer: &mut W,
+) -> Result<()> {
+    if args.is_empty() {
+        // Print current mappings
+        if state.error_levels.is_empty() {
+            writeln!(writer, "No custom error level mappings configured.")?;
+        } else {
+            writeln!(writer, "Active error level mappings:")?;
+            let mut sorted_keys: Vec<_> = state.error_levels.keys().collect();
+            sorted_keys.sort();
+            for &code in sorted_keys {
+                writeln!(
+                    writer,
+                    "  [Error {}] -> {}",
+                    code,
+                    state.error_levels.get(&code).unwrap()
+                )?;
+            }
+        }
+        return Ok(());
+    }
+
+    if args[0].eq_ignore_ascii_case("clear") {
+        state.error_levels.clear();
+        writeln!(writer, "Cleared all error level mappings.")?;
+        return Ok(());
+    }
+
+    // Otherwise, parse CODE [CODE...] SEVERITY
+    // The last arg must be the severity.
+    let severity_str = args[args.len() - 1];
+    let severity = match severity_str.parse::<crate::error::Severity>() {
+        Ok(sev) => sev,
+        Err(_) => {
+            writeln!(
+                writer,
+                "Error: Invalid severity level '{}'. Supported: success, warning, error, severe, fatal.",
+                severity_str
+            )?;
+            return Ok(());
+        }
+    };
+
+    let mut codes = Vec::new();
+    for &code_str in &args[..args.len() - 1] {
+        match code_str.parse::<u32>() {
+            Ok(code) => codes.push(code),
+            Err(_) => {
+                writeln!(
+                    writer,
+                    "Error: '{}' is not a valid error code (must be a positive integer).",
+                    code_str
+                )?;
+                return Ok(());
+            }
+        }
+    }
+
+    if codes.is_empty() {
+        writeln!(
+            writer,
+            "Error: Missing error code(s).\nUsage: /errorlevel CODE [CODE...] SEVERITY"
+        )?;
+        return Ok(());
+    }
+
+    for code in codes {
+        state.error_levels.insert(code, severity);
+        writeln!(
+            writer,
+            "Mapped [Error {}] to severity: {}",
+            code,
+            severity
+        )?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3473,5 +3566,35 @@ mod tests {
         let suggestions = complete_metacommands_for_test("i");
         let has_inspect = suggestions.iter().any(|s| s.contains("inspect"));
         assert!(has_inspect, "Tab completion for 'i' should include inspect");
+    }
+
+    #[test]
+    fn test_errorlevel_metacommand() {
+        let config = create_test_config();
+        let mut state = ReplState::new(config);
+        let mut buf = Vec::new();
+
+        // Check clear/empty list
+        handle_errorlevel_command(&[], &mut state, &mut buf).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        assert!(output.contains("No custom error level mappings configured"));
+
+        // Map errors
+        let mut buf2 = Vec::new();
+        handle_errorlevel_command(&["3120", "3802", "warning"], &mut state, &mut buf2).unwrap();
+        assert_eq!(state.error_levels.get(&3120).unwrap(), &crate::error::Severity::Warning);
+        assert_eq!(state.error_levels.get(&3802).unwrap(), &crate::error::Severity::Warning);
+
+        // Print mappings
+        let mut buf3 = Vec::new();
+        handle_errorlevel_command(&[], &mut state, &mut buf3).unwrap();
+        let output3 = String::from_utf8(buf3).unwrap();
+        assert!(output3.contains("[Error 3120] -> warning"));
+        assert!(output3.contains("[Error 3802] -> warning"));
+
+        // Clear mappings
+        let mut buf4 = Vec::new();
+        handle_errorlevel_command(&["clear"], &mut state, &mut buf4).unwrap();
+        assert!(state.error_levels.is_empty());
     }
 }
