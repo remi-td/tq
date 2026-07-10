@@ -6,10 +6,11 @@
 
 use crate::cli::{OutputFormat, QueryArgs};
 use crate::db::DatabaseClient;
-use crate::error::{Result, TqError};
+use crate::error::{Result, Severity, TqError};
 use crate::format::{write_output_with_pagination, write_output_with_timing, FormatOptions};
 use crate::pagination::PaginationInfo;
 use crate::params::ParamStore;
+use std::collections::HashMap;
 use crate::sql::{
     classify_statement_detailed, has_multiple_statements, parse_statements, ParsedStatement,
     StatementSafety,
@@ -206,7 +207,8 @@ pub fn execute<W: Write>(
     writer: &mut W,
     use_color: bool,
     verbose: bool,
-) -> Result<()> {
+    error_levels: &HashMap<u32, Severity>,
+) -> Result<u8> {
     // Determine input source
     let source = determine_input_source(args)?;
 
@@ -237,9 +239,9 @@ pub fn execute<W: Write>(
     };
 
     if use_batch {
-        execute_batch(client, &sql, args, writer, use_color, verbose)
+        execute_batch(client, &sql, args, writer, use_color, verbose, error_levels)
     } else {
-        execute_single(client, &sql, args, writer, use_color, verbose)
+        execute_single(client, &sql, args, writer, use_color, verbose, error_levels)
     }
 }
 
@@ -251,7 +253,8 @@ fn execute_single<W: Write>(
     writer: &mut W,
     use_color: bool,
     verbose: bool,
-) -> Result<()> {
+    error_levels: &HashMap<u32, Severity>,
+) -> Result<u8> {
     let trimmed_sql = sql.trim();
 
     if verbose {
@@ -268,10 +271,25 @@ fn execute_single<W: Write>(
     };
 
     // Execute query
-    let mut result = if let Some(limit) = effective_limit {
-        client.execute_with_limit(trimmed_sql, limit)?
+    let result_or_err = if let Some(limit) = effective_limit {
+        client.execute_with_limit(trimmed_sql, limit)
     } else {
-        client.execute(trimmed_sql)?
+        client.execute(trimmed_sql)
+    };
+
+    let mut result = match result_or_err {
+        Ok(res) => res,
+        Err(err) => {
+            if let Some(code) = err.teradata_error_code() {
+                if let Some(&severity) = error_levels.get(&code) {
+                    if severity <= Severity::Warning {
+                        eprintln!("Warning: [Error {}] {}", code, err);
+                        return Ok(severity as u8);
+                    }
+                }
+            }
+            return Err(err);
+        }
     };
 
     // Agent-safe: check if result exceeds max_rows
@@ -310,7 +328,7 @@ fn execute_single<W: Write>(
         write_output_with_timing(&result, writer, args.format, &format_options, args.timing)?;
     }
 
-    Ok(())
+    Ok(0)
 }
 
 /// Detect if SQL contains explicit transaction control statements
@@ -336,7 +354,8 @@ fn execute_batch<W: Write>(
     writer: &mut W,
     use_color: bool,
     verbose: bool,
-) -> Result<()> {
+    error_levels: &HashMap<u32, Severity>,
+) -> Result<u8> {
     // Parse statements
     let statements = parse_statements(sql)
         .map_err(TqError::from)?;
@@ -381,6 +400,7 @@ fn execute_batch<W: Write>(
 
     let mut successful_count = 0;
     let mut batch_result: Result<()> = Ok(());
+    let mut max_severity: u8 = 0;
 
     for statement in &statements {
         // Show progress to stderr
@@ -423,18 +443,31 @@ fn execute_batch<W: Write>(
                 }
             }
             Err(error) => {
-                // Fail-fast: stop on first error
-                eprintln!("FAILED");
+                let mut demoted = false;
+                if let Some(code) = error.teradata_error_code() {
+                    if let Some(&severity) = error_levels.get(&code) {
+                        if severity <= Severity::Warning {
+                            eprintln!("WARNING ([Error {}] {})", code, error);
+                            max_severity = std::cmp::max(max_severity, severity as u8);
+                            demoted = true;
+                        }
+                    }
+                }
 
-                let batch_error = BatchExecutionError::new(
-                    statement.clone(),
-                    error,
-                    successful_count,
-                    total_count,
-                );
+                if !demoted {
+                    // Fail-fast: stop on first error
+                    eprintln!("FAILED");
 
-                batch_result = Err(TqError::QueryExecution(batch_error.format_error()));
-                break;
+                    let batch_error = BatchExecutionError::new(
+                        statement.clone(),
+                        error,
+                        successful_count,
+                        total_count,
+                    );
+
+                    batch_result = Err(TqError::QueryExecution(batch_error.format_error()));
+                    break;
+                }
             }
         }
     }
@@ -444,7 +477,7 @@ fn execute_batch<W: Write>(
         match &batch_result {
             Ok(_) => {
                 if verbose {
-                    eprintln!("COMMIT (all statements succeeded)");
+                    eprintln!("COMMIT (all statements succeeded or warnings only)");
                 }
                 eprintln!("[Commit transaction]");
 
@@ -481,10 +514,14 @@ fn execute_batch<W: Write>(
 
     // Summary message
     if verbose {
-        eprintln!("\nAll {} statements executed successfully", total_count);
+        if max_severity > 0 {
+            eprintln!("\nBatch completed with warnings (highest severity: {})", max_severity);
+        } else {
+            eprintln!("\nAll {} statements executed successfully", total_count);
+        }
     }
 
-    Ok(())
+    Ok(max_severity)
 }
 
 /// Execute query and write to file atomically
@@ -503,7 +540,8 @@ pub fn execute_to_file<W: Write>(
     status_writer: &mut W,
     _use_color: bool,
     verbose: bool,
-) -> Result<()> {
+    error_levels: &HashMap<u32, Severity>,
+) -> Result<u8> {
     let output_path = args.output.as_ref().ok_or_else(|| {
         TqError::InternalError("execute_to_file called without output path".to_string())
     })?;
@@ -549,6 +587,8 @@ pub fn execute_to_file<W: Write>(
         .with_header(!args.no_header)
         .with_color(false);
 
+    let mut max_severity = 0;
+
     let row_count = if use_batch {
         // Execute batch and write to file
         let statements = parse_statements(&sql)
@@ -589,11 +629,28 @@ pub fn execute_to_file<W: Write>(
                     }
                 }
                 Err(error) => {
-                    if verbose {
-                        eprintln!("FAILED");
+                    let mut demoted = false;
+                    if let Some(code) = error.teradata_error_code() {
+                        if let Some(&severity) = error_levels.get(&code) {
+                            if severity <= Severity::Warning {
+                                if verbose {
+                                    eprintln!("WARNING ([Error {}] {})", code, error);
+                                } else {
+                                    eprintln!("Statement {}: WARNING ([Error {}] {})", statement.statement_number, code, error);
+                                }
+                                max_severity = std::cmp::max(max_severity, severity as u8);
+                                demoted = true;
+                            }
+                        }
                     }
-                    // Temp file will be automatically cleaned up when dropped
-                    return Err(error);
+
+                    if !demoted {
+                        if verbose {
+                            eprintln!("FAILED");
+                        }
+                        // Temp file will be automatically cleaned up when dropped
+                        return Err(error);
+                    }
                 }
             }
         }
@@ -617,10 +674,31 @@ pub fn execute_to_file<W: Write>(
             eprintln!("Executing query: {}", truncate_sql(trimmed_sql, 100));
         }
 
-        let result = if let Some(limit) = args.limit {
-            client.execute_with_limit(trimmed_sql, limit)?
+        let result_or_err = if let Some(limit) = args.limit {
+            client.execute_with_limit(trimmed_sql, limit)
         } else {
-            client.execute(trimmed_sql)?
+            client.execute(trimmed_sql)
+        };
+
+        let result = match result_or_err {
+            Ok(res) => res,
+            Err(err) => {
+                if let Some(code) = err.teradata_error_code() {
+                    if let Some(&severity) = error_levels.get(&code) {
+                        if severity <= Severity::Warning {
+                            eprintln!("Warning: [Error {}] {}", code, err);
+                            max_severity = severity as u8;
+                            crate::db::QueryResult::new(Vec::new(), Vec::new(), std::time::Duration::from_secs(0))
+                        } else {
+                            return Err(err);
+                        }
+                    } else {
+                        return Err(err);
+                    }
+                } else {
+                    return Err(err);
+                }
+            }
         };
 
         let rows = result.row_count;
@@ -661,7 +739,7 @@ pub fn execute_to_file<W: Write>(
         eprintln!("File written atomically ({} rows)", row_count);
     }
 
-    Ok(())
+    Ok(max_severity)
 }
 
 // ============================================================================

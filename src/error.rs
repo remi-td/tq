@@ -603,6 +603,132 @@ impl TqError {
             source: string_to_error(message.into()),
         }
     }
+
+    /// Get the numeric Teradata database error code if available
+    pub fn teradata_error_code(&self) -> Option<u32> {
+        match self {
+            TqError::QueryExecution(msg)
+            | TqError::PermissionDenied(msg) => extract_error_code(msg),
+            TqError::SqlSyntaxError { message, .. } => extract_error_code(message),
+            TqError::TableNotFound { .. } => Some(3807), // Teradata table not found is 3807
+            TqError::SessionModeTransactionError { error_code, .. } => *error_code,
+            _ => None,
+        }
+    }
+}
+
+/// BTEQ-compatible severity levels for error code overrides
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    Success = 0,
+    Warning = 4,
+    Error = 8,
+    Severe = 12,
+    Fatal = 16,
+}
+
+impl std::str::FromStr for Severity {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "success" | "0" => Ok(Severity::Success),
+            "warning" | "warn" | "4" => Ok(Severity::Warning),
+            "error" | "err" | "8" => Ok(Severity::Error),
+            "severe" | "12" => Ok(Severity::Severe),
+            "fatal" | "16" => Ok(Severity::Fatal),
+            _ => Err(format!(
+                "Invalid severity level '{}'. Supported: success, warning, error, severe, fatal",
+                s
+            )),
+        }
+    }
+}
+
+impl std::fmt::Display for Severity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Severity::Success => write!(f, "success"),
+            Severity::Warning => write!(f, "warning"),
+            Severity::Error => write!(f, "error"),
+            Severity::Severe => write!(f, "severe"),
+            Severity::Fatal => write!(f, "fatal"),
+        }
+    }
+}
+
+/// Extract Teradata error code from error message (e.g., "[Error 3706]" -> Some(3706))
+pub fn extract_error_code(error: &str) -> Option<u32> {
+    // Look for patterns like "[Error 3706]" or "Error 3706"
+    let patterns = ["[Error ", "Error "];
+
+    for pattern in patterns {
+        if let Some(start) = error.find(pattern) {
+            let after_pattern = &error[start + pattern.len()..];
+            // Find the end of the number (first non-digit or ']')
+            let end = after_pattern
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(after_pattern.len());
+            if end > 0 {
+                if let Ok(code) = after_pattern[..end].parse::<u32>() {
+                    return Some(code);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Parse errorlevel CLI arguments into a map of Teradata error code to Severity
+pub fn parse_errorlevel(args: &[String]) -> Result<std::collections::HashMap<u32, Severity>> {
+    let mut map = std::collections::HashMap::new();
+    let mut current_codes = Vec::new();
+
+    for arg in args {
+        let arg_lower = arg.to_lowercase();
+        match arg_lower.as_str() {
+            "warning" | "warn" | "4" => {
+                for code in current_codes.drain(..) {
+                    map.insert(code, Severity::Warning);
+                }
+            }
+            "error" | "err" | "8" => {
+                for code in current_codes.drain(..) {
+                    map.insert(code, Severity::Error);
+                }
+            }
+            "severe" | "12" => {
+                for code in current_codes.drain(..) {
+                    map.insert(code, Severity::Severe);
+                }
+            }
+            "fatal" | "16" => {
+                for code in current_codes.drain(..) {
+                    map.insert(code, Severity::Fatal);
+                }
+            }
+            _ => {
+                if let Ok(code) = arg.parse::<u32>() {
+                    current_codes.push(code);
+                } else {
+                    return Err(TqError::InvalidConfig(format!(
+                        "Invalid error level argument '{}'. Expected an error code (number) or a severity level (warning, error, severe, fatal)",
+                        arg
+                    )));
+                }
+            }
+        }
+    }
+
+    if !current_codes.is_empty() {
+        return Err(TqError::InvalidConfig(format!(
+            "Missing severity level for error code(s): {:?}",
+            current_codes
+        )));
+    }
+
+    Ok(map)
 }
 
 /// Helper to convert a string into a boxed error (for use in TqError variants)
@@ -930,5 +1056,73 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["error"]["code"], "AGENT_SAFE_MAX_ROWS");
         assert!(parsed["error"]["hint"].as_str().unwrap().contains("max-rows"));
+    }
+
+    #[test]
+    fn test_severity_parsing() {
+        use std::str::FromStr;
+        assert_eq!(Severity::from_str("warning").unwrap(), Severity::Warning);
+        assert_eq!(Severity::from_str("WARN").unwrap(), Severity::Warning);
+        assert_eq!(Severity::from_str("4").unwrap(), Severity::Warning);
+
+        assert_eq!(Severity::from_str("error").unwrap(), Severity::Error);
+        assert_eq!(Severity::from_str("err").unwrap(), Severity::Error);
+        assert_eq!(Severity::from_str("8").unwrap(), Severity::Error);
+
+        assert_eq!(Severity::from_str("severe").unwrap(), Severity::Severe);
+        assert_eq!(Severity::from_str("12").unwrap(), Severity::Severe);
+
+        assert_eq!(Severity::from_str("fatal").unwrap(), Severity::Fatal);
+        assert_eq!(Severity::from_str("16").unwrap(), Severity::Fatal);
+
+        assert!(Severity::from_str("invalid").is_err());
+    }
+
+    #[test]
+    fn test_parse_errorlevel() {
+        let args = vec![
+            "3120".to_string(),
+            "3802".to_string(),
+            "warning".to_string(),
+            "3523".to_string(),
+            "error".to_string(),
+        ];
+        let map = parse_errorlevel(&args).unwrap();
+        assert_eq!(map.len(), 3);
+        assert_eq!(map.get(&3120).unwrap(), &Severity::Warning);
+        assert_eq!(map.get(&3802).unwrap(), &Severity::Warning);
+        assert_eq!(map.get(&3523).unwrap(), &Severity::Error);
+
+        // Test invalid arg
+        let bad_args = vec!["3120".to_string(), "invalid".to_string()];
+        assert!(parse_errorlevel(&bad_args).is_err());
+
+        // Test missing severity
+        let missing_sev = vec!["3120".to_string()];
+        assert!(parse_errorlevel(&missing_sev).is_err());
+    }
+
+    #[test]
+    fn test_teradata_error_code_extraction() {
+        let err1 = TqError::QueryExecution("[Error 3802] Table already exists".into());
+        assert_eq!(err1.teradata_error_code(), Some(3802));
+
+        let err2 = TqError::SqlSyntaxError {
+            message: "Error 3706 Syntax error".into(),
+            query: None,
+        };
+        assert_eq!(err2.teradata_error_code(), Some(3706));
+
+        let err3 = TqError::TableNotFound {
+            table: "some_table".into(),
+        };
+        assert_eq!(err3.teradata_error_code(), Some(3807));
+
+        let err4 = TqError::SessionModeTransactionError {
+            operation: "COMMIT".into(),
+            error_code: Some(3932),
+            original_message: "not active".into(),
+        };
+        assert_eq!(err4.teradata_error_code(), Some(3932));
     }
 }

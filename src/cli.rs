@@ -193,6 +193,15 @@ pub struct GlobalOpts {
     )]
     pub color: ColorChoice,
 
+    /// Override severity levels for specific Teradata error codes
+    ///
+    /// Format: --errorlevel CODE [CODE...] SEVERITY
+    /// Examples:
+    ///   --errorlevel 3120 3802 warning
+    ///   --errorlevel 3523 error --errorlevel 3802 warning
+    #[arg(long, num_args = 2.., action = clap::ArgAction::Append, global = true, value_name = "ARGS")]
+    pub errorlevel: Vec<String>,
+
     /// YAML parameter file(s) for variable substitution in SQL
     ///
     /// Load variables from YAML files. Variables in SQL are referenced

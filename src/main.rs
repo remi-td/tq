@@ -37,7 +37,7 @@ fn main() -> ExitCode {
 
     // Run the application
     match run(cli) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(exit_code) => ExitCode::from(exit_code),
         Err(e) => {
             if is_json_format {
                 // Structured JSON error to stdout (for agent consumption)
@@ -57,7 +57,7 @@ fn main() -> ExitCode {
 }
 
 /// Main application logic
-fn run(cli: Cli) -> Result<()> {
+fn run(cli: Cli) -> Result<u8> {
     // Load configuration from files and environment
     let config = Config::load().unwrap_or_else(|e| {
         log::warn!("Failed to load config: {}. Using defaults.", e);
@@ -67,16 +67,22 @@ fn run(cli: Cli) -> Result<()> {
     // Handle commands that don't require database connection
     match &cli.command {
         Command::Help(args) => {
-            return handle_help(args);
+            handle_help(args)?;
+            return Ok(0);
         }
         Command::Profiles => {
-            return handle_profiles(&config);
+            handle_profiles(&config)?;
+            return Ok(0);
         }
         Command::Profile(action) => {
-            return commands::profile::execute(action, &config);
+            commands::profile::execute(action, &config)?;
+            return Ok(0);
         }
         _ => {}
     }
+
+    // Parse error level overrides from CLI
+    let error_levels = tq::error::parse_errorlevel(&cli.global.errorlevel)?;
 
     // Build ParamStore from --params flag(s)
     let param_store = build_param_store(&cli.global.params)?;
@@ -105,33 +111,34 @@ fn run(cli: Cli) -> Result<()> {
     let verbose = cli.global.verbose > 0;
 
     // Execute database commands
-    match cli.command {
+    let exit_code = match cli.command {
         Command::Ping(args) => {
             let mut stdout = io::stdout();
             commands::ping(&client, &args, &mut stdout, verbose)?;
+            0
         }
         Command::Query(args) => {
             if args.output.is_some() {
                 // Write to file
                 let mut stderr = io::stderr();
                 commands::query::execute_to_file(
-                    &client, &args, Some(&param_store), &mut stderr, use_color, verbose,
-                )?;
+                    &client, &args, Some(&param_store), &mut stderr, use_color, verbose, &error_levels,
+                )?
             } else {
                 // Write to stdout
                 let mut stdout = io::stdout();
                 commands::query::execute(
-                    &client, &args, Some(&param_store), &mut stdout, use_color, verbose,
-                )?;
+                    &client, &args, Some(&param_store), &mut stdout, use_color, verbose, &error_levels,
+                )?
             }
         }
         Command::Repl(args) => {
             let mut stdout = io::stdout();
-            // Sprint 7: Pass ownership of client to REPL for /logon support
-            // Sprint 40: Pass param_store for variable substitution
+            // Pass parsed error levels to the REPL
             commands::repl::execute(
-                client, &args, Some(param_store), &mut stdout, use_color, verbose,
+                client, &args, Some(param_store), &mut stdout, use_color, verbose, error_levels,
             )?;
+            0
         }
         // Sprint 26: Sessions command for system monitoring
         Command::Sessions(args) => {
@@ -147,6 +154,7 @@ fn run(cli: Cli) -> Result<()> {
                 let mut stdout = io::stdout();
                 commands::sessions(&client, &args, &mut stdout, use_color)?;
             }
+            0
         }
         // Sprint 33: Sample command for random data sampling
         Command::Sample(args) => {
@@ -158,6 +166,7 @@ fn run(cli: Cli) -> Result<()> {
                 let mut stdout = io::stdout();
                 commands::sample(&client, &args, &mut stdout, use_color)?;
             }
+            0
         }
         // Sprint 33: Peek command for data preview with column metadata
         Command::Peek(args) => {
@@ -169,6 +178,7 @@ fn run(cli: Cli) -> Result<()> {
                 let mut stdout = io::stdout();
                 commands::peek(&client, &args, &mut stdout, use_color)?;
             }
+            0
         }
         // Sprint 38: Sysconfig command for system topology
         Command::Sysconfig(args) => {
@@ -180,6 +190,7 @@ fn run(cli: Cli) -> Result<()> {
                 let mut stdout = io::stdout();
                 commands::sysconfig(&client, &args, &mut stdout, use_color)?;
             }
+            0
         }
         // Sprint 38: Locks command for lock contention analysis
         Command::Locks(args) => {
@@ -195,6 +206,7 @@ fn run(cli: Cli) -> Result<()> {
                 let mut stdout = io::stdout();
                 commands::locks(&client, &args, &mut stdout, use_color)?;
             }
+            0
         }
         // Sprint 39: Query inspection for session drill-down
         Command::QueryInspect(args) => {
@@ -206,6 +218,7 @@ fn run(cli: Cli) -> Result<()> {
                 let mut stdout = io::stdout();
                 commands::query_inspect(&client, &args, &mut stdout, use_color)?;
             }
+            0
         }
         // Sprint 45: Inspect command for object metadata
         Command::Inspect(args) => {
@@ -217,6 +230,7 @@ fn run(cli: Cli) -> Result<()> {
                 let mut stdout = io::stdout();
                 commands::inspect::execute(&client, &args.object, args.format, &mut stdout, use_color)?;
             }
+            0
         }
         // Sprint 46: List command
         Command::List(ref args) => {
@@ -228,6 +242,7 @@ fn run(cli: Cli) -> Result<()> {
                 let mut stdout = io::stdout();
                 commands::list::execute(&client, args, &mut stdout, use_color)?;
             }
+            0
         }
         // Sprint 55: Search command for cross-database discovery
         Command::Search(ref args) => {
@@ -239,6 +254,7 @@ fn run(cli: Cli) -> Result<()> {
                 let mut stdout = io::stdout();
                 commands::search::execute(&client, args, &mut stdout, use_color)?;
             }
+            0
         }
         // Sprint 46: Show-indexes command
         Command::ShowIndexes(args) => {
@@ -250,6 +266,7 @@ fn run(cli: Cli) -> Result<()> {
                 let mut stdout = io::stdout();
                 commands::show_indexes::execute(&client, &args.table, args.format, &mut stdout, use_color)?;
             }
+            0
         }
         // Sprint 49: Abort command for session control
         Command::Abort(args) => {
@@ -261,6 +278,7 @@ fn run(cli: Cli) -> Result<()> {
                 let mut stdout = io::stdout();
                 commands::abort(&client, &args, &mut stdout, use_color)?;
             }
+            0
         }
         // Sprint 50: Explain command for query analysis
         Command::Explain(args) => {
@@ -272,6 +290,7 @@ fn run(cli: Cli) -> Result<()> {
                 let mut stdout = io::stdout();
                 commands::explain(&client, &args, &mut stdout, use_color)?;
             }
+            0
         }
         // Sprint 51: Session history command
         Command::History(args) => {
@@ -283,6 +302,7 @@ fn run(cli: Cli) -> Result<()> {
                 let mut stdout = io::stdout();
                 commands::history(&client, &args, &mut stdout, use_color)?;
             }
+            0
         }
         // Sprint 50: Skew command for AMP resource analysis
         Command::Skew(args) => {
@@ -294,6 +314,7 @@ fn run(cli: Cli) -> Result<()> {
                 let mut stdout = io::stdout();
                 commands::skew(&client, &args, &mut stdout, use_color)?;
             }
+            0
         }
         // Resources command for PMON resource monitoring
         Command::Resources(args) => {
@@ -309,6 +330,7 @@ fn run(cli: Cli) -> Result<()> {
                 let mut stdout = io::stdout();
                 commands::resources(&client, &args, &mut stdout, use_color)?;
             }
+            0
         }
         // Sprint 61: Logoff idle sessions
         Command::LogoffIdle(args) => {
@@ -320,12 +342,13 @@ fn run(cli: Cli) -> Result<()> {
                 let mut stdout = io::stdout();
                 commands::logoff_idle(&client, &args, &mut stdout, use_color)?;
             }
+            0
         }
         // Help, Profiles, and Profile already handled above
         Command::Help(_) | Command::Profiles | Command::Profile(_) => unreachable!(),
-    }
+    };
 
-    Ok(())
+    Ok(exit_code)
 }
 
 /// Handle the help command
