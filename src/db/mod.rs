@@ -12,7 +12,7 @@ pub mod metadata;
 pub mod types;
 
 // Re-export commonly used types
-pub use client::DatabaseClient;
+pub use client::{DatabaseClient, FastloadOptions};
 pub use connection::{parse_duration, ConnectionConfig};
 pub use metadata::{ColumnInfo, MetadataCache, TableInfo};
 pub use types::{Alignment, ColumnMetadata, QueryResult, Row, TeradataType, Value};

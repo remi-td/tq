@@ -601,6 +601,220 @@ impl DatabaseClient {
             TqError::QueryExecution(clean_error)
         }
     }
+
+    /// Retrieve warnings or errors using an escape query (e.g. teradata_get_warnings or teradata_get_errors)
+    fn get_warnings_or_errors(&self, u_log: u64, conn_handle: u64, escape_fn: &str) -> Result<Vec<String>> {
+        let rows_handle = match teradatarustapi::rustgo_create_rows_wrapper(u_log, conn_handle, escape_fn, "null") {
+            Ok(h) => h,
+            Err(e) => {
+                log::warn!("Failed to query escape function {}: {}", escape_fn, e);
+                return Ok(Vec::new());
+            }
+        };
+
+        let mut messages = Vec::new();
+        while let Ok(Some(row_json)) = teradatarustapi::rustgo_fetch_row_wrapper(u_log, rows_handle) {
+            if let Ok(values) = serde_json::from_str::<serde_json::Value>(&row_json) {
+                if let Some(arr) = values.as_array() {
+                    for val in arr {
+                        if let Some(s) = val.as_str() {
+                            if !s.trim().is_empty() {
+                                messages.push(s.to_string());
+                            }
+                        }
+                    }
+                } else if let Some(s) = values.as_str() {
+                    if !s.trim().is_empty() {
+                        messages.push(s.to_string());
+                    }
+                }
+            }
+        }
+
+        let _ = teradatarustapi::go_close_rows_wrapper(u_log, rows_handle);
+        Ok(messages)
+    }
+}
+
+/// Options for FastLoad execution
+pub struct FastloadOptions<'a> {
+    pub sessions: Option<usize>,
+    pub error_db: Option<&'a str>,
+    pub err1_suffix: &'a str,
+    pub err2_suffix: &'a str,
+}
+
+impl DatabaseClient {
+    /// FastLoad CSV data into an empty permanent Teradata table in parallel
+    pub fn fastload(
+        &self,
+        csv_path: &Path,
+        target_table: &str,
+        columns: &[String],
+        options: &FastloadOptions,
+    ) -> Result<(usize, Vec<String>, Vec<String>)> {
+        log::info!("Starting FastLoad of {} into {}", csv_path.display(), target_table);
+
+        // Establish connection
+        let connection_string = self.config.to_json_string();
+        let (u_log, conn_handle) = teradatarustapi::create_connection(&connection_string)
+            .map_err(|e| self.map_connection_error(&e))?;
+
+        // Disable autocommit
+        if let Err(e) = teradatarustapi::set_autocommit(u_log, conn_handle, false) {
+            let _ = teradatarustapi::go_close_connection_wrapper(u_log, conn_handle);
+            return Err(TqError::QueryExecution(format!("Failed to disable autocommit: {}", e)));
+        }
+
+        // Construct INSERT statement with escape functions prepended
+        let mut prefix = String::new();
+        prefix.push_str("{fn teradata_require_fastload}");
+        if let Some(s) = options.sessions {
+            prefix.push_str(&format!("{{fn teradata_sessions({})}}", s));
+        }
+        if let Some(db) = options.error_db {
+            prefix.push_str(&format!("{{fn teradata_error_table_database({})}}", db));
+        }
+        if !options.err1_suffix.is_empty() {
+            prefix.push_str(&format!("{{fn teradata_error_table_1_suffix({})}}", options.err1_suffix));
+        }
+        if !options.err2_suffix.is_empty() {
+            prefix.push_str(&format!("{{fn teradata_error_table_2_suffix({})}}", options.err2_suffix));
+        }
+        prefix.push_str(&format!("{{fn teradata_read_csv({})}}", csv_path.to_string_lossy()));
+
+        let col_names = columns.join(", ");
+        let placeholders = vec!["?"; columns.len()].join(", ");
+        let sql = format!(
+            "{}INSERT INTO {} ({}) VALUES ({})",
+            prefix, target_table, col_names, placeholders
+        );
+
+        log::debug!("FastLoad SQL: {}", sql);
+
+        // Execute load
+        let result = teradatarustapi::rustgo_create_rows_wrapper(u_log, conn_handle, &sql, "null");
+
+        let mut warnings = Vec::new();
+        let mut errors = Vec::new();
+
+        let rows_handle = match result {
+            Ok(h) => h,
+            Err(e) => {
+                // Read load-time errors/warnings before rolling back
+                warnings.extend(self.get_warnings_or_errors(u_log, conn_handle, "{fn teradata_nativesql}{fn teradata_get_warnings}")?);
+                errors.extend(self.get_warnings_or_errors(u_log, conn_handle, "{fn teradata_nativesql}{fn teradata_get_errors}")?);
+
+                // Rollback transaction
+                let _ = teradatarustapi::rollback(u_log, conn_handle);
+                let _ = teradatarustapi::go_close_connection_wrapper(u_log, conn_handle);
+
+                return Err(TqError::QueryExecution(format!(
+                    "FastLoad failed: {}. Warnings: {:?}. Errors: {:?}",
+                    strip_go_stack_trace(&e),
+                    warnings,
+                    errors
+                )));
+            }
+        };
+
+        // Close rows handle representing the INSERT result
+        let _ = teradatarustapi::go_close_rows_wrapper(u_log, rows_handle);
+
+        // Read warnings and errors from the load request itself
+        warnings.extend(self.get_warnings_or_errors(u_log, conn_handle, "{fn teradata_nativesql}{fn teradata_get_warnings}")?);
+        errors.extend(self.get_warnings_or_errors(u_log, conn_handle, "{fn teradata_nativesql}{fn teradata_get_errors}")?);
+
+        // Commit or Rollback transaction based on errors
+        let commit_res = if errors.is_empty() {
+            teradatarustapi::commit(u_log, conn_handle)
+        } else {
+            let _ = teradatarustapi::rollback(u_log, conn_handle);
+            Err("FastLoad had data errors, rolled back transaction".to_string())
+        };
+
+        // Fetch post-commit warnings and errors (Error Table 2)
+        warnings.extend(self.get_warnings_or_errors(u_log, conn_handle, "{fn teradata_nativesql}{fn teradata_get_warnings}")?);
+        errors.extend(self.get_warnings_or_errors(u_log, conn_handle, "{fn teradata_nativesql}{fn teradata_get_errors}")?);
+
+        // Close connection
+        let _ = teradatarustapi::go_close_connection_wrapper(u_log, conn_handle);
+
+        match commit_res {
+            Ok(_) => {
+                if !errors.is_empty() {
+                    Err(TqError::QueryExecution(format!(
+                        "FastLoad failed with post-commit errors: {:?}",
+                        errors
+                    )))
+                } else {
+                    // Count records in the CSV file
+                    let file_rows = match csv::Reader::from_path(csv_path) {
+                        Ok(mut rdr) => rdr.records().count(),
+                        Err(_) => 0,
+                    };
+                    Ok((file_rows, warnings, errors))
+                }
+            }
+            Err(e) => Err(TqError::QueryExecution(format!(
+                "FastLoad commit failed: {}. Warnings: {:?}. Errors: {:?}",
+                e, warnings, errors
+            ))),
+        }
+    }
+
+    /// FastExport data from a Teradata table/view directly to a CSV file in parallel
+    pub fn fastexport(
+        &self,
+        source_table: &str,
+        target_path: &Path,
+        sessions: Option<usize>,
+    ) -> Result<usize> {
+        log::info!("Starting FastExport from {} to {}", source_table, target_path.display());
+
+        // Establish connection
+        let connection_string = self.config.to_json_string();
+        let (u_log, conn_handle) = teradatarustapi::create_connection(&connection_string)
+            .map_err(|e| self.map_connection_error(&e))?;
+
+        // Prepend fastexport and write_csv escape functions to query
+        let mut prefix = String::new();
+        prefix.push_str("{fn teradata_require_fastexport}");
+        if let Some(s) = sessions {
+            prefix.push_str(&format!("{{fn teradata_sessions({})}}", s));
+        }
+        prefix.push_str(&format!("{{fn teradata_write_csv({})}}", target_path.to_string_lossy()));
+
+        let sql = format!("{}SELECT * FROM {}", prefix, source_table);
+        log::debug!("FastExport SQL: {}", sql);
+
+        // Execute query
+        let rows_handle = match teradatarustapi::rustgo_create_rows_wrapper(u_log, conn_handle, &sql, "null") {
+            Ok(h) => h,
+            Err(e) => {
+                let _ = teradatarustapi::go_close_connection_wrapper(u_log, conn_handle);
+                return Err(self.map_query_error(&e, &sql));
+            }
+        };
+
+        // Call rustgo_result_metadata_wrapper to get the activity_count (number of rows exported)
+        let (activity_count, _, _, _) = match teradatarustapi::rustgo_result_metadata_wrapper(u_log, rows_handle) {
+            Ok(meta) => meta,
+            Err(e) => {
+                let _ = teradatarustapi::go_close_rows_wrapper(u_log, rows_handle);
+                let _ = teradatarustapi::go_close_connection_wrapper(u_log, conn_handle);
+                return Err(TqError::MetadataFetch(e.to_string()));
+            }
+        };
+
+        // Close rows
+        let _ = teradatarustapi::go_close_rows_wrapper(u_log, rows_handle);
+
+        // Close connection
+        let _ = teradatarustapi::go_close_connection_wrapper(u_log, conn_handle);
+
+        Ok(activity_count as usize)
+    }
 }
 
 /// Check if the error is a transaction control error due to session mode limitations

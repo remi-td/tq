@@ -590,13 +590,25 @@ All core features are complete and tested.
 
 ---
 
+## Bulk Loading & Exporting
+
+| Feature | Status | Spec Reference | Since |
+|---------|--------|----------------|-------|
+| `tq fastload` (batch bulk loading) | ✅ v1.54.0 | [CLI Interface](../specifications/cli-interface.md#fastload---bulk-load-data-fastload) | v1.54.0 (Sprint 73) |
+| `tq fastexport` (batch bulk exporting) | ✅ v1.54.0 | [CLI Interface](../specifications/cli-interface.md#fastexport---bulk-export-data-fastexport) | v1.54.0 (Sprint 73) |
+| Format Auto-Detection (CSV, Parquet, JSON) | ✅ v1.54.0 | [CLI Interface](../specifications/cli-interface.md#fastload---bulk-load-data-fastload) | v1.54.0 (Sprint 73) |
+| Lazy-Load Table Creation | ✅ v1.54.0 | [CLI Interface](../specifications/cli-interface.md#fastload---bulk-load-data-fastload) | v1.54.0 (Sprint 73) |
+| Streaming Convert to CSV | ✅ v1.54.0 | [CLI Interface](../specifications/cli-interface.md#fastload---bulk-load-data-fastload) | v1.54.0 (Sprint 73) |
+
+---
+
 ## Summary Statistics
 
-- **Total Features**: 129
-- **Implemented**: 129 (100%)
+- **Total Features**: 134
+- **Implemented**: 134 (100%)
 - **Planned**: 0 (0%)
-- **Test Pass Rate**: 100% (1058 unit tests pass, 92 integration tests pass)
-- **Latest Sprint**: Sprint 63 - Pager Exit Snapshot
+- **Test Pass Rate**: 100% (1182 unit tests pass, 95 integration tests pass)
+- **Latest Sprint**: Sprint 73 - FastLoad & FastExport
 
 ---
 

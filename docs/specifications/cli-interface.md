@@ -21,6 +21,8 @@
    - [list - List Database Objects](#list---list-database-objects)
    - [search - Search Across Databases](#search---search-across-databases)
    - [show-indexes - Show Table Index Structure](#show-indexes---show-table-index-structure)
+   - [fastload - Bulk Load Data (FastLoad)](#fastload---bulk-load-data-fastload)
+   - [fastexport - Bulk Export Data (FastExport)](#fastexport---bulk-export-data-fastexport)
    - [profiles - List Connection Profiles](#profiles---list-connection-profiles)
    - [profile - Manage Connection Profiles](#profile---manage-connection-profiles)
 6. [Input/Output Behavior](#inputoutput-behavior)
@@ -61,6 +63,8 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 - `list` - List database objects: `databases`, `tables [pattern]`, `views`
 - `search` - Search for objects across all accessible databases: `tables <keyword>`, `columns <keyword>`, `views <keyword>`, `procedures <keyword>`
 - `show-indexes` - Show index structure for a table
+- `fastload` - Bulk load CSV, Parquet, or JSON files into a table in parallel
+- `fastexport` - Bulk export a table or query directly to a CSV file in parallel
 - `profiles` - List connection profiles
 - `profile` - Manage connection profiles (add, edit, delete, list)
 
@@ -3367,6 +3371,58 @@ tq show-indexes --format json production.orders | \
 - Execute `tq show-indexes <nonexistent>` and verify not-found error (exit code 1)
 - Verify composite index columns are listed in correct order in all output formats
 - Execute `tq show-indexes --output indexes.txt <table>` and verify file is created with correct content
+
+---
+
+### fastload - Bulk Load Data (FastLoad)
+
+**Purpose**: Bulk load large datasets into an empty permanent Teradata table in parallel using the FastLoad protocol.
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] fastload [OPTIONS] <SOURCE_FILE> <TARGET_TABLE>
+```
+
+**Options**:
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--source-format` | - | enum | auto-detect | Source format: `csv`, `parquet`, `json` |
+| `--no-create` | - | flag | false | Disable automatic table creation if it does not exist |
+| `--sessions` | - | int | database choice | Number of parallel data transfer connections |
+| `--error-table-db` | - | string | target db | Database where the FastLoad error tables should reside |
+| `--error-table-1-suffix` | - | string | `_ERR_1` | Suffix for FastLoad Error Table 1 |
+| `--error-table-2-suffix` | - | string | `_ERR_2` | Suffix for FastLoad Error Table 2 |
+
+**Behavior Requirements**:
+1. **Parallel Execution**: Opens multiple parallel data transfer connections matching the sessions parameter (capped at the number of AMPs).
+2. **Lazy-Load Creation**: If the target table does not exist and `--no-create` is not set, checks the schema of the source file (CSV headers, Parquet metadata, or first JSON object properties) and automatically issues a `CREATE TABLE` statement with permissive `VARCHAR(1000)` columns (or type-mapped columns for Parquet) before loading.
+3. **Transaction Control**: Disables auto-commit before starting FastLoad. Performs all batch insertions under a transaction. If successful, issues `COMMIT`; if any data error or driver failure occurs, issues `ROLLBACK` and cleans up error tables.
+4. **Format Auto-Detection**: Infers the source format from the file extension (`.csv`, `.parquet`, `.json`, `.ndjson`). Override using `--source-format`.
+5. **Streaming/Conversion**:
+   - CSV: Streams directly to the driver using native `{fn teradata_read_csv}`.
+   - Parquet/JSON: Streamingly converts records to a temporary CSV file on disk, then loads the CSV natively. Memory usage must remain constant regardless of file size.
+6. **Error Reporting**: Inspects and prints FastLoad warnings and errors (from Error Table 1 and 2) using `{fn teradata_get_warnings}` and `{fn teradata_get_errors}`.
+
+---
+
+### fastexport - Bulk Export Data (FastExport)
+
+**Purpose**: Bulk export large datasets from a Teradata table or view to a CSV file in parallel using the FastExport protocol.
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] fastexport [OPTIONS] <SOURCE_TABLE> <TARGET_FILE>
+```
+
+**Options**:
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--sessions` | - | int | database choice | Number of parallel data transfer connections |
+
+**Behavior Requirements**:
+1. **Parallel Extraction**: Opens multiple parallel connections to download the table in chunks.
+2. **Native CSV Writing**: Uses driver-native `{fn teradata_write_csv}` and `{fn teradata_require_fastexport}` to stream the query results directly to the target CSV file, bypassing local memory caching.
+3. **Progress Reporting**: Prints the number of rows exported (from `activity_count` in metadata) and the elapsed time on completion.
 
 ---
 

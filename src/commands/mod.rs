@@ -26,6 +26,8 @@ pub mod show_indexes;
 pub mod skew;
 pub mod sysconfig;
 pub mod watch;
+pub mod fastload;
+pub mod fastexport;
 
 pub use abort::execute as abort;
 pub use explain::execute as explain;
@@ -41,3 +43,5 @@ pub use sessions::execute as sessions;
 pub use skew::execute as skew;
 pub use logoff_idle::execute as logoff_idle;
 pub use sysconfig::execute as sysconfig;
+pub use fastload::execute as fastload;
+pub use fastexport::execute as fastexport;

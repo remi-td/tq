@@ -879,3 +879,32 @@ Unit tests for `handle_delete` run in non-TTY mode (piped stdin), so the existin
 - **Health check customization**: User-defined validation queries
 - **Session variable setting**: Execute SQL on connection
 - **Connection logging**: Detailed diagnostics for troubleshooting
+
+## Parallel Data Loading (FastLoad) & Exporting (FastExport)
+
+### FastLoad Connection Flow
+
+FastLoad is designed for parallel bulk data loading. To manage resources efficiently, the connection flow must follow these precise requirements:
+
+1. **Disable Auto-Commit**: Turn off autocommit on the connection prior to initiating FastLoad.
+2. **Escape SQL Request**: Prepend `{fn teradata_require_fastload}{fn teradata_read_csv(csv_path)}` to the `INSERT` SQL statement. The driver parses these escape functions, dynamically opens auxiliary data transfer connections (up to the number of AMPs), and streams the CSV file directly from disk.
+3. **Error Table Configuration**: Optional suffixes can be specified using `{fn teradata_error_table_1_suffix(suffix)}` and similar functions.
+4. **Execution and Error Retrieval**:
+   - Call `rustgo_create_rows_wrapper` to run the load.
+   - Immediately execute a query containing `{fn teradata_nativesql}{fn teradata_get_warnings}` to fetch load-time warnings.
+   - Execute `{fn teradata_nativesql}{fn teradata_get_errors}` to check for load-time errors from Error Table 1.
+5. **Session Termination**:
+   - If there were no critical errors, execute `{fn teradata_commit}` (commit transaction).
+   - If a failure occurred, execute `{fn teradata_rollback}` (rollback transaction).
+   - After commit or rollback, check `{fn teradata_nativesql}{fn teradata_get_warnings}` and `{fn teradata_nativesql}{fn teradata_get_errors}` again (to check for duplicate keys or unique index violations from Error Table 2).
+   - Clean up/drop the error tables.
+
+### FastExport Connection Flow
+
+FastExport downloads table data in parallel via multiple transfer connections.
+
+1. **Escape Query**: Prepend `{fn teradata_require_fastexport}{fn teradata_write_csv(target_path)}` to the `SELECT` query.
+2. **Execution**: Execute the query using `rustgo_create_rows_wrapper`. The driver opens auxiliary connections to stream records directly to the file.
+3. **Retrieving Row Count**: Call `rustgo_result_metadata_wrapper` to read the `activity_count`, which indicates the total number of records successfully written to the CSV file.
+4. **Cleanup**: Call `go_close_rows_wrapper` to release connection resources.
+

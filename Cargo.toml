@@ -1,6 +1,6 @@
 [package]
 name = "tq"
-version = "1.52.0"
+version = "1.54.0"
 edition = "2021"
 authors = ["Teradata Query Contributors"]
 description = "A fast, lightweight command-line client for Teradata databases"
@@ -45,6 +45,9 @@ base64 = "0.22"
 
 # File operations
 tempfile = "3.10"
+parquet = { version = "59.1.0", features = ["arrow"] }
+arrow-csv = "59.1.0"
+arrow = "59.1.0"
 
 # Platform-specific: stdout suppression for metadata queries (Sprint 19)
 [target.'cfg(unix)'.dependencies]

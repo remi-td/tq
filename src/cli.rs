@@ -397,6 +397,25 @@ pub enum Command {
     ///          tq logoff-idle --force --older-than 2h
     #[command(name = "logoff-idle")]
     LogoffIdle(LogoffIdleArgs),
+
+    /// Bulk load data into an empty Teradata table in parallel (FastLoad)
+    ///
+    /// FastLoad transfers data in parallel over multiple connections.
+    /// It can only load into an empty permanent table.
+    ///
+    /// Source file can be CSV, Parquet, or JSON.
+    ///
+    /// Example: tq fastload data.csv my_db.my_table
+    Fastload(FastloadArgs),
+
+    /// Bulk export data from a Teradata table in parallel (FastExport)
+    ///
+    /// FastExport transfers data in parallel over multiple connections.
+    ///
+    /// Destination file is exported in CSV format.
+    ///
+    /// Example: tq fastexport my_db.my_table data.csv
+    Fastexport(FastexportArgs),
 }
 
 impl Command {
@@ -422,7 +441,7 @@ impl Command {
             Command::History(a) => Some(a.format),
             Command::Resources(a) => Some(a.format),
             Command::LogoffIdle(a) => Some(a.format),
-            Command::Ping(_) | Command::Repl(_) | Command::Help(_) | Command::Profiles | Command::Profile(_) => None,
+            Command::Fastload(_) | Command::Fastexport(_) | Command::Ping(_) | Command::Repl(_) | Command::Help(_) | Command::Profiles | Command::Profile(_) => None,
         }
     }
 }
@@ -1497,6 +1516,69 @@ pub enum EditorMode {
     Vi,
 }
 
+/// Arguments for the fastload command
+#[derive(Parser, Debug)]
+pub struct FastloadArgs {
+    /// Path to the source file (CSV, Parquet, or JSON)
+    #[arg(value_name = "SOURCE_FILE")]
+    pub source_file: std::path::PathBuf,
+
+    /// Target table name (e.g. database.table or table)
+    #[arg(value_name = "TARGET_TABLE")]
+    pub target_table: String,
+
+    /// Force a specific source file format
+    #[arg(long, value_name = "FORMAT", value_enum)]
+    pub source_format: Option<SourceFormat>,
+
+    /// Disable automatic table creation if it does not exist
+    #[arg(long)]
+    pub no_create: bool,
+
+    /// Number of parallel data transfer connections (default: let database choose)
+    #[arg(long, value_name = "N")]
+    pub sessions: Option<usize>,
+
+    /// Database name for FastLoad error tables
+    #[arg(long, value_name = "DB")]
+    pub error_table_db: Option<String>,
+
+    /// Suffix for FastLoad Error Table 1
+    #[arg(long, value_name = "SUFFIX", default_value = "_ERR_1")]
+    pub error_table_1_suffix: String,
+
+    /// Suffix for FastLoad Error Table 2
+    #[arg(long, value_name = "SUFFIX", default_value = "_ERR_2")]
+    pub error_table_2_suffix: String,
+}
+
+/// Supported source file formats for FastLoad
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SourceFormat {
+    /// Comma-separated values
+    Csv,
+    /// Apache Parquet
+    Parquet,
+    /// JSON array of objects or NDJSON
+    Json,
+}
+
+/// Arguments for the fastexport command
+#[derive(Parser, Debug)]
+pub struct FastexportArgs {
+    /// Source table or view name (e.g. database.table or table)
+    #[arg(value_name = "SOURCE_TABLE")]
+    pub source_table: String,
+
+    /// Path to the destination CSV file
+    #[arg(value_name = "TARGET_FILE")]
+    pub target_file: std::path::PathBuf,
+
+    /// Number of parallel data transfer connections (default: let database choose)
+    #[arg(long, value_name = "N")]
+    pub sessions: Option<usize>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2324,5 +2406,59 @@ mod tests {
         assert_eq!(OutputFormat::Csv.to_string(), "csv");
         assert_eq!(OutputFormat::Markdown.to_string(), "markdown");
         assert_eq!(OutputFormat::Md.to_string(), "markdown");
+    }
+
+    #[test]
+    fn test_cli_fastload_basic() {
+        let args = vec!["tq", "fastload", "data.csv", "mydb.mytable"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Fastload(args) = cli.command {
+            assert_eq!(args.source_file, std::path::PathBuf::from("data.csv"));
+            assert_eq!(args.target_table, "mydb.mytable");
+            assert_eq!(args.source_format, None);
+            assert!(!args.no_create);
+            assert_eq!(args.sessions, None);
+        } else {
+            panic!("Expected Fastload command");
+        }
+    }
+
+    #[test]
+    fn test_cli_fastload_with_options() {
+        let args = vec![
+            "tq", "fastload", "data.json", "mytable",
+            "--source-format", "json",
+            "--no-create",
+            "--sessions", "4",
+            "--error-table-db", "errdb",
+            "--error-table-1-suffix", "_err1",
+            "--error-table-2-suffix", "_err2"
+        ];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Fastload(args) = cli.command {
+            assert_eq!(args.source_file, std::path::PathBuf::from("data.json"));
+            assert_eq!(args.target_table, "mytable");
+            assert_eq!(args.source_format, Some(SourceFormat::Json));
+            assert!(args.no_create);
+            assert_eq!(args.sessions, Some(4));
+            assert_eq!(args.error_table_db, Some("errdb".to_string()));
+            assert_eq!(args.error_table_1_suffix, "_err1");
+            assert_eq!(args.error_table_2_suffix, "_err2");
+        } else {
+            panic!("Expected Fastload command");
+        }
+    }
+
+    #[test]
+    fn test_cli_fastexport_basic() {
+        let args = vec!["tq", "fastexport", "mydb.mytable", "data.csv"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::Fastexport(args) = cli.command {
+            assert_eq!(args.source_table, "mydb.mytable");
+            assert_eq!(args.target_file, std::path::PathBuf::from("data.csv"));
+            assert_eq!(args.sessions, None);
+        } else {
+            panic!("Expected Fastexport command");
+        }
     }
 }

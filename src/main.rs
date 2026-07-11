@@ -344,6 +344,16 @@ fn run(cli: Cli) -> Result<u8> {
             }
             0
         }
+        // Sprint 73: Fastload bulk loader
+        Command::Fastload(args) => {
+            commands::fastload::execute(&client, &args)?;
+            0
+        }
+        // Sprint 73: Fastexport bulk exporter
+        Command::Fastexport(args) => {
+            commands::fastexport::execute(&client, &args)?;
+            0
+        }
         // Help, Profiles, and Profile already handled above
         Command::Help(_) | Command::Profiles | Command::Profile(_) => unreachable!(),
     };
