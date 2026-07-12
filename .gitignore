@@ -38,3 +38,13 @@ tests/results/
 
 # Claude agent working files
 .claude/*.txt
+
+# Evaluation framework files
+tests/eval_test/.env
+tests/eval_test/.venv/
+tests/eval_test/results/
+tests/eval_test/.deepeval/
+.pytest_cache/
+tests/eval_test/**/.pytest_cache/
+__pycache__/
+tests/eval_test/**/__pycache__/

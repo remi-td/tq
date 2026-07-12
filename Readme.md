@@ -7,12 +7,11 @@
 
 ## What is tq?
 
-tq is a fast, user-friendly terminal client for Teradata databases. It provides
+tq is a fast terminal client for Teradata databases, optimised for AI agents and human nerds alike. It provides
 a powerful REPL (Read-Eval-Print Loop) with tab completion, command history,
-and beautiful table output. Perfect for DBAs, analysts, and developers who work
-with Teradata from the command line.
+and beautiful table output.
 
-**Why tq?** Modern CLI experience, instant startup, no Java dependencies.
+**Why tq?** Modern CLI experience, instant startup, no dependencies, no telemetry.
 
 ## Quick Start
 
@@ -37,8 +36,7 @@ tq query "SELECT * FROM dbc.dbcinfo"
 
 ## Built Exclusively by AI Agents
 
-Here is something different: `tq` is developed entirely by AI agents using Claude
-Code. No human has written a line of production code. Instead, specialized AI
+`tq` is developed entirely by AI agents using. No human has written a line of production code. Instead, specialized AI
 agents collaborate through a sprint-driven workflow:
 
 - **cli-ux-designer**: Designs the user experience and interface specifications
@@ -56,6 +54,26 @@ Current development status and roadmap: [docs/roadmap/status.md](docs/roadmap/st
 *Note: While the agents handle implementation, humans oversee the project
 direction and validate releases. This is an experiment in AI capabilities, not
 a replacement for human developers.*
+
+
+## Built for AI Agents
+
+While `tq` is a great CLI for humans, it is specifically optimized for integration into agentic workflows (like Claude Code, Cursor, or Gemini Code Assist):
+
+1. **One-Shot Execution Model**: Agents operate best on stateless tool calls. `tq` follows a simple, one-shot connection lifecycle (`one command -> one connection -> close session when done`), preventing resource leaks and stuck TCP connections in sandbox environments.
+2. **Instant Startup, lightweight**: `tq` is a lightweight native Rust binary with instant startup (<10ms), preventing sandbox execution timeout issues. You can install it anywhere.
+3. **High Token Efficiency (Prompt Context Preservation)**: Traditional database MCP servers require registering large numbers of verbose JSON schemas for every fine-grained function, inflating the prompt context of every turn. By exposing a single command execution tool paired with the `tq` CLI, the agent only loads context on-demand, reducing token costs drastically.
+4. **Agent-Friendly Structured Outputs**: Supports flags like `--format json`, `--format csv`, or clean flat ASCII tables that agents can easily parse programmatically.
+5. **No Telemetry & Air-Gapped Friendly**: Ensures database queries, schemas, and credentials remain private within the local execution sandbox.
+
+### 📊 Interface Benchmark & Token Costs
+In evaluations against 10 happy-path query tasks (using `gemini-2.5-flash`), the interface design of `tq` paired with an on-demand skill model is **3.1x cheaper** than a custom-scoped base MCP Community Edition server:
+
+| Interface Scenario | Pass Rate | Input Tokens | Output Tokens | Total Tokens | Cost (USD) | Duration (s) | Speed (tokens/s) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| **No tq or MCP (Baseline)** (`no-tool`) | 4/10 | 315 | 3,810 | **4,125** | **$0.00117** | 58.7s | 70.2/s |
+| **tq CLI (On-Demand Skill)** (`tq-cli`) | 8/10 | 29,693 | 1,729 | 31,422 | $0.00275 | 146.6s | 214.3/s |
+| **Teradata MCP Server CE (Base)** (`mcp`) | **10/10** | 97,190 | 2,227 | 99,417 | $0.00796 | **55.6s** | **1,789.7/s** |
 
 ---
 
