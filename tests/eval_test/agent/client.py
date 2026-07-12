@@ -467,7 +467,13 @@ class UnifiedAgentRunner:
 
         if self.mode in ("tq-cli", "tq-cli-force-skill", "tq-cli-no-skill") and name == "execute_command":
             cmd = params.get("command", "")
-            code, stdout, stderr = run_tq(cmd.replace("tq ", "").split())
+            import shlex
+            cmd_clean = cmd.replace("tq ", "")
+            try:
+                args = shlex.split(cmd_clean)
+            except ValueError:
+                args = cmd_clean.split()
+            code, stdout, stderr = run_tq(args)
             txt = stdout if code == 0 else f"Error: {stderr}"
             # Translate raw shell command to virtual tool call records
             virtual_records = _parse_cli_command(cmd)

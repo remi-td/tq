@@ -16,19 +16,20 @@ MCP_SERVER_DIR = WORKSPACE_DIR / "teradata-mcp-server"
 
 def get_tq_binary() -> str:
     """Find the tq CLI binary, looking at target builds first, then PATH."""
-    debug_bin = WORKSPACE_DIR / "tq" / "target" / "debug" / "tq"
-    if debug_bin.exists():
-        return str(debug_bin)
-
+    # Prefer release build for optimal performance
     release_bin = WORKSPACE_DIR / "tq" / "target" / "release" / "tq"
     if release_bin.exists():
         return str(release_bin)
 
+    debug_bin = WORKSPACE_DIR / "tq" / "target" / "debug" / "tq"
+    if debug_bin.exists():
+        return str(debug_bin)
+
     # Check relative to cwd
-    if Path("target/debug/tq").exists():
-        return "target/debug/tq"
     if Path("target/release/tq").exists():
         return "target/release/tq"
+    if Path("target/debug/tq").exists():
+        return "target/debug/tq"
 
     return "tq"
 
