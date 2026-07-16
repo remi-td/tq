@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-07-16
-**Current Version:** 1.54.1
-**Latest Sprint:** Sprint 74 Complete (FastLoad delimiter validation, integration tests fixed, release v1.54.1 built)
+**Current Version:** 1.54.2
+**Latest Sprint:** Sprint 75 Complete (Resolved show indexes on NoPI tables, SHOW statement multi-line DDL rendering, version v1.54.2 released)
 
 ---
 
