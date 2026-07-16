@@ -642,6 +642,7 @@ pub struct FastloadOptions<'a> {
     pub error_db: Option<&'a str>,
     pub err1_suffix: &'a str,
     pub err2_suffix: &'a str,
+    pub delimiter: Option<&'a str>,
 }
 
 impl DatabaseClient {
@@ -680,6 +681,13 @@ impl DatabaseClient {
         }
         if !options.err2_suffix.is_empty() {
             prefix.push_str(&format!("{{fn teradata_error_table_2_suffix({})}}", options.err2_suffix));
+        }
+        if let Some(delim) = options.delimiter {
+            let escaped_delim = match delim {
+                "\\t" | "tab" | "\t" => "\t",
+                other => other,
+            };
+            prefix.push_str(&format!("{{fn teradata_field_sep('{}')}}", escaped_delim));
         }
         prefix.push_str(&format!("{{fn teradata_read_csv({})}}", csv_path.to_string_lossy()));
 

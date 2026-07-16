@@ -25,11 +25,29 @@ pub fn execute(client: &DatabaseClient, args: &FastloadArgs) -> Result<()> {
         }
     });
 
+    if format != SourceFormat::Csv && args.delimiter.is_some() {
+        return Err(TqError::QueryExecution(
+            "The --delimiter option can only be used with CSV/TSV source files".to_string()
+        ));
+    }
+
+    let delimiter = args.delimiter.as_deref().or_else(|| {
+        let ext = args.source_file.extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_lowercase());
+        if ext.as_deref() == Some("tsv") {
+            Some("\t")
+        } else {
+            None
+        }
+    });
+
     println!(
-        "Loading {} into {} (format: {:?})...",
+        "Loading {} into {} (format: {:?}, delimiter: {:?})...",
         args.source_file.display(),
         args.target_table,
-        format
+        format,
+        delimiter
     );
 
     // 2. Check if the target table exists
@@ -54,7 +72,7 @@ pub fn execute(client: &DatabaseClient, args: &FastloadArgs) -> Result<()> {
 
         println!("Target table does not exist. Inspecting source schema for auto-creation...");
         let cols = match format {
-            SourceFormat::Csv => get_csv_schema(&args.source_file)?,
+            SourceFormat::Csv => get_csv_schema(&args.source_file, delimiter)?,
             SourceFormat::Parquet => get_parquet_schema(&args.source_file)?,
             SourceFormat::Json => get_json_schema(&args.source_file)?,
         };
@@ -120,11 +138,17 @@ pub fn execute(client: &DatabaseClient, args: &FastloadArgs) -> Result<()> {
 
     // 5. Trigger FFI client FastLoad execution
     let error_db = args.error_table_db.as_deref();
+    let effective_delimiter = if format == SourceFormat::Csv {
+        delimiter
+    } else {
+        None
+    };
     let options = FastloadOptions {
         sessions: args.sessions,
         error_db,
         err1_suffix: &args.error_table_1_suffix,
         err2_suffix: &args.error_table_2_suffix,
+        delimiter: effective_delimiter,
     };
     let (rows, warnings, errors) = client.fastload(
         effective_csv_path,
@@ -165,8 +189,17 @@ pub fn execute(client: &DatabaseClient, args: &FastloadArgs) -> Result<()> {
     Ok(())
 }
 
-fn get_csv_schema(path: &Path) -> Result<Vec<SourceColumn>> {
-    let mut rdr = csv::Reader::from_path(path).map_err(|e| {
+fn get_csv_schema(path: &Path, delimiter: Option<&str>) -> Result<Vec<SourceColumn>> {
+    let mut builder = csv::ReaderBuilder::new();
+    if let Some(delim) = delimiter {
+        let delim_byte = match delim {
+            "\\t" | "tab" | "\t" => b'\t',
+            other if other.len() == 1 => other.as_bytes()[0],
+            _ => b',',
+        };
+        builder.delimiter(delim_byte);
+    }
+    let mut rdr = builder.from_path(path).map_err(|e| {
         TqError::QueryExecution(format!("Failed to read CSV: {}", e))
     })?;
     let headers = rdr.headers().map_err(|e| {

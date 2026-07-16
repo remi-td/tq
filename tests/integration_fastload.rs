@@ -48,6 +48,7 @@ fn test_live_fastload_and_fastexport_csv() {
             source_file: temp_csv.path().to_path_buf(),
             target_table: table_name.to_string(),
             source_format: None,
+            delimiter: None,
             no_create: false,
             sessions: None,
             error_table_db: None,
@@ -127,6 +128,7 @@ fn test_live_fastload_parquet() {
             source_file: temp_parquet.path().to_path_buf(),
             target_table: table_name.to_string(),
             source_format: None,
+            delimiter: None,
             no_create: false,
             sessions: None,
             error_table_db: None,
@@ -185,6 +187,7 @@ fn test_live_fastload_json() {
             source_file: temp_json.path().to_path_buf(),
             target_table: table_name.to_string(),
             source_format: None,
+            delimiter: None,
             no_create: false,
             sessions: None,
             error_table_db: None,
@@ -232,3 +235,40 @@ fn write_test_parquet(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+#[test]
+fn test_fastload_delimiter_validation_with_parquet() {
+    common::with_driver(|| {
+        let config = ConnectionConfig::from_connection_string(
+            "dummy_user:dummy_pass@dummy_host:1025/dummy_db",
+            LogonMechanism::Td2,
+            Duration::from_secs(3),
+            None,
+        )
+        .unwrap();
+
+        // If driver loading is not supported/installed on the build machine, skip the test
+        let client = match DatabaseClient::new(config, None) {
+            Ok(c) => c,
+            Err(_) => return, 
+        };
+
+        let args = FastloadArgs {
+            source_file: std::path::PathBuf::from("data.parquet"),
+            target_table: "my_table".to_string(),
+            source_format: Some(tq::cli::SourceFormat::Parquet),
+            delimiter: Some("|".to_string()),
+            no_create: false,
+            sessions: None,
+            error_table_db: None,
+            error_table_1_suffix: "_FL_ERR_1".to_string(),
+            error_table_2_suffix: "_FL_ERR_2".to_string(),
+        };
+
+        let result = tq::commands::fastload::execute(&client, &args);
+        assert!(result.is_err());
+        let err_msg = result.err().unwrap().to_string();
+        assert!(err_msg.contains("The --delimiter option can only be used with CSV/TSV source files"));
+    });
+}
+

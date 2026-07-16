@@ -1531,6 +1531,10 @@ pub struct FastloadArgs {
     #[arg(long, value_name = "FORMAT", value_enum)]
     pub source_format: Option<SourceFormat>,
 
+    /// Field separator for CSV/TSV source files (default: comma, or tab if file extension is .tsv)
+    #[arg(long, value_name = "CHAR")]
+    pub delimiter: Option<String>,
+
     /// Disable automatic table creation if it does not exist
     #[arg(long)]
     pub no_create: bool,

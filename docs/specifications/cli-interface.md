@@ -3387,6 +3387,7 @@ tq [GLOBAL_OPTIONS] fastload [OPTIONS] <SOURCE_FILE> <TARGET_TABLE>
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
 | `--source-format` | - | enum | auto-detect | Source format: `csv`, `parquet`, `json` |
+| `--delimiter` | - | string | auto-detect | Field separator for CSV/TSV source files (comma, or tab for `.tsv`) |
 | `--no-create` | - | flag | false | Disable automatic table creation if it does not exist |
 | `--sessions` | - | int | database choice | Number of parallel data transfer connections |
 | `--error-table-db` | - | string | target db | Database where the FastLoad error tables should reside |
@@ -3402,6 +3403,7 @@ tq [GLOBAL_OPTIONS] fastload [OPTIONS] <SOURCE_FILE> <TARGET_TABLE>
    - CSV: Streams directly to the driver using native `{fn teradata_read_csv}`.
    - Parquet/JSON: Streamingly converts records to a temporary CSV file on disk, then loads the CSV natively. Memory usage must remain constant regardless of file size.
 6. **Error Reporting**: Inspects and prints FastLoad warnings and errors (from Error Table 1 and 2) using `{fn teradata_get_warnings}` and `{fn teradata_get_errors}`.
+7. **Delimiter Handling**: The `--delimiter` option is only valid for CSV/TSV format. Specifying `--delimiter` with Parquet or JSON formats will result in a validation error. Temporary CSV files generated during Parquet/JSON streaming conversion always use the default comma delimiter.
 
 ---
 
