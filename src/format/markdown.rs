@@ -55,6 +55,21 @@ pub fn write<W: Write>(
     writer: &mut W,
     options: &MarkdownOptions,
 ) -> Result<()> {
+    if crate::format::is_show_query_result(result) {
+        if let Some(row) = result.rows.first() {
+            if let Some(val) = row.first() {
+                let ddl = val.display();
+                writeln!(writer, "```sql")?;
+                write!(writer, "{}", ddl)?;
+                if !ddl.ends_with('\n') {
+                    writeln!(writer)?;
+                }
+                writeln!(writer, "```")?;
+                return Ok(());
+            }
+        }
+    }
+
     // Write header
     if options.show_header && !result.columns.is_empty() {
         let headers: Vec<String> = result
@@ -246,4 +261,25 @@ mod tests {
         // Integer -> right, Varchar -> left, Decimal -> right, Boolean -> center, Date -> left
         assert_eq!(sep, "| ---: | :--- | ---: | :---: | :--- |");
     }
+
+    #[test]
+    fn test_write_markdown_show_query() {
+        use crate::db::{ColumnMetadata, TeradataType, Value, QueryResult};
+        use std::time::Duration;
+
+        let columns = vec![ColumnMetadata::new("Request Text", TeradataType::Varchar, false)];
+        let ddl = "CREATE SET TABLE db.table ,\n     NO FLASHBACK\n     (id INTEGER);";
+        let rows = vec![vec![Value::String(ddl.to_string())]];
+        let result = QueryResult::new(columns, rows, Duration::ZERO);
+
+        let options = MarkdownOptions::default();
+        let mut buffer = Vec::new();
+        write(&result, &mut buffer, &options).unwrap();
+        let output = String::from_utf8(buffer).unwrap();
+
+        // Should output the DDL wrapped in sql block
+        let expected = format!("```sql\n{}\n```\n", ddl);
+        assert_eq!(output, expected);
+    }
 }
+

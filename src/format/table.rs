@@ -413,6 +413,19 @@ fn write_with_width_constraint<W: Write>(
         return Ok(());
     }
 
+    if crate::format::is_show_query_result(result) {
+        if let Some(row) = result.rows.first() {
+            if let Some(val) = row.first() {
+                let ddl = val.display();
+                write!(writer, "{}", ddl)?;
+                if !ddl.ends_with('\n') {
+                    writeln!(writer)?;
+                }
+                return Ok(());
+            }
+        }
+    }
+
     // Prepare data
     let column_names: Vec<String> = result.columns.iter().map(|c| c.name.clone()).collect();
     let column_values: Vec<Vec<String>> = result
@@ -934,4 +947,24 @@ mod tests {
             select_visible_columns(&column_names, &column_values, None, Some(50));
         assert_eq!(selection_constrained.column_widths[0], 52); // 50 + 2 padding
     }
+
+    #[test]
+    fn test_write_table_show_query() {
+        use crate::db::{ColumnMetadata, TeradataType, Value, QueryResult};
+        use std::time::Duration;
+
+        let columns = vec![ColumnMetadata::new("Request Text", TeradataType::Varchar, false)];
+        let ddl = "CREATE SET TABLE db.table ,\n     NO FLASHBACK\n     (id INTEGER);";
+        let rows = vec![vec![Value::String(ddl.to_string())]];
+        let result = QueryResult::new(columns, rows, Duration::ZERO);
+
+        let options = TableOptions::default();
+        let mut buffer = Vec::new();
+        write(&result, &mut buffer, &options).unwrap();
+        let output = String::from_utf8(buffer).unwrap();
+
+        // Should output the raw DDL without table borders or headers
+        assert_eq!(output, format!("{}\n", ddl));
+    }
 }
+

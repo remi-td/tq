@@ -57,23 +57,29 @@ fn show_indexes_table<W: Write>(
     let (groups, qualified) = query_helpers::query_indexes_qualified(client, table_name)?;
 
     if groups.is_empty() {
-        writeln!(
-            writer,
-            "Error: No indexes found for table '{}'.",
-            table_name
-        )?;
-        writeln!(writer)?;
-        writeln!(writer, "Suggestions:")?;
-        writeln!(writer, "  - Check the table name spelling")?;
-        writeln!(
-            writer,
-            "  - Try using qualified name: show-indexes database.table"
-        )?;
-        writeln!(
-            writer,
-            "  - Verify you have SELECT permission on DBC.IndicesV"
-        )?;
-        return Ok(());
+        let (database, table) = crate::commands::format_helpers::parse_table_name(table_name);
+        let resolved_db = query_helpers::resolve_database(client, database)?;
+        let header_opt = query_helpers::query_object_header(client, &resolved_db, table)?;
+
+        if header_opt.is_none() {
+            writeln!(
+                writer,
+                "Error: Table or view '{}' not found in database '{}'.",
+                table, resolved_db
+            )?;
+            writeln!(writer)?;
+            writeln!(writer, "Suggestions:")?;
+            writeln!(writer, "  - Check the table name spelling")?;
+            writeln!(
+                writer,
+                "  - Try using qualified name: show-indexes database.table"
+            )?;
+            writeln!(
+                writer,
+                "  - Verify you have SELECT permission on DBC.TablesV"
+            )?;
+            return Ok(());
+        }
     }
 
     writeln!(writer, "Indexes on {}:", qualified)?;
@@ -151,6 +157,22 @@ fn show_indexes_json<W: Write>(
 ) -> Result<()> {
     let (groups, qualified) = query_helpers::query_indexes_qualified(client, table_name)?;
 
+    if groups.is_empty() {
+        let (database, table) = crate::commands::format_helpers::parse_table_name(table_name);
+        let resolved_db = query_helpers::resolve_database(client, database)?;
+        let header_opt = query_helpers::query_object_header(client, &resolved_db, table)?;
+
+        if header_opt.is_none() {
+            writeln!(
+                writer,
+                "{{\"ok\":false,\"error\":{{\"code\":\"OBJECT_NOT_FOUND\",\"message\":\"Table or view '{}' not found in database '{}'\"}}}}",
+                json_escape(table),
+                json_escape(&resolved_db)
+            )?;
+            return Ok(());
+        }
+    }
+
     // Structured JSON: {ok, object, primary_index, secondary_indexes}
     write!(writer, "{{\"ok\":true,\"object\":\"{}\"", json_escape(&qualified))?;
 
@@ -211,6 +233,22 @@ fn show_indexes_csv<W: Write>(
 ) -> Result<()> {
     let (groups, _qualified) = query_helpers::query_indexes_qualified(client, table_name)?;
 
+    if groups.is_empty() {
+        let (database, table) = crate::commands::format_helpers::parse_table_name(table_name);
+        let resolved_db = query_helpers::resolve_database(client, database)?;
+        let header_opt = query_helpers::query_object_header(client, &resolved_db, table)?;
+
+        if header_opt.is_none() {
+            writeln!(
+                writer,
+                "error,Table or view '{}' not found in database '{}'",
+                csv_escape(table),
+                csv_escape(&resolved_db)
+            )?;
+            return Ok(());
+        }
+    }
+
     writeln!(writer, "IndexName,IndexType,ShortType,IsPrimary,Columns")?;
     for idx in &groups {
         let cols = idx.columns.join(", ");
@@ -234,6 +272,22 @@ fn show_indexes_markdown<W: Write>(
     writer: &mut W,
 ) -> Result<()> {
     let (groups, _qualified) = query_helpers::query_indexes_qualified(client, table_name)?;
+
+    if groups.is_empty() {
+        let (database, table) = crate::commands::format_helpers::parse_table_name(table_name);
+        let resolved_db = query_helpers::resolve_database(client, database)?;
+        let header_opt = query_helpers::query_object_header(client, &resolved_db, table)?;
+
+        if header_opt.is_none() {
+            writeln!(
+                writer,
+                "Table or view '{}' not found in database '{}'.",
+                table,
+                resolved_db
+            )?;
+            return Ok(());
+        }
+    }
 
     writeln!(writer, "| IndexName | IndexType | ShortType | IsPrimary | Columns |")?;
     writeln!(writer, "| :--- | :--- | :--- | :--- | :--- |")?;

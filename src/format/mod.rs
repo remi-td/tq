@@ -51,6 +51,20 @@ impl FormatOptions {
     }
 }
 
+/// Check if the query result represents a Teradata `SHOW` command.
+///
+/// Teradata `SHOW` statements return exactly 1 column named `"Request Text"`
+/// (or `"RequestText"`) and 1 row of DDL.
+pub fn is_show_query_result(result: &QueryResult) -> bool {
+    if result.columns.len() == 1 {
+        let col_name = result.columns[0].name.to_lowercase();
+        if col_name == "request text" || col_name == "requesttext" {
+            return true;
+        }
+    }
+    false
+}
+
 /// Write query results in the specified format
 pub fn write_output<W: Write>(
     result: &QueryResult,
