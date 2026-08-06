@@ -14,6 +14,7 @@ use crate::commands::format_helpers::markdown_escape_pipe;
 use crate::db::{DatabaseClient, QueryResult, Value};
 use crate::error::Result;
 use super::monitoring_utils::{escape_csv, extract_decimal, extract_integer};
+use super::severity::MonitoringContext;
 use std::io::Write;
 
 /// SQL query to retrieve per-VPROC resource usage from DBC.ResUsageSVPR
@@ -126,6 +127,46 @@ pub fn calculate_skew(values: &[f64]) -> Option<f64> {
     Some(100.0 * (1.0 - (avg / max)))
 }
 
+/// The largest observed average-I/O value, used to normalize I/O into a
+/// percentage of the busiest VPROC/node before classification.
+///
+/// Returns `None` when nothing has been observed, in which case I/O cells carry
+/// no severity — there is no scale to compare against.
+fn io_scale(resources: &[ResourceInfo]) -> Option<f64> {
+    let max = resources
+        .iter()
+        .flat_map(|r| [r.avg_io, r.peak_io])
+        .fold(f64::NEG_INFINITY, f64::max);
+    (max > 0.0).then_some(max)
+}
+
+/// Render a CPU-busy percentage, colored by the configured `cpu` thresholds
+fn cpu_cell(pct: f64, ctx: &MonitoringContext) -> String {
+    ctx.styler
+        .paint(ctx.thresholds.cpu(pct), &format!("{pct:.2}"))
+}
+
+/// Render an I/O value, colored by its share of the busiest observed I/O
+fn io_cell(value: f64, scale: Option<f64>, ctx: &MonitoringContext) -> String {
+    let text = format!("{value:.2}");
+    match scale {
+        Some(max) => ctx
+            .styler
+            .paint(ctx.thresholds.io(value / max * 100.0), &text),
+        None => text,
+    }
+}
+
+/// Render a skew percentage, colored by the configured `skew` thresholds
+fn skew_cell(skew: Option<f64>, ctx: &MonitoringContext) -> String {
+    match skew {
+        Some(v) => ctx
+            .styler
+            .paint(ctx.thresholds.skew(v), &format!("{v:.2}%")),
+        None => "[--]".to_string(),
+    }
+}
+
 /// Execute the resources command and write results
 ///
 /// This is the main entry point for batch mode. Selects the appropriate
@@ -134,18 +175,18 @@ pub fn execute<W: Write>(
     client: &DatabaseClient,
     args: &ResourcesArgs,
     writer: &mut W,
-    _use_color: bool,
+    ctx: &MonitoringContext,
 ) -> Result<()> {
     let sql = if args.physical { PHYSICAL_SQL } else { VIRTUAL_SQL };
     let result = client.execute(sql)?;
     let physical = args.physical;
 
     match args.format {
-        OutputFormat::Table => display_table(&result, writer, physical)?,
+        OutputFormat::Table => display_table(&result, writer, physical, ctx)?,
         OutputFormat::Csv => display_csv(&result, writer, physical)?,
         OutputFormat::Json => display_json(&result, writer, physical)?,
         OutputFormat::Markdown | OutputFormat::Md => {
-            display_markdown(&result, writer, physical)?;
+            display_markdown(&result, writer, physical, ctx)?;
         }
     }
 
@@ -160,6 +201,7 @@ pub fn execute_for_repl<W: Write>(
     client: &DatabaseClient,
     physical: bool,
     writer: &mut W,
+    ctx: &MonitoringContext,
 ) -> Result<()> {
     writeln!(writer)?;
 
@@ -185,9 +227,9 @@ pub fn execute_for_repl<W: Write>(
                 writeln!(writer)?;
                 writeln!(writer, "0 entries")?;
             } else {
-                display_resources_table(&resources, writer, physical)?;
+                display_resources_table(&resources, writer, physical, ctx)?;
                 writeln!(writer)?;
-                write_skew_summary(&resources, writer)?;
+                write_skew_summary(&resources, writer, ctx)?;
                 writeln!(writer)?;
                 let label = if physical { "node(s)" } else { "VPROC(s)" };
                 writeln!(
@@ -243,6 +285,7 @@ fn display_table<W: Write>(
     result: &QueryResult,
     writer: &mut W,
     physical: bool,
+    ctx: &MonitoringContext,
 ) -> Result<()> {
     let resources: Vec<ResourceInfo> = result
         .rows
@@ -260,9 +303,9 @@ fn display_table<W: Write>(
         return Ok(());
     }
 
-    display_resources_table(&resources, writer, physical)?;
+    display_resources_table(&resources, writer, physical, ctx)?;
     writeln!(writer)?;
-    write_skew_summary(&resources, writer)?;
+    write_skew_summary(&resources, writer, ctx)?;
     writeln!(writer)?;
     let label = if physical { "node(s)" } else { "VPROC(s)" };
     writeln!(
@@ -281,6 +324,7 @@ fn display_resources_table<W: Write>(
     resources: &[ResourceInfo],
     writer: &mut W,
     physical: bool,
+    ctx: &MonitoringContext,
 ) -> Result<()> {
     use comfy_table::{presets, Cell, CellAlignment, ContentArrangement, Table};
 
@@ -310,13 +354,14 @@ fn display_resources_table<W: Write>(
         mem2_hdr,
     ]);
 
+    let scale = io_scale(resources);
     for r in resources {
         table.add_row(vec![
             Cell::new(r.id).set_alignment(CellAlignment::Right),
-            Cell::new(format!("{:.2}", r.avg_cpu)).set_alignment(CellAlignment::Right),
-            Cell::new(format!("{:.2}", r.peak_cpu)).set_alignment(CellAlignment::Right),
-            Cell::new(format!("{:.2}", r.avg_io)).set_alignment(CellAlignment::Right),
-            Cell::new(format!("{:.2}", r.peak_io)).set_alignment(CellAlignment::Right),
+            Cell::new(cpu_cell(r.avg_cpu, ctx)).set_alignment(CellAlignment::Right),
+            Cell::new(cpu_cell(r.peak_cpu, ctx)).set_alignment(CellAlignment::Right),
+            Cell::new(io_cell(r.avg_io, scale, ctx)).set_alignment(CellAlignment::Right),
+            Cell::new(io_cell(r.peak_io, scale, ctx)).set_alignment(CellAlignment::Right),
             Cell::new(format!("{:.2}", r.mem_metric1)).set_alignment(CellAlignment::Right),
             Cell::new(format!("{:.2}", r.mem_metric2)).set_alignment(CellAlignment::Right),
         ]);
@@ -330,19 +375,19 @@ fn display_resources_table<W: Write>(
 }
 
 /// Write the skew summary footer showing CPU and I/O skew across all entries
-fn write_skew_summary<W: Write>(resources: &[ResourceInfo], writer: &mut W) -> Result<()> {
+fn write_skew_summary<W: Write>(
+    resources: &[ResourceInfo],
+    writer: &mut W,
+    ctx: &MonitoringContext,
+) -> Result<()> {
     let cpu_values: Vec<f64> = resources.iter().map(|r| r.avg_cpu).collect();
     let io_values: Vec<f64> = resources.iter().map(|r| r.avg_io).collect();
 
     let cpu_skew = calculate_skew(&cpu_values);
     let io_skew = calculate_skew(&io_values);
 
-    let cpu_str = cpu_skew
-        .map(|v| format!("{v:.2}%"))
-        .unwrap_or_else(|| "[--]".to_string());
-    let io_str = io_skew
-        .map(|v| format!("{v:.2}%"))
-        .unwrap_or_else(|| "[--]".to_string());
+    let cpu_str = skew_cell(cpu_skew, ctx);
+    let io_str = skew_cell(io_skew, ctx);
 
     writeln!(writer, "Skew: CPU {cpu_str}, I/O {io_str}")?;
 
@@ -458,6 +503,7 @@ fn display_markdown<W: Write>(
     result: &QueryResult,
     writer: &mut W,
     physical: bool,
+    ctx: &MonitoringContext,
 ) -> Result<()> {
     let resources: Vec<ResourceInfo> = result
         .rows
@@ -491,11 +537,18 @@ fn display_markdown<W: Write>(
         "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
     )?;
 
+    let scale = io_scale(&resources);
     for r in &resources {
         writeln!(
             writer,
-            "| {} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} | {:.2} |",
-            r.id, r.avg_cpu, r.peak_cpu, r.avg_io, r.peak_io, r.mem_metric1, r.mem_metric2,
+            "| {} | {} | {} | {} | {} | {:.2} | {:.2} |",
+            r.id,
+            cpu_cell(r.avg_cpu, ctx),
+            cpu_cell(r.peak_cpu, ctx),
+            io_cell(r.avg_io, scale, ctx),
+            io_cell(r.peak_io, scale, ctx),
+            r.mem_metric1,
+            r.mem_metric2,
         )?;
     }
 
@@ -684,7 +737,7 @@ mod tests {
     fn test_display_table_virtual_empty() {
         let result = make_result(vec![]);
         let mut output = Vec::new();
-        display_table(&result, &mut output, false).unwrap();
+        display_table(&result, &mut output, false, &MonitoringContext::default()).unwrap();
         let text = String::from_utf8(output).unwrap();
         assert!(text.contains("Resources (Virtual)"));
         assert!(text.contains("no resource usage data found"));
@@ -695,7 +748,7 @@ mod tests {
     fn test_display_table_physical_empty() {
         let result = make_result(vec![]);
         let mut output = Vec::new();
-        display_table(&result, &mut output, true).unwrap();
+        display_table(&result, &mut output, true, &MonitoringContext::default()).unwrap();
         let text = String::from_utf8(output).unwrap();
         assert!(text.contains("Resources (Physical)"));
         assert!(text.contains("no resource usage data found"));
@@ -709,7 +762,7 @@ mod tests {
         ];
         let result = make_result(rows);
         let mut output = Vec::new();
-        display_table(&result, &mut output, false).unwrap();
+        display_table(&result, &mut output, false, &MonitoringContext::default()).unwrap();
         let text = String::from_utf8(output).unwrap();
         assert!(text.contains("Resources (Virtual)"));
         assert!(text.contains("VprocNo"));
@@ -726,7 +779,7 @@ mod tests {
         ];
         let result = make_result(rows);
         let mut output = Vec::new();
-        display_table(&result, &mut output, true).unwrap();
+        display_table(&result, &mut output, true, &MonitoringContext::default()).unwrap();
         let text = String::from_utf8(output).unwrap();
         assert!(text.contains("Resources (Physical)"));
         assert!(text.contains("NodeID"));
@@ -849,7 +902,7 @@ mod tests {
         ];
         let result = make_result(rows);
         let mut output = Vec::new();
-        display_markdown(&result, &mut output, false).unwrap();
+        display_markdown(&result, &mut output, false, &MonitoringContext::default()).unwrap();
         let text = String::from_utf8(output).unwrap();
 
         assert!(text.contains("VprocNo"));
@@ -866,7 +919,7 @@ mod tests {
         ];
         let result = make_result(rows);
         let mut output = Vec::new();
-        display_markdown(&result, &mut output, true).unwrap();
+        display_markdown(&result, &mut output, true, &MonitoringContext::default()).unwrap();
         let text = String::from_utf8(output).unwrap();
 
         assert!(text.contains("NodeID"));
@@ -877,7 +930,7 @@ mod tests {
     fn test_display_markdown_empty() {
         let result = make_result(vec![]);
         let mut output = Vec::new();
-        display_markdown(&result, &mut output, false).unwrap();
+        display_markdown(&result, &mut output, false, &MonitoringContext::default()).unwrap();
         let text = String::from_utf8(output).unwrap();
         let lines: Vec<&str> = text.lines().collect();
         // Header + separator, no data rows
@@ -912,7 +965,7 @@ mod tests {
         ];
 
         let mut output = Vec::new();
-        write_skew_summary(&resources, &mut output).unwrap();
+        write_skew_summary(&resources, &mut output, &MonitoringContext::default()).unwrap();
         let text = String::from_utf8(output).unwrap();
         assert!(text.contains("Skew:"));
         assert!(text.contains("CPU"));
@@ -938,7 +991,7 @@ mod tests {
         ];
 
         let mut output = Vec::new();
-        write_skew_summary(&resources, &mut output).unwrap();
+        write_skew_summary(&resources, &mut output, &MonitoringContext::default()).unwrap();
         let text = String::from_utf8(output).unwrap();
         assert!(text.contains("[--]"));
     }

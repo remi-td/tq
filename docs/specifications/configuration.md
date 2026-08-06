@@ -134,6 +134,127 @@ format = "json"
 timing = true
 ```
 
+## Monitoring Configuration
+
+The `[monitoring.thresholds]` and `[monitoring.colors]` sections configure the severity-based coloring and refresh behavior described in [Output Formats: Color and Severity Formatting](output-formats.md#color-and-severity-formatting). Both sections are supported in `~/.tq/config.toml` and `.tq.toml`, and follow the same [merging](#configuration-merging) and [precedence](#configuration-hierarchy) rules as `[defaults]` and `[profiles]`.
+
+### `[monitoring.thresholds]`
+
+**REQ-MON-001**: Every key in `[monitoring.thresholds]` is optional. Any key omitted from the config file falls back to its built-in default independently of the others — a config file that sets only `skew_warning` is valid and leaves all other threshold keys at their defaults.
+
+**REQ-MON-002**: Full key reference:
+
+| Key | Type | Built-in Default | Unit | Description |
+|-----|------|------------------|------|-------------|
+| `cpu_warning` | number | `70` | percent | CPU% at/above which a metric is classified Warning |
+| `cpu_critical` | number | `90` | percent | CPU% at/above which a metric is classified Critical |
+| `io_warning` | number | `80` | percent | I/O% at/above which a metric is classified Warning |
+| `io_critical` | number | `95` | percent | I/O% at/above which a metric is classified Critical |
+| `skew_warning` | number | `40` | percent | Skew% at/above which a metric is classified Warning |
+| `skew_critical` | number | `70` | percent | Skew% at/above which a metric is classified Critical |
+| `space_warning` | number | `80` | percent | `PermUsed%` (percent of `MaxPerm` used) at/above which a metric is classified Warning |
+| `space_critical` | number | `90` | percent | `PermUsed%` at/above which a metric is classified Critical |
+| `refresh_interval` | integer | `6` | seconds | Default auto-refresh interval for `--watch`-capable commands (`tq resources`, `tq sessions --watch`, `tq locks --watch`), used only when the command's own `--interval` flag is not given |
+
+**Example — tighten skew and space thresholds without touching CPU/IO:**
+```toml
+[monitoring.thresholds]
+skew_warning = 25
+skew_critical = 50
+space_warning = 75
+space_critical = 88
+```
+
+### `[monitoring.colors]`
+
+**REQ-MON-003**: Every key in `[monitoring.colors]` is optional; omitted keys fall back to their built-in default.
+
+| Key | Type | Built-in Default | Description |
+|-----|------|------------------|--------------|
+| `normal` | string | `"green"` | Color used for values classified Normal |
+| `warning` | string | `"yellow"` | Color used for values classified Warning |
+| `critical` | string | `"red"` | Color used for values classified Critical |
+
+**REQ-MON-004**: Accepted color name values are the ANSI-portable named colors already used elsewhere in the tool's terminal output: `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, and their `bright_` variants (`bright_red`, `bright_green`, etc.). Hex codes and 256-color indices are not supported in this configuration surface.
+
+**Example — align with an organization's existing monitoring palette:**
+```toml
+[monitoring.colors]
+normal = "green"
+warning = "bright_yellow"
+critical = "bright_red"
+```
+
+### Validation Rules
+
+Threshold and color configuration is validated when the config file is loaded, before any command runs. All validation failures are **configuration errors**, not panics, and exit with code `2`.
+
+**REQ-MON-005**: For each threshold pair (`cpu`, `io`, `skew`, `space`), `*_warning` SHALL be strictly less than `*_critical`. A config with `*_warning >= *_critical` SHALL fail to load with:
+```
+Error: Invalid monitoring configuration in ~/.tq/config.toml
+
+  [monitoring.thresholds]
+  cpu_warning = 95
+  cpu_critical = 90
+
+cpu_warning (95) must be less than cpu_critical (90).
+
+Exit code: 2
+```
+
+**REQ-MON-006**: All `*_warning` and `*_critical` threshold values SHALL be within the inclusive range `0`–`100` (they are percentages). A value outside this range SHALL fail to load with:
+```
+Error: Invalid monitoring configuration in ~/.tq/config.toml
+
+  [monitoring.thresholds]
+  skew_critical = 150
+
+skew_critical must be between 0 and 100 (got: 150).
+
+Exit code: 2
+```
+
+**REQ-MON-007**: All `*_warning` and `*_critical` threshold values SHALL be non-negative. A negative value SHALL fail to load with:
+```
+Error: Invalid monitoring configuration in ~/.tq/config.toml
+
+  [monitoring.thresholds]
+  space_warning = -10
+
+space_warning must be between 0 and 100 (got: -10).
+
+Exit code: 2
+```
+(Negative values are a special case of REQ-MON-006's range check — both share the same error message shape so the DBA sees one consistent style regardless of which bound was violated.)
+
+**REQ-MON-008**: `refresh_interval` SHALL be an integer between `2` and `300` seconds inclusive — the same bounds already enforced on the `--interval` CLI flag (see `tq resources`/`tq sessions`/`tq locks` in [CLI Interface](cli-interface.md)). A value outside this range SHALL fail to load with:
+```
+Error: Invalid monitoring configuration in ~/.tq/config.toml
+
+  [monitoring.thresholds]
+  refresh_interval = 1
+
+refresh_interval must be between 2 and 300 seconds (got: 1).
+
+Exit code: 2
+```
+
+**REQ-MON-009**: A value in `[monitoring.colors]` that is not one of the accepted color names (REQ-MON-004) SHALL fail to load with:
+```
+Error: Invalid monitoring configuration in ~/.tq/config.toml
+
+  [monitoring.colors]
+  warning = "orange"
+
+Unknown color 'orange'. Accepted values: black, red, green, yellow, blue, magenta, cyan, white (or bright_<color>).
+
+Exit code: 2
+```
+
+**REQ-MON-010**: Validation errors report every violation found in `[monitoring.thresholds]` and `[monitoring.colors]` in a single pass (not just the first), so a DBA fixing a config file does not have to re-run `tq` once per mistake.
+
+**REQ-MON-011**: These validation rules apply identically regardless of whether the values originate from `~/.tq/config.toml` or `.tq.toml`, and regardless of merge order — validation runs on the final merged configuration.
+
 ### File Permissions
 
 For security, `tq` checks the config file permissions:

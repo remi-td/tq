@@ -384,6 +384,17 @@ const METACOMMANDS: &[MetacommandDef] = &[
         aliases: &[],
         description: "Analyze AMP-level resource skew",
     },
+    // Space analysis commands
+    MetacommandDef {
+        name: "space",
+        aliases: &[],
+        description: "Show perm/spool/temp space for a database or object",
+    },
+    MetacommandDef {
+        name: "dbspace",
+        aliases: &[],
+        description: "Show database-level space only",
+    },
     // Sprint 51: Session history command
     MetacommandDef {
         name: "history",

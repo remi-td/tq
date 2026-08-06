@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
-**Last Updated:** 2026-07-16
-**Current Version:** 1.54.2
-**Latest Sprint:** Sprint 75 Complete (Resolved show indexes on NoPI tables, SHOW statement multi-line DDL rendering, version v1.54.2 released)
+**Last Updated:** 2026-08-06
+**Current Version:** 1.55.0
+**Latest Sprint:** Sprint 76 Complete (Space analysis commands `space`/`dbspace` and configurable monitoring thresholds/colors released)
 
 ---
 

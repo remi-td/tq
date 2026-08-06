@@ -48,3 +48,7 @@ tests/eval_test/.deepeval/
 tests/eval_test/**/.pytest_cache/
 __pycache__/
 tests/eval_test/**/__pycache__/
+
+# Local documentation & point-of-view documents
+misc/
+

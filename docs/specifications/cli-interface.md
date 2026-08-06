@@ -15,6 +15,8 @@
    - [sysconfig - System Configuration Summary](#sysconfig---system-configuration-summary)
    - [locks - Lock and Blocking Information](#locks---lock-and-blocking-information)
    - [resources - PMON Resource Usage](#resources---pmon-resource-usage)
+   - [space - Perm/Spool/Temp Space Analysis](#space---permspooltemp-space-analysis)
+   - [dbspace - Database-Level Space Analysis](#dbspace---database-level-space-analysis)
    - [query-inspect - Inspect Session Query Text](#query-inspect---inspect-session-query-text)
    - [inspect - Inspect a Database Object](#inspect---inspect-a-database-object)
    - [describe - Describe Table Structure](#describe---describe-table-structure)
@@ -79,11 +81,13 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 | `--timeout` | `-t` | duration | `30s` | Connection timeout |
 | `--verbose` | `-v` | flag | false | Verbose output (repeatable: `-vv`, `-vvv`) |
 | `--quiet` | `-q` | flag | false | Suppress non-essential output |
-| `--color` | - | enum | `auto` | Color output: `auto`, `always`, `never` |
+| `--color` | - | enum\* | `auto` | Color output: `auto`, `always`, `never` |
 | `--params` | `-p` | path | - | YAML parameter file for variable substitution (repeatable) |
 | `--profile` | - | string | - | Select connection profile from config file |
 | `--help` | `-h` | flag | - | Show help |
 | `--version` | `-V` | flag | - | Show version |
+
+\* `--color auto` (the default) additionally disables color when the `NO_COLOR` environment variable is set to any non-empty value, regardless of TTY status — see [NO_COLOR](https://no-color.org/). `--color never` and `--color always` are absolute and ignore both `NO_COLOR` and TTY detection. See [Output Formats: Color and Severity Formatting](output-formats.md#color-and-severity-formatting) for how color mode interacts with severity-based coloring.
 
 ## Driver Library Resolution
 
@@ -513,7 +517,9 @@ tq [GLOBAL_OPTIONS] --sessions [OPTIONS]
 | `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv` |
 | `--output` | `-o` | path | stdout | Write output to file |
 | `--watch` | - | flag | off | Auto-refresh display at a fixed interval |
-| `--interval` | - | integer | `6` | Refresh interval in seconds (min: 2, max: 300). Only valid with `--watch` |
+| `--interval` | - | integer | `6`\* | Refresh interval in seconds (min: 2, max: 300). Only valid with `--watch` |
+
+\* The built-in default of 6 seconds is overridden by `[monitoring.thresholds].refresh_interval` in configuration when set (see [Configuration](configuration.md#monitoring-configuration)). The `--interval` flag, when given, always wins over both the config value and the built-in default.
 
 **Examples**:
 ```bash
@@ -638,7 +644,7 @@ When `--watch` is specified, the command enters a continuous refresh loop:
 1. **Format enforcement**: Watch mode forces table output format. `--format csv` and `--format json` are incompatible with `--watch` and SHALL produce a usage error (exit code 2)
 2. **Output incompatibility**: `--output` (file output) is incompatible with `--watch` and SHALL produce a usage error (exit code 2)
 3. **Screen clearing**: Each refresh clears the terminal and redraws the full table from the top of the screen
-4. **Refresh interval**: Controlled by `--interval N` (default: 6 seconds, minimum: 2, maximum: 300). Values outside the allowed range SHALL produce a usage error (exit code 2)
+4. **Refresh interval**: Controlled by `--interval N` (default: `[monitoring.thresholds].refresh_interval` from configuration, or 6 seconds if unset; minimum: 2, maximum: 300). The `--interval` flag always overrides the configured default. Values outside the allowed range SHALL produce a usage error (exit code 2)
 5. **Footer line**: After the summary footer, display: `Last updated: HH:MM:SS | Refreshing every Ns | Press Ctrl-C to stop`
 6. **Clean exit**: Ctrl-C exits watch mode cleanly, restoring terminal state, with exit code 0
 
@@ -920,7 +926,9 @@ tq [GLOBAL_OPTIONS] locks [OPTIONS]
 | `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv` |
 | `--output` | `-o` | path | stdout | Write output to file |
 | `--watch` | - | flag | off | Auto-refresh display at a fixed interval |
-| `--interval` | - | integer | `6` | Refresh interval in seconds (min: 2, max: 300). Only valid with `--watch` |
+| `--interval` | - | integer | `6`\* | Refresh interval in seconds (min: 2, max: 300). Only valid with `--watch` |
+
+\* The built-in default of 6 seconds is overridden by `[monitoring.thresholds].refresh_interval` in configuration when set (see [Configuration](configuration.md#monitoring-configuration)). The `--interval` flag, when given, always wins over both the config value and the built-in default.
 
 **Examples**:
 ```bash
@@ -1034,7 +1042,7 @@ When `--watch` is specified, the command enters a continuous refresh loop:
 1. **Format enforcement**: Watch mode forces table output format. `--format csv` and `--format json` are incompatible with `--watch` and SHALL produce a usage error (exit code 2)
 2. **Output incompatibility**: `--output` (file output) is incompatible with `--watch` and SHALL produce a usage error (exit code 2)
 3. **Screen clearing**: Each refresh clears the terminal and redraws the full output from the top of the screen, including the blocking chain section when present
-4. **Refresh interval**: Controlled by `--interval N` (default: 6 seconds, minimum: 2, maximum: 300). Values outside the allowed range SHALL produce a usage error (exit code 2)
+4. **Refresh interval**: Controlled by `--interval N` (default: `[monitoring.thresholds].refresh_interval` from configuration, or 6 seconds if unset; minimum: 2, maximum: 300). The `--interval` flag always overrides the configured default. Values outside the allowed range SHALL produce a usage error (exit code 2)
 5. **Footer line**: After the summary footer (or "No locks currently held." line), display: `Last updated: HH:MM:SS | Refreshing every Ns | Press Ctrl-C to stop`
 6. **Clean exit**: Ctrl-C exits watch mode cleanly, restoring terminal state, with exit code 0
 
@@ -1170,7 +1178,9 @@ tq [GLOBAL_OPTIONS] resources [OPTIONS]
 | `--page-size` | - | integer | 50 | Number of rows per page in table format |
 | `--page` | - | integer | 1 | Page number to display (1-based) |
 | `--watch` | - | flag | off | Auto-refresh display at a fixed interval |
-| `--interval` | - | integer | `6` | Refresh interval in seconds (min: 2, max: 300). Only valid with `--watch` |
+| `--interval` | - | integer | `6`\* | Refresh interval in seconds (min: 2, max: 300). Only valid with `--watch` |
+
+\* The built-in default of 6 seconds is overridden by `[monitoring.thresholds].refresh_interval` in configuration when set (see [Configuration](configuration.md#monitoring-configuration)). The `--interval` flag, when given, always wins over both the config value and the built-in default.
 
 Note: `--virtual` and `--physical` are mutually exclusive. If both are specified, the command exits with a usage error (exit code 2).
 Note: `--watch` is incompatible with `--format csv`, `--format json`, and `--output`. `--page` and `--page-size` are also incompatible with `--watch` since the full dataset is shown on each refresh.
@@ -1353,7 +1363,7 @@ When `--watch` is specified, the command enters a continuous refresh loop:
 2. **Output incompatibility**: `--output` (file output) is incompatible with `--watch` and SHALL produce a usage error (exit code 2)
 3. **Pagination incompatibility**: `--page` and `--page-size` are incompatible with `--watch`. The full dataset is always displayed on each refresh. Specifying them alongside `--watch` SHALL produce a usage error (exit code 2)
 4. **Screen clearing**: Each refresh clears the terminal and redraws the full table from the top of the screen, including the collection period header and the summary footer
-5. **Refresh interval**: Controlled by `--interval N` (default: 6 seconds, minimum: 2, maximum: 300). Values outside the allowed range SHALL produce a usage error (exit code 2)
+5. **Refresh interval**: Controlled by `--interval N` (default: `[monitoring.thresholds].refresh_interval` from configuration, or 6 seconds if unset; minimum: 2, maximum: 300). The `--interval` flag always overrides the configured default. Values outside the allowed range SHALL produce a usage error (exit code 2)
 6. **Footer line**: After the summary footer, display: `Last updated: HH:MM:SS | Refreshing every Ns | Press Ctrl-C to stop`
 7. **Clean exit**: Ctrl-C exits watch mode cleanly, restoring terminal state, with exit code 0
 8. **Mode compatibility**: `--watch` can be combined with either `--virtual` (default) or `--physical`
@@ -1471,6 +1481,436 @@ tq resources --format json | \
 - Execute `tq resources --watch --output resources.txt` and verify usage error (exit code 2)
 - Execute `tq resources --watch --page-size 10` and verify usage error (exit code 2)
 - Execute `tq resources --watch --interval 1` and verify usage error for out-of-range interval (exit code 2)
+
+---
+
+### space - Perm/Spool/Temp Space Analysis
+
+**Purpose**: Give a database administrator a one-command view of permanent, spool, and temporary space usage and allocation for a database and the objects it contains, without hand-writing `DBC.DiskSpaceV` / `DBC.TableSizeV` queries.
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] space [OPTIONS] <TARGET>
+```
+
+**Arguments**:
+- `<TARGET>`: Required. Either a database name (`<database>`) or a fully qualified object name (`<database>.<object>`). The presence of a `.` determines which of the two invocation shapes below applies.
+
+**Two invocation shapes**:
+
+| Invocation | Behavior |
+|------------|----------|
+| `tq space <database>` | Returns one row for the database itself (aggregate perm/spool/temp metrics) followed by one row per object directly contained in that database. |
+| `tq space <database>.<object>` | Returns exactly one row: perm-space metrics for that single object. |
+
+**Options**:
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv`, `markdown` (alias: `md`) |
+| `--output` | `-o` | path | stdout | Write output to file |
+
+**Examples**:
+```bash
+# Database rollup + one row per object
+tq space demo_user
+
+# Single object detail
+tq space demo_user.orders
+
+# JSON for scripting/alerting
+tq space demo_user --format json
+
+# CSV export for spreadsheet analysis
+tq space demo_user --format csv --output demo_user_space.csv
+
+# Using a connection profile
+tq --profile prod space production.orders
+
+# Markdown for a report or GitHub issue
+tq space demo_user --format markdown
+```
+
+**Metrics returned**:
+
+| Row kind | Metrics |
+|----------|---------|
+| Object (single-object form, and each object row in the database form) | `CurrentPerm`, `PeakPerm`, `PermSkew%` |
+| Database (database form's header row) | All object metrics, plus `MaxPerm`, `PermUsed%` (percentage of `MaxPerm` currently used), and Spool/Temp (`Current`, `Max`, `Peak`, `Skew%` each) |
+
+**Skew formula** (applies identically to `CurrentPerm`, `CurrentSpool`, `CurrentTemp`, computed across the per-AMP rows for the object or database being measured):
+
+```
+Skew% = 100 - (AVG(Current<X>) / NULLIFZERO(MAX(Current<X>)) * 100)
+```
+
+This is the exact formula from issue #54 and SHALL be used verbatim (not `(max - avg) / max * 100`, which is the formula used by `tq resources`/`tq skew` for CPU/IO skew — the two commands intentionally use different but related formulas per their respective source issues).
+
+**Output (Table Format — `tq space <database>`)**:
+```
+Space Analysis — Database: demo_user
+
+┌──────────┬────────────┬─────────────┬────────────┬──────────┬───────────┬───────────┬───────────┬────────────┬───────────┬─────────┬────────────┬───────────┬───────────┬───────────┐
+│ Kind     │ Object     │ CurrentPerm │ PeakPerm   │ PermSkew%│ MaxPerm   │ PermUsed% │ SpoolCurr │ SpoolMax   │ SpoolPeak │SpoolSkew%│ TempCurr   │ TempMax   │ TempPeak  │ TempSkew% │
+├──────────┼────────────┼─────────────┼────────────┼──────────┼───────────┼───────────┼───────────┼────────────┼───────────┼─────────┼────────────┼───────────┼───────────┼───────────┤
+│ DATABASE │ demo_user  │     6.8 GB  │     7.1 GB │      4.2 │   10.0 GB │      68.0 │  120.0 MB │     2.0 GB │  340.0 MB │     12.5 │       0 B  │   1.0 GB  │      0 B  │    [--]   │
+│ TABLE    │ customers  │     2.1 GB  │     2.2 GB │      2.0 │        -  │        -  │        -  │        -   │        -  │       -  │        -   │       -   │       -   │       -   │
+│ TABLE    │ logs       │     1.5 GB  │     1.5 GB │      0.0 │        -  │        -  │        -  │        -   │        -  │       -  │        -   │       -   │       -   │       -   │
+│ TABLE    │ orders     │     3.2 GB  │     3.4 GB │      5.1 │        -  │        -  │        -  │        -   │        -  │       -  │        -   │       -   │       -   │       -   │
+└──────────┴────────────┴─────────────┴────────────┴──────────┴───────────┴───────────┴───────────┴────────────┴───────────┴─────────┴────────────┴───────────┴───────────┴───────────┘
+
+4 rows (1 database, 3 objects) | Total object CurrentPerm: 6.8 GB
+(Query time: 0.087s)
+```
+
+In a narrower terminal, this wide table is subject to the standard [column truncation rules](output-formats.md#column-truncation-strategy) (leftmost columns prioritized, `(+n cols)` indicator) — use `--format csv`, `--format json`, or pipe to `less` to see every column at once.
+
+**Output (Table Format — `tq space <database>.<object>`)**:
+```
+Space Analysis — Object: demo_user.orders
+
+┌──────────┬────────┬─────────────┬───────────┬───────────┐
+│ Database │ Object │ CurrentPerm │ PeakPerm  │ PermSkew% │
+├──────────┼────────┼─────────────┼───────────┼───────────┤
+│ demo_user│ orders │      3.2 GB │    3.4 GB │       5.1 │
+└──────────┴────────┴─────────────┴───────────┴───────────┘
+
+(Query time: 0.041s)
+```
+
+**Output (JSON Format — `tq space <database>`)**:
+
+Object rows omit the database-only keys entirely (they are not applicable), rather than setting them to `null` — matching the section-omission convention used by `tq inspect` (REQ-INSPECT-BATCH-004/006). Byte fields are raw integers; there are no human-readable string mirrors in JSON or CSV for this command (unlike `tq inspect`) — this keeps threshold/scripting comparisons (`jq '.[] | select(.current_perm_bytes > N)'`) unambiguous.
+
+```json
+[
+  {
+    "kind": "DATABASE",
+    "object": "demo_user",
+    "current_perm_bytes": 7301444780,
+    "peak_perm_bytes": 7645041818,
+    "perm_skew_pct": 4.2,
+    "max_perm_bytes": 10737418240,
+    "perm_used_pct": 68.0,
+    "spool_current_bytes": 125829120,
+    "spool_max_bytes": 2147483648,
+    "spool_peak_bytes": 356515840,
+    "spool_skew_pct": 12.5,
+    "temp_current_bytes": 0,
+    "temp_max_bytes": 1073741824,
+    "temp_peak_bytes": 0,
+    "temp_skew_pct": null
+  },
+  {
+    "kind": "TABLE",
+    "object": "customers",
+    "current_perm_bytes": 2254857830,
+    "peak_perm_bytes": 2361393152,
+    "perm_skew_pct": 2.0
+  },
+  {
+    "kind": "TABLE",
+    "object": "orders",
+    "current_perm_bytes": 3435973836,
+    "peak_perm_bytes": 3650722201,
+    "perm_skew_pct": 5.1
+  }
+]
+```
+
+**Output (JSON Format — `tq space <database>.<object>`)**:
+```json
+{
+  "database": "demo_user",
+  "object": "orders",
+  "current_perm_bytes": 3435973836,
+  "peak_perm_bytes": 3650722201,
+  "perm_skew_pct": 5.1
+}
+```
+
+**Output (CSV Format — `tq space <database>`)**:
+```csv
+Kind,Object,CurrentPerm,PeakPerm,PermSkew%,MaxPerm,PermUsed%,SpoolCurrent,SpoolMax,SpoolPeak,SpoolSkew%,TempCurrent,TempMax,TempPeak,TempSkew%
+DATABASE,demo_user,7301444780,7645041818,4.2,10737418240,68.0,125829120,2147483648,356515840,12.5,0,1073741824,0,
+TABLE,customers,2254857830,2361393152,2.0,,,,,,,,,,
+TABLE,orders,3435973836,3650722201,5.1,,,,,,,,,,
+```
+
+Note: CSV, like JSON, uses raw byte integers (never humanized strings). Inapplicable and NULL fields are both rendered as empty fields, per the standard [CSV NULL representation](output-formats.md#null-representation-1).
+
+**Byte-size humanization (table and markdown formats only)**:
+
+1. **REQ-SPACE-HUMAN-001**: In `table` and `markdown` formats, all byte-valued fields (`CurrentPerm`, `PeakPerm`, `MaxPerm`, `SpoolCurrent`, `SpoolMax`, `SpoolPeak`, `TempCurrent`, `TempMax`, `TempPeak`) SHALL be rendered as human-readable strings using base-1024 units (`B`, `KB`, `MB`, `GB`, `TB`) with one decimal place, matching the convention established by `tq list tables` (see REQ-LIST-010), e.g. `3.2 GB`, `890.0 KB`, `0 B`.
+2. **REQ-SPACE-HUMAN-002**: In `json` and `csv` formats, the same fields SHALL be rendered as raw byte integers (snake_case keys suffixed `_bytes` in JSON; unsuffixed integer columns in CSV). No humanized mirror fields are produced in these two formats.
+3. **REQ-SPACE-HUMAN-003**: Percentage fields (`PermSkew%`, `PermUsed%`, `SpoolSkew%`, `TempSkew%`) are never humanized; they are always rendered as a plain decimal number (one decimal place in table/markdown) in every format.
+
+**NULL and "not applicable" handling**:
+
+1. **REQ-SPACE-NULL-001**: A percentage field computed via `NULLIFZERO` that evaluates to NULL (zero denominator, e.g. an empty object where `MAX(CurrentPerm) = 0`) SHALL be displayed as `[--]` in table/markdown, an empty field in CSV, and `null` in JSON — matching the existing NULL-skew convention used by `tq sessions` (see the NULL skew handling for `tq sessions`, above).
+2. **REQ-SPACE-NULL-002**: A field that does not apply to a given row (e.g. `MaxPerm` on a `TABLE` row within `tq space <database>`) SHALL be displayed as `-` in table/markdown and an empty field in CSV. In JSON, inapplicable keys are omitted from that row's object entirely (not present as `null`) — this lets a consumer distinguish "not applicable" (key absent) from "computed but NULL" (`key: null`).
+3. **REQ-SPACE-NULL-003**: `MaxPerm = 0` in Teradata conventionally means "no perm space limit" (unlimited), not "zero capacity". When `MaxPerm = 0`, `PermUsed%` SHALL be displayed as `[unlimited]` in table/markdown (not `[--]`), remains `null` in JSON, and the JSON object additionally includes a sibling boolean key `"perm_unlimited": true` (this key is entirely absent — not `false` — when `MaxPerm` is greater than zero). In CSV, the field remains an empty field (CSV has no room for a second boolean signal); use `--format json` to script around the unlimited case.
+
+**Behavior Requirements**:
+
+1. **REQ-SPACE-001**: The target argument SHALL be parsed by presence of a single `.` separator: no dot → database form; exactly one dot → single-object form. A target with more than one dot SHALL produce a usage error (exit code 2): `Error: Invalid object reference '<target>' — expected <database> or <database>.<object>`.
+2. **REQ-SPACE-002**: Database-level metrics are sourced from `DBC.DiskSpaceV`, aggregated per database across its per-AMP rows. Object-level metrics are sourced from `DBC.TableSizeV`, aggregated per object across its per-AMP rows. (Exact column availability — including `PeakPerm` on `DBC.DiskSpaceV`, which issue #54's reference SQL assumes exists — SHALL be verified against a live Teradata system before implementation; do not assume undocumented columns exist.)
+3. **REQ-SPACE-003**: In the database form, the database's own row SHALL always be the first row returned, with `Kind = DATABASE`. Object rows follow, `Kind = TABLE`, sorted alphabetically by object name (matching the sort convention of `tq list tables`, REQ-LIST-009).
+4. **REQ-SPACE-004**: Object rows in the database form include only tables (and other objects that carry a physical storage footprint in `DBC.TableSizeV`, per live-system verification) — views carry no storage and SHALL NOT appear as rows.
+5. **REQ-SPACE-005**: If the database named in the database form contains zero objects, the command SHALL still return the single `DATABASE` row (an empty database is not an error).
+6. **REQ-SPACE-006**: `--format` and `--output` follow the same semantics as all other tq commands (see [Flag Design Guidelines](#flag-design-guidelines)).
+7. **REQ-SPACE-007**: The table format summary footer (database form only) reports the row count broken out as `N rows (1 database, M objects)`, the total `CurrentPerm` across object rows, and query execution time. The summary footer is omitted from CSV and JSON output, consistent with `tq resources`.
+8. **REQ-SPACE-008**: Severity coloring (Normal/Warning/Critical) is applied to `PermUsed%`, `PermSkew%`, `SpoolSkew%`, and `TempSkew%` cells in table format per [Output Formats: Color and Severity Formatting](output-formats.md#color-and-severity-formatting) and the `space_warning`/`space_critical`/`skew_warning`/`skew_critical` thresholds in [Configuration: Monitoring Configuration](configuration.md#monitoring-configuration).
+
+**Error Handling**:
+
+**Database Not Found**:
+```
+Error: Database 'demo_usre' not found.
+
+Did you mean: demo_user
+
+Exit code: 1
+```
+
+**Object Not Found**:
+```
+Error: Object 'demo_user.orderss' not found.
+
+Did you mean: orders
+
+Exit code: 1
+```
+
+**Invalid Target Format**:
+```
+Error: Invalid object reference 'a.b.c' — expected <database> or <database>.<object>
+Usage: tq space <database>[.<object>]
+
+Examples:
+  tq space demo_user
+  tq space demo_user.orders
+
+Exit code: 2
+```
+
+**Missing Argument**:
+```
+Error: Missing required argument <target>
+Usage: tq space <database>[.<object>]
+
+Exit code: 2
+```
+
+**Insufficient Privileges**:
+```
+Error: Unable to retrieve space data for 'demo_user'
+Reason: SELECT permission denied on DBC.DiskSpaceV
+
+Contact your DBA to request access:
+  GRANT SELECT ON DBC.DiskSpaceV TO <your_username>;
+  GRANT SELECT ON DBC.TableSizeV TO <your_username>;
+
+Exit code: 1
+```
+
+**Exit Codes**:
+- `0`: Space data displayed successfully, including an empty database (database row only, zero object rows)
+- `1`: Database/object not found, permission error, or connection failure
+- `2`: Usage error (missing/malformed target argument, invalid flag value)
+
+**Integration with Scripting**:
+```bash
+# Alert when a database is above 90% perm allocation
+PCT=$(tq space demo_user --format json | jq '.[] | select(.kind=="DATABASE") | .perm_used_pct')
+if (( $(echo "$PCT > 90" | bc -l) )); then
+  echo "WARNING: demo_user is at $PCT% of MaxPerm"
+fi
+
+# Find the largest object in a database
+tq space demo_user --format json | \
+  jq -r '.[] | select(.kind=="TABLE") | [.object, .current_perm_bytes] | @tsv' | \
+  sort -k2 -n -r | head -1
+
+# Export a full space snapshot for trending
+tq space demo_user --format csv --output "/var/log/td-space/$(date +%Y%m%d)_demo_user.csv"
+```
+
+**Acceptance Tests**:
+- Execute `tq space <db>` and verify the first row has `Kind=DATABASE` and every subsequent row has `Kind=TABLE`, sorted alphabetically by object name
+- Execute `tq space <db>.<object>` and verify exactly one row is returned with only `Database`, `Object`, `CurrentPerm`, `PeakPerm`, `PermSkew%` columns
+- Execute `tq space <db>` on an empty database and verify one `DATABASE` row with zero object rows and exit code 0
+- Execute `tq space <db> --format json` and verify object rows omit `max_perm_bytes`, `perm_used_pct`, and all `spool_*`/`temp_*` keys entirely
+- Execute `tq space <db> --format csv` and verify inapplicable object-row fields render as empty CSV fields, and all byte fields are raw integers (no unit suffix)
+- Verify `PermSkew%`/`SpoolSkew%`/`TempSkew%`/`PermUsed%` render as `[--]` when the underlying `NULLIFZERO` denominator is zero, and confirm this is `null` in JSON and empty in CSV
+- Verify `PermUsed%` renders as `[unlimited]` (not `[--]`) and JSON carries `"perm_unlimited": true` when `MaxPerm = 0`
+- Execute `tq space a.b.c` and verify usage error (exit code 2)
+- Execute `tq space nonexistent_db` and verify not-found error with spelling suggestion (exit code 1)
+- Execute `tq space demo_user.nonexistent_object` and verify not-found error with spelling suggestion (exit code 1)
+- Trigger a `DBC.DiskSpaceV`/`DBC.TableSizeV` permission error and verify the GRANT-example error message (exit code 1)
+- Execute `tq space demo_user --format markdown` and verify a valid GitHub-Flavored Markdown table
+
+---
+
+### dbspace - Database-Level Space Analysis
+
+**Purpose**: A focused variant of `tq space` that returns database-level perm/spool/temp metrics only, and clearly rejects any input that isn't a plain database name — for administrators who specifically want the database rollup and want a loud error if they accidentally pass an object reference.
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] dbspace [OPTIONS] <DATABASE>
+```
+
+**Arguments**:
+- `<DATABASE>`: Required. A single database (or user) name. Must NOT contain a `.` — qualified `database.object` references are rejected (use `tq space <database>.<object>` instead).
+
+**Options**:
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv`, `markdown` (alias: `md`) |
+| `--output` | `-o` | path | stdout | Write output to file |
+
+**Examples**:
+```bash
+# Database-level space rollup
+tq dbspace demo_user
+
+# JSON for scripting/alerting
+tq dbspace demo_user --format json
+
+# Using a connection profile
+tq --profile prod dbspace production
+```
+
+**Output (Table Format)**:
+```
+Space Analysis — Database: demo_user
+
+┌───────────┬─────────────┬───────────┬───────────┬───────────┬───────────┬─────────────┬───────────┬───────────┬───────────┬────────────┬───────────┬───────────┬───────────┐
+│ Database  │ CurrentPerm │ PeakPerm  │ PermSkew% │ MaxPerm   │ PermUsed% │ SpoolCurrent│ SpoolMax  │ SpoolPeak │SpoolSkew% │ TempCurrent│ TempMax   │ TempPeak  │ TempSkew% │
+├───────────┼─────────────┼───────────┼───────────┼───────────┼───────────┼─────────────┼───────────┼───────────┼───────────┼────────────┼───────────┼───────────┼───────────┤
+│ demo_user │      6.8 GB │    7.1 GB │       4.2 │   10.0 GB │      68.0 │    120.0 MB │    2.0 GB │  340.0 MB │      12.5 │       0 B  │   1.0 GB  │      0 B  │   [--]    │
+└───────────┴─────────────┴───────────┴───────────┴───────────┴───────────┴─────────────┴───────────┴───────────┴───────────┴────────────┴───────────┴───────────┴───────────┘
+
+(Query time: 0.052s)
+```
+
+**Output (JSON Format)**:
+```json
+{
+  "database": "demo_user",
+  "current_perm_bytes": 7301444780,
+  "peak_perm_bytes": 7645041818,
+  "perm_skew_pct": 4.2,
+  "max_perm_bytes": 10737418240,
+  "perm_used_pct": 68.0,
+  "spool_current_bytes": 125829120,
+  "spool_max_bytes": 2147483648,
+  "spool_peak_bytes": 356515840,
+  "spool_skew_pct": 12.5,
+  "temp_current_bytes": 0,
+  "temp_max_bytes": 1073741824,
+  "temp_peak_bytes": 0,
+  "temp_skew_pct": null
+}
+```
+
+Note: unlike `tq space <database>`, this is a single JSON object, not an array — `tq dbspace` always returns exactly one entity.
+
+**Output (CSV Format)**:
+```csv
+Database,CurrentPerm,PeakPerm,PermSkew%,MaxPerm,PermUsed%,SpoolCurrent,SpoolMax,SpoolPeak,SpoolSkew%,TempCurrent,TempMax,TempPeak,TempSkew%
+demo_user,7301444780,7645041818,4.2,10737418240,68.0,125829120,2147483648,356515840,12.5,0,1073741824,0,
+```
+
+**Behavior Requirements**:
+
+1. **REQ-DBSPACE-001**: The `<DATABASE>` argument SHALL NOT contain a `.`. If it does, the command SHALL produce a usage error (exit code 2) directing the user to `tq space <database>.<object>` — it SHALL NOT silently fall back to object-level behavior.
+2. **REQ-DBSPACE-002**: If `<DATABASE>` does not resolve to an entry in `DBC.DatabasesV` (a database or user), the command SHALL produce a not-found error (exit code 1) with a spelling suggestion where available, identical in style to `tq describe`'s not-found error.
+3. **REQ-DBSPACE-003**: If `<DATABASE>` resolves to an object that is not a database/user (e.g., it is only a table name reachable under the session's default database), the command SHALL produce a clear "not a database" error (exit code 1) rather than guessing intent, and SHALL suggest the correct command: `tq space <database>.<object>`.
+4. **REQ-DBSPACE-004**: Column set, humanization, NULL/"not applicable"/"unlimited" handling, and the skew formula are identical to the database row produced by `tq space <database>` (see REQ-SPACE-HUMAN-001 through REQ-SPACE-NULL-003) — `tq dbspace <db>` is equivalent in content to the first row of `tq space <db>`, minus the `Kind` column (always a database, so the column is redundant) and without any object rows.
+5. **REQ-DBSPACE-005**: `--format` and `--output` follow the same semantics as all other tq commands.
+6. **REQ-DBSPACE-006**: Severity coloring is applied identically to `tq space`'s database row (see REQ-SPACE-008).
+
+**Error Handling**:
+
+**Qualified Name Rejected**:
+```
+Error: tq dbspace requires a plain database name, not a qualified object reference.
+
+  Given:    demo_user.orders
+  Expected: tq dbspace demo_user
+  Or:       tq space demo_user.orders   (for object-level detail)
+
+Exit code: 2
+```
+
+**Not a Database**:
+```
+Error: 'orders' is not a database.
+Reason: 'orders' is a table under database 'demo_user', not a database or user.
+
+Try:
+  tq space demo_user.orders   (object-level detail)
+  tq dbspace demo_user        (database-level rollup)
+
+Exit code: 1
+```
+
+**Database Not Found**:
+```
+Error: Database 'demo_usre' not found.
+
+Did you mean: demo_user
+
+Exit code: 1
+```
+
+**Missing Argument**:
+```
+Error: Missing required argument <database>
+Usage: tq dbspace <database>
+
+Exit code: 2
+```
+
+**Insufficient Privileges**:
+```
+Error: Unable to retrieve space data for 'demo_user'
+Reason: SELECT permission denied on DBC.DiskSpaceV
+
+Contact your DBA to request access:
+  GRANT SELECT ON DBC.DiskSpaceV TO <your_username>;
+
+Exit code: 1
+```
+
+**Exit Codes**:
+- `0`: Database space data displayed successfully
+- `1`: Database not found, target is not a database, permission error, or connection failure
+- `2`: Usage error (qualified name given, missing argument, invalid flag value)
+
+**Integration with Scripting**:
+```bash
+# Nightly capacity check across a list of databases
+for db in demo_user analytics staging; do
+  PCT=$(tq dbspace "$db" --format json | jq '.perm_used_pct')
+  echo "$db: ${PCT}% of MaxPerm used"
+done
+
+# Fail a CI job if a database is unexpectedly near its perm limit
+tq dbspace production --format json | jq -e '.perm_used_pct < 85' > /dev/null \
+  || { echo "production database is above 85% perm allocation"; exit 1; }
+```
+
+**Acceptance Tests**:
+- Execute `tq dbspace <db>` and verify a single row with all 14 metric columns (no `Kind` column)
+- Execute `tq dbspace <db>.<object>` and verify a usage error (exit code 2) that names `tq space <db>.<object>` as the alternative
+- Execute `tq dbspace <table_name_used_as_db>` (a name that exists only as a table, not a database) and verify the "not a database" error (exit code 1)
+- Execute `tq dbspace nonexistent_db` and verify not-found error with spelling suggestion (exit code 1)
+- Execute `tq dbspace` with no argument and verify usage error (exit code 2)
+- Execute `tq dbspace demo_user --format json` and verify a single JSON object (not an array) with all 14 metric keys present
+- Verify the numeric content of `tq dbspace <db>` and the `DATABASE` row of `tq space <db>` are identical for the same database
+- Trigger a `DBC.DiskSpaceV` permission error and verify the GRANT-example error message (exit code 1)
 
 ---
 

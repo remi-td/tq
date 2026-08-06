@@ -462,6 +462,61 @@ id,name,email
 - Empty field (default)
 - `--null-string "NULL"` → explicit marker
 
+## Color and Severity Formatting
+
+### Purpose
+
+Several monitoring-oriented commands (`resources`, `sessions --watch`, `locks --watch`, `skew`, `space`, `dbspace`) surface metrics that have a natural "is this okay?" reading — CPU%, I/O%, skew%, and space allocation%. Rather than requiring the user to read every number, values that cross a configured boundary are classified into a severity and rendered in a corresponding color, so problems are visible at a glance.
+
+### Severity Model
+
+Every monitored metric maps to exactly one of three severities:
+
+| Severity | Meaning |
+|----------|---------|
+| Normal | Value is below its `*_warning` threshold |
+| Warning | Value is at or above its `*_warning` threshold and below its `*_critical` threshold |
+| Critical | Value is at or above its `*_critical` threshold |
+
+**REQ-COLOR-001**: Classification SHALL use `value >= warning_threshold` and `value >= critical_threshold` (inclusive boundaries) — a value exactly equal to the warning threshold is Warning, not Normal; a value exactly equal to the critical threshold is Critical, not Warning.
+
+**REQ-COLOR-002**: A metric whose value is NULL (see the NULL-percentage conventions in each command's own spec, e.g. `[--]`) has no severity and SHALL always render in the Normal color (or no color) — NULL never implies Warning or Critical.
+
+**REQ-COLOR-003**: Threshold keys and the metrics they classify are defined in [Configuration: Monitoring Configuration](configuration.md#monitoring-configuration) (`[monitoring.thresholds]`). Each metric family (`cpu`, `io`, `skew`, `space`) has its own independent `*_warning`/`*_critical` pair — a DBA may, for example, treat skew as more urgent than CPU by tightening `skew_warning`/`skew_critical` without affecting `cpu_warning`/`cpu_critical` (per user story US-8.5).
+
+**REQ-COLOR-004**: Metric-to-threshold-family mapping:
+
+| Metric | Threshold family | Appears in |
+|--------|-------------------|------------|
+| `AvgCPU%` / `PeakCPU%` (per-VPROC/node values) | `cpu` | `tq resources` |
+| `AvgIOCnt` / `PeakIOCnt` normalized to a percentage of the observed maximum | `io` | `tq resources` (physical mode) |
+| `CPU Skew%` / `IO Skew%` (summary footer) | `skew` | `tq resources` |
+| `CPU Skew %` / `I/O Skew %` | `skew` | `tq skew` |
+| `PermSkew%` / `SpoolSkew%` / `TempSkew%` | `skew` | `tq space`, `tq dbspace` |
+| `PermUsed%` | `space` | `tq space`, `tq dbspace` |
+
+### Color Application
+
+**REQ-COLOR-005**: Only the metric value's own cell/segment is colored — surrounding text, headers, borders, and unrelated columns are never colored by severity.
+
+**REQ-COLOR-006**: Colors are configurable via `[monitoring.colors]` (`normal`, `warning`, `critical`), defaulting to `green`/`yellow`/`red` respectively. See [Configuration: Monitoring Configuration](configuration.md#monitoring-configuration) for the accepted color name set and validation rules.
+
+**REQ-COLOR-007**: Severity coloring applies to `table` and `markdown`\* format output only. `json` and `csv` output SHALL NOT contain ANSI escape sequences or any color metadata — machine-readable formats carry only the raw values; a consumer computes severity itself from the same threshold config if needed.
+
+\* Markdown has no native concept of colored text; when color is enabled and the target is a terminal displaying raw markdown, ANSI codes are still emitted around the value exactly as in table format. When markdown is written to a file (`--output`) or is not a TTY, color mode resolution (below) disables it, same as any other format.
+
+### Color Mode Resolution
+
+**REQ-COLOR-008**: Color mode resolves in the same order as every other CLI setting (see [Configuration Hierarchy](configuration.md#configuration-hierarchy)), with the following specific rules:
+
+1. `--color always` SHALL force color on unconditionally, including when output is piped or redirected to a file.
+2. `--color never` SHALL force color off unconditionally.
+3. `--color auto` (the default) SHALL enable color only when: stdout is a TTY, AND the `NO_COLOR` environment variable is unset or empty, AND `--output <file>` was not given (file output is never colored under `auto`).
+4. The `NO_COLOR` environment variable, when set to any non-empty value, SHALL disable color under `--color auto` regardless of TTY status. It has no effect under `--color always`/`--color never`.
+5. Severity coloring is subject to the same resolution as all other color use in the tool — there is no separate on/off switch for severity coloring specifically. If color is disabled by any of the rules above, severity is still computed and metrics are still classified for the purposes of any non-color indicator (e.g. a future `⚠`/`‼` textual marker), but no ANSI codes are emitted.
+
+**REQ-COLOR-009**: Piped output (`tq resources --watch | tee log.txt`) SHALL emit zero ANSI escape sequences, exactly like all other `--color auto` piped behavior already documented in [Terminal Detection](cli-interface.md#terminal-detection).
+
 ## Format Comparison
 
 | Feature | Table | JSON | CSV |

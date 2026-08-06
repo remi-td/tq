@@ -84,12 +84,14 @@ pub mod sql;
 
 // Re-export commonly used types for convenience
 pub use cli::{
-    AbortArgs, Cli, Command, ExplainArgs, GlobalOpts, HelpArgs, HelpTopic,
+    AbortArgs, Cli, Command, DbspaceArgs, ExplainArgs, GlobalOpts, HelpArgs, HelpTopic,
     HistoryArgs, InspectArgs, ListArgs, ListObjectType, LogoffIdleArgs, LogonMechanism, OutputFormat, PeekArgs,
     PingArgs, ProfileAction, QueryArgs, ReplArgs, ResourcesArgs, SampleArgs, ShowIndexesArgs,
-    SkewArgs,
+    SkewArgs, SpaceArgs,
 };
-pub use config::{Config, ConnectionSettings};
+pub use config::{
+    Config, ConnectionSettings, MonitoringColors, MonitoringSettings, MonitoringThresholds,
+};
 pub use db::{
     Alignment, ColumnMetadata, ConnectionConfig, DatabaseClient, QueryResult, Row, TeradataType,
     Value,

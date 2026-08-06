@@ -133,10 +133,16 @@ Each layer can override previous layers. The `figment` crate handles merging aut
   - `completer.rs`: Tab completion logic
   - `pager.rs`: Result pagination
 
+**`src/commands/` shared layers**: Cross-cutting helpers used by monitoring commands
+- `monitoring_utils.rs`: Value extraction from result rows, CSV escaping
+- `format_helpers.rs`: Byte-size formatting, markdown escaping
+- `severity.rs`: Threshold classification and severity coloring
+
 **`src/config.rs`**: Configuration management
 - Config loading and merging
 - Profile management
 - Credential resolution
+- Monitoring thresholds and severity colors
 - Validation
 
 **`src/error.rs`**: Error handling
@@ -333,6 +339,23 @@ Add catalog browsing by querying DBC views:
 - `DBC.TablesV`: List tables
 - `DBC.ColumnsV`: Describe columns
 - `DBC.IndicesV`: Show indexes
+
+### Monitoring Severity
+
+Metrics are classified into `Normal` / `Warning` / `Critical` by a single shared layer
+(`src/commands/severity.rs`) driven by the `[monitoring.thresholds]` and
+`[monitoring.colors]` config sections. Commands never embed threshold constants or ANSI
+codes; they obtain a `Severity` from the shared classifier and hand text to a shared painter.
+
+To bring a new metric under severity:
+1. Add a threshold pair to `MonitoringThresholds` in `src/config.rs`, with a default.
+2. Extend `MonitoringSettings::validate()` with the range and `warning <= critical` check.
+3. Add an accessor on `Thresholds` so call sites read declaratively.
+4. Wrap the rendered value in `styler.paint(severity, text)` — in the table renderer only.
+
+The last point is a structural invariant: only `display_table` receives a `SeverityStyler`,
+which makes it impossible for escape sequences to reach `json`, `csv` or `markdown` output.
+See `docs/design/monitoring.md`.
 
 ### Tab Completion Extensibility
 

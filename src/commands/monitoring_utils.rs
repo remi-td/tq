@@ -34,6 +34,54 @@ pub fn extract_decimal(value: &Value) -> Option<f64> {
     }
 }
 
+/// Extract an integer, additionally accepting numeric `Value::String` payloads
+///
+/// The Teradata driver delivers `BIGINT`, `DECIMAL` and `NUMBER` columns as JSON
+/// strings, which the result mapper surfaces as [`Value::String`]. Aggregates
+/// such as `SUM(CurrentPerm)` therefore never arrive as [`Value::Integer`], and
+/// [`extract_integer`] would silently report them as absent.
+///
+/// This variant trims the string (Teradata pads fixed-width character output)
+/// and parses it. A value carrying a decimal point is parsed as `f64` and then
+/// truncated, matching [`extract_integer`]'s `Decimal -> i64` semantics.
+/// Unparseable text yields `None` rather than a panic.
+pub fn extract_i64_lenient(value: &Value) -> Option<i64> {
+    match value {
+        Value::Integer(v) => Some(*v),
+        Value::Decimal(v) => Some(*v as i64),
+        Value::String(s) => {
+            let t = s.trim();
+            if t.is_empty() {
+                return None;
+            }
+            match t.parse::<i64>() {
+                Ok(v) => Some(v),
+                Err(_) => t.parse::<f64>().ok().map(|v| v as i64),
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Extract a float, additionally accepting numeric `Value::String` payloads
+///
+/// Companion to [`extract_i64_lenient`]; see that function for why the string
+/// case matters. Trims before parsing and returns `None` on parse failure.
+pub fn extract_f64_lenient(value: &Value) -> Option<f64> {
+    match value {
+        Value::Decimal(v) => Some(*v),
+        Value::Integer(v) => Some(*v as f64),
+        Value::String(s) => {
+            let t = s.trim();
+            if t.is_empty() {
+                return None;
+            }
+            t.parse::<f64>().ok()
+        }
+        _ => None,
+    }
+}
+
 /// Extract a trimmed string value with configurable null display text
 ///
 /// For String values, trims leading/trailing whitespace.
@@ -153,6 +201,81 @@ mod tests {
         let result = extract_decimal(&value);
         assert!(result.is_some());
         assert!((result.unwrap() - neg_val).abs() < 0.001);
+    }
+
+    // =========================================================================
+    // extract_i64_lenient / extract_f64_lenient tests
+    //
+    // Regression guard: the driver returns SUM(BIGINT) as a quoted JSON string,
+    // so the space commands would read every metric as absent without these.
+    // =========================================================================
+
+    #[test]
+    fn test_extract_i64_lenient_from_string() {
+        let value = Value::String("35829234636".to_string());
+        assert_eq!(extract_i64_lenient(&value), Some(35_829_234_636));
+    }
+
+    #[test]
+    fn test_extract_i64_lenient_from_padded_string() {
+        let value = Value::String("  2260992  ".to_string());
+        assert_eq!(extract_i64_lenient(&value), Some(2_260_992));
+    }
+
+    #[test]
+    fn test_extract_i64_lenient_from_decimal_string_truncates() {
+        let value = Value::String("42.9".to_string());
+        assert_eq!(extract_i64_lenient(&value), Some(42));
+    }
+
+    #[test]
+    fn test_extract_i64_lenient_from_negative_string() {
+        let value = Value::String("-17".to_string());
+        assert_eq!(extract_i64_lenient(&value), Some(-17));
+    }
+
+    #[test]
+    fn test_extract_i64_lenient_from_integer_and_decimal() {
+        assert_eq!(extract_i64_lenient(&Value::Integer(7)), Some(7));
+        assert_eq!(extract_i64_lenient(&Value::Decimal(7.9)), Some(7));
+    }
+
+    #[test]
+    fn test_extract_i64_lenient_from_null_and_garbage() {
+        assert_eq!(extract_i64_lenient(&Value::Null), None);
+        assert_eq!(
+            extract_i64_lenient(&Value::String("n/a".to_string())),
+            None
+        );
+        assert_eq!(extract_i64_lenient(&Value::String("   ".to_string())), None);
+        assert_eq!(extract_i64_lenient(&Value::Boolean(true)), None);
+    }
+
+    #[test]
+    fn test_extract_f64_lenient_from_string() {
+        let value = Value::String("5.47945205479452".to_string());
+        let result = extract_f64_lenient(&value).unwrap();
+        assert!((result - 5.479_452_054_794_52).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_extract_f64_lenient_from_integer_and_decimal() {
+        assert_eq!(extract_f64_lenient(&Value::Integer(0)), Some(0.0));
+        assert_eq!(extract_f64_lenient(&Value::Decimal(1.5)), Some(1.5));
+    }
+
+    #[test]
+    fn test_extract_f64_lenient_from_null_and_garbage() {
+        assert_eq!(extract_f64_lenient(&Value::Null), None);
+        assert_eq!(extract_f64_lenient(&Value::String("abc".to_string())), None);
+        assert_eq!(extract_f64_lenient(&Value::String("".to_string())), None);
+    }
+
+    #[test]
+    fn test_strict_extractors_contract_unchanged() {
+        // The lenient variants are additive: the strict ones still reject strings.
+        assert_eq!(extract_integer(&Value::String("42".to_string())), None);
+        assert_eq!(extract_decimal(&Value::String("42.5".to_string())), None);
     }
 
     // =========================================================================

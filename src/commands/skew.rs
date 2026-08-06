@@ -11,6 +11,7 @@ use crate::commands::format_helpers::markdown_escape_pipe;
 use crate::db::{DatabaseClient, Value};
 use crate::error::Result;
 use super::monitoring_utils::{escape_csv, extract_decimal, extract_integer, extract_trimmed_string};
+use super::severity::MonitoringContext;
 use std::io::Write;
 
 /// SQL to retrieve AMP-level metrics for a specific session
@@ -137,6 +138,20 @@ fn calculate_skew(avg: f64, hot: f64) -> Option<f64> {
     }
 }
 
+/// Render a skew percentage, colored by the configured `skew` thresholds
+///
+/// Severity is a separate axis from the four-word interpretation ladder below:
+/// the words describe the distribution, the color reflects site policy.
+/// A `None` skew has no measurement and is therefore never colored.
+fn skew_cell(skew: Option<f64>, idle_text: &str, ctx: &MonitoringContext) -> String {
+    match skew {
+        Some(v) => ctx
+            .styler
+            .paint(ctx.thresholds.skew(v), &format!("{:.1}", v)),
+        None => idle_text.to_string(),
+    }
+}
+
 /// Format skew with interpretation hint
 fn format_skew_with_hint(skew: Option<f64>) -> String {
     match skew {
@@ -153,7 +168,7 @@ pub fn execute<W: Write>(
     client: &DatabaseClient,
     args: &SkewArgs,
     writer: &mut W,
-    _use_color: bool,
+    ctx: &MonitoringContext,
 ) -> Result<()> {
     let infos = if let Some(session_id) = args.session_id {
         query_session_skew(client, session_id)?
@@ -162,10 +177,10 @@ pub fn execute<W: Write>(
     };
 
     match args.format {
-        OutputFormat::Table => display_table(&infos, args.session_id, writer)?,
+        OutputFormat::Table => display_table(&infos, args.session_id, writer, ctx)?,
         OutputFormat::Csv => display_csv(&infos, writer)?,
         OutputFormat::Json => display_json(&infos, writer)?,
-        OutputFormat::Markdown | OutputFormat::Md => display_markdown(&infos, writer)?,
+        OutputFormat::Markdown | OutputFormat::Md => display_markdown(&infos, writer, ctx)?,
     }
 
     Ok(())
@@ -176,6 +191,7 @@ pub fn execute_for_repl<W: Write>(
     client: &DatabaseClient,
     session_id: Option<i64>,
     writer: &mut W,
+    ctx: &MonitoringContext,
 ) -> Result<()> {
     writeln!(writer)?;
 
@@ -246,8 +262,8 @@ pub fn execute_for_repl<W: Write>(
         ]);
 
         for info in &infos {
-            let cpu_skew_str = info.cpu_skew.map(|v| format!("{:.1}", v)).unwrap_or_else(|| "[idle]".to_string());
-            let io_skew_str = info.io_skew.map(|v| format!("{:.1}", v)).unwrap_or_else(|| "[idle]".to_string());
+            let cpu_skew_str = skew_cell(info.cpu_skew, "[idle]", ctx);
+            let io_skew_str = skew_cell(info.io_skew, "[idle]", ctx);
             let interpretation = match info.cpu_skew {
                 Some(v) if v < 10.0 => "good",
                 Some(v) if v < 30.0 => "moderate",
@@ -304,6 +320,7 @@ fn display_table<W: Write>(
     infos: &[SkewInfo],
     session_id: Option<i64>,
     writer: &mut W,
+    ctx: &MonitoringContext,
 ) -> Result<()> {
     if infos.is_empty() {
         if let Some(sid) = session_id {
@@ -326,8 +343,8 @@ fn display_table<W: Write>(
     ]);
 
     for info in infos {
-        let cpu_skew_str = info.cpu_skew.map(|v| format!("{:.1}", v)).unwrap_or_else(|| "[--]".to_string());
-        let io_skew_str = info.io_skew.map(|v| format!("{:.1}", v)).unwrap_or_else(|| "[--]".to_string());
+        let cpu_skew_str = skew_cell(info.cpu_skew, "[--]", ctx);
+        let io_skew_str = skew_cell(info.io_skew, "[--]", ctx);
 
         table.add_row(vec![
             Cell::new(info.session_no).set_alignment(CellAlignment::Right),
@@ -407,7 +424,11 @@ fn display_json<W: Write>(infos: &[SkewInfo], writer: &mut W) -> Result<()> {
 }
 
 /// Display skew info in Markdown format
-fn display_markdown<W: Write>(infos: &[SkewInfo], writer: &mut W) -> Result<()> {
+fn display_markdown<W: Write>(
+    infos: &[SkewInfo],
+    writer: &mut W,
+    ctx: &MonitoringContext,
+) -> Result<()> {
     writeln!(
         writer,
         "| SessionNo | UserName | AMP CPU (s) | AMP I/O | CPU Skew % | I/O Skew % | Max CPU | Min CPU | Max I/O | Min I/O |"
@@ -417,14 +438,8 @@ fn display_markdown<W: Write>(infos: &[SkewInfo], writer: &mut W) -> Result<()> 
         "| ---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
     )?;
     for info in infos {
-        let cpu_skew_str = info
-            .cpu_skew
-            .map(|v| format!("{:.1}", v))
-            .unwrap_or_else(|| "[--]".to_string());
-        let io_skew_str = info
-            .io_skew
-            .map(|v| format!("{:.1}", v))
-            .unwrap_or_else(|| "[--]".to_string());
+        let cpu_skew_str = skew_cell(info.cpu_skew, "[--]", ctx);
+        let io_skew_str = skew_cell(info.io_skew, "[--]", ctx);
         writeln!(
             writer,
             "| {} | {} | {:.3} | {} | {} | {} | {:.3} | {:.3} | {} | {} |",
@@ -562,7 +577,7 @@ mod tests {
     #[test]
     fn test_display_table_empty() {
         let mut output = Vec::new();
-        display_table(&[], Some(1234), &mut output).unwrap();
+        display_table(&[], Some(1234), &mut output, &MonitoringContext::default()).unwrap();
         let s = String::from_utf8(output).unwrap();
         assert!(s.contains("Session 1234 not found"));
     }
@@ -570,7 +585,7 @@ mod tests {
     #[test]
     fn test_display_table_empty_no_session() {
         let mut output = Vec::new();
-        display_table(&[], None, &mut output).unwrap();
+        display_table(&[], None, &mut output, &MonitoringContext::default()).unwrap();
         let s = String::from_utf8(output).unwrap();
         assert!(s.contains("No active sessions"));
     }

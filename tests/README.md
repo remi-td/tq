@@ -466,6 +466,64 @@ cargo test --test interactive_tests test_sql_error_format -- --ignored
 cargo test --test interactive_tests test_column_completion_after_select -- --ignored
 ```
 
+## Sprint 76: Space Analysis + Monitoring Thresholds & Colors
+
+Sprint 76 (space analysis, issue #54; monitoring thresholds/colors, issue #23)
+added two integration test files and one shared helper module.
+
+### Shared helper module: `tests/helpers/mod.rs`
+
+Included into a test binary with the same `#[path = ...]` pattern already used
+by `tests/pager_dimensional_tests.rs`:
+
+```rust
+#[path = "helpers/mod.rs"]
+mod helpers;
+```
+
+Provides:
+
+- **ANSI-escape detection** — `contains_ansi(&[u8]) -> bool`,
+  `assert_no_ansi(&[u8])`, `assert_has_ansi(&[u8])`. Pure `std` byte scanning
+  (`\x1b[`), no new crate. Used by every color-suppression test (`NO_COLOR`,
+  `--color never`, piped output) and color-emission test (`--color always`
+  under Warning/Critical severity).
+- **Scripted config-file fixtures** — `create_user_config(home_dir, content)`
+  and `create_project_config(dir, content)`, promoted out of the private
+  helper previously duplicated in `tests/integration_project_config_edge_cases.rs`
+  and `tests/integration_profile_resolution.rs`. Used to write
+  `[monitoring.thresholds]` / `[monitoring.colors]` fixtures without
+  duplicating file-writing boilerplate.
+
+### `tests/integration_space.rs` — `tq space` / `tq dbspace` (#54)
+
+14 `#[ignore]` tests (TC109-I01–I14) spawning the built `tq` binary against the
+live database from `.env` (`TQ_LOGON`). See `tests/cases/TC109.md`.
+
+```bash
+cargo test --test integration_space -- --ignored
+```
+
+### `tests/integration_monitoring.rs` — thresholds, colors, `refresh_interval` (#23)
+
+8 `#[ignore]` tests (TC110-I01–I08). TC110-I05/I06 (refresh-interval
+precedence) spawn through a PTY (`expectrl::Session::spawn(std::process::Command)`)
+rather than a plain piped subprocess, because `tq ... --watch` calls
+`crossterm::terminal::enable_raw_mode()`, which requires a real TTY and fails
+immediately against piped stdio. See `tests/cases/TC110.md`.
+
+```bash
+cargo test --test integration_monitoring -- --ignored
+```
+
+The 37 unit tests for both features (TC109-U01–U13, TC110-U01–U24) are
+colocated in `src/commands/space.rs`, `src/config.rs`, and
+`src/commands/severity.rs` `#[cfg(test)]` modules, per the project's
+unit-test-ownership convention (`rust-teradata-architect` owns production code
+and unit tests; `quality-validator` owns `tests/`).
+
+See `tests/strategy/sprint-76-strategy.md` for the full 59-test plan.
+
 ## Code Coverage Baseline (Sprint 15)
 
 **Baseline Coverage: 40.07%** (1384/3454 lines covered)

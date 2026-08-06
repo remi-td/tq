@@ -256,6 +256,14 @@ pub fn handle_metacommand<W: Write>(
             )?;
         }
 
+        // Space analysis (basic handler - no client available)
+        "space" | "dbspace" => {
+            writeln!(
+                writer,
+                "The /{command} command requires full REPL mode with database connection."
+            )?;
+        }
+
         // Resources command (basic handler - no client available)
         "resources" | "res" | "perf" => {
             writeln!(
@@ -720,12 +728,17 @@ pub fn handle_metacommand_with_state<W: Write>(
         // Resources command for PMON resource monitoring (watch mode supported)
         "resources" | "res" | "perf" => {
             let physical = args.iter().any(|a| a.eq_ignore_ascii_case("--physical"));
-            if let Some(interval) = crate::commands::watch::parse_watch_args(&args, 6) {
+            let monitoring = state.monitoring.clone();
+            let default_interval = monitoring.refresh_interval;
+            if let Some(interval) =
+                crate::commands::watch::parse_watch_args(&args, default_interval)
+            {
                 crate::commands::watch::run_watch(interval, |buf| {
                     crate::commands::resources::execute_for_repl(
                         completion_state.client(),
                         physical,
                         buf,
+                        &monitoring,
                     )
                 })?;
             } else {
@@ -733,6 +746,7 @@ pub fn handle_metacommand_with_state<W: Write>(
                     completion_state.client(),
                     physical,
                     writer,
+                    &monitoring,
                 )?;
             }
         }
@@ -853,6 +867,7 @@ pub fn handle_metacommand_with_state<W: Write>(
                     completion_state.client(),
                     None,
                     writer,
+                    &state.monitoring,
                 )?;
             } else {
                 match args[0].parse::<i64>() {
@@ -861,6 +876,7 @@ pub fn handle_metacommand_with_state<W: Write>(
                             completion_state.client(),
                             Some(session_id),
                             writer,
+                            &state.monitoring,
                         )?;
                     }
                     Err(_) => {
@@ -875,6 +891,42 @@ pub fn handle_metacommand_with_state<W: Write>(
                         writeln!(writer, "       /skew 1234      Analyze specific session")?;
                     }
                 }
+            }
+        }
+
+        // Space analysis for a database or object
+        "space" | "dbspace" => {
+            let database_only = command == "dbspace";
+            if args.is_empty() {
+                writeln!(writer)?;
+                if database_only {
+                    writeln!(writer, "Usage: /dbspace <database>")?;
+                    writeln!(writer)?;
+                    writeln!(writer, "Show database-level perm, spool and temp space.")?;
+                    writeln!(writer)?;
+                    writeln!(writer, "Example:")?;
+                    writeln!(writer, "  /dbspace demo_user")?;
+                } else {
+                    writeln!(writer, "Usage: /space <database>[.<object>]")?;
+                    writeln!(writer)?;
+                    writeln!(
+                        writer,
+                        "Show space usage for a database (with its objects) or a single object."
+                    )?;
+                    writeln!(writer)?;
+                    writeln!(writer, "Examples:")?;
+                    writeln!(writer, "  /space demo_user")?;
+                    writeln!(writer, "  /space demo_user.orders")?;
+                }
+                writeln!(writer)?;
+            } else {
+                crate::commands::space::execute_for_repl(
+                    completion_state.client(),
+                    args[0],
+                    database_only,
+                    writer,
+                    &state.monitoring,
+                )?;
             }
         }
 
@@ -1054,6 +1106,14 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(
         writer,
         "  /skew [session_id]     Analyze AMP-level resource skew"
+    )?;
+    writeln!(
+        writer,
+        "  /space <db>[.<obj>]    Perm/spool/temp space for a database or object"
+    )?;
+    writeln!(
+        writer,
+        "  /dbspace <db>          Database-level space only"
     )?;
     writeln!(
         writer,

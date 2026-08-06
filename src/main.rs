@@ -64,6 +64,11 @@ fn run(cli: Cli) -> Result<u8> {
         Config::default()
     });
 
+    // Threshold validation is deliberately separate from Config::load(): a load
+    // failure degrades gracefully to defaults above, but a semantically invalid
+    // threshold must be a hard error rather than silently reverting.
+    config.monitoring.validate()?;
+
     // Handle commands that don't require database connection
     match &cli.command {
         Command::Help(args) => {
@@ -110,6 +115,17 @@ fn run(cli: Cli) -> Result<u8> {
     let use_color = cli.global.color.should_use_color();
     let verbose = cli.global.verbose > 0;
 
+    // Severity thresholds and palette, resolved once for every monitoring
+    // command. Structured formats never receive the styler.
+    let monitoring = commands::severity::MonitoringContext::new(
+        &config.monitoring.thresholds,
+        &config.monitoring.colors,
+        use_color,
+    );
+
+    // Watch-mode refresh interval: CLI flag > config > built-in default.
+    let refresh_interval = config.monitoring.thresholds.refresh_interval;
+
     // Execute database commands
     let exit_code = match cli.command {
         Command::Ping(args) => {
@@ -136,14 +152,21 @@ fn run(cli: Cli) -> Result<u8> {
             let mut stdout = io::stdout();
             // Pass parsed error levels to the REPL
             commands::repl::execute(
-                client, &args, Some(param_store), &mut stdout, use_color, verbose, error_levels,
+                client,
+                &args,
+                Some(param_store),
+                &mut stdout,
+                use_color,
+                verbose,
+                error_levels,
+                monitoring,
             )?;
             0
         }
         // Sprint 26: Sessions command for system monitoring
         Command::Sessions(args) => {
             if args.watch {
-                commands::watch::run_watch(args.interval, |buf| {
+                commands::watch::run_watch(args.interval.unwrap_or(refresh_interval), |buf| {
                     commands::sessions(&client, &args, buf, use_color)
                 })?;
             } else if let Some(ref output_path) = args.output {
@@ -195,7 +218,7 @@ fn run(cli: Cli) -> Result<u8> {
         // Sprint 38: Locks command for lock contention analysis
         Command::Locks(args) => {
             if args.watch {
-                commands::watch::run_watch(args.interval, |buf| {
+                commands::watch::run_watch(args.interval.unwrap_or(refresh_interval), |buf| {
                     commands::locks(&client, &args, buf, use_color)
                 })?;
             } else if let Some(ref output_path) = args.output {
@@ -309,26 +332,50 @@ fn run(cli: Cli) -> Result<u8> {
             if let Some(ref output_path) = args.output {
                 let file = std::fs::File::create(output_path)?;
                 let mut writer = std::io::BufWriter::new(file);
-                commands::skew(&client, &args, &mut writer, use_color)?;
+                commands::skew(&client, &args, &mut writer, &monitoring)?;
             } else {
                 let mut stdout = io::stdout();
-                commands::skew(&client, &args, &mut stdout, use_color)?;
+                commands::skew(&client, &args, &mut stdout, &monitoring)?;
+            }
+            0
+        }
+        // Space analysis for a database or object
+        Command::Space(args) => {
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::space(&client, &args, &mut writer, &monitoring)?;
+            } else {
+                let mut stdout = io::stdout();
+                commands::space(&client, &args, &mut stdout, &monitoring)?;
+            }
+            0
+        }
+        // Database-level space analysis
+        Command::Dbspace(args) => {
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::dbspace(&client, &args, &mut writer, &monitoring)?;
+            } else {
+                let mut stdout = io::stdout();
+                commands::dbspace(&client, &args, &mut stdout, &monitoring)?;
             }
             0
         }
         // Resources command for PMON resource monitoring
         Command::Resources(args) => {
             if args.watch {
-                commands::watch::run_watch(args.interval, |buf| {
-                    commands::resources(&client, &args, buf, use_color)
+                commands::watch::run_watch(args.interval.unwrap_or(refresh_interval), |buf| {
+                    commands::resources(&client, &args, buf, &monitoring)
                 })?;
             } else if let Some(ref output_path) = args.output {
                 let file = std::fs::File::create(output_path)?;
                 let mut writer = std::io::BufWriter::new(file);
-                commands::resources(&client, &args, &mut writer, use_color)?;
+                commands::resources(&client, &args, &mut writer, &monitoring)?;
             } else {
                 let mut stdout = io::stdout();
-                commands::resources(&client, &args, &mut stdout, use_color)?;
+                commands::resources(&client, &args, &mut stdout, &monitoring)?;
             }
             0
         }

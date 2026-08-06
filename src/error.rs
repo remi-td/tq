@@ -73,6 +73,42 @@ pub enum TqError {
     #[error("Table '{table}' does not exist")]
     TableNotFound { table: String },
 
+    /// A named catalog entity (database, user, table, view, ...) does not exist,
+    /// or exists but is not of the kind the command requires.
+    ///
+    /// `object_type` is the human-readable noun used in the message ("Database",
+    /// "Object", ...). `hint` carries an optional actionable follow-up line.
+    #[error("{object_type} '{name}' not found")]
+    ObjectNotFound {
+        object_type: String,
+        name: String,
+        hint: Option<String>,
+    },
+
+    /// A name resolved in the catalog, but to the wrong kind of object.
+    ///
+    /// Distinct from [`TqError::ObjectNotFound`] on purpose: the name *does*
+    /// exist, so reporting it as missing would send the user looking for a
+    /// typo that is not there.
+    #[error("'{name}' is not a {expected_kind}")]
+    WrongObjectKind {
+        name: String,
+        expected_kind: String,
+        hint: Option<String>,
+    },
+
+    /// A command-line object reference could not be parsed.
+    ///
+    /// This is a usage error (exit code 2): the reference never reached the
+    /// database because its shape was wrong.
+    #[error("Invalid object reference '{reference}' — expected {expected}")]
+    InvalidObjectReference {
+        reference: String,
+        expected: String,
+        /// Usage/example block appended to the user-facing message.
+        usage: String,
+    },
+
     /// Permission denied
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
@@ -119,6 +155,13 @@ pub enum TqError {
     /// Configuration file parse error
     #[error("Failed to parse configuration: {0}")]
     ConfigParseError(String),
+
+    /// `[monitoring]` configuration parsed but is semantically invalid
+    ///
+    /// Carries every violation found in a single pass so the whole file can be
+    /// fixed in one edit (REQ-MON-010).
+    #[error("Invalid monitoring configuration:\n\n  {0}")]
+    MonitoringConfigError(String),
 
     /// Invalid logon mechanism
     #[error("Invalid logon mechanism '{0}'. Supported: TD2, LDAP, KRB5, TDNEGO")]
@@ -245,6 +288,8 @@ impl TqError {
             | TqError::InvalidLogonMechanism(_)
             | TqError::InvalidDuration(_)
             | TqError::ConfigParseError(_)
+            | TqError::MonitoringConfigError(_)
+            | TqError::InvalidObjectReference { .. }
             | TqError::MissingPassword => 2,
 
             // Runtime errors (exit code 1)
@@ -358,6 +403,39 @@ impl TqError {
                 )
             }
 
+            TqError::MonitoringConfigError(problems) => format!(
+                "Error: Invalid monitoring configuration\n\n  {}\n\n\
+                 Fix these in ~/.tq/config.toml or .tq.toml, then re-run.",
+                problems
+            ),
+
+            TqError::WrongObjectKind {
+                name,
+                expected_kind,
+                hint,
+            } => match hint {
+                Some(h) => format!("Error: '{}' is not a {}.\n\n{}", name, expected_kind, h),
+                None => format!("Error: '{}' is not a {}.", name, expected_kind),
+            },
+
+            TqError::ObjectNotFound {
+                object_type,
+                name,
+                hint,
+            } => match hint {
+                Some(h) => format!("Error: {} '{}' not found.\n\n{}", object_type, name, h),
+                None => format!("Error: {} '{}' not found.", object_type, name),
+            },
+
+            TqError::InvalidObjectReference {
+                reference,
+                expected,
+                usage,
+            } => format!(
+                "Error: Invalid object reference '{}' — expected {}\n{}",
+                reference, expected, usage
+            ),
+
             TqError::InvalidConnectionString(msg) => {
                 format!(
                     "Error: Invalid connection string\n\n\
@@ -453,6 +531,9 @@ impl TqError {
             TqError::SqlSyntaxError { .. } => "SQL_SYNTAX_ERROR",
             TqError::QueryExecution(_) => "QUERY_EXECUTION_FAILED",
             TqError::TableNotFound { .. } => "OBJECT_NOT_FOUND",
+            TqError::ObjectNotFound { .. } => "OBJECT_NOT_FOUND",
+            TqError::WrongObjectKind { .. } => "INVALID_OBJECT_TYPE",
+            TqError::InvalidObjectReference { .. } => "INVALID_ARGUMENT",
             TqError::PermissionDenied(_) => "PERMISSION_DENIED",
             TqError::RowFetch { .. } => "ROW_FETCH_FAILED",
             TqError::ResultParsing { .. } => "RESULT_PARSING_FAILED",
@@ -464,6 +545,7 @@ impl TqError {
             TqError::InvalidConfig(_) => "INVALID_ARGUMENT",
             TqError::MissingPassword => "INVALID_ARGUMENT",
             TqError::ConfigParseError(_) => "INVALID_ARGUMENT",
+            TqError::MonitoringConfigError(_) => "INVALID_ARGUMENT",
             TqError::InvalidLogonMechanism(_) => "INVALID_ARGUMENT",
             TqError::InvalidDuration(_) => "INVALID_ARGUMENT",
             TqError::FileReadError { .. } => "IO_ERROR",
@@ -494,6 +576,8 @@ impl TqError {
             TqError::SqlSyntaxError { .. }
             | TqError::QueryExecution(_)
             | TqError::TableNotFound { .. }
+            | TqError::ObjectNotFound { .. }
+            | TqError::WrongObjectKind { .. }
             | TqError::PingFailed(_)
             | TqError::QueryTimeout { .. }
             | TqError::SqlParseError { .. } => "query",
@@ -506,8 +590,10 @@ impl TqError {
             | TqError::InvalidConfig(_)
             | TqError::MissingPassword
             | TqError::ConfigParseError(_)
+            | TqError::MonitoringConfigError(_)
             | TqError::InvalidLogonMechanism(_)
             | TqError::InvalidDuration(_)
+            | TqError::InvalidObjectReference { .. }
             | TqError::AtomicConflict => "config",
             TqError::FileReadError { .. }
             | TqError::FileWriteError { .. }
@@ -759,6 +845,59 @@ mod tests {
         assert_eq!(TqError::MissingPassword.exit_code(), 2);
         assert_eq!(TqError::QueryExecution("test".into()).exit_code(), 1);
         assert_eq!(TqError::PingFailed("test".into()).exit_code(), 1);
+    }
+
+    #[test]
+    fn test_object_not_found_message_and_classification() {
+        let err = TqError::ObjectNotFound {
+            object_type: "Database".into(),
+            name: "demo_usre".into(),
+            hint: None,
+        };
+        assert_eq!(err.user_message(), "Error: Database 'demo_usre' not found.");
+        assert_eq!(err.exit_code(), 1);
+        assert_eq!(err.error_code(), "OBJECT_NOT_FOUND");
+        assert_eq!(err.error_category(), "query");
+    }
+
+    #[test]
+    fn test_object_not_found_message_with_hint() {
+        let err = TqError::ObjectNotFound {
+            object_type: "Object".into(),
+            name: "demo_user.orderss".into(),
+            hint: Some("Check the object name spelling.".into()),
+        };
+        let msg = err.user_message();
+        assert!(msg.starts_with("Error: Object 'demo_user.orderss' not found."));
+        assert!(msg.contains("Check the object name spelling."));
+    }
+
+    #[test]
+    fn test_invalid_object_reference_is_usage_error() {
+        let err = TqError::InvalidObjectReference {
+            reference: "a.b.c".into(),
+            expected: "<database> or <database>.<object>".into(),
+            usage: "Usage: tq space <database>[.<object>]".into(),
+        };
+        let msg = err.user_message();
+        assert!(msg.contains("Invalid object reference 'a.b.c'"));
+        assert!(msg.contains("Usage: tq space"));
+        assert_eq!(err.exit_code(), 2);
+        assert_eq!(err.error_code(), "INVALID_ARGUMENT");
+        assert_eq!(err.error_category(), "config");
+    }
+
+    #[test]
+    fn test_monitoring_config_error_is_usage_error() {
+        let err = TqError::MonitoringConfigError(
+            "cpu_warning (95) must be less than cpu_critical (90).".into(),
+        );
+        let msg = err.user_message();
+        assert!(msg.starts_with("Error: Invalid monitoring configuration"));
+        assert!(msg.contains("cpu_warning (95) must be less than cpu_critical (90)."));
+        assert_eq!(err.exit_code(), 2);
+        assert_eq!(err.error_code(), "INVALID_ARGUMENT");
+        assert_eq!(err.error_category(), "config");
     }
 
     #[test]

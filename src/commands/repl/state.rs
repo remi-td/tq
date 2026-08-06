@@ -7,6 +7,7 @@
 //! - MetadataCache for table/column completion
 //! - Connection string storage for /logon metacommand
 
+use crate::commands::severity::MonitoringContext;
 use crate::db::{ConnectionConfig, MetadataCache, QueryResult};
 use crate::params::ParamStore;
 use crate::error::Severity;
@@ -82,6 +83,10 @@ pub struct ReplState {
 
     /// Custom error level overrides (error code to Severity)
     pub error_levels: HashMap<u32, Severity>,
+
+    /// Monitoring thresholds and severity palette for `/skew`, `/resources`,
+    /// `/space` and `/dbspace`
+    pub monitoring: MonitoringContext,
 }
 
 impl ReplState {
@@ -104,6 +109,7 @@ impl ReplState {
             default_limit: 0,
             params: ParamStore::new(),
             error_levels: HashMap::new(),
+            monitoring: MonitoringContext::default(),
         }
     }
 

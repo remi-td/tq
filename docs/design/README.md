@@ -22,6 +22,14 @@ Design documents mirror the structure of specifications where applicable:
 | `specifications/performance.md` | `design/performance.md` | Optimization techniques, profiling approaches |
 | `specifications/security.md` | `design/security.md` | Security implementation details |
 
+Some design documents have no one-to-one specification counterpart because they describe a
+cross-cutting mechanism rather than a single user-facing feature:
+
+| Design Document | Purpose |
+|-----------------|---------|
+| `design/monitoring.md` | Threshold configuration, severity classification and color rendering shared by all monitoring commands |
+| `design/space-analysis.md` | `tq space` / `tq dbspace`: DBC sources, SQL, aggregation and output shapes |
+
 ## What Design Documents Contain
 
 Each design document should include:

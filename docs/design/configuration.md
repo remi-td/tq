@@ -112,6 +112,9 @@ pub struct Config {
     /// Named connection profiles
     #[serde(default)]
     pub profiles: HashMap<String, ConnectionSettings>,
+
+    /// Monitoring thresholds and severity colors
+    pub monitoring: MonitoringSettings,
 }
 ```
 
@@ -150,6 +153,34 @@ impl Default for ConnectionSettings {
 - Defaults are specified in `Default` impl, not in field types
 - `password_file` instead of inline password for security
 - `serde(default)` allows partial TOML files
+
+### Monitoring Settings
+
+The `[monitoring]` tree carries alert thresholds, severity colors and the watch-mode refresh
+interval. Its structure, defaults, validation rules and the reason validation is invoked
+explicitly from `main` rather than inside `Config::load()` are documented in
+`docs/design/monitoring.md`.
+
+Two properties are worth noting here because they follow from this module's design:
+
+- **Partial tables merge key-by-key.** `Config::load()` seeds Figment with
+  `Serialized::defaults(Config::default())`, so a user config that sets only `cpu_warning`
+  inherits the remaining threshold defaults with no merge code of its own. This is the same
+  mechanism that lets `[connection]` be specified partially.
+- **This tree is file-only.** `Config::load()` merges `Env::prefixed("TQ_").split("_")`.
+  Because the monitoring keys themselves contain underscores,
+  `TQ_MONITORING_THRESHOLDS_CPU_WARNING` would split into `monitoring.thresholds.cpu.warning`
+  and fail to bind. Rather than adding a second env provider with different splitting rules —
+  which would make precedence harder to reason about — monitoring settings are configured
+  through TOML only.
+- **Validation is fatal, loading is not.** `main` keeps its existing
+  `Config::load().unwrap_or_else(-> default)` fallback, so an unreadable or syntactically
+  broken file still degrades gracefully. It then calls `config.monitoring.validate()?`
+  explicitly. A semantically invalid threshold therefore aborts with
+  `TqError::MonitoringConfigError` (exit code 2) instead of silently reverting to defaults,
+  which is the behaviour the requirement asks for. Validation runs on the *merged*
+  configuration, so it applies identically regardless of which file a value came from
+  (REQ-MON-011).
 
 ## Profile Management Commands
 
@@ -565,6 +596,8 @@ fn test_add_profile_creates_tq_directory() { /* ... */ }
 | Component | File Path | Key Functions |
 |-----------|-----------|---------------|
 | Config types | `src/config.rs` | `Config`, `ConnectionSettings` |
+| Monitoring settings | `src/config.rs` | `MonitoringSettings`, `MonitoringThresholds`, `MonitoringColors`, `MonitoringSettings::validate()` |
+| Severity layer | `src/commands/severity.rs` | `Severity`, `Thresholds`, `SeverityStyler`, `MonitoringContext` |
 | Config loading | `src/config.rs` | `Config::load()`, `find_project_config()` |
 | User config path | `src/config.rs` | `Config::user_config_path()` |
 | Password reading | `src/config.rs` | `read_password_from_file()`, `expand_home_dir()` |

@@ -32,6 +32,13 @@ pub struct Config {
     /// REPL settings (for future use)
     pub repl: ReplSettings,
 
+    /// Monitoring thresholds and severity colors
+    ///
+    /// File-only configuration: the `TQ_` environment provider splits on `_`,
+    /// so keys that themselves contain underscores (`cpu_warning`) cannot be
+    /// expressed as environment variables. See `docs/design/monitoring.md`.
+    pub monitoring: MonitoringSettings,
+
     /// Named connection profiles
     #[serde(default)]
     pub profiles: HashMap<String, ConnectionSettings>,
@@ -131,6 +138,190 @@ impl Default for ReplSettings {
             autocomplete: true,
         }
     }
+}
+
+/// Monitoring thresholds and severity colors (`[monitoring]` in config files)
+///
+/// Every key is optional; omitted keys keep their built-in default because
+/// `Config::load()` seeds Figment with `Serialized::defaults(Config::default())`
+/// and TOML tables merge key-by-key over it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MonitoringSettings {
+    /// Numeric thresholds driving severity classification
+    pub thresholds: MonitoringThresholds,
+
+    /// Color names used to paint each severity
+    pub colors: MonitoringColors,
+}
+
+/// Numeric monitoring thresholds (`[monitoring.thresholds]`)
+///
+/// All `*_warning` / `*_critical` values are percentages in `0..=100`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MonitoringThresholds {
+    /// CPU% at/above which a metric is Warning
+    pub cpu_warning: f64,
+    /// CPU% at/above which a metric is Critical
+    pub cpu_critical: f64,
+    /// I/O% at/above which a metric is Warning
+    pub io_warning: f64,
+    /// I/O% at/above which a metric is Critical
+    pub io_critical: f64,
+    /// Skew% at/above which a metric is Warning
+    pub skew_warning: f64,
+    /// Skew% at/above which a metric is Critical
+    pub skew_critical: f64,
+    /// PermUsed% at/above which a metric is Warning
+    pub space_warning: f64,
+    /// PermUsed% at/above which a metric is Critical
+    pub space_critical: f64,
+    /// Default `--watch` refresh interval in seconds (2..=300)
+    pub refresh_interval: u64,
+}
+
+impl Default for MonitoringThresholds {
+    fn default() -> Self {
+        Self {
+            cpu_warning: 70.0,
+            cpu_critical: 90.0,
+            io_warning: 80.0,
+            io_critical: 95.0,
+            skew_warning: 40.0,
+            skew_critical: 70.0,
+            space_warning: 80.0,
+            space_critical: 90.0,
+            refresh_interval: 6,
+        }
+    }
+}
+
+/// Severity color names (`[monitoring.colors]`)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MonitoringColors {
+    /// Color for values classified Normal
+    pub normal: String,
+    /// Color for values classified Warning
+    pub warning: String,
+    /// Color for values classified Critical
+    pub critical: String,
+}
+
+impl Default for MonitoringColors {
+    fn default() -> Self {
+        Self {
+            normal: "green".to_string(),
+            warning: "yellow".to_string(),
+            critical: "red".to_string(),
+        }
+    }
+}
+
+/// Minimum accepted `refresh_interval`, mirroring the `--interval` clap range
+pub const MIN_REFRESH_INTERVAL: u64 = 2;
+/// Maximum accepted `refresh_interval`, mirroring the `--interval` clap range
+pub const MAX_REFRESH_INTERVAL: u64 = 300;
+
+impl MonitoringSettings {
+    /// Validate every threshold and color in one pass.
+    ///
+    /// Per REQ-MON-010 all violations are collected and reported together so a
+    /// DBA fixing a config file does not have to re-run `tq` once per mistake.
+    ///
+    /// This is deliberately *not* called from [`Config::load`]: `main` treats a
+    /// load failure as non-fatal and falls back to defaults, which would
+    /// silently swallow a semantic threshold error. `main` calls this
+    /// explicitly and propagates the result.
+    pub fn validate(&self) -> Result<()> {
+        let mut problems: Vec<String> = Vec::new();
+        let t = &self.thresholds;
+
+        for (name, value) in [
+            ("cpu_warning", t.cpu_warning),
+            ("cpu_critical", t.cpu_critical),
+            ("io_warning", t.io_warning),
+            ("io_critical", t.io_critical),
+            ("skew_warning", t.skew_warning),
+            ("skew_critical", t.skew_critical),
+            ("space_warning", t.space_warning),
+            ("space_critical", t.space_critical),
+        ] {
+            if !(0.0..=100.0).contains(&value) || value.is_nan() {
+                problems.push(format!(
+                    "{} must be between 0 and 100 (got: {}).",
+                    name,
+                    format_threshold(value)
+                ));
+            }
+        }
+
+        for (family, warning, critical) in [
+            ("cpu", t.cpu_warning, t.cpu_critical),
+            ("io", t.io_warning, t.io_critical),
+            ("skew", t.skew_warning, t.skew_critical),
+            ("space", t.space_warning, t.space_critical),
+        ] {
+            if warning >= critical {
+                problems.push(format!(
+                    "{family}_warning ({}) must be less than {family}_critical ({}).",
+                    format_threshold(warning),
+                    format_threshold(critical)
+                ));
+            }
+        }
+
+        if !(MIN_REFRESH_INTERVAL..=MAX_REFRESH_INTERVAL).contains(&t.refresh_interval) {
+            problems.push(format!(
+                "refresh_interval must be between {} and {} seconds (got: {}).",
+                MIN_REFRESH_INTERVAL, MAX_REFRESH_INTERVAL, t.refresh_interval
+            ));
+        }
+
+        for (key, name) in [
+            ("normal", &self.colors.normal),
+            ("warning", &self.colors.warning),
+            ("critical", &self.colors.critical),
+        ] {
+            if !is_valid_color_name(name) {
+                problems.push(format!(
+                    "[monitoring.colors] {key}: unknown color '{name}'. \
+                     Accepted values: black, red, green, yellow, blue, magenta, \
+                     cyan, white (or bright_<color>)."
+                ));
+            }
+        }
+
+        if problems.is_empty() {
+            Ok(())
+        } else {
+            Err(TqError::MonitoringConfigError(problems.join("\n  ")))
+        }
+    }
+}
+
+/// Format a threshold for an error message without a trailing `.0` on integers
+fn format_threshold(value: f64) -> String {
+    if value.fract() == 0.0 && value.is_finite() {
+        format!("{}", value as i64)
+    } else {
+        format!("{}", value)
+    }
+}
+
+/// The ANSI-portable base color names accepted in `[monitoring.colors]`
+pub const ACCEPTED_COLOR_NAMES: [&str; 8] = [
+    "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+];
+
+/// Whether `name` is an accepted `[monitoring.colors]` value
+///
+/// Accepts the eight base names and their `bright_` variants, case-insensitively.
+pub fn is_valid_color_name(name: &str) -> bool {
+    let lower = name.trim().to_ascii_lowercase();
+    let base = lower.strip_prefix("bright_").unwrap_or(&lower);
+    ACCEPTED_COLOR_NAMES.contains(&base)
 }
 
 impl Config {
@@ -453,6 +644,160 @@ pub fn should_use_color(_config: &Config, cli_color: &crate::cli::ColorChoice) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // =========================================================================
+    // [monitoring] defaults, merging and validation
+    // =========================================================================
+
+    /// Extract a `Config` from a TOML snippet the way `Config::load` would:
+    /// defaults first, user table merged over them key-by-key.
+    fn config_from_toml(toml: &str) -> Config {
+        Figment::new()
+            .merge(Serialized::defaults(Config::default()))
+            .merge(figment::providers::Toml::string(toml))
+            .extract()
+            .expect("config should parse")
+    }
+
+    #[test]
+    fn test_monitoring_defaults() {
+        let t = MonitoringThresholds::default();
+        assert_eq!(t.cpu_warning, 70.0);
+        assert_eq!(t.cpu_critical, 90.0);
+        assert_eq!(t.io_warning, 80.0);
+        assert_eq!(t.io_critical, 95.0);
+        assert_eq!(t.skew_warning, 40.0);
+        assert_eq!(t.skew_critical, 70.0);
+        assert_eq!(t.space_warning, 80.0);
+        assert_eq!(t.space_critical, 90.0);
+        assert_eq!(t.refresh_interval, 6);
+
+        let c = MonitoringColors::default();
+        assert_eq!(c.normal, "green");
+        assert_eq!(c.warning, "yellow");
+        assert_eq!(c.critical, "red");
+    }
+
+    #[test]
+    fn test_monitoring_absent_section_is_valid() {
+        let config = config_from_toml("[output]\nformat = \"json\"\n");
+        assert_eq!(config.monitoring.thresholds.cpu_warning, 70.0);
+        assert!(config.monitoring.validate().is_ok());
+    }
+
+    #[test]
+    fn test_monitoring_partial_table_merges_over_defaults() {
+        let config = config_from_toml(
+            "[monitoring.thresholds]\nskew_warning = 25\nskew_critical = 50\n",
+        );
+        let t = &config.monitoring.thresholds;
+        assert_eq!(t.skew_warning, 25.0);
+        assert_eq!(t.skew_critical, 50.0);
+        // Untouched keys keep their defaults
+        assert_eq!(t.cpu_warning, 70.0);
+        assert_eq!(t.space_critical, 90.0);
+        assert_eq!(t.refresh_interval, 6);
+        assert!(config.monitoring.validate().is_ok());
+    }
+
+    #[test]
+    fn test_monitoring_partial_colors_merge() {
+        let config = config_from_toml("[monitoring.colors]\nwarning = \"bright_yellow\"\n");
+        assert_eq!(config.monitoring.colors.warning, "bright_yellow");
+        assert_eq!(config.monitoring.colors.normal, "green");
+        assert!(config.monitoring.validate().is_ok());
+    }
+
+    #[test]
+    fn test_monitoring_defaults_validate() {
+        assert!(MonitoringSettings::default().validate().is_ok());
+    }
+
+    #[test]
+    fn test_monitoring_warning_not_less_than_critical_is_rejected() {
+        for (family, key) in [
+            ("cpu", "cpu_warning = 95\ncpu_critical = 90"),
+            ("io", "io_warning = 96\nio_critical = 95"),
+            ("skew", "skew_warning = 70\nskew_critical = 70"),
+            ("space", "space_warning = 95\nspace_critical = 90"),
+        ] {
+            let config = config_from_toml(&format!("[monitoring.thresholds]\n{key}\n"));
+            let err = config
+                .monitoring
+                .validate()
+                .expect_err("{family} pair should be rejected");
+            let msg = err.to_string();
+            assert!(
+                msg.contains(&format!("{family}_warning")),
+                "message did not name the family: {msg}"
+            );
+            assert!(msg.contains("must be less than"), "unexpected message: {msg}");
+            assert_eq!(err.exit_code(), 2);
+        }
+    }
+
+    #[test]
+    fn test_monitoring_out_of_range_rejected() {
+        let config = config_from_toml("[monitoring.thresholds]\nskew_critical = 150\n");
+        let msg = config.monitoring.validate().unwrap_err().to_string();
+        assert!(msg.contains("skew_critical must be between 0 and 100 (got: 150)"));
+    }
+
+    #[test]
+    fn test_monitoring_negative_rejected() {
+        let config = config_from_toml("[monitoring.thresholds]\nspace_warning = -10\n");
+        let msg = config.monitoring.validate().unwrap_err().to_string();
+        assert!(msg.contains("space_warning must be between 0 and 100 (got: -10)"));
+    }
+
+    #[test]
+    fn test_monitoring_refresh_interval_bounds() {
+        for value in ["1", "301"] {
+            let config =
+                config_from_toml(&format!("[monitoring.thresholds]\nrefresh_interval = {value}\n"));
+            let msg = config.monitoring.validate().unwrap_err().to_string();
+            assert!(
+                msg.contains("refresh_interval must be between 2 and 300 seconds"),
+                "unexpected message: {msg}"
+            );
+        }
+        let config = config_from_toml("[monitoring.thresholds]\nrefresh_interval = 30\n");
+        assert!(config.monitoring.validate().is_ok());
+        assert_eq!(config.monitoring.thresholds.refresh_interval, 30);
+    }
+
+    #[test]
+    fn test_monitoring_unknown_color_rejected() {
+        let config = config_from_toml("[monitoring.colors]\nwarning = \"orange\"\n");
+        let msg = config.monitoring.validate().unwrap_err().to_string();
+        assert!(msg.contains("unknown color 'orange'"), "unexpected: {msg}");
+        assert!(msg.contains("bright_<color>"));
+    }
+
+    #[test]
+    fn test_monitoring_reports_every_violation_in_one_pass() {
+        let config = config_from_toml(
+            "[monitoring.thresholds]\n\
+             cpu_warning = 95\ncpu_critical = 90\nskew_critical = 150\nrefresh_interval = 1\n\
+             [monitoring.colors]\nnormal = \"chartreuse\"\n",
+        );
+        let msg = config.monitoring.validate().unwrap_err().to_string();
+        assert!(msg.contains("cpu_warning"), "missing cpu: {msg}");
+        assert!(msg.contains("skew_critical"), "missing skew: {msg}");
+        assert!(msg.contains("refresh_interval"), "missing interval: {msg}");
+        assert!(msg.contains("chartreuse"), "missing color: {msg}");
+    }
+
+    #[test]
+    fn test_is_valid_color_name() {
+        assert!(is_valid_color_name("green"));
+        assert!(is_valid_color_name("GREEN"));
+        assert!(is_valid_color_name("bright_magenta"));
+        assert!(is_valid_color_name("  cyan "));
+        assert!(!is_valid_color_name("orange"));
+        assert!(!is_valid_color_name("bright_orange"));
+        assert!(!is_valid_color_name(""));
+    }
 
     #[test]
     fn test_default_config() {

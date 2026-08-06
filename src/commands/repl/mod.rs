@@ -57,6 +57,11 @@ use crate::params::ParamStore;
 ///
 /// When `initial_params` is `Some`, the ParamStore is loaded into REPL state
 /// so that `{{variable}}` substitution is available from the start.
+///
+/// `monitoring` carries the resolved severity thresholds and palette; it is
+/// stored on `ReplState` so metacommand handlers can reach it without growing
+/// their own signatures.
+#[allow(clippy::too_many_arguments)]
 pub fn execute<W: Write>(
     client: DatabaseClient,
     args: &ReplArgs,
@@ -65,6 +70,7 @@ pub fn execute<W: Write>(
     use_color: bool,
     _verbose: bool,
     error_levels: std::collections::HashMap<u32, crate::error::Severity>,
+    monitoring: crate::commands::severity::MonitoringContext,
 ) -> Result<()> {
     // Create shared completion state (thread-safe for reedline)
     let database = client.config().database.clone();
@@ -75,6 +81,7 @@ pub fn execute<W: Write>(
         let cs = completion_state.lock().unwrap();
         let mut s = ReplState::new(cs.client().config().clone());
         s.error_levels = error_levels;
+        s.monitoring = monitoring;
         // Sprint 36: Store default_limit so /repeat can re-use it
         s.set_default_limit(args.default_limit);
         if args.no_pager {

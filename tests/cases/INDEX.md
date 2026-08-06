@@ -11,6 +11,36 @@ This directory contains comprehensive test case definitions for the tq CLI tool.
 
 ## Test Case Categories
 
+### Sprint 76: Feature — Perm Space Analysis (#54) + Monitoring Thresholds & Colors (#23)
+
+- **TC109**: Space Analysis (`tq space`, `tq dbspace`) — 13 unit tests (TC109-U01..U13, colocated in
+  `src/commands/space.rs` `#[cfg(test)]`, owned by `rust-teradata-architect` per the project's
+  unit-test-ownership convention) plus 14 live-DB integration tests (TC109-I01..I14) in
+  `tests/integration_space.rs`, `#[ignore]`. Covers the three invocation shapes (`space <db>`,
+  `space <db>.<obj>`, `dbspace <db>`), all four output formats, the NULL-safe skew formula, and the
+  descoped (no fuzzy-match helper) not-found error path. — `TC109.md`
+
+- **TC110**: Monitoring Thresholds & Colors — 24 unit tests (TC110-U01..U24, colocated in
+  `src/config.rs`/`src/commands/severity.rs` `#[cfg(test)]`) plus 8 integration tests
+  (TC110-I01..I08) in `tests/integration_monitoring.rs`, `#[ignore]`. Covers per-key partial-config
+  defaults, inclusive severity-boundary classification, fatal threshold validation
+  (`config.monitoring.validate()?` per coordinator ruling #3), ANSI presence/absence under
+  `Auto`/`Always`/`Never`/`NO_COLOR`, and `refresh_interval` CLI-flag-over-config precedence
+  (verified via a PTY since `--watch` requires `enable_raw_mode()`). — `TC110.md`
+
+**Sprint 76 test case summary:**
+- Unit tests (colocated in `src/`, owned by `rust-teradata-architect`): TC109-U01..U13 (13) +
+  TC110-U01..U24 (24) = 37 new unit tests
+- Integration tests (live DB / PTY, `#[ignore]`, owned by `quality-validator`):
+  TC109-I01..I14 (14) + TC110-I01..I08 (8) = 22 new `#[ignore]` tests
+- New shared test tooling (`tests/helpers/mod.rs`): `contains_ansi`/`assert_no_ansi`/
+  `assert_has_ansi` (pure `std` byte scan); `create_user_config`/`create_project_config` promoted
+  out of `tests/integration_project_config_edge_cases.rs`.
+- **Total planned: 59 tests** (37 unit + 22 integration), per
+  `tests/strategy/sprint-76-strategy.md`.
+
+---
+
 ### Sprint 69: Feature — PTY Cursor-Position Fix + Pager Search Status Bar Composition
 
 - **TC107**: PTY Cursor-Position Fix Validation — (a) Unit test for the `[6n` → `[1;1R` CPR

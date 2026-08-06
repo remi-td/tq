@@ -368,6 +368,24 @@ pub enum Command {
     ///          tq skew
     Skew(SkewArgs),
 
+    /// Analyze permanent space usage for a database or object
+    ///
+    /// With a bare database name, shows the database's own perm/spool/temp
+    /// footprint followed by one row per contained object. With a qualified
+    /// name, shows that object only.
+    ///
+    /// Example: tq space demo_user
+    ///          tq space demo_user.orders
+    Space(SpaceArgs),
+
+    /// Analyze permanent space usage for a database only
+    ///
+    /// Shows database-level perm, spool and temp metrics without listing the
+    /// objects it contains. Rejects a qualified `database.object` argument.
+    ///
+    /// Example: tq dbspace demo_user
+    Dbspace(DbspaceArgs),
+
     /// View session logon/logoff history and trends
     ///
     /// Shows recent session activity from DBC.LogOnOffV including logon,
@@ -438,6 +456,8 @@ impl Command {
             Command::Abort(a) => Some(a.format),
             Command::Explain(a) => Some(a.format),
             Command::Skew(a) => Some(a.format),
+            Command::Space(a) => Some(a.format),
+            Command::Dbspace(a) => Some(a.format),
             Command::History(a) => Some(a.format),
             Command::Resources(a) => Some(a.format),
             Command::LogoffIdle(a) => Some(a.format),
@@ -737,11 +757,19 @@ pub struct SessionsArgs {
     #[arg(long, conflicts_with = "output")]
     pub watch: bool,
 
-    /// Refresh interval in seconds for watch mode (default: 6)
+    /// Refresh interval in seconds for watch mode
+    ///
+    /// Defaults to `[monitoring.thresholds] refresh_interval` from the config
+    /// file, or 6 seconds when that is unset.
     ///
     /// Minimum: 2 seconds. Maximum: 300 seconds.
-    #[arg(long, default_value = "6", value_name = "SECONDS", requires = "watch", value_parser = clap::value_parser!(u64).range(2..=300))]
-    pub interval: u64,
+    //
+    // Deliberately `Option<u64>` rather than `u64` with a clap default: a clap
+    // default makes "the user asked for 6" indistinguishable from "the user
+    // said nothing", so config could never win. Precedence (flag > config >
+    // built-in) is resolved at the dispatch site in `main`.
+    #[arg(long, value_name = "SECONDS", requires = "watch", value_parser = clap::value_parser!(u64).range(2..=300))]
+    pub interval: Option<u64>,
 }
 
 /// Arguments for the sysconfig command (Sprint 38)
@@ -800,11 +828,19 @@ pub struct LocksArgs {
     #[arg(long, conflicts_with = "output")]
     pub watch: bool,
 
-    /// Refresh interval in seconds for watch mode (default: 6)
+    /// Refresh interval in seconds for watch mode
+    ///
+    /// Defaults to `[monitoring.thresholds] refresh_interval` from the config
+    /// file, or 6 seconds when that is unset.
     ///
     /// Minimum: 2 seconds. Maximum: 300 seconds.
-    #[arg(long, default_value = "6", value_name = "SECONDS", requires = "watch", value_parser = clap::value_parser!(u64).range(2..=300))]
-    pub interval: u64,
+    //
+    // Deliberately `Option<u64>` rather than `u64` with a clap default: a clap
+    // default makes "the user asked for 6" indistinguishable from "the user
+    // said nothing", so config could never win. Precedence (flag > config >
+    // built-in) is resolved at the dispatch site in `main`.
+    #[arg(long, value_name = "SECONDS", requires = "watch", value_parser = clap::value_parser!(u64).range(2..=300))]
+    pub interval: Option<u64>,
 }
 
 /// Arguments for the query-inspect command (Sprint 39)
@@ -1188,6 +1224,66 @@ pub struct SkewArgs {
     pub output: Option<PathBuf>,
 }
 
+/// Arguments for the space command
+#[derive(Parser, Debug)]
+pub struct SpaceArgs {
+    /// Database or qualified object to analyze
+    ///
+    /// `<database>` shows the database header row plus one row per contained
+    /// object; `<database>.<object>` shows that object only.
+    #[arg(value_name = "TARGET")]
+    pub target: String,
+
+    /// Output format
+    ///
+    /// table: Human-readable table with humanized byte sizes (default)
+    /// json: JSON with raw byte integers
+    /// csv: Comma-separated values with raw byte integers
+    /// markdown/md: GitHub-Flavored Markdown table
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
+/// Arguments for the dbspace command
+#[derive(Parser, Debug)]
+pub struct DbspaceArgs {
+    /// Database to analyze
+    ///
+    /// Must be a bare database or user name. A qualified `database.object`
+    /// argument is rejected — use `tq space <database>.<object>` instead.
+    #[arg(value_name = "DATABASE")]
+    pub database: String,
+
+    /// Output format
+    ///
+    /// table: Human-readable table with humanized byte sizes (default)
+    /// json: JSON with raw byte integers
+    /// csv: Comma-separated values with raw byte integers
+    /// markdown/md: GitHub-Flavored Markdown table
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+}
+
 /// Arguments for the history command (Sprint 51)
 #[derive(Parser, Debug)]
 pub struct HistoryArgs {
@@ -1278,11 +1374,19 @@ pub struct ResourcesArgs {
     #[arg(long, conflicts_with = "output")]
     pub watch: bool,
 
-    /// Refresh interval in seconds for watch mode (default: 6)
+    /// Refresh interval in seconds for watch mode
+    ///
+    /// Defaults to `[monitoring.thresholds] refresh_interval` from the config
+    /// file, or 6 seconds when that is unset.
     ///
     /// Minimum: 2 seconds. Maximum: 300 seconds.
-    #[arg(long, default_value = "6", value_name = "SECONDS", requires = "watch", value_parser = clap::value_parser!(u64).range(2..=300))]
-    pub interval: u64,
+    //
+    // Deliberately `Option<u64>` rather than `u64` with a clap default: a clap
+    // default makes "the user asked for 6" indistinguishable from "the user
+    // said nothing", so config could never win. Precedence (flag > config >
+    // built-in) is resolved at the dispatch site in `main`.
+    #[arg(long, value_name = "SECONDS", requires = "watch", value_parser = clap::value_parser!(u64).range(2..=300))]
+    pub interval: Option<u64>,
 }
 
 /// Arguments for the sample command (Sprint 33)

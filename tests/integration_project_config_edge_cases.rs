@@ -12,6 +12,10 @@ use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
 
+#[path = "helpers/mod.rs"]
+mod helpers;
+use helpers::{create_project_config, create_user_config};
+
 /// Helper to create a tq command with custom HOME and working directory
 fn tq_cmd_with_env(home_dir: &std::path::Path, work_dir: &std::path::Path) -> Command {
     let mut cmd = Command::cargo_bin("tq").unwrap();
@@ -21,20 +25,6 @@ fn tq_cmd_with_env(home_dir: &std::path::Path, work_dir: &std::path::Path) -> Co
     cmd.env_remove("TQ_LOGON");
     cmd.env_remove("TQ_PROFILE");
     cmd
-}
-
-/// Create user config directory and file
-fn create_user_config(home_dir: &std::path::Path, content: &str) {
-    let config_dir = home_dir.join(".tq");
-    fs::create_dir_all(&config_dir).unwrap();
-    let config_path = config_dir.join("config.toml");
-    fs::write(&config_path, content).unwrap();
-}
-
-/// Create project config file in directory
-fn create_project_config(dir: &std::path::Path, content: &str) {
-    let config_path = dir.join(".tq.toml");
-    fs::write(&config_path, content).unwrap();
 }
 
 // =============================================================================

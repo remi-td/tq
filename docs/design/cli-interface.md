@@ -3303,6 +3303,112 @@ Follow the same test structure as existing table/column search tests:
 | Tab completion | `src/commands/repl/metadata_completer.rs` | `MetacommandDef` entry + subcommand array |
 | Unit tests | `src/commands/search.rs` | 7 new tests |
 
+## tq space / tq dbspace Commands
+
+Two commands report permanent, spool and temporary space usage. The full design — verified
+DBC column sets, SQL, skew formula, module structure and output shapes — lives in
+`docs/design/space-analysis.md`. This section records only the CLI-surface decisions.
+
+### Command shapes
+
+```
+tq space <database>            # database header row + one row per contained object
+tq space <database>.<object>   # single object row
+tq dbspace <database>          # database-level metrics only
+```
+
+Both commands take a single positional argument plus the standard `--format` and `--output`
+flags, matching `SkewArgs` (`src/cli.rs:1163`).
+
+### Why two commands rather than one flag
+
+`tq space <db>` and `tq dbspace <db>` return different column sets, not different filters of
+the same set: the database view carries `MaxPerm`, `% used`, and spool/temp metrics that have
+no object-level equivalent, because `DBC.TableSizeV` exposes only `CurrentPerm` and
+`PeakPerm`. Expressing this as `tq space --database-only` would give one command two
+incompatible output schemas per format, which complicates every renderer and every consumer.
+Two commands keep each output schema stable.
+
+### Target parsing
+
+Both commands share one `parse_target` function returning a `SpaceTarget` enum
+(`Database` | `Object`). `dbspace` accepts only the `Database` variant and rejects a
+qualified argument with an actionable error naming the correct command, rather than silently
+ignoring the object part:
+
+```
+Error: Invalid object reference 'demo_user.orders' — expected <database> (dbspace operates on databases only)
+Hint: use 'tq space demo_user.orders' for object-level space,
+      or 'tq dbspace demo_user' for the database.
+
+Usage: tq dbspace <database>
+```
+
+This is a usage error, exit code 2, carried by `TqError::InvalidObjectReference`. A target
+with more than one dot (`a.b.c`) uses the same variant.
+
+`parse_target` splits on `.` but ignores dots inside double-quoted identifier parts, so
+`"my.db".tbl` resolves to the database `my.db` and the object `tbl`. Surrounding quotes are
+stripped and doubled inner quotes are un-doubled, matching the conventions in
+`src/sql/identifiers.rs`.
+
+### Not-found handling
+
+A database that holds no space returns zero rows from `DBC.DiskSpaceV`, which is
+indistinguishable at the query level from a misspelled name. Rather than guessing, an empty
+result triggers a catalog probe against `DBC.DatabasesV` (or `DBC.TablesV` for the object
+form). A missing catalog entry produces `TqError::ObjectNotFound` (exit code 1); an existing
+entry produces a zero-usage report. The probe runs only on the empty-result path, so the
+common case costs one round trip.
+
+No spelling suggestion is offered — no fuzzy-match helper exists anywhere in `src/`, and
+adding one was out of scope. `dbspace` does, however, make one extra distinction: when the
+database probe fails it re-probes `DBC.TablesV` for an object of that name in any database,
+so `tq dbspace evals_employees` reports "'evals_employees' is an object in database
+'demo_user', not a database" and names `tq space demo_user.evals_employees`.
+
+### Severity coloring
+
+Table and markdown output route skew percentages and `PermUsed%` through the shared severity
+layer (`docs/design/monitoring.md`). The `json` and `csv` renderers take no
+`MonitoringContext` parameter at all, so they cannot emit ANSI escapes regardless of
+`--color` (REQ-COLOR-007).
+
+### Code Linkage
+
+| Component | File Path | Key Elements |
+|-----------|-----------|--------------|
+| Command variants | `src/cli.rs` | `Command::Space`, `Command::Dbspace` |
+| Argument structs | `src/cli.rs` | `SpaceArgs`, `DbspaceArgs` |
+| Implementation | `src/commands/space.rs` | `execute`, `execute_for_repl`, `parse_target`, 4 renderers |
+| Module registration | `src/commands/mod.rs` | `pub mod space;`, `pub use space::execute as space;` |
+| Dispatch | `src/main.rs` | `Command::Space` / `Command::Dbspace` arms with `--output` branch |
+| Re-exports | `src/lib.rs` | `SpaceArgs`, `DbspaceArgs` |
+| REPL metacommands | `src/commands/repl/metacommands.rs` | `/space`, `/dbspace` in both handlers + `print_help_extended` |
+| Tab completion | `src/commands/repl/metadata_completer.rs` | `MetacommandDef` entries |
+| Lenient numeric extraction | `src/commands/monitoring_utils.rs` | `extract_i64_lenient`, `extract_f64_lenient` |
+| Error variants | `src/error.rs` | `ObjectNotFound`, `InvalidObjectReference` |
+
+## Watch Interval Flag Resolution
+
+`--interval` was declared on three arg structs (`SessionsArgs`, `LocksArgs`, `ResourcesArgs`)
+with `default_value = "6"`. That default made "the user asked for 6"
+indistinguishable from "the user said nothing", so a configured `refresh_interval` could
+never take effect.
+
+The flag becomes `Option<u64>` with the clap default removed and the `2..=300` range parser
+retained. Resolution moves to the dispatch site in `src/main.rs`, where both the parsed args
+and the loaded config are in scope:
+
+```rust
+let interval = args.interval.unwrap_or(config.monitoring.thresholds.refresh_interval);
+```
+
+Precedence is CLI flag > config > built-in default, matching the hierarchy in
+`docs/design/configuration.md`. This is the general pattern for any future flag that needs a
+config-supplied default: express the flag as `Option<T>`, keep validation in the clap value
+parser, and resolve the default where config is available.
+
 ## Future Enhancements
 
 - **Config file flag**: `--config <path>` to override default config location
