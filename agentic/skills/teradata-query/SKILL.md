@@ -299,6 +299,38 @@ tq sample customers 20        # 20 random rows
 
 ---
 
+## Space Analysis
+
+Analyze disk space, table allocation, and storage skew across databases or specific tables using `tq space` and `tq dbspace`.
+
+### Database & Object Space Breakdown
+
+```bash
+# Database-level summary + list of all child tables/views with Perm space and skew
+tq space demo_user
+
+# Object-level space analysis (Current Perm, Peak Perm, Perm Skew %)
+tq space demo_user.orders
+
+# Database-level summary only (Perm, Spool, Temp space, allocation limits; omits child tables)
+tq dbspace demo_user
+```
+
+### Space Analysis Output Formats
+
+```bash
+# Export space metrics to CSV (raw byte counts for automated parsing)
+tq space demo_user --format csv
+
+# Structured JSON format with nested metric objects
+tq space demo_user --format json
+
+# GitHub-flavored Markdown table for documentation
+tq space demo_user --format markdown
+```
+
+---
+
 ## Monitoring and Administration
 
 ### Active Sessions
@@ -371,6 +403,7 @@ tq --profile dev repl
 | `/sample table_name 20` | Random sample (20 rows) |
 | `/peek table_name` | Preview structure + data |
 | `/sessions` | Monitor active sessions |
+| `/errorlevel [CODE...] [SEVERITY]` | View or set error code severity overrides |
 | `/params load file.yaml` | Load parameter file for variable substitution |
 | `/params show` | Show loaded parameters |
 | `/params unload` | Clear loaded parameters |
@@ -394,15 +427,65 @@ tq ping
 
 ---
 
-## Error Handling
+## Error Handling & Error Level Control
 
-- If a query fails, tq prints the Teradata error code and message to stderr.
-- For batch file execution, stop on first error -- do not continue executing subsequent files.
+- If a query fails, `tq` prints the Teradata error code and message to stderr.
+- For batch file execution, `tq` stops on the first error by default -- it does not continue executing subsequent statements in the batch unless the error severity is downgraded.
 - Common Teradata errors:
-  - **3807** -- Object does not exist (check database/table name)
+  - **3807** -- Object does not exist (e.g. table, view, or database not found)
   - **3706** -- Syntax error (check SQL syntax)
   - **2801** -- Authentication failed (check credentials or profile config)
   - **6706** -- Untranslatable character (check for non-ASCII characters in SQL)
+
+### Controlling Severity Levels (`--errorlevel`)
+
+By default, database errors halt execution. You can downgrade specific error codes to `warning` (or upgrade/map them) using `--errorlevel CODE [CODE...] SEVERITY` so that scripts continue running when encountering non-fatal expected errors.
+
+Supported severities: `warning` (4), `error` (8), `severe` (12), `fatal` (16).
+
+#### Common Pattern: Deployment Scripts & Idempotent DDL (`DROP TABLE` before `CREATE TABLE`)
+
+In DDL deployment scripts, dropping a table before recreating it (`DROP TABLE my_table; CREATE TABLE my_table ...;`) is a common pattern. On a first deployment, the table does not exist, so Teradata returns error **3807** ("Table 'my_table' does not exist"). Without `--errorlevel`, this error halts the script before the `CREATE TABLE` statement is reached.
+
+By passing `--errorlevel 3807 warning`, `tq` logs the missing table as a warning and continues to create the table:
+
+```bash
+# Downgrade error 3807 (Object does not exist) to warning so deployment continues
+tq query --file deploy_schema.sql --errorlevel 3807 warning
+```
+
+*Example `deploy_schema.sql`:*
+```sql
+-- If table orders does not exist (first run), Teradata returns error 3807.
+-- With '--errorlevel 3807 warning', tq logs a warning and proceeds to CREATE TABLE.
+DROP TABLE demo_user.orders;
+
+CREATE TABLE demo_user.orders (
+    order_id INTEGER NOT NULL,
+    customer_id INTEGER,
+    order_date DATE
+) PRIMARY INDEX (order_id);
+```
+
+#### Multiple Error Code Overrides
+
+```bash
+# Map both 3807 (object not found) and 3802 (database not found) to warning
+tq query --file migration.sql --errorlevel 3807 3802 warning
+
+# Combine multiple mappings
+tq query --file script.sql --errorlevel 3807 warning --errorlevel 3523 error
+```
+
+#### REPL Metacommand (`/errorlevel`)
+
+In interactive REPL sessions, manage error level mappings dynamically:
+
+```text
+/errorlevel 3807 warning     # Set 3807 to warning severity
+/errorlevel                  # Display active errorlevel overrides
+/errorlevel clear            # Reset all custom severity mappings
+```
 
 ---
 
