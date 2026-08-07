@@ -36,25 +36,23 @@ The project follows a structured sprint-driven approach coordinated by the **mai
 
 **IMPORTANT: Use the `/sprint-coordinator` skill when starting a new sprint or coordinating sprint phases.**
 
-The sprint-coordinator skill (`.claude/skills/sprint-coordinator/SKILL.md`) defines the complete 6-phase workflow:
+The sprint-coordinator skill (`.agents/skills/sprint-coordinator/SKILL.md`) defines the complete 7-phase lean workflow:
 
-0. **Restrospective** - Review the at least last three sprints to identify opportunities for improvement.
-1. **Sprint Planning** - Review context, create sprint plan, execute autonomously
-2. **Parallel Design** - cli-ux-designer + rust-teradata-architect in parallel
-3. **Parallel Implementation** - rust-teradata-architect + quality-validator in parallel
-4. **Test Execution & Fix Loop** - quality-validator executes tests, iterate until 100% pass
-5. **Sprint Closure** - tq-project-manager validates, create sprint review, update roadmap
-6. **Framework Optimization** - Review retro for improvements, optional token analysis, implement optimizations
+0. **Reality Check** - Quick scan of recent sprint state to decide Feature or Maintenance sprint.
+1. **Lean Planning** - Create concise `sprint-N-planning.md` (max 40-50 lines) with clear acceptance criteria.
+2. **Parallel Design** - cli-ux-designer + rust-teradata-architect in parallel.
+3. **Parallel Build & Test** - rust-teradata-architect (code) + quality-validator (tests) in parallel.
+4. **Ship** - Validate 100% test pass rate, commit, tag release, update GitHub issues.
+5. **Single-Pass Retrospective** - Unified single-agent summary (<50 lines) in `sprint-N-review.md` with delta metrics.
+6. **Action-Only Optimization** - If workflow friction occurred, directly modify skill/code files in that turn; otherwise exit immediately.
 
 **Key Principles:**
-- **Full Autonomy - HEADLESS LOOP:** Execute all sprint phases (0-5) automatically without stopping for approval. This is a versioned, safe sandbox environment. NEVER ask "Should I proceed?" or wait for user permission between phases.
+- **Full Autonomy - HEADLESS LOOP:** Execute all sprint phases (0-6) automatically without stopping for approval. This is a versioned, safe sandbox environment. NEVER ask "Should I proceed?" or wait for user permission between phases.
 - **Own All Decisions:** The sprint coordinator makes ALL executive decisions autonomously. No supervisor. No approval gates.
 - **Maximize Parallelism:** Launch independent sub-agents in a single message with multiple Task calls
-- **Context Isolation:** Sub-agents handle verbose work; main conversation stays clean
-- **Quality Focus:** Zero technical debt tolerance, 100% test pass rate before sprint closure
-- **Documentation-Driven:** Every sprint produces planning and review documents
-- **Self Reflection:** The primary Claude agent must reflect on its own performance and identify opportunities for improvement
-- **Continuous Improvement:** Phase 6 ensures framework learns from each sprint
+- **Lean Administrative Overhead:** Keep planning and review documents under 50 lines to prevent token waste and context bloat.
+- **Quality Focus:** Zero technical debt tolerance, 100% test pass rate before sprint closure.
+- **Direct-Action Optimization:** Phase 6 applies concrete prompt/code edits immediately rather than writing prose proposal files.
 
 #### Specialized Sub-Agent Roles
 

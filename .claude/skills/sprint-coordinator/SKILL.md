@@ -34,29 +34,23 @@ Review the last 3 sprint reviews. Look for stuck issues, accumulating debt, or f
 ### Phase 1: Planning
 
 **If Feature Sprint:**
-> **Read:** `phase1-feature-planning.md`
+> **Read:** `process/phase1-feature-planning.md`
 
 Create `docs/sprints/sprint-N-planning.md` with objectives and acceptance criteria.
-Use `.claude/skills/sprint-coordinator/references/sprint-planning-template.md` as template.
+**Constraint:** Max 40-50 lines total. Do NOT create verbose planning documents.
 **Integrate with GitHub Issues:** Use `/github-issues` skill to fetch sprint-ready issues and update selected issues.
 
 #### Session Management Rule (CRITICAL)
 
-**Complete all sprint phases (0-5) within a SINGLE session.**
+**Complete all sprint phases (0-6) within a SINGLE session.**
 - If approaching session limit, reduce sprint scope rather than splitting sessions
 - Session transitions waste 10-20K tokens in context rebuild (~$8-15)
 - A smaller single-session sprint is MORE efficient than a larger multi-session sprint
-- Before starting Phase 3, verify: "Can implementation + testing complete in remaining session?"
-- If NO: Scale back scope to what CAN complete in this session
 
 **If Maintenance Sprint (Crisis Detected):**
-> **Read:** `.claude/skills/sprint-coordinator/process/phase1-maintainance-planning.md`
+> **Read:** `process/phase1-maintainance-planning.md`
 
-Facilitate a 2-round multi-agent deliberation:
-1. Launch all 3 agents with the problem statement (parallel).
-2. Synthesize their perspectives.
-3. Launch all 3 agents with the synthesis (parallel).
-4. Make final decision and create the planning document.
+Launch a **single-pass investigation** with `rust-teradata-architect` to analyze the root cause and propose a direct fix plan in one step (do NOT use 2-round multi-agent deliberation).
 
 ### Phase 2: Design
 > **Read:** `process/phase2-design.md`
@@ -85,21 +79,23 @@ Validate against `definitions/done.md`:
 - Docs synchronized?
 
 If all pass: `git commit`, `git push`.
-**Update GitHub Issues:** Use `/github-issues` skill to close/update issues addressed in sprint.
+**Close GitHub Issues (MANDATORY):** Explicitly execute `gh issue close <number> --comment '...'` via shell for every issue completed in the sprint.
 Then proceed to Phase 5.
 
 ### Phase 5: Retrospective
 > **Read:** `process/phase5-review.md`
 
-**CRITICAL: You MUST use the `/sprint-reviewer` skill. Do NOT manually create review.**
+Use `/sprint-reviewer` skill in single-pass mode:
+- Summarizes features shipped, test execution output, and git log in ONE concise document (<50 lines).
+- Invokes `/collect-metrics` to output true sprint delta metrics.
+- Do NOT launch parallel review sub-agents (`architect`, `quality`, `ux`).
 
-Use Skill tool to invoke `sprint-reviewer`:
-- Launches 3 agents in parallel for comprehensive review
-- Collects token/cost metrics
-- Uses proper template
-- Creates consolidated sprint-N-review.md
+### Phase 6: Framework Optimization (Action-Only)
+> **Read:** `process/phase6-optimize.md`
 
-**DO NOT skip this phase. Token metrics are required for framework optimization.**
+- Review Phase 5 execution metrics and sprint output for workflow friction or context waste.
+- **Action-Only Contract:** If friction is detected, directly edit the relevant skill, prompt, script, or code file in that turn. Do NOT generate prose proposal files.
+- If no friction occurred, log a 3-line status and exit immediately.
 
 ## Execution Principles
 

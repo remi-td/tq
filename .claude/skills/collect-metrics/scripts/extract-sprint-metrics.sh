@@ -234,28 +234,75 @@ if [ $total_input_processing -gt 0 ]; then
     overall_cache_rate=$(awk "BEGIN {printf \"%.1f\", ($total_cache_read / $total_input_processing) * 100}")
 fi
 
+# Check for previous sprint metrics to compute per-sprint delta if in same session
+PREV_SPRINT=$((SPRINT_NUM - 1))
+PREV_METRICS_FILE="$PROJECT_ROOT/docs/sprints/sprint-${PREV_SPRINT}-metrics.md"
+IS_DELTA=0
+
+if [ -f "$PREV_METRICS_FILE" ]; then
+    PREV_SESSION=$(grep "\*\*Session ID:\*\*" "$PREV_METRICS_FILE" | head -1 | awk '{print $NF}')
+    if [ "$PREV_SESSION" = "$SESSION_ID" ]; then
+        IS_DELTA=1
+        prev_input=$(grep "^| Total Input Tokens" "$PREV_METRICS_FILE" | head -1 | sed 's/[^0-9,]//g' | tr -d ',')
+        prev_output=$(grep "^| Total Output Tokens" "$PREV_METRICS_FILE" | head -1 | sed 's/[^0-9,]//g' | tr -d ',')
+        prev_cache_create=$(grep "^| Total Cache Creation" "$PREV_METRICS_FILE" | head -1 | sed 's/[^0-9,]//g' | tr -d ',')
+        prev_cache_read=$(grep "^| Total Cache Reads" "$PREV_METRICS_FILE" | head -1 | sed 's/[^0-9,]//g' | tr -d ',')
+
+        delta_input=$((total_input - prev_input))
+        delta_output=$((total_output - prev_output))
+        delta_cache_create=$((total_cache_creation - prev_cache_create))
+        delta_cache_read=$((total_cache_read - prev_cache_read))
+        delta_grand=$((grand_total - (prev_input + prev_output + prev_cache_create + prev_cache_read)))
+
+        delta_input_proc=$((delta_input + delta_cache_create + delta_cache_read))
+        delta_cache_rate=0
+        if [ $delta_input_proc -gt 0 ]; then
+            delta_cache_rate=$(awk "BEGIN {printf \"%.1f\", ($delta_cache_read / $delta_input_proc) * 100}")
+        fi
+    fi
+fi
+
 echo "---"
 echo ""
 echo "## Sprint Summary"
 echo ""
-echo "| Metric | Value |"
-echo "|--------|-------|"
-echo "| Total Input Tokens | $(printf "%'d" $total_input) |"
-echo "| Total Output Tokens | $(printf "%'d" $total_output) |"
-echo "| Total Cache Creation | $(printf "%'d" $total_cache_creation) |"
-echo "| Total Cache Reads | $(printf "%'d" $total_cache_read) |"
-echo "| **Grand Total** | **$(printf "%'d" $grand_total)** |"
-echo "| Overall Cache Hit Rate | ${overall_cache_rate}% |"
+if [ $IS_DELTA -eq 1 ]; then
+    echo "*Note: Session shared with Sprint $PREV_SPRINT. Showing per-sprint delta (and cumulative total).* "
+    echo ""
+    echo "| Metric | Sprint Delta | Cumulative Session Total |"
+    echo "|--------|--------------|--------------------------|"
+    echo "| Input Tokens | $(printf "%'d" $delta_input) | $(printf "%'d" $total_input) |"
+    echo "| Output Tokens | $(printf "%'d" $delta_output) | $(printf "%'d" $total_output) |"
+    echo "| Cache Creation | $(printf "%'d" $delta_cache_create) | $(printf "%'d" $total_cache_creation) |"
+    echo "| Cache Reads | $(printf "%'d" $delta_cache_read) | $(printf "%'d" $total_cache_read) |"
+    echo "| **Grand Total** | **$(printf "%'d" $delta_grand)** | **$(printf "%'d" $grand_total)** |"
+    echo "| Cache Hit Rate | ${delta_cache_rate}% | ${overall_cache_rate}% |"
+    
+    cost_input_val=$delta_input
+    cost_output_val=$delta_output
+    cost_cache_create_val=$delta_cache_create
+    cost_cache_read_val=$delta_cache_read
+else
+    echo "| Metric | Value |"
+    echo "|--------|-------|"
+    echo "| Total Input Tokens | $(printf "%'d" $total_input) |"
+    echo "| Total Output Tokens | $(printf "%'d" $total_output) |"
+    echo "| Total Cache Creation | $(printf "%'d" $total_cache_creation) |"
+    echo "| Total Cache Reads | $(printf "%'d" $total_cache_read) |"
+    echo "| **Grand Total** | **$(printf "%'d" $grand_total)** |"
+    echo "| Overall Cache Hit Rate | ${overall_cache_rate}% |"
+    
+    cost_input_val=$total_input
+    cost_output_val=$total_output
+    cost_cache_create_val=$total_cache_creation
+    cost_cache_read_val=$total_cache_read
+fi
 echo ""
 
 # Calculate estimated costs (2026 pricing)
-# Sonnet 4.5: $3/1M input, $15/1M output, $0.30/1M cache read
-# Opus 4.5: $15/1M input, $75/1M output, $1.50/1M cache read
-# Haiku 4.5: $1/1M input, $5/1M output, $0.10/1M cache read
-# Simplified: assume mix of models, use average
-cost_input=$(awk "BEGIN {printf \"%.2f\", ($total_input + $total_cache_creation) * 3 / 1000000}")
-cost_output=$(awk "BEGIN {printf \"%.2f\", $total_output * 15 / 1000000}")
-cost_cache=$(awk "BEGIN {printf \"%.2f\", $total_cache_read * 0.30 / 1000000}")
+cost_input=$(awk "BEGIN {printf \"%.2f\", ($cost_input_val + $cost_cache_create_val) * 3 / 1000000}")
+cost_output=$(awk "BEGIN {printf \"%.2f\", $cost_output_val * 15 / 1000000}")
+cost_cache=$(awk "BEGIN {printf \"%.2f\", $cost_cache_read_val * 0.30 / 1000000}")
 cost_total=$(awk "BEGIN {printf \"%.2f\", $cost_input + $cost_output + $cost_cache}")
 
 echo "## Estimated Cost (Sonnet 4.5 pricing)"

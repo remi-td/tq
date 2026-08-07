@@ -87,7 +87,8 @@ Cost analysis from Sprints 30-36:
 
 ### Step 3: Update Planning Document
 
-Append to the sprint planning document `docs/sprints/sprint-N-planning.md`:
+Append to the sprint planning document `docs/sprints/sprint-N-planning.md`.
+**HARD CONSTRAINT:** The planning document MUST be under 50 lines total. Do NOT write verbose prose essays. Focus strictly on bulleted scope, acceptance criteria, and issues.
 
 ```markdown
 

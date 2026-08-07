@@ -10,17 +10,17 @@ context: fork
 
 ## Purpose
 
-Deep analysis of sprint metrics to identify where time/tokens are wasted and generate concrete optimization actions.
+Rapid analysis of sprint metrics and subagent execution to identify workflow friction or context waste, and **immediately execute direct file edits** to fix them.
 
-**Input:** Historical sprint metrics files (`docs/sprints/sprint-N-metrics.md`)
-**Output:** Specific file edits to improve agents, docs, tools, and workflows
-**Model:** Opus (requires complex analysis and decision-making)
+**Action-Only Contract:** Do NOT generate prose proposal files (`sprint-N-optimizations.md`). Directly modify the target skill, prompt, script, or documentation file in the current turn.
+
+**Input:** Sprint metrics (`docs/sprints/sprint-N-metrics.md`) & subagent execution logs
+**Output:** Direct code, script, or prompt edits committed to git
 
 ## When to Use
 
-**Quarterly:** After every 3-4 sprints to identify systemic patterns
-**On-Demand:** After quality failures or unusually high token usage
-**Minimum Data:** At least 2 sprints with metrics collected
+- **Phase 6:** End of every sprint as part of Phase 6 execution.
+- **On-Demand:** After quality failures or token spikes.
 
 ```
 /optimize-agents
@@ -28,35 +28,9 @@ Deep analysis of sprint metrics to identify where time/tokens are wasted and gen
 
 ## What This Skill Does
 
-### 1. Analyze Where Time/Tokens Were Wasted
-
-Examines metrics to identify:
-- **Inefficient agents:** High token usage relative to output quality
-- **Redundant work:** Repeated file reads, duplicate searches
-- **Missing context:** Agents asking questions that docs should answer
-- **Workflow issues:** Sequential execution when parallel possible
-- **Quality failures:** Rework due to bugs, missed requirements
-- **Missing tools:** Tasks agents improvise that should be automated
-
-### 2. Apply Pattern Analysis
-
-Uses bundled `references/waste-patterns.md` to systematically:
-- Match transcript operations to known waste patterns
-- Identify root causes
-- Map to documented solutions
-- Estimate impact of fixes
-
-### 3. Generate Concrete Optimization Actions
-
-Produces specific, actionable improvements:
-- **Agent prompt edits:** Exact changes to `.claude/subagents/*.md`
-- **Documentation updates:** Sections to add to architecture/testing guides
-- **Tool creation:** Scripts/utilities to automate repetitive tasks
-- **Workflow improvements:** Changes to sprint-coordinator skill
-
-### 4. Prioritize by Impact
-
-Ranks optimizations by expected token reduction and implementation effort.
+1. **Scans Sprint Execution:** Quickly checks metrics for unusual token spikes, tool failures, or redundant operations.
+2. **Executes Direct Action:** If friction or waste is found, immediately updates the relevant `.agents/skills/*`, sub-agent prompt, script, or codebase file.
+3. **Exits Fast:** If no friction occurred, logs a 3-line status and exits immediately without generating unnecessary artifacts.
 
 ## Workflow
 

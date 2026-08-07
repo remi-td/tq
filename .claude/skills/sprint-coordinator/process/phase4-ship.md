@@ -192,9 +192,10 @@ gh run list --workflow=release.yml --limit=1
 
 **NEVER skip this step.** Every sprint ships a tagged release with cross-compiled binaries.
 
-### Step 3.5: Update GitHub Issues
+### Step 3.5: Update & Close GitHub Issues
 
-**CRITICAL**: After successful push, use `/github-issues` skill to update completed issues.
+**MANDATORY SHELL EXECUTION (Cross-Framework Rule):**
+After git push, you MUST directly execute `gh issue close <number> --comment "..."` via shell commands (`run_command` / bash) for every issue completed in the sprint. Do NOT skip this step or rely on passive skill prompts. Every agent framework (Claude Code, Gemini, Antigravity, etc.) MUST execute the `gh issue close` CLI command directly.
 
 For each GitHub issue addressed in this sprint:
 

@@ -1,19 +1,29 @@
-# Phase 6: Optimize
+# Phase 6: Framework Optimization (Action-Only Mode)
 
 **Owner:** Sprint Coordinator (Main Agent)
-**Goal:** Optimize the agentic framework to accelerate delivery speed and minimize token consumption.
+**Goal:** Keep the agentic framework fast, lean, and effective by directly fixing friction observed during the sprint.
 
-## Prerequisites
-- Phase 5 completed.
+## Action-Only Contract
+Phase 6 MUST NOT generate prose proposal files (`sprint-N-optimizations.md`). It operates strictly via **direct edits**:
 
-## Process
-Consider the retrospective to identify key areas for improvement and gather metrics.
-Use the skill /optimize-agents identify opportunities for optimisations in the agentic framework and implement the most urgent ones.
+1. **Review Sprint Execution:**
+   - Did any sub-agent make repeated mistakes, get confused, or re-read files multiple times?
+   - Did metrics show unusual token spikes or broken tools?
 
-Commit with a clear messae indicating that this relates to agentic framework optimisation and push:
-```bash
-git add .
-git commit -m "Sprint N: Agent optimisation"
-git push origin main
-```
+2. **Execute Direct Fix (If Friction Detected):**
+   - Directly edit the relevant `.agents/skills/*` file, agent prompt file, script, or code in that turn.
+   - Example: Fix a bug in a metric script, update a vague sub-agent instruction, or refine a CLI specification tip.
 
+3. **Immediate Exit (If Operating Cleanly):**
+   - If no workflow friction occurred, output:
+     ```
+     Phase 6 Assessment: No framework friction observed in Sprint N. Workflow operating at peak efficiency.
+     ```
+   - Exit Phase 6 immediately in 0 additional turns.
+
+4. **Commit Changes (If edits made):**
+   ```bash
+   git add .
+   git commit -m "Sprint N: Framework optimization - [short description of fix]"
+   git push origin main
+   ```
