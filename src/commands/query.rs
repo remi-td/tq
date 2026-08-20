@@ -219,11 +219,21 @@ pub fn execute<W: Write>(
     // Read SQL from source
     let sql = read_input_sql(&source)?;
 
-    // Apply variable substitution if params provided and non-empty
+    // Apply variable substitution if params provided or SQL contains substitution markers
     let sql = match params {
-        Some(p) if !p.is_empty() => p.substitute(&sql)?,
+        Some(p) if !p.is_empty() || ParamStore::has_variables(&sql) => p.substitute(&sql)?,
+        None if ParamStore::has_variables(&sql) => {
+            let p = ParamStore::new();
+            p.substitute(&sql)?
+        }
         _ => sql,
     };
+
+    // Check for --dry-run preview
+    if args.dry_run {
+        writeln!(writer, "{}", sql)?;
+        return Ok(0);
+    }
 
     // Agent-safe mode validation
     if args.agent_safe {
@@ -560,11 +570,21 @@ pub fn execute_to_file<W: Write>(
     // Read SQL from source
     let sql = read_input_sql(&source)?;
 
-    // Apply variable substitution if params provided and non-empty
+    // Apply variable substitution if params provided or SQL contains substitution markers
     let sql = match params {
-        Some(p) if !p.is_empty() => p.substitute(&sql)?,
+        Some(p) if !p.is_empty() || ParamStore::has_variables(&sql) => p.substitute(&sql)?,
+        None if ParamStore::has_variables(&sql) => {
+            let p = ParamStore::new();
+            p.substitute(&sql)?
+        }
         _ => sql,
     };
+
+    // Check for --dry-run preview
+    if args.dry_run {
+        writeln!(status_writer, "{}", sql)?;
+        return Ok(0);
+    }
 
     // Agent-safe mode validation
     if args.agent_safe {
@@ -1119,6 +1139,7 @@ mod tests {
             page_size: None,
             page: 1,
             json: false,
+            dry_run: false,
         }
     }
 
@@ -1144,5 +1165,44 @@ mod tests {
         assert!(msg.contains("Command argument"));
         assert!(msg.contains("--file"));
         assert!(msg.contains("echo"));
+    }
+
+    #[test]
+    fn test_dry_run_query_substitution() {
+        let args = QueryArgs {
+            query: Some("SELECT * FROM {{table}} WHERE id = ${ID}".to_string()),
+            file: None,
+            format: OutputFormat::Json,
+            output: None,
+            no_header: false,
+            timing: false,
+            limit: None,
+            atomic: false,
+            agent_safe: false,
+            max_rows: 10000,
+            allow_dml: false,
+            allow_maintenance: false,
+            page_size: None,
+            page: 1,
+            json: false,
+            dry_run: true,
+        };
+
+        let mut store = ParamStore::new();
+        store.insert_define("table=employees").unwrap();
+        unsafe {
+            std::env::set_var("ID", "99");
+        }
+
+        let source = determine_input_source(&args).unwrap();
+        let sql = read_input_sql(&source).unwrap();
+        let substituted = store.substitute(&sql).unwrap();
+
+        unsafe {
+            std::env::remove_var("ID");
+        }
+
+        assert_eq!(substituted, "SELECT * FROM employees WHERE id = 99");
+        assert!(args.dry_run);
     }
 }

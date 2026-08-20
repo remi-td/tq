@@ -101,8 +101,8 @@ fn run(cli: Cli) -> Result<u8> {
     let error_levels = tq::error::parse_errorlevel(&cli.global.errorlevel)?;
 
 
-    // Build ParamStore from --params flag(s)
-    let param_store = build_param_store(&cli.global.params)?;
+    // Build ParamStore from --params and --define flag(s)
+    let param_store = build_param_store(&cli.global.params, &cli.global.define)?;
 
     // Build connection configuration for database commands.
     //
@@ -806,11 +806,14 @@ fn build_connection_from_profile(
     })
 }
 
-/// Build a ParamStore from a list of parameter file paths
-fn build_param_store(paths: &[std::path::PathBuf]) -> Result<ParamStore> {
+/// Build a ParamStore from a list of parameter file paths and CLI defines
+fn build_param_store(paths: &[std::path::PathBuf], defines: &[String]) -> Result<ParamStore> {
     let mut store = ParamStore::new();
     for path in paths {
         store.load_file(path)?;
+    }
+    for define in defines {
+        store.insert_define(define)?;
     }
     Ok(store)
 }

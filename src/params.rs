@@ -17,11 +17,11 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-/// Pre-compiled regex for `{{variable}}` pattern matching.
+/// Pre-compiled regex for `{{variable}}`, `{{ variable }}`, and `${variable}` pattern matching.
 /// Compiled once on first use via `LazyLock` to avoid repeated compilation
 /// on every `substitute()` call.
 static VARIABLE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\{\{([a-zA-Z0-9_.$]+)\}\}").expect("valid regex")
+    Regex::new(r"(?:\{\{\s*([a-zA-Z0-9_.$]+)\s*\}\}|\$\{([a-zA-Z0-9_.$]+)\})").expect("valid regex")
 });
 
 /// Errors specific to parameter substitution
@@ -258,6 +258,32 @@ impl ParamStore {
         Ok(())
     }
 
+    /// Parse and insert a KEY=VALUE define string into the store (e.g. from -D / --define)
+    pub fn insert_define(&mut self, key_value: &str) -> Result<()> {
+        let (key_path, val_str) = match key_value.find('=') {
+            Some(idx) => (&key_value[..idx], &key_value[idx + 1..]),
+            None => (key_value, "true"),
+        };
+
+        let key_path = key_path.trim();
+        if key_path.is_empty() {
+            return Ok(());
+        }
+
+        let parsed_val: YamlValue = serde_yaml::from_str(val_str)
+            .unwrap_or_else(|_| YamlValue::String(val_str.to_string()));
+
+        let segments: Vec<&str> = key_path.split('.').collect();
+        let define_tree = build_yaml_tree(&segments, parsed_val);
+        self.values = deep_merge(self.values.clone(), define_tree);
+        Ok(())
+    }
+
+    /// Check if SQL string contains any substitution markers
+    pub fn has_variables(sql: &str) -> bool {
+        VARIABLE_RE.is_match(sql)
+    }
+
     /// Clear all loaded parameters
     pub fn clear(&mut self) {
         self.values = YamlValue::Mapping(serde_yaml::Mapping::new());
@@ -291,29 +317,44 @@ impl ParamStore {
 
         let segments: Vec<&str> = path.split('.').collect();
         let mut current = &self.values;
+        let mut found = true;
 
         for segment in &segments {
             match current {
                 YamlValue::Mapping(map) => {
                     let key = YamlValue::String(segment.to_string());
-                    current = map.get(&key).ok_or_else(|| ParamError::UndefinedVariable {
-                        variable: path.to_string(),
-                        available: self.list_available_paths(),
-                    })?;
+                    if let Some(next) = map.get(&key) {
+                        current = next;
+                    } else {
+                        found = false;
+                        break;
+                    }
                 }
                 _ => {
-                    return Err(ParamError::UndefinedVariable {
-                        variable: path.to_string(),
-                        available: self.list_available_paths(),
-                    });
+                    found = false;
+                    break;
                 }
             }
         }
 
-        yaml_value_to_string(current, path)
+        if found {
+            return yaml_value_to_string(current, path);
+        }
+
+        // Fallback: check environment variable if key has no dots
+        if !path.contains('.') {
+            if let Ok(env_val) = std::env::var(path) {
+                return Ok(env_val);
+            }
+        }
+
+        Err(ParamError::UndefinedVariable {
+            variable: path.to_string(),
+            available: self.list_available_paths(),
+        })
     }
 
-    /// Substitute all `{{variable}}` markers in the given SQL text.
+    /// Substitute all `{{variable}}`, `{{ variable }}`, and `${variable}` markers in the given SQL text.
     ///
     /// Returns the SQL with all variables replaced, or an error if any
     /// variable cannot be resolved. This is all-or-nothing: partial
@@ -324,7 +365,7 @@ impl ParamStore {
         // First pass: collect all errors
         let mut errors: Vec<String> = Vec::new();
         for cap in re.captures_iter(sql) {
-            let var_path = &cap[1];
+            let var_path = cap.get(1).or_else(|| cap.get(2)).unwrap().as_str();
             if let Err(e) = self.resolve(var_path) {
                 errors.push(format!("{}", e));
             }
@@ -340,7 +381,7 @@ impl ParamStore {
 
         for cap in re.captures_iter(sql) {
             let full_match = cap.get(0).unwrap();
-            let var_path = &cap[1];
+            let var_path = cap.get(1).or_else(|| cap.get(2)).unwrap().as_str();
 
             result.push_str(&sql[last_end..full_match.start()]);
             // Safe to unwrap: we verified all variables resolve in first pass
@@ -386,6 +427,19 @@ impl fmt::Debug for ParamStore {
             .field("is_empty", &self.is_empty())
             .finish()
     }
+}
+
+/// Recursively build a YAML tree mapping from dot-separated key segments.
+fn build_yaml_tree(segments: &[&str], value: YamlValue) -> YamlValue {
+    if segments.is_empty() {
+        return value;
+    }
+    let mut map = serde_yaml::Mapping::new();
+    map.insert(
+        YamlValue::String(segments[0].to_string()),
+        build_yaml_tree(&segments[1..], value),
+    );
+    YamlValue::Mapping(map)
 }
 
 /// Deep merge two YAML values. `overlay` takes precedence over `base`.
@@ -975,5 +1029,79 @@ mod tests {
         };
         let tq_err: crate::error::TqError = err.into();
         assert_eq!(tq_err.exit_code(), 2); // Usage error
+    }
+
+    // -------------------------------------------------------------------------
+    // Sprint 78 enhancements: Defines, Jinja2 whitespace, Shell syntax, Env fallback
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_insert_define_scalar_and_nested() {
+        let mut store = ParamStore::new();
+        store.insert_define("table=employees").unwrap();
+        store.insert_define("target.db=PROD").unwrap();
+        store.insert_define("limit=100").unwrap();
+
+        assert_eq!(store.resolve("table").unwrap(), "employees");
+        assert_eq!(store.resolve("target.db").unwrap(), "PROD");
+        assert_eq!(store.resolve("limit").unwrap(), "100");
+    }
+
+    #[test]
+    fn test_insert_define_overrides_yaml() {
+        let mut store = ParamStore::new();
+        store.load_yaml_str("table: customers\nregion: APAC").unwrap();
+        store.insert_define("table=employees").unwrap();
+
+        assert_eq!(store.resolve("table").unwrap(), "employees");
+        assert_eq!(store.resolve("region").unwrap(), "APAC");
+    }
+
+    #[test]
+    fn test_substitute_whitespace_in_braces() {
+        let mut store = ParamStore::new();
+        store.insert_define("db=DEV").unwrap();
+        store.insert_define("schema=HR").unwrap();
+
+        let sql = "SELECT * FROM {{ db }}.{{   schema   }}.emp";
+        let res = store.substitute(sql).unwrap();
+        assert_eq!(res, "SELECT * FROM DEV.HR.emp");
+    }
+
+    #[test]
+    fn test_substitute_shell_syntax() {
+        let mut store = ParamStore::new();
+        store.insert_define("db=PROD").unwrap();
+
+        let sql = "SELECT * FROM ${db}.employees WHERE id = ${ID}";
+        unsafe {
+            std::env::set_var("ID", "42");
+        }
+        let res = store.substitute(sql).unwrap();
+        assert_eq!(res, "SELECT * FROM PROD.employees WHERE id = 42");
+        unsafe {
+            std::env::remove_var("ID");
+        }
+    }
+
+    #[test]
+    fn test_implicit_env_fallback() {
+        let store = ParamStore::new();
+        unsafe {
+            std::env::set_var("TQ_TEST_ENV_VAR", "FINANCE");
+        }
+        let res = store.substitute("SELECT * FROM {{TQ_TEST_ENV_VAR}}").unwrap();
+        assert_eq!(res, "SELECT * FROM FINANCE");
+        unsafe {
+            std::env::remove_var("TQ_TEST_ENV_VAR");
+        }
+    }
+
+    #[test]
+    fn test_has_variables() {
+        assert!(ParamStore::has_variables("SELECT * FROM {{table}}"));
+        assert!(ParamStore::has_variables("SELECT * FROM {{ table }}"));
+        assert!(ParamStore::has_variables("SELECT * FROM ${table}"));
+        assert!(!ParamStore::has_variables("SELECT * FROM table"));
     }
 }

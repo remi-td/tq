@@ -225,19 +225,23 @@ tq help unknown
 ```
 tq - Variable Substitution
 
-Use {{variable}} markers in SQL to substitute values at execution time.
-Values come from a YAML parameter file specified with -p/--params.
+Use {{variable}} or ${variable} markers in SQL to substitute values at execution time.
+Values come from YAML parameter files (-p/--params), CLI definitions (-D/--define), or environment variables.
 
 Usage:
   tq -p <file.yaml> query "SELECT * FROM {{table}}"
+  tq -D table=employees query "SELECT * FROM {{table}}"
   tq -p <file.yaml> query --file script.sql
   tq -p base.yaml -p overrides.yaml query --file report.sql
   cat script.sql | tq -p params.yaml query
+  tq query --file script.sql -D region=EMEA --dry-run
 
 Marker Syntax:
-  {{key}}              Simple key from YAML file
+  {{key}}              Simple key from YAML file or -D flag
+  {{ key }}            Surrounding whitespace ignored
+  ${key}               Unix shell variable format
   {{section.key}}      Nested key using dot notation
-  {{$ENV.VAR_NAME}}    Environment variable (no YAML entry needed)
+  {{$ENV.VAR_NAME}}    Explicit environment variable (no YAML entry needed)
 
 Parameter File Format (YAML):
   # params.yaml

@@ -212,6 +212,15 @@ pub struct GlobalOpts {
     #[arg(short = 'p', long = "params", value_name = "FILE", global = true)]
     pub params: Vec<PathBuf>,
 
+    /// Pass KEY=VALUE parameters for SQL variable substitution
+    ///
+    /// Defines or overrides parameters directly from the command line.
+    /// Overrides keys loaded from parameter files (-p/--params).
+    ///
+    /// Example: tq -D table=employees query "SELECT * FROM {{table}}"
+    #[arg(short = 'D', long = "define", value_name = "KEY=VALUE", global = true)]
+    pub define: Vec<String>,
+
     /// Enforce agent-safe restrictions globally
     #[arg(long, env = "TQ_AGENT_SAFE", global = true)]
     pub agent_safe: bool,
@@ -753,6 +762,10 @@ pub struct QueryArgs {
     /// Shortcut for --format json
     #[arg(long)]
     pub json: bool,
+
+    /// Output substituted SQL statement without executing query against database
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 

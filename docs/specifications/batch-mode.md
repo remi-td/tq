@@ -1442,22 +1442,29 @@ Variable substitution allows SQL templates to contain placeholder markers that a
 
 **REQ-PARAMS-001: Variable Marker Format**
 
-Variables in SQL are written using double curly braces:
+Variables in SQL can be written using double curly braces (Mustache/Jinja2 format) or dollar braces (Unix shell format):
 
 ```
 {{variable_name}}
+{{ variable_name }}
+${variable_name}
+${ENV.variable_name}
 ```
 
 - Markers are case-sensitive: `{{Table}}` and `{{table}}` are distinct.
 - Markers may appear anywhere in SQL text: in identifiers, string literals, numeric values, or comments.
-- A marker with no whitespace inside the braces is required: `{{ var }}` is invalid, `{{var}}` is valid.
+- Surrounding whitespace inside double curly braces is ignored: `{{ var }}` and `{{var}}` are equivalent.
+- Unix shell syntax `${VAR}` and `${ENV.VAR}` are supported natively.
 - Markers that span multiple lines are not supported.
 
 **Examples:**
 
 ```sql
--- Simple scalar substitution
-SELECT * FROM {{target_table}} SAMPLE {{row_count}};
+-- Simple scalar substitution with surrounding whitespace
+SELECT * FROM {{ target_table }} SAMPLE {{ row_count }};
+
+-- Unix shell format substitution
+SELECT * FROM ${target_table} WHERE id = ${USER_ID};
 
 -- Nested path substitution (dot notation into YAML hierarchy)
 SELECT * FROM {{env.database}}.{{env.schema}} WHERE region = '{{filters.region}}';
@@ -1601,6 +1608,36 @@ tq -p base.yaml -p overrides.yaml query --file script.sql
 - Repeatable: multiple `-p` flags are accepted; later files override earlier files on key conflicts
 - Scope: global (applies to any command that accepts SQL input)
 - The flag is silently ignored when the executed command does not process SQL templates
+
+---
+
+**REQ-PARAMS-005B: `--define` / `-D` Flag**
+
+The `--define` (or `-D`) flag allows passing key-value parameter overrides directly on the command line without creating a parameter file.
+
+```bash
+tq -D table=employees query "SELECT * FROM {{table}}"
+tq --define target.db=PROD -D limit=100 query --file script.sql
+tq -p base.yaml -D region=EMEA query --file script.sql
+```
+
+- Flag name: `--define` (long), `-D` (short)
+- Argument format: `KEY=VALUE`
+- Repeatable: multiple `-D` flags are accepted.
+- Merge order: `-D` flags override parameter file (`-p`) settings on key conflicts (highest precedence).
+
+---
+
+**REQ-PARAMS-005C: `--dry-run` Flag**
+
+The `--dry-run` flag displays the fully substituted SQL query without executing it against the database.
+
+```bash
+tq query --file report.sql -p params.yaml -D region=EMEA --dry-run
+```
+
+- Flag name: `--dry-run`
+- Action: Resolves all variables and prints the resulting SQL to stdout, exiting with status `0` without creating a database session.
 
 ---
 

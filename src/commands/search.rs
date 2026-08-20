@@ -1204,13 +1204,13 @@ mod tests {
             table_name: "employees".to_string(),
             column_name: "salary".to_string(),
             column_type: "DECIMAL(10,2)".to_string(),
-            nullable: "Y".to_string(),
+            nullable: true,
         };
         assert_eq!(c.database, "mydb");
         assert_eq!(c.table_name, "employees");
         assert_eq!(c.column_name, "salary");
         assert_eq!(c.column_type, "DECIMAL(10,2)");
-        assert_eq!(c.nullable, "Y");
+        assert_eq!(c.nullable, true);
     }
 
     #[test]
@@ -1367,14 +1367,14 @@ mod tests {
                 table_name: "employees".to_string(),
                 column_name: "salary".to_string(),
                 column_type: "DECIMAL(10,2)".to_string(),
-                nullable: "Y".to_string(),
+                nullable: true,
             },
             ColumnSearchResult {
                 database: "hr".to_string(),
                 table_name: "employees".to_string(),
                 column_name: "base_salary".to_string(),
                 column_type: "DECIMAL(8,2)".to_string(),
-                nullable: "N".to_string(),
+                nullable: false,
             },
         ];
         let mut buf = Vec::new();
@@ -1409,7 +1409,7 @@ mod tests {
             table_name: "employees".to_string(),
             column_name: "salary".to_string(),
             column_type: "DECIMAL(10,2)".to_string(),
-            nullable: "Y".to_string(),
+            nullable: true,
         }];
         let mut buf = Vec::new();
         render_column_search_json_with_pagination(&columns, None, &mut buf).unwrap();
@@ -1419,7 +1419,7 @@ mod tests {
         assert!(output.contains("\"table_name\":\"employees\""));
         assert!(output.contains("\"column_name\":\"salary\""));
         assert!(output.contains("\"column_type\":\"DECIMAL(10,2)\""));
-        assert!(output.contains("\"nullable\":\"Y\""));
+        assert!(output.contains("\"nullable\":true"));
         assert!(output.ends_with("]}\n"));
     }
 
@@ -1439,7 +1439,7 @@ mod tests {
             table_name: "employees".to_string(),
             column_name: "salary".to_string(),
             column_type: "DECIMAL(10,2)".to_string(),
-            nullable: "Y".to_string(),
+            nullable: true,
         }];
         let mut buf = Vec::new();
         render_column_search_csv(&columns, &mut buf).unwrap();
@@ -1455,7 +1455,7 @@ mod tests {
             table_name: "employees".to_string(),
             column_name: "salary".to_string(),
             column_type: "DECIMAL(10,2)".to_string(),
-            nullable: "Y".to_string(),
+            nullable: true,
         }];
         let mut buf = Vec::new();
         render_column_search_markdown(&columns, &mut buf).unwrap();
@@ -1506,7 +1506,7 @@ mod tests {
             table_name: "y".to_string(),
             column_name: "z".to_string(),
             column_type: "INTEGER".to_string(),
-            nullable: "N".to_string(),
+            nullable: false,
         }];
         let mut buf2 = Vec::new();
         render_column_search_json_with_pagination(&columns, None, &mut buf2).unwrap();
@@ -1554,7 +1554,7 @@ mod tests {
                 table_name: "tbl".to_string(),
                 column_name: "col".to_string(),
                 column_type: "INTEGER".to_string(),
-                nullable: "N".to_string(),
+                nullable: false,
             },
         ];
         let pg = PaginationInfo::new(2, 5, 7);
@@ -1607,7 +1607,7 @@ mod tests {
             table_name: "tbl".to_string(),
             column_name: "col\"name".to_string(),
             column_type: "VARCHAR(100)".to_string(),
-            nullable: "Y".to_string(),
+            nullable: true,
         }];
         let mut buf = Vec::new();
         render_column_search_json_with_pagination(&columns, None, &mut buf).unwrap();
