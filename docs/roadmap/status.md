@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-08-20
-**Current Version:** 1.56.0
-**Latest Sprint:** Sprint 77 Complete (Tech Debt Repayment & Agent Ergonomics Exemplar: `--json` flag shortcut, `tq params`, `tq errorlevel`, REPL `/fastload`/`/fastexport`/`/profile`, `TQ_AGENT_SAFE` global mode, and structured JSON error outputs released)
+**Current Version:** 1.57.0
+**Latest Sprint:** Sprint 78 Complete (Comprehensive SQL Script Parameterization: `-D`/`--define` CLI parameters, Jinja2 `{{ var }}` whitespace syntax, `${VAR}` shell syntax, implicit process env fallback, and `--dry-run` SQL inspection)
 
 ---
 
