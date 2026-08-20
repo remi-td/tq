@@ -54,6 +54,7 @@ fn test_live_fastload_and_fastexport_csv() {
             error_table_db: None,
             error_table_1_suffix: "_FL_ERR_1".to_string(),
             error_table_2_suffix: "_FL_ERR_2".to_string(),
+            json: false,
         };
 
         tq::commands::fastload::execute(&client, &args).unwrap();
@@ -76,6 +77,7 @@ fn test_live_fastload_and_fastexport_csv() {
             source_table: table_name.to_string(),
             target_file: temp_export.path().to_path_buf(),
             sessions: None,
+            json: false,
         };
 
         tq::commands::fastexport::execute(&client, &export_args).unwrap();
@@ -134,6 +136,7 @@ fn test_live_fastload_parquet() {
             error_table_db: None,
             error_table_1_suffix: "_FL_ERR_1".to_string(),
             error_table_2_suffix: "_FL_ERR_2".to_string(),
+            json: false,
         };
 
         tq::commands::fastload::execute(&client, &args).unwrap();
@@ -193,6 +196,7 @@ fn test_live_fastload_json() {
             error_table_db: None,
             error_table_1_suffix: "_FL_ERR_1".to_string(),
             error_table_2_suffix: "_FL_ERR_2".to_string(),
+            json: false,
         };
 
         tq::commands::fastload::execute(&client, &args).unwrap();
@@ -263,6 +267,7 @@ fn test_fastload_delimiter_validation_with_parquet() {
             error_table_db: None,
             error_table_1_suffix: "_FL_ERR_1".to_string(),
             error_table_2_suffix: "_FL_ERR_2".to_string(),
+            json: false,
         };
 
         let result = tq::commands::fastload::execute(&client, &args);

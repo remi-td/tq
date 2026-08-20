@@ -304,6 +304,8 @@ fn execute_single<W: Write>(
         .with_header(!args.no_header)
         .with_color(use_color);
 
+    let effective_format = if args.json { OutputFormat::Json } else { args.format };
+
     // Apply pagination if --page-size is set
     if let Some(page_size) = args.page_size {
         let pagination = PaginationInfo::new(args.page, page_size, result.row_count);
@@ -318,14 +320,14 @@ fn execute_single<W: Write>(
         write_output_with_pagination(
             &result,
             writer,
-            args.format,
+            effective_format,
             &format_options,
             args.timing,
             Some(&pagination),
         )?;
     } else {
         // Write output
-        write_output_with_timing(&result, writer, args.format, &format_options, args.timing)?;
+        write_output_with_timing(&result, writer, effective_format, &format_options, args.timing)?;
     }
 
     Ok(0)
@@ -402,6 +404,8 @@ fn execute_batch<W: Write>(
     let mut batch_result: Result<()> = Ok(());
     let mut max_severity: u8 = 0;
 
+    let effective_format = if args.json { OutputFormat::Json } else { args.format };
+
     for statement in &statements {
         // Show progress to stderr
         eprint!(
@@ -421,7 +425,7 @@ fn execute_batch<W: Write>(
                 successful_count += 1;
 
                 // Format status based on result
-                let status = format_statement_status(&query_result, args.format);
+                let status = format_statement_status(&query_result, effective_format);
                 eprintln!("{}", status);
 
                 // Write results for SELECT queries (those with rows)
@@ -429,14 +433,14 @@ fn execute_batch<W: Write>(
                     write_output_with_timing(
                         &query_result,
                         writer,
-                        args.format,
+                        effective_format,
                         &format_options,
                         args.timing,
                     )?;
 
                     // Add separator between result sets for readability
                     if statement.statement_number < total_count
-                        && args.format == OutputFormat::Table
+                        && effective_format == OutputFormat::Table
                     {
                         writeln!(writer)?;
                     }
@@ -1114,6 +1118,7 @@ mod tests {
             allow_maintenance: false, // Sprint 71: new field
             page_size: None,
             page: 1,
+            json: false,
         }
     }
 

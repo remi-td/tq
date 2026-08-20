@@ -83,11 +83,23 @@ fn run(cli: Cli) -> Result<u8> {
             commands::profile::execute(action, &config)?;
             return Ok(0);
         }
+        Command::Params(args) => {
+            let mut stdout = io::stdout();
+            commands::params(args, &cli.global.params, &mut stdout)?;
+            return Ok(0);
+        }
+        Command::Errorlevel(args) => {
+            let error_levels = tq::error::parse_errorlevel(&cli.global.errorlevel)?;
+            let mut stdout = io::stdout();
+            commands::errorlevel(args, &error_levels, &mut stdout)?;
+            return Ok(0);
+        }
         _ => {}
     }
 
     // Parse error level overrides from CLI
     let error_levels = tq::error::parse_errorlevel(&cli.global.errorlevel)?;
+
 
     // Build ParamStore from --params flag(s)
     let param_store = build_param_store(&cli.global.params)?;
@@ -133,7 +145,10 @@ fn run(cli: Cli) -> Result<u8> {
             commands::ping(&client, &args, &mut stdout, verbose)?;
             0
         }
-        Command::Query(args) => {
+        Command::Query(mut args) => {
+            if cli.global.agent_safe || std::env::var("TQ_AGENT_SAFE").ok().as_deref() == Some("1") {
+                args.agent_safe = true;
+            }
             if args.output.is_some() {
                 // Write to file
                 let mut stderr = io::stderr();
@@ -401,8 +416,8 @@ fn run(cli: Cli) -> Result<u8> {
             commands::fastexport::execute(&client, &args)?;
             0
         }
-        // Help, Profiles, and Profile already handled above
-        Command::Help(_) | Command::Profiles | Command::Profile(_) => unreachable!(),
+        // Help, Profiles, Profile, Params, and Errorlevel already handled above
+        Command::Help(_) | Command::Profiles | Command::Profile(_) | Command::Params(_) | Command::Errorlevel(_) => unreachable!(),
     };
 
     Ok(exit_code)

@@ -30,6 +30,8 @@ pub mod sysconfig;
 pub mod watch;
 pub mod fastload;
 pub mod fastexport;
+pub mod params;
+pub mod errorlevel;
 
 pub use abort::execute as abort;
 pub use explain::execute as explain;
@@ -49,3 +51,6 @@ pub use logoff_idle::execute as logoff_idle;
 pub use sysconfig::execute as sysconfig;
 pub use fastload::execute as fastload;
 pub use fastexport::execute as fastexport;
+pub use params::execute as params;
+pub use errorlevel::execute as errorlevel;
+

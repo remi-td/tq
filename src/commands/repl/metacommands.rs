@@ -966,6 +966,69 @@ pub fn handle_metacommand_with_state<W: Write>(
             handle_errorlevel_command(&args, state, writer)?;
         }
 
+        // Sprint 77: Fastload bulk load command
+        "fastload" => {
+            if args.len() < 2 {
+                writeln!(writer, "Usage: /fastload <source_file> <target_table>")?;
+                writeln!(writer, "Example: /fastload data.csv mydb.mytable")?;
+            } else {
+                let fastload_args = crate::cli::FastloadArgs {
+                    source_file: std::path::PathBuf::from(args[0]),
+                    target_table: args[1].to_string(),
+                    source_format: None,
+                    delimiter: None,
+                    no_create: false,
+                    sessions: None,
+                    error_table_db: None,
+                    error_table_1_suffix: "_ERR_1".to_string(),
+                    error_table_2_suffix: "_ERR_2".to_string(),
+                    json: false,
+                };
+                crate::commands::fastload::execute(completion_state.client(), &fastload_args)?;
+                writeln!(writer, "FastLoad completed successfully.")?;
+            }
+        }
+
+        // Sprint 77: Fastexport bulk export command
+        "fastexport" => {
+            if args.len() < 2 {
+                writeln!(writer, "Usage: /fastexport <source_table> <target_file>")?;
+                writeln!(writer, "Example: /fastexport mydb.mytable data.csv")?;
+            } else {
+                let fastexport_args = crate::cli::FastexportArgs {
+                    source_table: args[0].to_string(),
+                    target_file: std::path::PathBuf::from(args[1]),
+                    sessions: None,
+                    json: false,
+                };
+                crate::commands::fastexport::execute(completion_state.client(), &fastexport_args)?;
+                writeln!(writer, "FastExport completed successfully.")?;
+            }
+        }
+
+        // Sprint 77: Profile management command
+        "profile" | "profiles" => {
+            let config = crate::config::Config::load().unwrap_or_default();
+            if config.profiles.is_empty() {
+                writeln!(writer, "No profiles configured.")?;
+            } else {
+                writeln!(writer, "Configured connection profiles:")?;
+                let mut sorted_keys: Vec<&String> = config.profiles.keys().collect();
+                sorted_keys.sort();
+                for name in sorted_keys {
+                    let p = &config.profiles[name];
+                    writeln!(
+                        writer,
+                        "  {:<15} host={:<20} db={:<15} user={}",
+                        name,
+                        p.host.as_deref().unwrap_or("-"),
+                        p.database.as_deref().unwrap_or("-"),
+                        p.user.as_deref().unwrap_or("-")
+                    )?;
+                }
+            }
+        }
+
         // Unknown command
         _ => {
             writeln!(writer, "Unknown command: /{}", command)?;

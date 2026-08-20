@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
-**Last Updated:** 2026-08-06
-**Current Version:** 1.55.0
-**Latest Sprint:** Sprint 76 Complete (Space analysis commands `space`/`dbspace` and configurable monitoring thresholds/colors released)
+**Last Updated:** 2026-08-20
+**Current Version:** 1.56.0
+**Latest Sprint:** Sprint 77 Complete (Tech Debt Repayment & Agent Ergonomics Exemplar: `--json` flag shortcut, `tq params`, `tq errorlevel`, REPL `/fastload`/`/fastexport`/`/profile`, `TQ_AGENT_SAFE` global mode, and structured JSON error outputs released)
 
 ---
 

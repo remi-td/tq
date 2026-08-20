@@ -751,6 +751,7 @@ mod tests {
             force: false,
             format: OutputFormat::Table,
             output: None,
+            json: false,
         };
         // Without --force, batch mode should print error and not execute
         assert!(!args.force);
@@ -939,6 +940,7 @@ mod tests {
             force: false,
             format: OutputFormat::Table,
             output: None,
+            json: false,
         };
         assert!(!args.force);
         // The force check in execute() would prevent execution
@@ -954,6 +956,7 @@ mod tests {
             force: false,
             format: OutputFormat::Table,
             output: None,
+            json: false,
         };
         assert!(!args.force);
     }

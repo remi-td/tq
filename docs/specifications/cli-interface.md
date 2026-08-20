@@ -59,12 +59,14 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 - `sysconfig` - Display system configuration (version and AMP count)
 - `locks` - Display current lock contention and blocking chains
 - `resources` - Display CPU, I/O, and memory metrics from PMON resource usage tables
-- `query-inspect` - Show SQL text for a specific session
+- `query-inspect` (alias `qi`) - Show SQL text for a specific session
 - `inspect` - Comprehensive inspection of a database object (type, columns, indexes, size, dependencies)
 - `describe` - Show column structure and indexes for a table or view
 - `list` - List database objects: `databases`, `tables [pattern]`, `views`
 - `search` - Search for objects across all accessible databases: `tables <keyword>`, `columns <keyword>`, `views <keyword>`, `procedures <keyword>`
-- `show-indexes` - Show index structure for a table
+- `show-indexes` (alias `di`) - Show index structure for a table
+- `params` - Inspect and validate YAML parameter files
+- `errorlevel` - Inspect error severity classifications and overrides
 - `fastload` - Bulk load CSV, Parquet, or JSON files into a table in parallel
 - `fastexport` - Bulk export a table or query directly to a CSV file in parallel
 - `profiles` - List connection profiles
@@ -84,6 +86,8 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 | `--color` | - | enum\* | `auto` | Color output: `auto`, `always`, `never` |
 | `--params` | `-p` | path | - | YAML parameter file for variable substitution (repeatable) |
 | `--profile` | - | string | - | Select connection profile from config file |
+| `--agent-safe` | - | flag | false | Enforce agent-safe restrictions globally (env: `$TQ_AGENT_SAFE`) |
+| `--json` | - | flag | false | Direct boolean shortcut for `--format json` across all commands |
 | `--help` | `-h` | flag | - | Show help |
 | `--version` | `-V` | flag | - | Show version |
 

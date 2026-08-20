@@ -211,7 +211,16 @@ pub struct GlobalOpts {
     /// Example: tq -p params.yaml query "SELECT * FROM {{target.database}}.orders"
     #[arg(short = 'p', long = "params", value_name = "FILE", global = true)]
     pub params: Vec<PathBuf>,
+
+    /// Enforce agent-safe restrictions globally
+    #[arg(long, env = "TQ_AGENT_SAFE", global = true)]
+    pub agent_safe: bool,
+
+    /// Shortcut for --format json across all subcommands
+    #[arg(long, global = true)]
+    pub json: bool,
 }
+
 
 /// Available commands for tq
 #[derive(Subcommand, Debug)]
@@ -301,7 +310,7 @@ pub enum Command {
     /// Requires SELECT privilege on DBC.QryLogV (DBQL must be enabled).
     ///
     /// Example: tq query-inspect 1234
-    #[command(name = "query-inspect")]
+    #[command(name = "query-inspect", alias = "qi")]
     QueryInspect(QueryInspectArgs),
 
     /// Inspect a database object (type, columns, indexes, size)
@@ -339,7 +348,7 @@ pub enum Command {
     ///
     /// Example: tq show-indexes employees
     ///          tq show-indexes mydb.employees
-    #[command(name = "show-indexes")]
+    #[command(name = "show-indexes", alias = "di")]
     ShowIndexes(ShowIndexesArgs),
 
     /// Abort a session or running query
@@ -434,6 +443,20 @@ pub enum Command {
     ///
     /// Example: tq fastexport my_db.my_table data.csv
     Fastexport(FastexportArgs),
+
+    /// Inspect and validate parameter files
+    ///
+    /// Load and display dot-notation variable mappings from YAML parameter files.
+    ///
+    /// Example: tq params params.yaml
+    Params(ParamsArgs),
+
+    /// Inspect error severity classification mappings
+    ///
+    /// Display configured or custom error level severity overrides.
+    ///
+    /// Example: tq errorlevel
+    Errorlevel(ErrorlevelArgs),
 }
 
 impl Command {
@@ -442,25 +465,27 @@ impl Command {
     /// Returns None for commands that don't have a format argument (Help, Profiles, Profile, Repl, Ping).
     pub fn format(&self) -> Option<OutputFormat> {
         match self {
-            Command::Query(a) => Some(a.format),
-            Command::Sessions(a) => Some(a.format),
-            Command::Sample(a) => Some(a.format),
-            Command::Peek(a) => Some(a.format),
-            Command::Sysconfig(a) => Some(a.format),
-            Command::Locks(a) => Some(a.format),
-            Command::QueryInspect(a) => Some(a.format),
-            Command::Inspect(a) => Some(a.format),
-            Command::List(a) => Some(a.format),
-            Command::Search(a) => Some(a.format),
-            Command::ShowIndexes(a) => Some(a.format),
-            Command::Abort(a) => Some(a.format),
-            Command::Explain(a) => Some(a.format),
-            Command::Skew(a) => Some(a.format),
-            Command::Space(a) => Some(a.format),
-            Command::Dbspace(a) => Some(a.format),
-            Command::History(a) => Some(a.format),
-            Command::Resources(a) => Some(a.format),
-            Command::LogoffIdle(a) => Some(a.format),
+            Command::Query(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::Sessions(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::Sample(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::Peek(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::Sysconfig(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::Locks(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::QueryInspect(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::Inspect(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::List(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::Search(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::ShowIndexes(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::Abort(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::Explain(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::Skew(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::Space(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::Dbspace(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::History(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::Resources(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::LogoffIdle(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::Params(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::Errorlevel(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
             Command::Fastload(_) | Command::Fastexport(_) | Command::Ping(_) | Command::Repl(_) | Command::Help(_) | Command::Profiles | Command::Profile(_) => None,
         }
     }
@@ -724,7 +749,12 @@ pub struct QueryArgs {
     /// Requires --page-size. Returns the specified page of results.
     #[arg(long, value_name = "P", default_value = "1", requires = "page_size")]
     pub page: usize,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
+
 
 /// Arguments for the sessions command (Sprint 26)
 #[derive(Parser, Debug)]
@@ -770,6 +800,10 @@ pub struct SessionsArgs {
     // built-in) is resolved at the dispatch site in `main`.
     #[arg(long, value_name = "SECONDS", requires = "watch", value_parser = clap::value_parser!(u64).range(2..=300))]
     pub interval: Option<u64>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for the sysconfig command (Sprint 38)
@@ -795,6 +829,10 @@ pub struct SysconfigArgs {
     /// If the file exists, it will be overwritten.
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for the locks command (Sprint 38)
@@ -841,6 +879,10 @@ pub struct LocksArgs {
     // built-in) is resolved at the dispatch site in `main`.
     #[arg(long, value_name = "SECONDS", requires = "watch", value_parser = clap::value_parser!(u64).range(2..=300))]
     pub interval: Option<u64>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for the query-inspect command (Sprint 39)
@@ -872,6 +914,10 @@ pub struct QueryInspectArgs {
     /// If the file exists, it will be overwritten.
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for the inspect command (Sprint 45)
@@ -903,6 +949,10 @@ pub struct InspectArgs {
     /// If the file exists, it will be overwritten.
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for the list command (Sprint 46)
@@ -951,6 +1001,10 @@ pub struct ListArgs {
     /// Requires --page-size. Returns the specified page of results.
     #[arg(long, value_name = "P", default_value = "1", requires = "page_size")]
     pub page: usize,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Types of objects that can be listed
@@ -1015,6 +1069,10 @@ pub struct SearchArgs {
     /// Requires --page-size. Returns the specified page of results.
     #[arg(long, value_name = "P", default_value = "1", requires = "page_size")]
     pub page: usize,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Types of objects that can be searched
@@ -1055,6 +1113,10 @@ pub struct ShowIndexesArgs {
     /// Write output to file instead of stdout
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for the abort command (Sprint 49, Sprint 61)
@@ -1118,6 +1180,10 @@ pub struct AbortArgs {
     /// Write output to file instead of stdout
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for the logoff-idle command (Sprint 61)
@@ -1162,6 +1228,10 @@ pub struct LogoffIdleArgs {
     /// Write output to file instead of stdout
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for the explain command (Sprint 50)
@@ -1192,6 +1262,10 @@ pub struct ExplainArgs {
     /// Write output to file instead of stdout
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for the skew command (Sprint 50)
@@ -1222,6 +1296,10 @@ pub struct SkewArgs {
     /// Write output to file instead of stdout
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for the space command
@@ -1252,6 +1330,10 @@ pub struct SpaceArgs {
     /// Write output to file instead of stdout
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for the dbspace command
@@ -1282,6 +1364,10 @@ pub struct DbspaceArgs {
     /// Write output to file instead of stdout
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for the history command (Sprint 51)
@@ -1318,6 +1404,10 @@ pub struct HistoryArgs {
     /// Write output to file instead of stdout
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for the resources command
@@ -1387,6 +1477,10 @@ pub struct ResourcesArgs {
     // built-in) is resolved at the dispatch site in `main`.
     #[arg(long, value_name = "SECONDS", requires = "watch", value_parser = clap::value_parser!(u64).range(2..=300))]
     pub interval: Option<u64>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for the sample command (Sprint 33)
@@ -1422,6 +1516,10 @@ pub struct SampleArgs {
     /// Write output to file instead of stdout
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for the peek command (Sprint 33)
@@ -1455,6 +1553,10 @@ pub struct PeekArgs {
     /// Write output to file instead of stdout
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Arguments for the REPL command
@@ -1658,6 +1760,10 @@ pub struct FastloadArgs {
     /// Suffix for FastLoad Error Table 2
     #[arg(long, value_name = "SUFFIX", default_value = "_ERR_2")]
     pub error_table_2_suffix: String,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Supported source file formats for FastLoad
@@ -1685,7 +1791,52 @@ pub struct FastexportArgs {
     /// Number of parallel data transfer connections (default: let database choose)
     #[arg(long, value_name = "N")]
     pub sessions: Option<usize>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
 }
+
+/// Arguments for the params command
+#[derive(Parser, Debug)]
+pub struct ParamsArgs {
+    /// Parameter file(s) to inspect
+    #[arg(value_name = "FILE")]
+    pub files: Vec<PathBuf>,
+
+    /// Output format
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for the errorlevel command
+#[derive(Parser, Debug)]
+pub struct ErrorlevelArgs {
+    /// Output format
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -2567,6 +2718,50 @@ mod tests {
             assert_eq!(args.sessions, None);
         } else {
             panic!("Expected Fastexport command");
+        }
+    }
+
+    // Sprint 77: Tech debt & agent ergonomics tests
+    #[test]
+    fn test_cli_json_shortcut_flag() {
+        let args = vec!["tq", "query", "--json", "SELECT 1"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert_eq!(cli.command.format(), Some(OutputFormat::Json));
+    }
+
+    #[test]
+    fn test_cli_global_json_flag() {
+        let args = vec!["tq", "--json", "query", "SELECT 1"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert!(cli.global.json);
+    }
+
+    #[test]
+    fn test_cli_global_agent_safe_flag() {
+        let args = vec!["tq", "--agent-safe", "query", "SELECT 1"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        assert!(cli.global.agent_safe);
+    }
+
+    #[test]
+    fn test_cli_query_inspect_qi_alias() {
+        let args = vec!["tq", "qi", "1234"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::QueryInspect(args) = cli.command {
+            assert_eq!(args.session_id, 1234);
+        } else {
+            panic!("Expected QueryInspect command");
+        }
+    }
+
+    #[test]
+    fn test_cli_show_indexes_di_alias() {
+        let args = vec!["tq", "di", "employees"];
+        let cli = Cli::try_parse_from(args).unwrap();
+        if let Command::ShowIndexes(args) = cli.command {
+            assert_eq!(args.table, "employees");
+        } else {
+            panic!("Expected ShowIndexes command");
         }
     }
 }
