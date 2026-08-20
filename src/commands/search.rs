@@ -465,7 +465,7 @@ struct ColumnSearchResult {
     table_name: String,
     column_name: String,
     column_type: String,
-    nullable: String,
+    nullable: bool,
 }
 
 fn search_columns<W: Write>(
@@ -523,8 +523,8 @@ fn search_columns<W: Write>(
             }
 
             let nullable = match nullable_raw.trim().to_uppercase().as_str() {
-                "Y" | "YES" => "Y".to_string(),
-                _ => "N".to_string(),
+                "Y" | "YES" | "T" | "TRUE" | "1" => true,
+                _ => false,
             };
 
             Some(ColumnSearchResult {
@@ -600,10 +600,11 @@ fn render_column_search_table<W: Write>(
         writeln!(writer, "(no columns found)")?;
     } else {
         for c in columns {
+            let n_str = if c.nullable { "Y" } else { "N" };
             writeln!(
                 writer,
                 "{:<20} {:<25} {:<25} {:<15} {:<8}",
-                c.database, c.table_name, c.column_name, c.column_type, c.nullable
+                c.database, c.table_name, c.column_name, c.column_type, n_str
             )?;
         }
     }
@@ -630,7 +631,7 @@ struct ColumnSearchJsonRow<'a> {
     table_name: &'a str,
     column_name: &'a str,
     column_type: &'a str,
-    nullable: &'a str,
+    nullable: bool,
 }
 
 fn render_column_search_json_with_pagination<W: Write>(
@@ -648,7 +649,7 @@ fn render_column_search_json_with_pagination<W: Write>(
                 table_name: &c.table_name,
                 column_name: &c.column_name,
                 column_type: &c.column_type,
-                nullable: &c.nullable,
+                nullable: c.nullable,
             })
             .collect(),
         pagination: pagination.map(PaginationJson::from_info),
@@ -664,6 +665,7 @@ fn render_column_search_csv<W: Write>(
 ) -> Result<()> {
     writeln!(writer, "Database,TableName,ColumnName,ColumnType,Nullable")?;
     for c in columns {
+        let n_str = if c.nullable { "Y" } else { "N" };
         writeln!(
             writer,
             "{},{},{},{},{}",
@@ -671,7 +673,7 @@ fn render_column_search_csv<W: Write>(
             csv_escape(&c.table_name),
             csv_escape(&c.column_name),
             csv_escape(&c.column_type),
-            csv_escape(&c.nullable)
+            csv_escape(n_str)
         )?;
     }
     Ok(())
@@ -687,6 +689,7 @@ fn render_column_search_markdown<W: Write>(
     )?;
     writeln!(writer, "| :--- | :--- | :--- | :--- | :--- |")?;
     for c in columns {
+        let n_str = if c.nullable { "Y" } else { "N" };
         writeln!(
             writer,
             "| {} | {} | {} | {} | {} |",
@@ -694,7 +697,7 @@ fn render_column_search_markdown<W: Write>(
             markdown_escape_pipe(&c.table_name),
             markdown_escape_pipe(&c.column_name),
             markdown_escape_pipe(&c.column_type),
-            markdown_escape_pipe(&c.nullable)
+            markdown_escape_pipe(n_str)
         )?;
     }
     Ok(())
