@@ -380,21 +380,28 @@ pub(crate) fn perform_abort(
     session_id: i64,
     query_only: bool,
 ) -> Result<AbortResult> {
-    let sql = if query_only {
-        // Abort only the running request/query on the session
-        format!(
-            "SELECT * FROM TABLE (MonitorCancelRequest({})) AS t1",
-            session_id
-        )
-    } else {
-        // Abort the entire session
-        format!(
-            "SELECT * FROM TABLE (MonitorAbortSession({})) AS t1",
-            session_id
-        )
+    let logoff_flag = if query_only { "'N'" } else { "'Y'" };
+    let primary_sql = format!(
+        "SELECT * FROM TABLE (SYSLIB.AbortListSessions(-1, '*', {}, {}, 'Y')) AS t1",
+        session_id, logoff_flag
+    );
+
+    let primary_result = client.execute(&primary_sql);
+
+    let execution_result = match primary_result {
+        Ok(res) => Ok(res),
+        Err(_) => {
+            // Fallback to legacy MonitorCancelRequest / MonitorAbortSession
+            let fallback_sql = if query_only {
+                format!("SELECT * FROM TABLE (MonitorCancelRequest({})) AS t1", session_id)
+            } else {
+                format!("SELECT * FROM TABLE (MonitorAbortSession({})) AS t1", session_id)
+            };
+            client.execute(&fallback_sql)
+        }
     };
 
-    match client.execute(&sql) {
+    match execution_result {
         Ok(_) => {
             let message = if query_only {
                 format!("Running query on session {} aborted.", session_id)

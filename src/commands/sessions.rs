@@ -18,20 +18,21 @@ use std::io::Write;
 /// which are used to calculate skew percentages in Rust.
 const SESSIONS_SQL: &str = r#"
 SELECT
-    SessionNo,
-    UserName,
-    LogonTime,
-    PEState,
-    AMPState,
-    AMPCPUSec,
-    AMPIO,
-    ReqSpool,
-    AvgAmpCPUSec,
-    HotAmp1CPU,
-    AvgAmpIOCnt,
-    HotAmp1IO
-FROM TABLE (MonitorSession(-1, '*', 0)) AS t1
-ORDER BY SessionNo
+    s.SessionNo,
+    s.UserName,
+    CAST(s.LogonDate AS VARCHAR(10)) || ' ' || CAST(s.LogonTime AS VARCHAR(15)) AS LogonTime,
+    COALESCE(m.PEState, 'IDLE') AS PEState,
+    COALESCE(m.AMPState, 'IDLE') AS AMPState,
+    COALESCE(m.AMPCPUSec, 0.0) AS AMPCPUSec,
+    COALESCE(m.AMPIO, 0) AS AMPIO,
+    COALESCE(m.ReqSpool, 0) AS ReqSpool,
+    COALESCE(m.AvgAmpCPUSec, 0.0) AS AvgAmpCPUSec,
+    COALESCE(m.HotAmp1CPU, 0.0) AS HotAmp1CPU,
+    COALESCE(m.AvgAmpIOCnt, 0.0) AS AvgAmpIOCnt,
+    COALESCE(m.HotAmp1IO, 0.0) AS HotAmp1IO
+FROM DBC.SessionInfoV s
+LEFT JOIN TABLE (MonitorSession(-1, '*', 0)) m ON s.SessionNo = m.SessionNo
+ORDER BY s.SessionNo
 "#;
 
 /// Session information extracted from MonitorSession result

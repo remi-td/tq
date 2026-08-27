@@ -226,6 +226,20 @@ pub fn handle_metacommand<W: Write>(
             )?;
         }
 
+        "active-query" | "aq" => {
+            writeln!(
+                writer,
+                "The /active-query command requires full REPL mode with database connection."
+            )?;
+        }
+
+        "query-plan" | "qp" | "plan" => {
+            writeln!(
+                writer,
+                "The /query-plan command requires full REPL mode with database connection."
+            )?;
+        }
+
         // Sprint 45: Inspect command (basic handler - no client available)
         "inspect" | "i" => {
             writeln!(
@@ -677,6 +691,71 @@ pub fn handle_metacommand_with_state<W: Write>(
                 match args[0].parse::<i64>() {
                     Ok(session_id) => {
                         crate::commands::query_inspect::execute_for_repl(
+                            completion_state.client(),
+                            session_id,
+                            writer,
+                        )?;
+                    }
+                    Err(_) => {
+                        writeln!(
+                            writer,
+                            "Error: '{}' is not a valid session ID. Expected a number.",
+                            args[0]
+                        )?;
+                    }
+                }
+            }
+        }
+
+        "active-query" | "aq" => {
+            if args.is_empty() {
+                writeln!(writer, "Usage: /active-query <session_id>")?;
+                writeln!(writer, "       /aq <session_id>")?;
+                writeln!(writer)?;
+                writeln!(writer, "Show real-time active SQL text and step progress for a running session.")?;
+                writeln!(writer)?;
+                writeln!(writer, "Examples:")?;
+                writeln!(writer, "  /active-query 1234")?;
+                writeln!(writer, "  /aq 1234")?;
+                writeln!(writer)?;
+                writeln!(writer, "Use /sessions to list active session IDs.")?;
+            } else {
+                match args[0].parse::<i64>() {
+                    Ok(session_id) => {
+                        crate::commands::active_query::execute_for_repl(
+                            completion_state.client(),
+                            session_id,
+                            writer,
+                        )?;
+                    }
+                    Err(_) => {
+                        writeln!(
+                            writer,
+                            "Error: '{}' is not a valid session ID. Expected a number.",
+                            args[0]
+                        )?;
+                    }
+                }
+            }
+        }
+
+        "query-plan" | "qp" | "plan" => {
+            if args.is_empty() {
+                writeln!(writer, "Usage: /query-plan <session_id>")?;
+                writeln!(writer, "       /qp <session_id>")?;
+                writeln!(writer, "       /plan <session_id>")?;
+                writeln!(writer)?;
+                writeln!(writer, "Show real-time query execution plan steps with estimated vs actual metrics for a running session.")?;
+                writeln!(writer)?;
+                writeln!(writer, "Examples:")?;
+                writeln!(writer, "  /query-plan 1234")?;
+                writeln!(writer, "  /plan 1234")?;
+                writeln!(writer)?;
+                writeln!(writer, "Use /sessions to list active session IDs.")?;
+            } else {
+                match args[0].parse::<i64>() {
+                    Ok(session_id) => {
+                        crate::commands::query_plan::execute_for_repl(
                             completion_state.client(),
                             session_id,
                             writer,

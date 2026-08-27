@@ -258,6 +258,28 @@ fn run(cli: Cli) -> Result<u8> {
             }
             0
         }
+        Command::ActiveQuery(args) => {
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::active_query(&client, &args, &mut writer, use_color)?;
+            } else {
+                let mut stdout = io::stdout();
+                commands::active_query(&client, &args, &mut stdout, use_color)?;
+            }
+            0
+        }
+        Command::QueryPlan(args) => {
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::query_plan(&client, &args, &mut writer, use_color)?;
+            } else {
+                let mut stdout = io::stdout();
+                commands::query_plan(&client, &args, &mut stdout, use_color)?;
+            }
+            0
+        }
         // Sprint 45: Inspect command for object metadata
         Command::Inspect(args) => {
             if let Some(ref output_path) = args.output {

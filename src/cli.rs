@@ -322,6 +322,24 @@ pub enum Command {
     #[command(name = "query-inspect", alias = "qi")]
     QueryInspect(QueryInspectArgs),
 
+    /// Display real-time active SQL query and step progress for a currently running session
+    ///
+    /// Shows currently executing SQL text and step progress in real time
+    /// using SYSLIB.MonitorSQLText and SYSLIB.MonitorSQLCurrentStep.
+    ///
+    /// Example: tq active-query 1234
+    #[command(name = "active-query", alias = "aq")]
+    ActiveQuery(ActiveQueryArgs),
+
+    /// Display real-time query execution plan and step metrics for a currently running query
+    ///
+    /// Shows full step-by-step query execution plan with per-step estimated
+    /// vs actual row counts, skew %, and elapsed time using SYSLIB.MonitorSQLSteps.
+    ///
+    /// Example: tq query-plan 1234
+    #[command(name = "query-plan", alias = "qp", alias = "plan")]
+    QueryPlan(QueryPlanArgs),
+
     /// Inspect a database object (type, columns, indexes, size)
     ///
     /// Shows comprehensive metadata for a table, view, or other object
@@ -481,6 +499,8 @@ impl Command {
             Command::Sysconfig(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
             Command::Locks(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
             Command::QueryInspect(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::ActiveQuery(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::QueryPlan(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
             Command::Inspect(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
             Command::List(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
             Command::Search(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
@@ -925,6 +945,58 @@ pub struct QueryInspectArgs {
     /// Write output to file instead of stdout
     ///
     /// If the file exists, it will be overwritten.
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for the active-query command
+#[derive(Parser, Debug)]
+pub struct ActiveQueryArgs {
+    /// Session ID to inspect active query for
+    #[arg(value_name = "SESSION_ID")]
+    pub session_id: i64,
+
+    /// Output format
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Arguments for the query-plan command
+#[derive(Parser, Debug)]
+pub struct QueryPlanArgs {
+    /// Session ID to inspect real-time query plan for
+    #[arg(value_name = "SESSION_ID")]
+    pub session_id: i64,
+
+    /// Output format
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: OutputFormat,
+
+    /// Write output to file instead of stdout
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
 

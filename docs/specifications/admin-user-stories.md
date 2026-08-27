@@ -115,6 +115,8 @@ This document contains user stories for all features of Teradata Performance Mon
 | US-9.3 | As a support analyst, I want to analyze running queries in real-time so that I can find critical steps causing performance problems. |
 | US-9.4 | As a DBA, I want to identify queries with heavy AMP skewing so that I can recommend optimization strategies. |
 | US-9.5 | As a developer, I want to monitor my query while it runs so that I can observe its behavior and identify tuning opportunities. |
+| US-9.6 | As a DBA, I want to view the real-time active SQL text and step progress of a currently running session (using `MonitorSQLText` and `MonitorSQLCurrentStep`) without relying on DBQL log tables. |
+| US-9.7 | As a performance engineer, I want to view the full execution plan of a currently running query with per-step estimated vs. actual row counts, skew %, and elapsed time (using `MonitorSQLSteps`) so that I can identify bottleneck steps. |
 
 ---
 
@@ -129,13 +131,46 @@ This document contains user stories for all features of Teradata Performance Mon
 
 ---
 
+## Operational DBA Real-Time Performance Flow
+
+```
++-----------------------------+
+| 1. List Active Sessions     |  tq sessions
+| (PEState, AMPState, Skew,   |  (DBC.SessionInfoV + SYSLIB.MonitorSession)
+|  CPU, IO, Spool, Host/IFP)  |
++--------------+--------------+
+               |
+               v
++-----------------------------+
+| 2. Inspect Active Query     |  tq active-query <session_id>
+| (Real-time SQL text,        |  (SYSLIB.MonitorSQLText + SYSLIB.MonitorSQLCurrentStep)
+|  Total & current step #)    |
++--------------+--------------+
+               |
+               v
++-----------------------------+
+| 3. Inspect Full Step Plan   |  tq query-plan <session_id>
+| (Est vs Act RowCount/Skew,  |  (SYSLIB.MonitorSQLSteps)
+|  Est vs Act Elapsed Time)   |
++--------------+--------------+
+               |
+               v
++-----------------------------+
+| 4. Abort Query or Session   |  tq abort <session_id> [--query]
+| (Cancel running request     |  (SYSLIB.AbortListSessions / MonitorCancelRequest)
+|  or terminate session)      |
++-----------------------------+
+```
+
+---
+
 ## Summary by Persona
 
 | Persona | User Story Count |
 |---------|------------------|
-| DBA | 22 |
+| DBA | 24 |
 | Operations Analyst | 8 |
-| Performance Engineer | 5 |
+| Performance Engineer | 6 |
 | Support Engineer | 6 |
 | System Administrator | 4 |
 | Capacity Planner | 4 |
@@ -151,7 +186,8 @@ This document contains user stories for all features of Teradata Performance Mon
 
 | Field | Value |
 |-------|-------|
-| Total User Stories | 54 |
+| Total User Stories | 56 |
 | Feature Categories | 10 |
 | Created Date | February 2026 |
 | Source | Teradata PMON Documentation |
+
