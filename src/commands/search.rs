@@ -522,10 +522,10 @@ fn search_columns<W: Write>(
                 return None;
             }
 
-            let nullable = match nullable_raw.trim().to_uppercase().as_str() {
-                "Y" | "YES" | "T" | "TRUE" | "1" => true,
-                _ => false,
-            };
+            let nullable = matches!(
+                nullable_raw.trim().to_uppercase().as_str(),
+                "Y" | "YES" | "T" | "TRUE" | "1"
+            );
 
             Some(ColumnSearchResult {
                 database: database.trim().to_string(),
@@ -1210,7 +1210,7 @@ mod tests {
         assert_eq!(c.table_name, "employees");
         assert_eq!(c.column_name, "salary");
         assert_eq!(c.column_type, "DECIMAL(10,2)");
-        assert_eq!(c.nullable, true);
+        assert!(c.nullable);
     }
 
     #[test]
