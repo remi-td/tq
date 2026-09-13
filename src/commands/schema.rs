@@ -133,7 +133,7 @@ pub fn execute<W: Write>(
     Ok(())
 }
 
-/// Execute `/schema` or `/schema-graph` in REPL mode
+/// Execute `/schema` in REPL mode
 pub fn execute_for_repl<W: Write>(
     client: &DatabaseClient,
     database: Option<&str>,

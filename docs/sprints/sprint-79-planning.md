@@ -13,8 +13,8 @@
 ## Objectives & Scope
 
 1. **CLI Subcommand & REPL Integration:**
-   - Add `tq schema [DATABASE] [TABLE_PATTERN]` with aliases `schema-graph`, `sg`.
-   - Add REPL metacommands `/schema` and `/schema-graph`.
+   - Add `tq schema [DATABASE] [TABLE_PATTERN]` (canonical, single command).
+   - Add REPL metacommand `/schema`.
    - Add options: `--depth <N>`, `--format <table|json|csv|markdown|compact>`, `--json`, `--include-views`.
 2. **Bulk Metadata Extraction Engine:**
    - Bulk query DBC tables (`DBC.TablesV`, `DBC.ColumnsV`, `DBC.IndicesV`, `DBC.TableSizeV`) in constant round trips.
@@ -29,8 +29,7 @@
 ## Acceptance Criteria
 
 - [ ] `tq schema` runs against current database or specified database.
-- [ ] Aliases `tq schema-graph` and `tq sg` work identically to `tq schema`.
-- [ ] REPL metacommands `/schema` and `/schema-graph` display schema summary.
+- [ ] REPL metacommand `/schema` displays schema summary.
 - [ ] Candidate foreign keys and Teradata PI join paths are detected and scored.
 - [ ] `--format json` outputs structured envelope matching specification.
 - [ ] `--format compact` emits dense single-line representation saving >70% tokens.

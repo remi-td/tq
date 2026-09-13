@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-09-13
 **Current Version:** 1.58.0
-**Latest Sprint:** Sprint 79 Complete (Topological Schema Graph, Foreign Key & Join Inference, and Token-Optimized RAG Formats: `tq schema`, `tq schema-graph`, `tq sg`, `/schema`, `/schema-graph`, `/sg`)
+**Latest Sprint:** Sprint 79 Complete (Topological Schema Graph, Foreign Key & Join Inference, and Token-Optimized RAG Formats: `tq schema`, `/schema`)
 
 ---
 
@@ -606,13 +606,13 @@ All core features are complete and tested.
 
 | Feature | Status | Spec Reference | Since |
 |---------|--------|----------------|-------|
-| `tq schema` / `tq schema-graph` / `tq sg` | ✅ v1.58.0 | [CLI Interface](../specifications/cli-interface.md#schema---schema-graph-and-relationship-mapper-schema) | v1.58.0 (Sprint 79) |
+| `tq schema` | ✅ v1.58.0 | [CLI Interface](../specifications/cli-interface.md#schema---schema-graph-and-relationship-mapper-schema) | v1.58.0 (Sprint 79) |
 | Multi-Table & View Topological Map | ✅ v1.58.0 | [CLI Interface](../specifications/cli-interface.md#schema---schema-graph-and-relationship-mapper-schema) | v1.58.0 (Sprint 79) |
 | Foreign Key & Relationship Inference | ✅ v1.58.0 | [CLI Interface](../specifications/cli-interface.md#schema---schema-graph-and-relationship-mapper-schema) | v1.58.0 (Sprint 79) |
 | Teradata PI Join Optimization Scoring | ✅ v1.58.0 | [CLI Interface](../specifications/cli-interface.md#schema---schema-graph-and-relationship-mapper-schema) | v1.58.0 (Sprint 79) |
 | Token-Optimized `compact` Format | ✅ v1.58.0 | [CLI Interface](../specifications/cli-interface.md#schema---schema-graph-and-relationship-mapper-schema) | v1.58.0 (Sprint 79) |
 | Mermaid `erDiagram` Markdown Export | ✅ v1.58.0 | [CLI Interface](../specifications/cli-interface.md#schema---schema-graph-and-relationship-mapper-schema) | v1.58.0 (Sprint 79) |
-| REPL `/schema`, `/schema-graph`, `/sg` | ✅ v1.58.0 | [CLI Interface](../specifications/cli-interface.md#schema---schema-graph-and-relationship-mapper-schema) | v1.58.0 (Sprint 79) |
+| REPL `/schema` | ✅ v1.58.0 | [CLI Interface](../specifications/cli-interface.md#schema---schema-graph-and-relationship-mapper-schema) | v1.58.0 (Sprint 79) |
 
 ---
 

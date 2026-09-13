@@ -249,7 +249,7 @@ const METACOMMANDS: &[MetacommandDef] = &[
     },
     MetacommandDef {
         name: "schema",
-        aliases: &["schema-graph", "sg"],
+        aliases: &[],
         description: "Schema topological graph and candidate join paths",
     },
     MetacommandDef {

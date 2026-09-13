@@ -6,7 +6,7 @@
 
 ## Features Shipped
 
-1. **Topological Schema Discovery (`tq schema`, `tq schema-graph`, `tq sg`):**
+1. **Topological Schema Discovery (`tq schema`):**
    - Implemented database-wide or multi-table topological schema inspection via high-performance bulk DBC catalog queries (`DBC.TablesV`, `DBC.ColumnsV`, `DBC.IndicesV`, `DBC.StatsV`, `DBC.TableSizeV`).
 2. **Relationship & Foreign Key Inference:**
    - Heuristic candidate key inference matching column names and compatible types across tables, automatically determining directionality from Primary Index configurations.
@@ -15,7 +15,7 @@
 4. **Agentic & RAG Token-Optimized Formats:**
    - Implemented 5 output formats (`table`, `json`, `csv`, `markdown` with Mermaid `erDiagram`, and `compact`). The `compact` format achieves ~80% token reduction for LLM context windows.
 5. **Interactive REPL Integration:**
-   - Added `/schema`, `/schema-graph`, and `/sg` metacommands and completion in REPL interactive shell.
+   - Added `/schema` metacommand and completion in REPL interactive shell.
 
 ## Metrics & Validation
 

@@ -1,4 +1,4 @@
-//! Integration tests for `tq schema` / `tq schema-graph` / `tq sg` (Issue #55, Sprint 79)
+//! Integration tests for `tq schema` (Issue #55, Sprint 79)
 //!
 //! Corresponds to TC111-I01 through TC111-I06 in `tests/strategy/sprint-79-strategy.md`.
 //! Every test runs the built `tq` binary against the live Teradata database configured
@@ -33,9 +33,15 @@ fn stdout_str(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).to_string()
 }
 
+fn ensure_test_tables() {
+    let _ = run(&["query", "CREATE TABLE demo_user.customers (customer_id INTEGER, name VARCHAR(100)) PRIMARY INDEX (customer_id);"]);
+    let _ = run(&["query", "CREATE TABLE demo_user.orders (order_id INTEGER, customer_id INTEGER, total_amount DECIMAL(10,2)) PRIMARY INDEX (order_id);"]);
+}
+
 #[test]
 #[ignore]
 fn tc111_i01_live_schema_current_database() {
+    ensure_test_tables();
     let out = run(&["schema"]);
     assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
     let stdout = stdout_str(&out);
@@ -45,21 +51,18 @@ fn tc111_i01_live_schema_current_database() {
 
 #[test]
 #[ignore]
-fn tc111_i02_live_schema_aliases() {
-    let out1 = run(&["schema-graph"]);
-    assert!(out1.status.success());
-    let stdout1 = stdout_str(&out1);
-    assert!(stdout1.contains("Database Schema:"));
-
-    let out2 = run(&["sg"]);
-    assert!(out2.status.success());
-    let stdout2 = stdout_str(&out2);
-    assert!(stdout2.contains("Database Schema:"));
+fn tc111_i02_live_schema_database_and_pattern() {
+    ensure_test_tables();
+    let out = run(&["schema", LIVE_DB, "cust*"]);
+    assert!(out.status.success());
+    let stdout = stdout_str(&out);
+    assert!(stdout.contains("Database Schema:"));
 }
 
 #[test]
 #[ignore]
 fn tc111_i03_live_schema_format_json() {
+    ensure_test_tables();
     let out = run(&["schema", "--format", "json"]);
     assert!(out.status.success());
     let stdout = stdout_str(&out);
@@ -80,6 +83,7 @@ fn tc111_i03_live_schema_format_json() {
 #[test]
 #[ignore]
 fn tc111_i04_live_schema_format_markdown() {
+    ensure_test_tables();
     let out = run(&["schema", "--format", "markdown"]);
     assert!(out.status.success());
     let stdout = stdout_str(&out);
@@ -91,6 +95,7 @@ fn tc111_i04_live_schema_format_markdown() {
 #[test]
 #[ignore]
 fn tc111_i05_live_schema_format_compact() {
+    ensure_test_tables();
     let out = run(&["schema", "--format", "compact"]);
     assert!(out.status.success());
     let stdout = stdout_str(&out);
@@ -100,6 +105,7 @@ fn tc111_i05_live_schema_format_compact() {
 #[test]
 #[ignore]
 fn tc111_i06_live_schema_e2e_relationship_detection() {
+    ensure_test_tables();
     let out = run(&["schema", LIVE_DB, "--format", "json"]);
     assert!(out.status.success());
     let stdout = stdout_str(&out);

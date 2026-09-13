@@ -2,7 +2,7 @@
 
 ## Architectural Overview
 
-`tq schema` (with aliases `tq schema-graph` and `tq sg`) extracts database schema metadata, primary index structures, column attributes, and row estimates, and computes a directed relationship graph with candidate join paths.
+`tq schema` extracts database schema metadata, primary index structures, column attributes, and row estimates, and computes a directed relationship graph with candidate join paths.
 
 ## Key Components
 

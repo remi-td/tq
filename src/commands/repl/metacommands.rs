@@ -87,7 +87,7 @@ pub fn handle_metacommand<W: Write>(
         }
 
         // Schema command (Sprint 79)
-        "schema" | "schema-graph" | "sg" => {
+        "schema" => {
             writeln!(
                 writer,
                 "The /schema command requires full REPL mode with database connection."
@@ -802,8 +802,8 @@ pub fn handle_metacommand_with_state<W: Write>(
             }
         }
 
-        // Sprint 79: Schema graph command
-        "schema" | "schema-graph" | "sg" => {
+        // Sprint 79: Schema command
+        "schema" => {
             let db_arg = args.first().map(|s| &s[..]);
             let pattern_arg = args.get(1).map(|s| &s[..]);
             crate::commands::schema::execute_for_repl(

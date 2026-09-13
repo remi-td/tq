@@ -493,7 +493,7 @@ pub enum Command {
     /// Example: tq schema
     ///          tq schema my_db
     ///          tq schema my_db "order*" --format json
-    #[command(name = "schema", alias = "schema-graph", alias = "sg")]
+    #[command(name = "schema")]
     Schema(SchemaArgs),
 }
 

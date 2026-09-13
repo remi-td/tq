@@ -5050,13 +5050,7 @@ Requirements:
 **Usage**:
 ```bash
 tq [GLOBAL_OPTIONS] schema [OPTIONS] [DATABASE] [TABLE_PATTERN]
-tq [GLOBAL_OPTIONS] schema-graph [OPTIONS] [DATABASE] [TABLE_PATTERN]
-tq [GLOBAL_OPTIONS] sg [OPTIONS] [DATABASE] [TABLE_PATTERN]
 ```
-
-**Aliases**:
-- `schema-graph`: Verbose alias.
-- `sg`: Ergonomic short alias.
 
 **Arguments**:
 - `[DATABASE]`: Optional. Name of the database to inspect. If omitted, defaults to current session database.
@@ -5071,7 +5065,7 @@ tq [GLOBAL_OPTIONS] sg [OPTIONS] [DATABASE] [TABLE_PATTERN]
 | `--include-views` | | flag | `false` | Include views in schema graph |
 
 **Requirements**:
-1. **REQ-SCHEMA-001**: Subcommand name SHALL be `schema`, with aliases `schema-graph` and `sg`.
+1. **REQ-SCHEMA-001**: Subcommand name SHALL be `schema` (canonical, unambiguous command without redundant aliases).
 2. **REQ-SCHEMA-002**: If `[DATABASE]` is omitted, target database SHALL resolve to current session database (`SELECT DATABASE` or config database).
 3. **REQ-SCHEMA-003**: If `[TABLE_PATTERN]` is provided, only tables matching the glob pattern SHALL be included.
 4. **REQ-SCHEMA-004**: Metadata SHALL be fetched in bulk queries against `DBC.TablesV`, `DBC.ColumnsV`, `DBC.IndicesV`, and `DBC.TableSizeV`.

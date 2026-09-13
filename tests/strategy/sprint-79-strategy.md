@@ -1,7 +1,7 @@
 # Sprint 79 Test Strategy: Topological Schema RAG (`tq schema`)
 
 **Sprint:** 79
-**Feature:** `tq schema` (aliases: `schema-graph`, `sg`)
+**Feature:** `tq schema` (canonical, unambiguous schema discovery)
 **Target:** Batch & REPL schema graph introspection and join path inference
 
 ## Test Matrix
@@ -24,7 +24,7 @@
 | Test ID | Description | Scope |
 |---------|-------------|-------|
 | `TC111-I01` | Live `tq schema` against test database (`demo_user` / system) | Verify execution without errors against DBC views |
-| `TC111-I02` | Live `tq schema-graph` and `tq sg` aliases | Verify aliases execute identically to `tq schema` |
+| `TC111-I02` | Live `tq schema` with database and table pattern filtering | Verify pattern globbing against DBC views |
 | `TC111-I03` | Live `tq schema --format json` envelope validation | Verify valid JSON output on stdout |
 | `TC111-I04` | Live `tq schema --format markdown` Mermaid validation | Verify Mermaid `erDiagram` block generated |
 | `TC111-I05` | Live `tq schema --format compact` validation | Verify compact format generated |
