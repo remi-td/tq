@@ -484,6 +484,17 @@ pub enum Command {
     ///
     /// Example: tq errorlevel
     Errorlevel(ErrorlevelArgs),
+
+    /// Extract schema topological map and candidate join paths
+    ///
+    /// Generates a dense, token-compressed topological map of database objects,
+    /// table relationships, primary/secondary indexes, and candidate join paths.
+    ///
+    /// Example: tq schema
+    ///          tq schema my_db
+    ///          tq schema my_db "order*" --format json
+    #[command(name = "schema", alias = "schema-graph", alias = "sg")]
+    Schema(SchemaArgs),
 }
 
 impl Command {
@@ -515,6 +526,11 @@ impl Command {
             Command::LogoffIdle(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
             Command::Params(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
             Command::Errorlevel(a) => Some(if a.json { OutputFormat::Json } else { a.format }),
+            Command::Schema(a) => Some(if a.json || matches!(a.format, SchemaFormat::Json) {
+                OutputFormat::Json
+            } else {
+                OutputFormat::Table
+            }),
             Command::Fastload(_) | Command::Fastexport(_) | Command::Ping(_) | Command::Repl(_) | Command::Help(_) | Command::Profiles | Command::Profile(_) => None,
         }
     }
@@ -1771,6 +1787,46 @@ impl std::fmt::Display for OutputFormat {
     }
 }
 
+/// Output format for the schema command
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
+pub enum SchemaFormat {
+    /// Human-readable table with borders (default)
+    #[default]
+    Table,
+    /// JSON array of objects
+    Json,
+    /// Comma-separated values (RFC 4180)
+    Csv,
+    /// GitHub-Flavored Markdown table
+    Markdown,
+    /// GitHub-Flavored Markdown table (alias for markdown)
+    Md,
+    /// Dense token-optimized format for AI agents
+    Compact,
+}
+
+impl SchemaFormat {
+    /// Normalize aliases to their canonical variant
+    pub fn canonical(self) -> Self {
+        match self {
+            SchemaFormat::Md => SchemaFormat::Markdown,
+            other => other,
+        }
+    }
+}
+
+impl std::fmt::Display for SchemaFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SchemaFormat::Table => write!(f, "table"),
+            SchemaFormat::Json => write!(f, "json"),
+            SchemaFormat::Csv => write!(f, "csv"),
+            SchemaFormat::Markdown | SchemaFormat::Md => write!(f, "markdown"),
+            SchemaFormat::Compact => write!(f, "compact"),
+        }
+    }
+}
+
 /// Color output control
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
 pub enum ColorChoice {
@@ -1920,6 +1976,44 @@ pub struct ErrorlevelArgs {
     /// Shortcut for --format json
     #[arg(long)]
     pub json: bool,
+}
+
+/// Arguments for the schema command
+#[derive(Parser, Debug)]
+pub struct SchemaArgs {
+    /// Target database to inspect (defaults to current session database)
+    #[arg(value_name = "DATABASE")]
+    pub database: Option<String>,
+
+    /// Table name pattern (glob syntax, e.g. "order*", "*cust*")
+    #[arg(value_name = "PATTERN")]
+    pub pattern: Option<String>,
+
+    /// Traversal depth for relationship join paths
+    #[arg(short = 'd', long, default_value = "2", value_name = "DEPTH")]
+    pub depth: usize,
+
+    /// Output format
+    #[arg(
+        short,
+        long,
+        env = "TQ_FORMAT",
+        default_value = "table",
+        value_name = "FORMAT"
+    )]
+    pub format: SchemaFormat,
+
+    /// Shortcut for --format json
+    #[arg(long)]
+    pub json: bool,
+
+    /// Write output to file instead of stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+
+    /// Include views in schema graph
+    #[arg(long)]
+    pub include_views: bool,
 }
 
 

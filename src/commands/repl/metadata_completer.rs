@@ -248,6 +248,11 @@ const METACOMMANDS: &[MetacommandDef] = &[
         description: "Describe object (alias for /inspect)",
     },
     MetacommandDef {
+        name: "schema",
+        aliases: &["schema-graph", "sg"],
+        description: "Schema topological graph and candidate join paths",
+    },
+    MetacommandDef {
         name: "export",
         aliases: &[],
         description: "Export query results",

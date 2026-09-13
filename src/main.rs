@@ -438,6 +438,18 @@ fn run(cli: Cli) -> Result<u8> {
             commands::fastexport::execute(&client, &args)?;
             0
         }
+        // Sprint 79: Schema topological map and join path inference
+        Command::Schema(args) => {
+            if let Some(ref output_path) = args.output {
+                let file = std::fs::File::create(output_path)?;
+                let mut writer = std::io::BufWriter::new(file);
+                commands::schema(&client, &args, &mut writer, use_color)?;
+            } else {
+                let mut stdout = io::stdout();
+                commands::schema(&client, &args, &mut stdout, use_color)?;
+            }
+            0
+        }
         // Help, Profiles, Profile, Params, and Errorlevel already handled above
         Command::Help(_) | Command::Profiles | Command::Profile(_) | Command::Params(_) | Command::Errorlevel(_) => unreachable!(),
     };

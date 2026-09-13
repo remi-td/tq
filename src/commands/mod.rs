@@ -34,6 +34,7 @@ pub mod fastload;
 pub mod fastexport;
 pub mod params;
 pub mod errorlevel;
+pub mod schema;
 
 pub use abort::execute as abort;
 pub use active_query::execute as active_query;
@@ -57,4 +58,5 @@ pub use fastload::execute as fastload;
 pub use fastexport::execute as fastexport;
 pub use params::execute as params;
 pub use errorlevel::execute as errorlevel;
+pub use schema::execute as schema;
 

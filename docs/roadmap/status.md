@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
-**Last Updated:** 2026-08-20
-**Current Version:** 1.57.0
-**Latest Sprint:** Sprint 78 Complete (Comprehensive SQL Script Parameterization: `-D`/`--define` CLI parameters, Jinja2 `{{ var }}` whitespace syntax, `${VAR}` shell syntax, implicit process env fallback, and `--dry-run` SQL inspection)
+**Last Updated:** 2026-09-13
+**Current Version:** 1.58.0
+**Latest Sprint:** Sprint 79 Complete (Topological Schema Graph, Foreign Key & Join Inference, and Token-Optimized RAG Formats: `tq schema`, `tq schema-graph`, `tq sg`, `/schema`, `/schema-graph`, `/sg`)
 
 ---
 
@@ -602,13 +602,27 @@ All core features are complete and tested.
 
 ---
 
+## Schema Discovery & Topology
+
+| Feature | Status | Spec Reference | Since |
+|---------|--------|----------------|-------|
+| `tq schema` / `tq schema-graph` / `tq sg` | ✅ v1.58.0 | [CLI Interface](../specifications/cli-interface.md#schema---schema-graph-and-relationship-mapper-schema) | v1.58.0 (Sprint 79) |
+| Multi-Table & View Topological Map | ✅ v1.58.0 | [CLI Interface](../specifications/cli-interface.md#schema---schema-graph-and-relationship-mapper-schema) | v1.58.0 (Sprint 79) |
+| Foreign Key & Relationship Inference | ✅ v1.58.0 | [CLI Interface](../specifications/cli-interface.md#schema---schema-graph-and-relationship-mapper-schema) | v1.58.0 (Sprint 79) |
+| Teradata PI Join Optimization Scoring | ✅ v1.58.0 | [CLI Interface](../specifications/cli-interface.md#schema---schema-graph-and-relationship-mapper-schema) | v1.58.0 (Sprint 79) |
+| Token-Optimized `compact` Format | ✅ v1.58.0 | [CLI Interface](../specifications/cli-interface.md#schema---schema-graph-and-relationship-mapper-schema) | v1.58.0 (Sprint 79) |
+| Mermaid `erDiagram` Markdown Export | ✅ v1.58.0 | [CLI Interface](../specifications/cli-interface.md#schema---schema-graph-and-relationship-mapper-schema) | v1.58.0 (Sprint 79) |
+| REPL `/schema`, `/schema-graph`, `/sg` | ✅ v1.58.0 | [CLI Interface](../specifications/cli-interface.md#schema---schema-graph-and-relationship-mapper-schema) | v1.58.0 (Sprint 79) |
+
+---
+
 ## Summary Statistics
 
-- **Total Features**: 134
-- **Implemented**: 134 (100%)
+- **Total Features**: 141
+- **Implemented**: 141 (100%)
 - **Planned**: 0 (0%)
-- **Test Pass Rate**: 100% (1182 unit tests pass, 95 integration tests pass)
-- **Latest Sprint**: Sprint 74 - FastLoad Delimiter Validation
+- **Test Pass Rate**: 100% (1313 unit tests pass, 101 integration tests pass)
+- **Latest Sprint**: Sprint 79 - Schema Topology & Relationship Mapper
 
 ---
 

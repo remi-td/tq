@@ -86,6 +86,14 @@ pub fn handle_metacommand<W: Write>(
             }
         }
 
+        // Schema command (Sprint 79)
+        "schema" | "schema-graph" | "sg" => {
+            writeln!(
+                writer,
+                "The /schema command requires full REPL mode with database connection."
+            )?;
+        }
+
         // Export command (Sprint 6, Sprint 12, Sprint 13: simplified syntax)
         // Note: Old handler - no full dataset export (client not available for re-execution)
         "export" => {
@@ -794,6 +802,18 @@ pub fn handle_metacommand_with_state<W: Write>(
             }
         }
 
+        // Sprint 79: Schema graph command
+        "schema" | "schema-graph" | "sg" => {
+            let db_arg = args.first().map(|s| &s[..]);
+            let pattern_arg = args.get(1).map(|s| &s[..]);
+            crate::commands::schema::execute_for_repl(
+                completion_state.client(),
+                db_arg,
+                pattern_arg,
+                writer,
+            )?;
+        }
+
         // Sprint 51: Session history command
         "history" => {
             let args_strs: Vec<&str> = args.iter().map(|s| s.as_ref()).collect();
@@ -1156,6 +1176,10 @@ fn print_help_extended<W: Write>(writer: &mut W) -> Result<()> {
     )?;
     writeln!(writer)?;
     writeln!(writer, "Schema Inspection:")?;
+    writeln!(
+        writer,
+        "  /schema [db] [pat]     Schema topology & candidate join paths (alias /sg)"
+    )?;
     writeln!(
         writer,
         "  /inspect <obj>, /i     Inspect object (type, columns, indexes, size)"

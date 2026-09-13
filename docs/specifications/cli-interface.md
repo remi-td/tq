@@ -5042,3 +5042,44 @@ Requirements:
 2. **REQ-INSTALL-010.5.2** - The license file SHALL be included in every release archive for every supported platform.
 
 ---
+
+### schema - Topological Schema Graph and RAG
+
+**Purpose**: Extract a dense, topological graph of database objects, column definitions, primary/secondary index structures, row count estimates, and inferred relationship join paths. Supports token-optimized formats for AI agent context injection and human analysis.
+
+**Usage**:
+```bash
+tq [GLOBAL_OPTIONS] schema [OPTIONS] [DATABASE] [TABLE_PATTERN]
+tq [GLOBAL_OPTIONS] schema-graph [OPTIONS] [DATABASE] [TABLE_PATTERN]
+tq [GLOBAL_OPTIONS] sg [OPTIONS] [DATABASE] [TABLE_PATTERN]
+```
+
+**Aliases**:
+- `schema-graph`: Verbose alias.
+- `sg`: Ergonomic short alias.
+
+**Arguments**:
+- `[DATABASE]`: Optional. Name of the database to inspect. If omitted, defaults to current session database.
+- `[TABLE_PATTERN]`: Optional. Glob pattern (e.g. `order*`, `*user*`) to filter included tables.
+
+**Options**:
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--depth` | `-d` | integer | `2` | Traversal depth for join paths |
+| `--format` | `-f` | enum | `table` | Output format: `table`, `json`, `csv`, `markdown`, `compact` |
+| `--json` | | flag | `false` | Shortcut for `--format json` |
+| `--include-views` | | flag | `false` | Include views in schema graph |
+
+**Requirements**:
+1. **REQ-SCHEMA-001**: Subcommand name SHALL be `schema`, with aliases `schema-graph` and `sg`.
+2. **REQ-SCHEMA-002**: If `[DATABASE]` is omitted, target database SHALL resolve to current session database (`SELECT DATABASE` or config database).
+3. **REQ-SCHEMA-003**: If `[TABLE_PATTERN]` is provided, only tables matching the glob pattern SHALL be included.
+4. **REQ-SCHEMA-004**: Metadata SHALL be fetched in bulk queries against `DBC.TablesV`, `DBC.ColumnsV`, `DBC.IndicesV`, and `DBC.TableSizeV`.
+5. **REQ-SCHEMA-005**: Logical foreign key relationships SHALL be inferred across tables based on column name and type compatibility.
+6. **REQ-SCHEMA-006**: Inferred join paths SHALL be scored for Teradata PI optimization (`COLOCATED_PI_JOIN`, `RECOMMENDED_PI_JOIN`, `ALL_AMPS_JOIN`).
+7. **REQ-SCHEMA-007**: When `--format json` or `--json` is specified, output SHALL follow structured JSON envelope with `tables` and `join_paths`.
+8. **REQ-SCHEMA-008**: When `--format markdown` is specified, output SHALL include markdown tables and Mermaid `erDiagram` block.
+9. **REQ-SCHEMA-009**: When `--format compact` is specified, output SHALL emit dense single-line representation saving >70% tokens.
+10. **REQ-SCHEMA-010**: The command SHALL be read-only and fully compatible with `--agent-safe`.
+
+---
