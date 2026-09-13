@@ -68,6 +68,8 @@ pub fn execute<W: Write>(
             OutputFormat::Csv => display_bulk_csv(&bulk, writer)?,
             OutputFormat::Json => display_bulk_json(&bulk, writer)?,
             OutputFormat::Markdown | OutputFormat::Md => display_bulk_markdown(&bulk, writer)?,
+            OutputFormat::Compact => display_bulk_json(&bulk, writer)?,
+            OutputFormat::Toon | OutputFormat::Tsv => display_bulk_csv(&bulk, writer)?,
         }
     } else if let Some(ref host) = args.host {
         let bulk = abort_host_sessions(client, host)?;
@@ -76,6 +78,8 @@ pub fn execute<W: Write>(
             OutputFormat::Csv => display_bulk_csv(&bulk, writer)?,
             OutputFormat::Json => display_bulk_json(&bulk, writer)?,
             OutputFormat::Markdown | OutputFormat::Md => display_bulk_markdown(&bulk, writer)?,
+            OutputFormat::Compact => display_bulk_json(&bulk, writer)?,
+            OutputFormat::Toon | OutputFormat::Tsv => display_bulk_csv(&bulk, writer)?,
         }
     } else if let Some(session_id) = args.session_id {
         let result = perform_abort(client, session_id, args.query)?;
@@ -84,6 +88,8 @@ pub fn execute<W: Write>(
             OutputFormat::Csv => display_csv(&result, writer)?,
             OutputFormat::Json => display_json(&result, writer)?,
             OutputFormat::Markdown | OutputFormat::Md => display_markdown(&result, writer)?,
+            OutputFormat::Compact => display_json(&result, writer)?,
+            OutputFormat::Toon | OutputFormat::Tsv => display_csv(&result, writer)?,
         }
     } else {
         writeln!(writer, "Error: Specify a session ID, --user, or --host.")?;

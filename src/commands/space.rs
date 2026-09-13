@@ -571,6 +571,8 @@ pub fn render<W: Write>(
         OutputFormat::Csv => display_csv(report, writer),
         OutputFormat::Json => display_json(report, writer),
         OutputFormat::Markdown | OutputFormat::Md => display_markdown(report, writer, ctx),
+        OutputFormat::Compact => display_json(report, writer),
+        OutputFormat::Toon | OutputFormat::Tsv => display_csv(report, writer),
     }
 }
 

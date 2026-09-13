@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-09-13
-**Current Version:** 1.58.0
-**Latest Sprint:** Sprint 79 Complete (Topological Schema Graph, Foreign Key & Join Inference, and Token-Optimized RAG Formats: `tq schema`, `/schema`)
+**Current Version:** 1.59.0
+**Latest Sprint:** Sprint 80 Complete (Token Compression Schemes: TOON, Compact JSON, TSV, Token Budgeting, and Ergonomic Agent Mode: `--agent`, `TQ_AGENT=1`)
 
 ---
 

@@ -76,6 +76,33 @@ pub fn execute<W: Write>(
                 }
             }
         }
+        OutputFormat::Compact => {
+            let rows: Vec<serde_json::Value> = sorted_entries
+                .iter()
+                .map(|(code, sev)| json!([code, sev]))
+                .collect();
+            let envelope = json!({
+                "ok": true,
+                "cmd": "errorlevel",
+                "row_count": rows.len(),
+                "cols": ["error_code", "severity"],
+                "rows": rows,
+            });
+            writeln!(writer, "{}", serde_json::to_string(&envelope)?)?;
+        }
+        OutputFormat::Toon => {
+            writeln!(writer, "# rows: {}", sorted_entries.len())?;
+            writeln!(writer, "[columns: error_code, severity]")?;
+            for (code, sev) in &sorted_entries {
+                writeln!(writer, "{}, {}", code, sev)?;
+            }
+        }
+        OutputFormat::Tsv => {
+            writeln!(writer, "error_code\tseverity")?;
+            for (code, sev) in &sorted_entries {
+                writeln!(writer, "{}\t{}", code, sev)?;
+            }
+        }
     }
 
     Ok(())

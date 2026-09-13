@@ -127,7 +127,8 @@ pub fn execute<W: Write>(
         SchemaFormat::Table => render_table(&data, writer, use_color)?,
         SchemaFormat::Markdown | SchemaFormat::Md => render_markdown(&data, writer)?,
         SchemaFormat::Compact => render_compact(&data, writer)?,
-        SchemaFormat::Csv => render_csv(&data, writer)?,
+        SchemaFormat::Toon => render_compact(&data, writer)?,
+        SchemaFormat::Csv | SchemaFormat::Tsv => render_csv(&data, writer)?,
     }
 
     Ok(())

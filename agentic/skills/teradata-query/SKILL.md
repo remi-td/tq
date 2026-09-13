@@ -210,16 +210,90 @@ Wrap multi-statement execution in a transaction (rollback on failure):
 tq query --file migration.sql --atomic
 ```
 
-### Export Results
+### Output Formats & Token Optimization
+
+`tq` supports multiple output formats designed for both human inspection and LLM/agent token efficiency:
 
 ```bash
-# CSV
-tq query "SELECT * FROM sales" --format csv > report.csv
-tq query "SELECT * FROM sales" --format csv --output report.csv
+# TOON (Token-Oriented Object Notation) - Default for AI agents (-79% tokens vs JSON)
+tq query "SELECT * FROM sales" --format toon
 
-# JSON
+# Compact JSON (Columnar JSON) - Machine-readable JSON without repeated keys (-68% tokens vs JSON)
+tq query "SELECT * FROM sales" --format compact
+
+# TSV (Tab-Separated Values) - Clean and lightweight tabular data (-72% tokens vs JSON)
+tq query "SELECT * FROM sales" --format tsv
+
+# CSV & JSON
+tq query "SELECT * FROM sales" --format csv > report.csv
 tq query "SELECT * FROM products" --format json > products.json
+
+# Markdown table
+tq query "SELECT * FROM sales" --format markdown
 ```
+
+---
+
+## AI Agent Mode & Token Optimization (`--agent`)
+
+When AI agents interact with databases, standard JSON or tabular outputs waste thousands of context tokens on repeated keys, whitespace, and column padding. Furthermore, agents face "choice overhead" when deciding which flags to pass.
+
+`tq` provides a unified **`--agent`** mode (or environment variable **`TQ_AGENT=1`**) that bundles optimal defaults for AI agents:
+
+```bash
+# Recommended for AI agents:
+tq --agent query "SELECT * FROM dbc.dbcinfo"
+
+# Or set once in the environment:
+export TQ_AGENT=1
+tq query "SELECT * FROM dbc.dbcinfo"
+```
+
+### What `--agent` Enables by Default
+
+1. **Default Format (`toon`)**: Uses Token-Oriented Object Notation by default. Minimizes quotes, omits decorative borders, and achieves **~79% token reduction** compared to standard row-object JSON.
+2. **Smart JSON Mapping**: If an agent requests `--json` or `--format json` along with `--agent`, `tq` automatically upgrades the output to `compact` (Columnar JSON: `{"ok":true,"cols":[...],"rows":[[...]]}`), saving **~68% tokens** while remaining 100% valid JSON.
+3. **Automatic Token Compression (`--compress-tokens`)**:
+   - Caps floating-point numbers to 2 decimal places (e.g. `123.456789` -> `123.46`).
+   - Encodes `NULL` as concise `~`.
+   - Truncates oversized text cells exceeding 100 characters with an ellipsis indicator.
+4. **Token Budget Guardrail (`--token-budget 4000`)**: Enforces a default 4,000 token limit. Results that exceed this limit are dynamically truncated with a clear summary:
+   ```text
+   # Truncated: Showing 15 of 240 rows to fit 4000 token budget.
+   ```
+5. **Token Count Feedback (`--show-tokens`)**: Emits estimated token usage (`# tokens: ~N` or `"tokens_est": N`) so agents can track their context consumption.
+6. **Agent Safety Restrictions (`--agent-safe`)**:
+   - Forbids multi-statement SQL.
+   - Enforces a 30-second query timeout (overriding infinite waits).
+   - Enforces client-side fetch caps to prevent memory exhaustion.
+
+### Format Comparison for LLMs
+
+| Format | Token Cost vs JSON | LLM Readability | Best Use Case |
+|---|---|---|---|
+| **`toon`** | **-79%** | Excellent | **Primary default for all LLM/agent queries** |
+| **`compact`** | **-68%** | Excellent | Machine parsing when valid JSON is required |
+| **`tsv`** | **-72%** | Good | Script piping and simple parsing |
+| **`csv`** | **-55%** | Moderate | Exporting tabular data to CSV files |
+| **`json`** | Baseline (0%) | Redundant | Legacy pipelines requiring full row objects |
+| **`table`** | +15% to +40% | Human-only | Interactive terminal viewing by human users |
+
+### Fine-Tuning Token Settings
+
+When tighter budgets or specific adjustments are required:
+
+```bash
+# Constrain output to a strict token budget (e.g., 1,500 tokens)
+tq --agent --token-budget 1500 query "SELECT * FROM large_table"
+
+# Request JSON output while maintaining columnar compression
+tq --agent --json query "SELECT * FROM sales"
+
+# Enable token compression on human-oriented formats
+tq query "SELECT * FROM orders" --format markdown --compress-tokens
+```
+
+---
 
 ### Limit Rows
 
@@ -491,9 +565,10 @@ In interactive REPL sessions, manage error level mappings dynamically:
 
 ## Key Rules
 
+- **Always use `--agent` (or `export TQ_AGENT=1`)** when executing queries from AI agents or LLM workflows. This minimizes token consumption by ~79%, enforces safe execution, prevents context window overflow with automatic 4000 token budgeting, and applies query timeouts.
+- **Use `--agent --json`** (which outputs `compact` columnar JSON) when JSON format is strictly required by programmatic parsers, avoiding heavy repeating key overhead.
 - **Never hardcode credentials** in SQL files, scripts, or command-line arguments visible in shell history.
 - **Use password files** (`--password-file` or profile `password_file`) rather than embedding passwords in `TQ_LOGON` or command-line args.
 - **Use `--file`** for executing SQL files rather than pasting long statements inline.
-- **Use `--format json`** when query results will be processed programmatically by other tools or scripts.
 - **Confirm environment** before executing against non-dev targets -- always confirm with the user before running against staging or production.
 - **Use `--atomic`** for multi-statement migrations that should be all-or-nothing.

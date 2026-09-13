@@ -171,6 +171,13 @@ fn list_databases<W: Write>(
                 pg.write_footer(writer)?;
             }
         }
+        OutputFormat::Compact => render_databases_json_with_pagination(display, pagination.as_ref(), writer)?,
+        OutputFormat::Toon | OutputFormat::Tsv => {
+            render_databases_csv(display, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
     }
 
     Ok(())
@@ -531,6 +538,51 @@ fn list_tables<W: Write>(
                 pg.write_footer(writer)?;
             }
         }
+        OutputFormat::Compact => {
+            let cols = vec!["name", "type", "rows_est", "size", "owner"];
+            let rows: Vec<serde_json::Value> = display
+                .iter()
+                .map(|t| {
+                    serde_json::json!([
+                        t.name,
+                        t.kind,
+                        t.row_count_display,
+                        t.size_display,
+                        t.owner
+                    ])
+                })
+                .collect();
+            let payload = serde_json::json!({
+                "ok": true,
+                "cmd": "list_tables",
+                "row_count": rows.len(),
+                "cols": cols,
+                "rows": rows
+            });
+            serde_json::to_writer(&mut *writer, &payload)?;
+            writeln!(writer)?;
+        }
+        OutputFormat::Toon => {
+            writeln!(writer, "# rows: {}", display.len())?;
+            writeln!(writer, "[columns: name, type, rows_est, size, owner]")?;
+            for t in display {
+                writeln!(
+                    writer,
+                    "{}, {}, {}, {}, {}",
+                    t.name, t.kind, t.row_count_display, t.size_display, t.owner
+                )?;
+            }
+        }
+        OutputFormat::Tsv => {
+            writeln!(writer, "name\ttype\trows_est\tsize\towner")?;
+            for t in display {
+                writeln!(
+                    writer,
+                    "{}\t{}\t{}\t{}\t{}",
+                    t.name, t.kind, t.row_count_display, t.size_display, t.owner
+                )?;
+            }
+        }
     }
 
     Ok(())
@@ -692,6 +744,35 @@ fn list_views<W: Write>(
             }
             if let Some(ref pg) = pagination {
                 pg.write_footer(writer)?;
+            }
+        }
+        OutputFormat::Compact => {
+            let cols = vec!["name", "owner"];
+            let rows: Vec<serde_json::Value> = display
+                .iter()
+                .map(|v| serde_json::json!([v.name, v.owner]))
+                .collect();
+            let payload = serde_json::json!({
+                "ok": true,
+                "cmd": "list_views",
+                "row_count": rows.len(),
+                "cols": cols,
+                "rows": rows
+            });
+            serde_json::to_writer(&mut *writer, &payload)?;
+            writeln!(writer)?;
+        }
+        OutputFormat::Toon => {
+            writeln!(writer, "# rows: {}", display.len())?;
+            writeln!(writer, "[columns: name, owner]")?;
+            for v in display {
+                writeln!(writer, "{}, {}", v.name, v.owner)?;
+            }
+        }
+        OutputFormat::Tsv => {
+            writeln!(writer, "name\towner")?;
+            for v in display {
+                writeln!(writer, "{}\t{}", v.name, v.owner)?;
             }
         }
     }

@@ -251,6 +251,71 @@ pub fn execute<W: Write>(
         OutputFormat::Csv => display_csv(&display_rows, writer)?,
         OutputFormat::Json => display_json(&display_rows, writer)?,
         OutputFormat::Markdown | OutputFormat::Md => display_markdown(&display_rows, writer)?,
+        OutputFormat::Toon => {
+            writeln!(writer, "# rows: {}", display_rows.len())?;
+            writeln!(
+                writer,
+                "[columns: locked_object, lock_type, lock_mode, locking_session, waiting_sessions]"
+            )?;
+            for r in &display_rows {
+                writeln!(
+                    writer,
+                    "{}, {}, {}, {}, {}",
+                    r.locked_object,
+                    r.lock_type,
+                    r.lock_mode,
+                    r.locking_session,
+                    format_waiting_sessions(&r.waiting_sessions)
+                )?;
+            }
+        }
+        OutputFormat::Compact => {
+            let cols = vec![
+                "locked_object",
+                "lock_type",
+                "lock_mode",
+                "locking_session",
+                "waiting_sessions",
+            ];
+            let rows: Vec<serde_json::Value> = display_rows
+                .iter()
+                .map(|r| {
+                    serde_json::json!([
+                        r.locked_object,
+                        r.lock_type,
+                        r.lock_mode,
+                        r.locking_session,
+                        format_waiting_sessions(&r.waiting_sessions)
+                    ])
+                })
+                .collect();
+            let payload = serde_json::json!({
+                "ok": true,
+                "cmd": "locks",
+                "row_count": rows.len(),
+                "cols": cols,
+                "rows": rows
+            });
+            serde_json::to_writer(&mut *writer, &payload)?;
+            writeln!(writer)?;
+        }
+        OutputFormat::Tsv => {
+            writeln!(
+                writer,
+                "locked_object\tlock_type\tlock_mode\tlocking_session\twaiting_sessions"
+            )?;
+            for r in &display_rows {
+                writeln!(
+                    writer,
+                    "{}\t{}\t{}\t{}\t{}",
+                    r.locked_object,
+                    r.lock_type,
+                    r.lock_mode,
+                    r.locking_session,
+                    format_waiting_sessions(&r.waiting_sessions)
+                )?;
+            }
+        }
     }
 
     Ok(())

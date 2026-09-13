@@ -225,13 +225,25 @@ Execute a single query:
 tq query "SELECT COUNT(*) FROM orders WHERE date = CURRENT_DATE"
 ```
 
-### Export to Different Formats
+### Export to Different Formats & AI Agent Mode
 
 ```bash
+# AI Agent Mode (TOON format, -79% tokens vs JSON, 4k token budget, safe defaults)
+tq --agent query "SELECT * FROM sales_summary"
+
+# TOON format (Token-Oriented Object Notation)
+tq query "SELECT * FROM sales_summary" --format toon
+
+# Compact JSON (columnar JSON format, -68% tokens vs standard JSON)
+tq query "SELECT * FROM sales_summary" --format compact
+
+# TSV (Tab-Separated Values)
+tq query "SELECT * FROM sales_summary" --format tsv
+
 # CSV export
 tq query "SELECT * FROM sales_summary" --format csv > report.csv
 
-# JSON export
+# Standard JSON export
 tq query "SELECT * FROM products" --format json > products.json
 ```
 

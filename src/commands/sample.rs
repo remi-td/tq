@@ -66,6 +66,18 @@ pub fn execute_sample<W: Write>(
         OutputFormat::Csv => display_csv_result(&result, writer)?,
         OutputFormat::Json => display_json_result(&result, writer)?,
         OutputFormat::Markdown | OutputFormat::Md => display_markdown_result(&result, writer)?,
+        OutputFormat::Toon => {
+            let opts = crate::format::FormatOptions::default();
+            crate::format::toon::write(&result, writer, &opts.toon)?;
+        }
+        OutputFormat::Compact => {
+            let opts = crate::format::FormatOptions::default();
+            crate::format::compact::write(&result, writer, &opts.compact)?;
+        }
+        OutputFormat::Tsv => {
+            let opts = crate::format::FormatOptions::default();
+            crate::format::tsv::write(&result, writer, &opts.tsv)?;
+        }
     }
 
     Ok(())
@@ -114,6 +126,18 @@ pub fn execute_peek<W: Write>(
         OutputFormat::Json => display_peek_json(&columns, &result, writer)?,
         OutputFormat::Markdown | OutputFormat::Md => {
             display_peek_markdown(&columns, &result, writer)?
+        }
+        OutputFormat::Toon => {
+            let opts = crate::format::FormatOptions::default();
+            crate::format::toon::write(&result, writer, &opts.toon)?;
+        }
+        OutputFormat::Compact => {
+            let opts = crate::format::FormatOptions::default();
+            crate::format::compact::write(&result, writer, &opts.compact)?;
+        }
+        OutputFormat::Tsv => {
+            let opts = crate::format::FormatOptions::default();
+            crate::format::tsv::write(&result, writer, &opts.tsv)?;
         }
     }
 

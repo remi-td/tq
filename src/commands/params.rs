@@ -78,6 +78,36 @@ pub fn execute<W: Write>(
                 }
             }
         }
+        OutputFormat::Compact => {
+            let mut rows = Vec::new();
+            for path in &paths {
+                let val = store.resolve(path).unwrap_or_default();
+                rows.push(json!([path, val]));
+            }
+            let envelope = json!({
+                "ok": true,
+                "cmd": "params",
+                "row_count": rows.len(),
+                "cols": ["key", "value"],
+                "rows": rows,
+            });
+            writeln!(writer, "{}", serde_json::to_string(&envelope)?)?;
+        }
+        OutputFormat::Toon => {
+            writeln!(writer, "# rows: {}", paths.len())?;
+            writeln!(writer, "[columns: key, value]")?;
+            for path in &paths {
+                let val = store.resolve(path).unwrap_or_default();
+                writeln!(writer, "{}, {}", path, val)?;
+            }
+        }
+        OutputFormat::Tsv => {
+            writeln!(writer, "key\tvalue")?;
+            for path in &paths {
+                let val = store.resolve(path).unwrap_or_default();
+                writeln!(writer, "{}\t{}", path, val.replace('\t', " "))?;
+            }
+        }
     }
 
     Ok(())

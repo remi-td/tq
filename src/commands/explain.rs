@@ -37,6 +37,20 @@ pub fn execute<W: Write>(
         OutputFormat::Markdown | OutputFormat::Md => {
             display_markdown(&steps, &args.sql, writer)?
         }
+        OutputFormat::Compact => display_json(&steps, &args.sql, writer)?,
+        OutputFormat::Toon => {
+            writeln!(writer, "# query: {}", args.sql)?;
+            writeln!(writer, "# steps: {}", steps.len())?;
+            for (i, step) in steps.iter().enumerate() {
+                writeln!(writer, "{}. {}", i + 1, step.text)?;
+            }
+        }
+        OutputFormat::Tsv => {
+            writeln!(writer, "step\tinstruction")?;
+            for (i, step) in steps.iter().enumerate() {
+                writeln!(writer, "{}\t{}", i + 1, step.text.replace('\t', " "))?;
+            }
+        }
     }
 
     Ok(())

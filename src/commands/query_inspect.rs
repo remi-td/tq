@@ -122,6 +122,8 @@ pub fn execute<W: Write>(
         OutputFormat::Markdown | OutputFormat::Md => {
             display_markdown(&queries, args.session_id, writer)?
         }
+        OutputFormat::Compact => display_json(&queries, writer)?,
+        OutputFormat::Toon | OutputFormat::Tsv => display_csv(&queries, writer)?,
     }
 
     Ok(())

@@ -204,6 +204,8 @@ pub fn execute<W: Write>(
         OutputFormat::Markdown | OutputFormat::Md => {
             display_markdown(&events, &summary, duration_str, writer)?
         }
+        OutputFormat::Compact => display_json(&events, &summary, duration_str, writer)?,
+        OutputFormat::Toon | OutputFormat::Tsv => display_csv(&events, writer)?,
     }
 
     Ok(())

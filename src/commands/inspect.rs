@@ -50,6 +50,15 @@ pub fn execute<W: Write>(
         OutputFormat::Markdown | OutputFormat::Md => {
             inspect_object_markdown(client, object_name, writer)?;
         }
+        OutputFormat::Toon => {
+            inspect_object_toon(client, object_name, writer)?;
+        }
+        OutputFormat::Compact => {
+            inspect_object_compact(client, object_name, writer)?;
+        }
+        OutputFormat::Tsv => {
+            inspect_object_tsv(client, object_name, writer)?;
+        }
     }
     Ok(())
 }
@@ -539,6 +548,155 @@ fn inspect_object_csv<W: Write>(
                 format_size(storage.peak_size, 2),
                 skew,
                 storage.amp_count
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+/// TOON output for batch mode
+fn inspect_object_toon<W: Write>(
+    client: &DatabaseClient,
+    object_name: &str,
+    writer: &mut W,
+) -> Result<()> {
+    let (db_part, obj_part) = parse_table_name(object_name);
+    let database = query_helpers::resolve_database(client, db_part)?;
+
+    let obj_info = match query_object_type(client, &database, obj_part)? {
+        Some(info) => info,
+        None => {
+            writeln!(writer, "# error: Object '{}' not found", object_name)?;
+            return Ok(());
+        }
+    };
+
+    let columns = query_helpers::query_columns(client, &database, obj_part).unwrap_or_default();
+    writeln!(writer, "# object: table_inspect")?;
+    writeln!(writer, "# target: {}.{}", database, obj_part)?;
+    writeln!(writer, "# type: {}", obj_info.kind_label)?;
+    writeln!(writer, "# rows: {}", columns.len())?;
+    writeln!(writer, "[columns: name, type, nullable, default, comment]")?;
+
+    for col in &columns {
+        let def_val = if col.default_val == "-" || col.default_val.is_empty() {
+            "~"
+        } else {
+            &col.default_val
+        };
+        let comment_val = if col.comment.is_empty() {
+            "~"
+        } else {
+            &col.comment
+        };
+        let clean_comm = if comment_val.contains(',') || comment_val.contains('"') {
+            format!("\"{}\"", comment_val.replace('"', "\"\""))
+        } else {
+            comment_val.to_string()
+        };
+        writeln!(
+            writer,
+            "{}, {}, {}, {}, {}",
+            col.name, col.col_type, col.nullable, def_val, clean_comm
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Compact Columnar JSON output for batch mode
+fn inspect_object_compact<W: Write>(
+    client: &DatabaseClient,
+    object_name: &str,
+    writer: &mut W,
+) -> Result<()> {
+    let (db_part, obj_part) = parse_table_name(object_name);
+    let database = query_helpers::resolve_database(client, db_part)?;
+
+    let obj_info = match query_object_type(client, &database, obj_part)? {
+        Some(info) => info,
+        None => {
+            writeln!(
+                writer,
+                "{{\"ok\":false,\"cmd\":\"inspect\",\"error\":\"Object '{}' not found\"}}",
+                json_escape(object_name)
+            )?;
+            return Ok(());
+        }
+    };
+
+    let columns = query_helpers::query_columns(client, &database, obj_part).unwrap_or_default();
+    let mut rows = Vec::new();
+    for col in &columns {
+        let def_val = if col.default_val == "-" || col.default_val.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::String(col.default_val.clone())
+        };
+        let comm_val = if col.comment.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::String(col.comment.clone())
+        };
+        rows.push(serde_json::json!([
+            col.name,
+            col.col_type,
+            col.nullable,
+            def_val,
+            comm_val
+        ]));
+    }
+
+    let payload = serde_json::json!({
+        "ok": true,
+        "cmd": "inspect",
+        "database": database,
+        "target": obj_part,
+        "type": obj_info.kind_label,
+        "row_count": columns.len(),
+        "cols": ["name", "type", "nullable", "default", "comment"],
+        "rows": rows
+    });
+
+    serde_json::to_writer(&mut *writer, &payload)?;
+    writeln!(writer)?;
+    Ok(())
+}
+
+/// TSV output for batch mode
+fn inspect_object_tsv<W: Write>(
+    client: &DatabaseClient,
+    object_name: &str,
+    writer: &mut W,
+) -> Result<()> {
+    let (db_part, obj_part) = parse_table_name(object_name);
+    let database = query_helpers::resolve_database(client, db_part)?;
+
+    let _obj_info = match query_object_type(client, &database, obj_part)? {
+        Some(info) => info,
+        None => {
+            writeln!(writer, "error\tObject '{}' not found", object_name)?;
+            return Ok(());
+        }
+    };
+
+    writeln!(writer, "name\ttype\tnullable\tdefault\tcomment")?;
+    if let Ok(columns) = query_helpers::query_columns(client, &database, obj_part) {
+        for col in &columns {
+            let default_display = if col.default_val == "-" {
+                ""
+            } else {
+                &col.default_val
+            };
+            writeln!(
+                writer,
+                "{}\t{}\t{}\t{}\t{}",
+                col.name.replace('\t', " "),
+                col.col_type.replace('\t', " "),
+                col.nullable,
+                default_display.replace('\t', " "),
+                col.comment.replace(['\t', '\n'], " ")
             )?;
         }
     }

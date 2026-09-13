@@ -116,6 +116,8 @@ pub fn execute<W: Write>(
         OutputFormat::Csv => display_csv(&steps, writer)?,
         OutputFormat::Json => display_json(&steps, args.session_id, writer)?,
         OutputFormat::Markdown | OutputFormat::Md => display_markdown(&steps, args.session_id, writer)?,
+        OutputFormat::Compact => display_json(&steps, args.session_id, writer)?,
+        OutputFormat::Toon | OutputFormat::Tsv => display_csv(&steps, writer)?,
     }
 
     Ok(())

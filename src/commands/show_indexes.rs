@@ -30,6 +30,8 @@ pub fn execute<W: Write>(
         OutputFormat::Markdown | OutputFormat::Md => {
             show_indexes_markdown(client, table_name, writer)
         }
+        OutputFormat::Compact => show_indexes_json(client, table_name, writer),
+        OutputFormat::Toon | OutputFormat::Tsv => show_indexes_csv(client, table_name, writer),
     }
 }
 

@@ -181,6 +181,75 @@ pub fn execute<W: Write>(
         OutputFormat::Csv => display_csv(&infos, writer)?,
         OutputFormat::Json => display_json(&infos, writer)?,
         OutputFormat::Markdown | OutputFormat::Md => display_markdown(&infos, writer, ctx)?,
+        OutputFormat::Toon => {
+            writeln!(writer, "# rows: {}", infos.len())?;
+            writeln!(
+                writer,
+                "[columns: session_no, user_name, amp_cpu_sec, amp_io, cpu_skew, io_skew]"
+            )?;
+            for i in &infos {
+                let cpu_sk = i
+                    .cpu_skew
+                    .map(|v| format!("{:.1}%", v))
+                    .unwrap_or_else(|| "~".to_string());
+                let io_sk = i
+                    .io_skew
+                    .map(|v| format!("{:.1}%", v))
+                    .unwrap_or_else(|| "~".to_string());
+                writeln!(
+                    writer,
+                    "{}, {}, {:.3}, {}, {}, {}",
+                    i.session_no, i.user_name, i.amp_cpu_sec, i.amp_io, cpu_sk, io_sk
+                )?;
+            }
+        }
+        OutputFormat::Compact => {
+            let cols = vec![
+                "session_no",
+                "user_name",
+                "amp_cpu_sec",
+                "amp_io",
+                "cpu_skew",
+                "io_skew",
+            ];
+            let rows: Vec<serde_json::Value> = infos
+                .iter()
+                .map(|i| {
+                    serde_json::json!([
+                        i.session_no,
+                        i.user_name,
+                        i.amp_cpu_sec,
+                        i.amp_io,
+                        i.cpu_skew,
+                        i.io_skew
+                    ])
+                })
+                .collect();
+            let payload = serde_json::json!({
+                "ok": true,
+                "cmd": "skew",
+                "row_count": rows.len(),
+                "cols": cols,
+                "rows": rows
+            });
+            serde_json::to_writer(&mut *writer, &payload)?;
+            writeln!(writer)?;
+        }
+        OutputFormat::Tsv => {
+            writeln!(
+                writer,
+                "session_no\tuser_name\tamp_cpu_sec\tamp_io\tcpu_skew\tio_skew"
+            )?;
+            for i in &infos {
+                let cpu_sk = i.cpu_skew.map(|v| format!("{:.1}%", v)).unwrap_or_default();
+                let io_sk = i.io_skew.map(|v| format!("{:.1}%", v)).unwrap_or_default();
+                writeln!(
+                    writer,
+                    "{}\t{}\t{:.3}\t{}\t{}\t{}",
+                    i.session_no, i.user_name, i.amp_cpu_sec, i.amp_io, cpu_sk, io_sk
+                )?;
+            }
+        }
     }
 
     Ok(())

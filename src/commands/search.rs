@@ -301,6 +301,13 @@ fn search_tables<W: Write>(
                 pg.write_footer(writer)?;
             }
         }
+        OutputFormat::Compact => render_table_search_json_with_pagination(display_tables, pagination.as_ref(), writer)?,
+        OutputFormat::Toon | OutputFormat::Tsv => {
+            render_table_search_csv(display_tables, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
     }
 
     Ok(())
@@ -573,6 +580,13 @@ fn search_columns<W: Write>(
                 pg.write_footer(writer)?;
             }
         }
+        OutputFormat::Compact => render_column_search_json_with_pagination(display_columns, pagination.as_ref(), writer)?,
+        OutputFormat::Toon | OutputFormat::Tsv => {
+            render_column_search_csv(display_columns, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
     }
 
     Ok(())
@@ -820,6 +834,13 @@ fn search_views<W: Write>(
                 pg.write_footer(writer)?;
             }
         }
+        OutputFormat::Compact => render_view_search_json_with_pagination(display_views, pagination.as_ref(), writer)?,
+        OutputFormat::Toon | OutputFormat::Tsv => {
+            render_view_search_csv(display_views, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
     }
 
     Ok(())
@@ -1049,6 +1070,13 @@ fn search_procedures<W: Write>(
         }
         OutputFormat::Markdown | OutputFormat::Md => {
             render_procedure_search_markdown(display_procs, writer)?;
+            if let Some(ref pg) = pagination {
+                pg.write_footer(writer)?;
+            }
+        }
+        OutputFormat::Compact => render_procedure_search_json_with_pagination(display_procs, pagination.as_ref(), writer)?,
+        OutputFormat::Toon | OutputFormat::Tsv => {
+            render_procedure_search_csv(display_procs, writer)?;
             if let Some(ref pg) = pagination {
                 pg.write_footer(writer)?;
             }

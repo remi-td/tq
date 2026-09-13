@@ -9,6 +9,10 @@ pub mod csv;
 pub mod json;
 pub mod markdown;
 pub mod table;
+pub mod compact;
+pub mod token_budget;
+pub mod toon;
+pub mod tsv;
 
 use crate::cli::OutputFormat;
 use crate::db::QueryResult;
@@ -27,6 +31,14 @@ pub struct FormatOptions {
     pub csv: csv::CsvOptions,
     /// Markdown formatting options
     pub markdown: markdown::MarkdownOptions,
+    /// TOON formatting options
+    pub toon: toon::ToonOptions,
+    /// Compact JSON formatting options
+    pub compact: compact::CompactJsonOptions,
+    /// TSV formatting options
+    pub tsv: tsv::TsvOptions,
+    /// Shared token compression & budgeting options
+    pub token: token_budget::TokenOptions,
 }
 
 impl FormatOptions {
@@ -35,6 +47,7 @@ impl FormatOptions {
         self.table.show_header = show_header;
         self.csv.show_header = show_header;
         self.markdown.show_header = show_header;
+        self.tsv.show_header = show_header;
         self
     }
 
@@ -47,6 +60,42 @@ impl FormatOptions {
     /// Create options with pretty print setting for JSON
     pub fn with_pretty(mut self, pretty: bool) -> Self {
         self.json.pretty = pretty;
+        self
+    }
+
+    /// Set token options across all token-aware formatters
+    pub fn with_token_options(mut self, token_opts: token_budget::TokenOptions) -> Self {
+        self.token = token_opts.clone();
+        self.toon.token_opts = token_opts.clone();
+        self.compact.token_opts = token_opts.clone();
+        self.tsv.token_opts = token_opts;
+        self
+    }
+
+    /// Set token compression flag
+    pub fn with_compress_tokens(mut self, compress: bool) -> Self {
+        self.token.compress = compress;
+        self.toon.token_opts.compress = compress;
+        self.compact.token_opts.compress = compress;
+        self.tsv.token_opts.compress = compress;
+        self
+    }
+
+    /// Set token budget
+    pub fn with_token_budget(mut self, budget: Option<usize>) -> Self {
+        self.token.token_budget = budget;
+        self.toon.token_opts.token_budget = budget;
+        self.compact.token_opts.token_budget = budget;
+        self.tsv.token_opts.token_budget = budget;
+        self
+    }
+
+    /// Set show tokens flag
+    pub fn with_show_tokens(mut self, show: bool) -> Self {
+        self.token.show_tokens = show;
+        self.toon.token_opts.show_tokens = show;
+        self.compact.token_opts.show_tokens = show;
+        self.tsv.token_opts.show_tokens = show;
         self
     }
 }
@@ -77,6 +126,9 @@ pub fn write_output<W: Write>(
         OutputFormat::Json => json::write(result, writer, &options.json),
         OutputFormat::Csv => csv::write(result, writer, &options.csv),
         OutputFormat::Markdown => markdown::write(result, writer, &options.markdown),
+        OutputFormat::Toon => toon::write(result, writer, &options.toon),
+        OutputFormat::Compact => compact::write(result, writer, &options.compact),
+        OutputFormat::Tsv => tsv::write(result, writer, &options.tsv),
         _ => unreachable!(),
     }
 }
@@ -112,6 +164,27 @@ pub fn write_output_with_timing<W: Write>(
                 markdown::write(result, writer, &options.markdown)
             }
         }
+        OutputFormat::Toon => {
+            if show_timing {
+                toon::write_with_timing(result, writer, &options.toon)
+            } else {
+                toon::write(result, writer, &options.toon)
+            }
+        }
+        OutputFormat::Compact => {
+            if show_timing {
+                compact::write_with_timing(result, writer, &options.compact)
+            } else {
+                compact::write(result, writer, &options.compact)
+            }
+        }
+        OutputFormat::Tsv => {
+            if show_timing {
+                tsv::write_with_timing(result, writer, &options.tsv)
+            } else {
+                tsv::write(result, writer, &options.tsv)
+            }
+        }
         _ => unreachable!(),
     }
 }
@@ -119,7 +192,8 @@ pub fn write_output_with_timing<W: Write>(
 /// Write query results with optional pagination metadata
 ///
 /// When pagination is provided:
-/// - JSON format includes a "pagination" object in the envelope
+/// - JSON / Compact formats include pagination metadata in the envelope
+/// - TOON format includes pagination comments in the header
 /// - Other formats append a "Page X of Y (N total rows)" footer
 pub fn write_output_with_pagination<W: Write>(
     result: &QueryResult,
@@ -137,6 +211,16 @@ pub fn write_output_with_pagination<W: Write>(
             } else {
                 json::write_with_pagination(result, writer, &options.json, pagination)?;
             }
+        }
+        OutputFormat::Compact => {
+            if show_timing {
+                compact::write_with_metadata_and_pagination(result, writer, &options.compact, pagination)?;
+            } else {
+                compact::write_with_pagination(result, writer, &options.compact, pagination)?;
+            }
+        }
+        OutputFormat::Toon => {
+            toon::write_with_pagination(result, writer, &options.toon, pagination)?;
         }
         _ => {
             // Render using standard formatters
@@ -239,12 +323,38 @@ mod tests {
     }
 
     #[test]
-    fn test_format_md_alias() {
+    fn test_format_to_string_toon() {
         let result = create_test_result();
         let options = FormatOptions::default();
-        let output = format_to_string(&result, OutputFormat::Md, &options).unwrap();
+        let output = format_to_string(&result, OutputFormat::Toon, &options).unwrap();
 
-        assert!(output.contains("| id | name |"));
-        assert!(output.contains("| 2 | Bob |"));
+        assert!(output.contains("# rows: 2"));
+        assert!(output.contains("[columns: id, name]"));
+        assert!(output.contains("1, Alice"));
+        assert!(output.contains("2, Bob"));
+    }
+
+    #[test]
+    fn test_format_to_string_compact() {
+        let result = create_test_result();
+        let options = FormatOptions::default();
+        let output = format_to_string(&result, OutputFormat::Compact, &options).unwrap();
+
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        assert_eq!(parsed["ok"], true);
+        assert_eq!(parsed["row_count"], 2);
+        assert_eq!(parsed["cols"], serde_json::json!(["id", "name"]));
+        assert_eq!(parsed["rows"], serde_json::json!([[1, "Alice"], [2, "Bob"]]));
+    }
+
+    #[test]
+    fn test_format_to_string_tsv() {
+        let result = create_test_result();
+        let options = FormatOptions::default();
+        let output = format_to_string(&result, OutputFormat::Tsv, &options).unwrap();
+
+        assert!(output.contains("id\tname"));
+        assert!(output.contains("1\tAlice"));
+        assert!(output.contains("2\tBob"));
     }
 }

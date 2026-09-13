@@ -138,6 +138,19 @@ fn run(cli: Cli) -> Result<u8> {
     // Watch-mode refresh interval: CLI flag > config > built-in default.
     let refresh_interval = config.monitoring.thresholds.refresh_interval;
 
+    // Agent preset resolution
+    let is_agent = cli.global.agent || std::env::var("TQ_AGENT").ok().as_deref() == Some("1");
+    let is_agent_safe = is_agent || cli.global.agent_safe || std::env::var("TQ_AGENT_SAFE").ok().as_deref() == Some("1");
+    let compress_tokens = is_agent || cli.global.compress_tokens || std::env::var("TQ_COMPRESS_TOKENS").ok().as_deref() == Some("1");
+    let show_tokens = is_agent || cli.global.show_tokens || std::env::var("TQ_SHOW_TOKENS").ok().as_deref() == Some("1");
+    let token_budget = cli.global.token_budget.or_else(|| {
+        if is_agent {
+            Some(4000)
+        } else {
+            std::env::var("TQ_TOKEN_BUDGET").ok().and_then(|s| s.parse().ok())
+        }
+    });
+
     // Execute database commands
     let exit_code = match cli.command {
         Command::Ping(args) => {
@@ -146,8 +159,26 @@ fn run(cli: Cli) -> Result<u8> {
             0
         }
         Command::Query(mut args) => {
-            if cli.global.agent_safe || std::env::var("TQ_AGENT_SAFE").ok().as_deref() == Some("1") {
+            if is_agent {
+                args.agent = true;
+            }
+            if is_agent_safe {
                 args.agent_safe = true;
+            }
+            if compress_tokens {
+                args.compress_tokens = true;
+            }
+            if show_tokens {
+                args.show_tokens = true;
+            }
+            if args.token_budget.is_none() {
+                args.token_budget = token_budget;
+            }
+            if is_agent && args.format == OutputFormat::Table && !cli.global.json && !args.json {
+                args.format = OutputFormat::Toon;
+            } else if is_agent && (cli.global.json || args.json) {
+                args.format = OutputFormat::Compact;
+                args.json = false;
             }
             if args.output.is_some() {
                 // Write to file

@@ -198,6 +198,18 @@ pub fn execute<W: Write>(
         OutputFormat::Csv => display_csv(&result, writer)?,
         OutputFormat::Json => display_json(&result, writer)?,
         OutputFormat::Markdown | OutputFormat::Md => display_markdown(&result, writer)?,
+        OutputFormat::Toon => {
+            let opts = crate::format::FormatOptions::default();
+            crate::format::toon::write(&result, writer, &opts.toon)?;
+        }
+        OutputFormat::Compact => {
+            let opts = crate::format::FormatOptions::default();
+            crate::format::compact::write(&result, writer, &opts.compact)?;
+        }
+        OutputFormat::Tsv => {
+            let opts = crate::format::FormatOptions::default();
+            crate::format::tsv::write(&result, writer, &opts.tsv)?;
+        }
     }
 
     Ok(())

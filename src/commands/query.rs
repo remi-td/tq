@@ -312,9 +312,22 @@ fn execute_single<W: Write>(
     // Configure output formatting
     let format_options = FormatOptions::default()
         .with_header(!args.no_header)
-        .with_color(use_color);
+        .with_color(use_color)
+        .with_compress_tokens(args.compress_tokens)
+        .with_token_budget(args.token_budget)
+        .with_show_tokens(args.show_tokens);
 
-    let effective_format = if args.json { OutputFormat::Json } else { args.format };
+    let effective_format = if args.json {
+        if args.agent {
+            OutputFormat::Compact
+        } else {
+            OutputFormat::Json
+        }
+    } else if args.agent && args.format == OutputFormat::Table {
+        OutputFormat::Toon
+    } else {
+        args.format
+    };
 
     // Apply pagination if --page-size is set
     if let Some(page_size) = args.page_size {
@@ -834,6 +847,9 @@ fn format_statement_status(result: &crate::db::QueryResult, format: OutputFormat
             OutputFormat::Markdown | OutputFormat::Md => {
                 format!("{} rows (Markdown)", row_count)
             }
+            OutputFormat::Toon => format!("{} rows (TOON)", row_count),
+            OutputFormat::Compact => format!("{} rows (Compact JSON)", row_count),
+            OutputFormat::Tsv => format!("{} rows (TSV)", row_count),
         }
     }
 }
@@ -1133,6 +1149,10 @@ mod tests {
             limit: None,
             atomic: false,
             agent_safe: true,
+            agent: true,
+            compress_tokens: false,
+            token_budget: None,
+            show_tokens: false,
             max_rows: 10000,
             allow_dml,
             allow_maintenance: false, // Sprint 71: new field
@@ -1179,6 +1199,10 @@ mod tests {
             limit: None,
             atomic: false,
             agent_safe: false,
+            agent: false,
+            compress_tokens: false,
+            token_budget: None,
+            show_tokens: false,
             max_rows: 10000,
             allow_dml: false,
             allow_maintenance: false,

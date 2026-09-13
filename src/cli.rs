@@ -222,8 +222,24 @@ pub struct GlobalOpts {
     pub define: Vec<String>,
 
     /// Enforce agent-safe restrictions globally
-    #[arg(long, env = "TQ_AGENT_SAFE", global = true)]
+    #[arg(long, env = "TQ_AGENT_SAFE", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::SetTrue, global = true)]
     pub agent_safe: bool,
+
+    /// Enable unified AI agent mode (implies --agent-safe, --compress-tokens, 4000 token budget, --show-tokens, and defaults to toon format or compact JSON)
+    #[arg(long, env = "TQ_AGENT", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::SetTrue, global = true)]
+    pub agent: bool,
+
+    /// Enable cell-level token compression (NULL as ~, numeric precision capping, string truncation)
+    #[arg(long, env = "TQ_COMPRESS_TOKENS", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::SetTrue, global = true)]
+    pub compress_tokens: bool,
+
+    /// Maximum token budget before dynamic truncation
+    #[arg(long, env = "TQ_TOKEN_BUDGET", value_name = "TOKENS", global = true)]
+    pub token_budget: Option<usize>,
+
+    /// Show estimated token count in output header or envelope
+    #[arg(long, env = "TQ_SHOW_TOKENS", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::SetTrue, global = true)]
+    pub show_tokens: bool,
 
     /// Shortcut for --format json across all subcommands
     #[arg(long, global = true)]
@@ -753,9 +769,26 @@ pub struct QueryArgs {
     /// - Fails closed: statements it cannot classify are rejected, not run.
     /// - Enforces single-statement-only (rejects multi-statement input).
     /// - Applies a finite query timeout by default (see --query-timeout).
-    /// - Enforces the --max-rows client fetch/output cap.
-    #[arg(long, env = "TQ_AGENT_SAFE")]
+    ///
+    /// Enforce agent-safe restrictions
+    #[arg(long, env = "TQ_AGENT_SAFE", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::SetTrue)]
     pub agent_safe: bool,
+
+    /// Enable unified AI agent mode (implies --agent-safe, --compress-tokens, 4000 token budget, --show-tokens, and defaults to toon format or compact JSON)
+    #[arg(long, env = "TQ_AGENT", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::SetTrue)]
+    pub agent: bool,
+
+    /// Enable cell-level token compression (NULL as ~, numeric precision capping, string truncation)
+    #[arg(long, env = "TQ_COMPRESS_TOKENS", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::SetTrue)]
+    pub compress_tokens: bool,
+
+    /// Maximum token budget before dynamic truncation
+    #[arg(long, env = "TQ_TOKEN_BUDGET", value_name = "TOKENS")]
+    pub token_budget: Option<usize>,
+
+    /// Show estimated token count in output header or envelope
+    #[arg(long, env = "TQ_SHOW_TOKENS", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::SetTrue)]
+    pub show_tokens: bool,
 
     /// Maximum rows for the client fetch/output cap in agent-safe mode (default: 10000)
     ///
@@ -1764,6 +1797,12 @@ pub enum OutputFormat {
     Markdown,
     /// GitHub-Flavored Markdown table (alias for markdown)
     Md,
+    /// Token-Oriented Object Notation (ultra-dense LLM format)
+    Toon,
+    /// Dense Columnar JSON without repeated keys
+    Compact,
+    /// Tab-separated values
+    Tsv,
 }
 
 impl OutputFormat {
@@ -1783,6 +1822,9 @@ impl std::fmt::Display for OutputFormat {
             OutputFormat::Json => write!(f, "json"),
             OutputFormat::Csv => write!(f, "csv"),
             OutputFormat::Markdown | OutputFormat::Md => write!(f, "markdown"),
+            OutputFormat::Toon => write!(f, "toon"),
+            OutputFormat::Compact => write!(f, "compact"),
+            OutputFormat::Tsv => write!(f, "tsv"),
         }
     }
 }
@@ -1803,6 +1845,10 @@ pub enum SchemaFormat {
     Md,
     /// Dense token-optimized format for AI agents
     Compact,
+    /// Token-Oriented Object Notation
+    Toon,
+    /// Tab-separated values
+    Tsv,
 }
 
 impl SchemaFormat {
@@ -1823,6 +1869,8 @@ impl std::fmt::Display for SchemaFormat {
             SchemaFormat::Csv => write!(f, "csv"),
             SchemaFormat::Markdown | SchemaFormat::Md => write!(f, "markdown"),
             SchemaFormat::Compact => write!(f, "compact"),
+            SchemaFormat::Toon => write!(f, "toon"),
+            SchemaFormat::Tsv => write!(f, "tsv"),
         }
     }
 }
