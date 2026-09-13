@@ -170,8 +170,23 @@ tq resolves configuration in this order (later overrides earlier):
 1. Built-in defaults
 2. User config (`~/.tq/config.toml`)
 3. Project config (`.tq.toml`)
-4. Environment variables (`TQ_LOGON`, `TQ_LOGMECH`, etc.)
-5. Command-line arguments (`--logon`, `--profile`)
+4. Environment variables (`TQ_LOGON`, `TQ_LOGMECH`, `TQ_QUERY_BAND`, etc.)
+5. Command-line arguments (`--logon`, `--profile`, `--query-band`)
+
+### Teradata QueryBand (Workload & Telemetry Tagging)
+
+Tag session queries for Teradata workload management (TASM) and DBQL (`DBC.QryLogV`) auditing:
+
+```bash
+# Via CLI flag:
+tq --query-band "App=DataPipeline;Job=DailySync;" query "SELECT 1"
+
+# Inside connection string:
+tq --logon "user:pass@host:1025/db?query_band=App=DataPipeline;Job=DailySync;" query "SELECT 1"
+
+# Via environment variable:
+export TQ_QUERY_BAND="App=DataPipeline;Job=DailySync;"
+```
 
 ---
 
@@ -209,6 +224,29 @@ Wrap multi-statement execution in a transaction (rollback on failure):
 ```bash
 tq query --file migration.sql --atomic
 ```
+
+### High-Performance Bulk Ingestion (`tq fastload`)
+
+For loading local CSV, TSV, Parquet, or JSON files into Teradata staging tables, use `tq fastload`. It transfers data in parallel directly across AMPs, completing in seconds compared to slow row-by-row `INSERT` statements:
+
+```bash
+# Bulk load a CSV file into a table (creates table if not exists):
+tq fastload seed_data/stg_customers.csv stg_customers
+
+# Bulk load with explicit delimiter:
+tq fastload seed_data/stg_orders.tsv stg_orders --delimiter '\t'
+```
+
+### Teradata DDL & Batch Separation Rules
+
+Teradata enforces strict transaction boundaries around Data Definition Language (DDL):
+- **Never mix DDL statements (CREATE, DROP, ALTER) in a multi-statement request** or batch file with other queries. Teradata will fail with error `3932: Only an ET or null statement is legal after a DDL Statement`.
+- **Always execute each DDL statement individually** as its own separate `tq query "..."` command:
+  ```bash
+  tq query "DROP TABLE stg_customers;"
+  tq query "CREATE TABLE stg_customers (cust_id INT, cust_name VARCHAR(50)) PRIMARY INDEX (cust_id);"
+  ```
+- **Primary Index (PI) Selection**: Always specify a `PRIMARY INDEX (column)` with high cardinality (unique or primary key) to evenly hash rows across AMPs and prevent severe table skew.
 
 ### Output Formats & Token Optimization
 

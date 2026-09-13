@@ -1,8 +1,8 @@
 # Implementation Status Dashboard
 
 **Last Updated:** 2026-09-13
-**Current Version:** 1.59.0
-**Latest Sprint:** Sprint 80 Complete (Token Compression Schemes: TOON, Compact JSON, TSV, Token Budgeting, and Ergonomic Agent Mode: `--agent`, `TQ_AGENT=1`)
+**Current Version:** 1.60.0
+**Latest Sprint:** Sprint 81 Complete (Teradata QueryBand Telemetry & Workload Tagging, Agent Optimization & Benchmark Framework)
 
 ---
 
@@ -615,6 +615,20 @@ All core features are complete and tested.
 | REPL `/schema` | ✅ v1.58.0 | [CLI Interface](../specifications/cli-interface.md#schema---schema-graph-and-relationship-mapper-schema) | v1.58.0 (Sprint 79) |
 
 ---
+
+## Agentic Optimization & Benchmarking Framework
+
+| Feature | Status | Spec Reference | Since |
+|---------|--------|----------------|-------|
+| External Orchestration Runner (`agentic/bench/tq-bench`) | ✅ v1.60.0 | [Optimisation Framework](../../misc/optimisation.md) | v1.60.0 (Sprint 81) |
+| Multi-Harness Runner (Claude Code, Gemini, Codex) | ✅ v1.60.0 | [Optimisation Framework](../../misc/optimisation.md) | v1.60.0 (Sprint 81) |
+| Comparative Modes (`tq-with-skill`, `tq-no-skill`, `baseline-python`) | ✅ v1.60.0 | [Optimisation Framework](../../misc/optimisation.md) | v1.60.0 (Sprint 81) |
+| Standardized TPC-H Order Fulfillment Pipeline Spec | ✅ v1.60.0 | [Optimisation Framework](../../misc/optimisation.md) | v1.60.0 (Sprint 81) |
+| Full-Spectrum Telemetry (Tokens + Teradata CPU/IO/Spool/Skew) | ✅ v1.60.0 | [Optimisation Framework](../../misc/optimisation.md) | v1.60.0 (Sprint 81) |
+| Total Effort Cost Calculator ($\text{Tokens} \times \text{Rates} + \text{Teradata Cloud Resource Cost}$) | ✅ v1.60.0 | [Optimisation Framework](../../misc/optimisation.md) | v1.60.0 (Sprint 81) |
+| Comparative Analytics & Inefficiency Detection Engine | ✅ v1.60.0 | [Optimisation Framework](../../misc/optimisation.md) | v1.60.0 (Sprint 81) |
+| Automated Markdown & JSON Optimization Reports | ✅ v1.60.0 | [Optimisation Framework](../../misc/optimisation.md) | v1.60.0 (Sprint 81) |
+
 
 ## Summary Statistics
 

@@ -162,6 +162,7 @@ user = "username"              # Optional: Username
 logmech = "TD2"                # Optional: Auth mechanism (default: TD2)
 password_file = "~/.tq/passwords/name"  # Optional: Path to password file
 timeout = "30s"                # Optional: Connection timeout (default: 30s)
+query_band = "App=ETL;Workload=Daily;" # Optional: Session QueryBand for workload tracking
 ```
 
 **Using profiles:**
@@ -740,6 +741,7 @@ Environment variables provide quick configuration overrides without editing file
 | `TQ_FORMAT` | string | Default output format | `json` |
 | `TQ_TIMEOUT` | string | Connection timeout | `30s` |
 | `TQ_PROFILE` | string | Profile name to use | `prod` |
+| `TQ_QUERY_BAND` | string | Teradata session QueryBand | `Workload=Analytics;RunId=42;` |
 | `TERADATA_LIB_DIR` | string | Directory containing the Teradata driver library | `/opt/teradata/lib` |
 
 ### Usage Examples
@@ -795,6 +797,72 @@ TQ_DATABASE=testing tq --profile dev query "SELECT 1"
 1. Use `password_file` in profile (best)
 2. Use `--password-file` flag (good)
 3. Allow interactive prompt (acceptable)
+
+## Teradata QueryBand Configuration
+
+Teradata QueryBands are sets of name-value pairs set at the session or transaction level. They enable:
+- **Workload Management (TASM):** Routing queries to appropriate workload definitions, priority tiers, or throttling rules based on application, department, or job.
+- **Query Telemetry & Auditing:** Tagging every executed query in Teradata Database Query Log (`DBC.QryLogV`) with metadata such as application name, pipeline step, run ID, or agent model.
+
+### 4 Ways to Specify QueryBand
+
+tq allows specifying QueryBands through any of the following methods:
+
+#### 1. Inside the Connection String (`--logon` / `TQ_LOGON`)
+
+Append `?query_band=<pairs>` as a URL query parameter in the connection string:
+
+```bash
+# Set QueryBand via --logon connection string
+tq --logon "alice:secret@teradata.corp:1025/prod?query_band=App=ETL;Job=NightlySync;Version=2.1;" query "SELECT 1"
+```
+
+#### 2. Via CLI Flag (`--query-band`)
+
+Pass `--query-band` as a global option before or after the subcommand:
+
+```bash
+# One-shot query with session QueryBand
+tq --profile prod --query-band "App=Reporting;Department=Finance;" query "SELECT COUNT(*) FROM revenue"
+
+# With REPL interactive session
+tq --profile dev --query-band "Workload=AdHoc;Client=tq-repl;" repl
+```
+
+#### 3. Via Environment Variable (`TQ_QUERY_BAND`)
+
+Set `TQ_QUERY_BAND` in your shell or CI/CD environment:
+
+```bash
+export TQ_QUERY_BAND="App=DataPipeline;RunId=run_8472;Env=prod;"
+tq query "SELECT CURRENT_TIMESTAMP"
+```
+
+#### 4. Per Profile in Configuration File
+
+Define `query_band` directly in your `~/.tq/config.toml` or project `.tq.toml`:
+
+```toml
+[profiles.analytics]
+host = "teradata.corp"
+database = "analytics_dw"
+user = "bi_user"
+password_file = "~/.tq/passwords/analytics"
+query_band = "App=BI_Reports;Tier=Standard;"
+```
+
+### Precedence
+
+When multiple QueryBand sources are provided, tq resolves them using standard precedence:
+1. **CLI flag (`--query-band`)** / **Environment variable (`TQ_QUERY_BAND`)** (highest priority)
+2. **Connection string parameter (`?query_band=...`)**
+3. **Configuration file profile (`query_band = "..."`)** (lowest priority)
+
+### Syntax & Zero-Overhead Guarantees
+
+- **Automatic Semicolon Normalization:** Teradata QueryBands require each key-value pair to end with a semicolon (e.g. `App=ETL;Job=Daily;`). If the trailing semicolon is omitted (e.g. `--query-band "Workload=test"`), `tq` automatically appends `;` and escapes quotes safely.
+- **Zero Overhead When Unused:** When no QueryBand is configured, `tq` executes zero extra driver calls or network roundtrips.
+- **Isolated Ping:** `tq ping` always runs a pure connectivity probe (`SELECT 1 AS ping`) without session QueryBand setup, guaranteeing accurate latency measurement.
 
 ## Common Workflows
 

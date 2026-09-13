@@ -319,6 +319,7 @@ mod tests {
             logmech: LogonMechanism::Td2,
             timeout: Duration::from_secs(30),
             query_timeout: None,
+            query_band: None,
         }
     }
 
@@ -418,6 +419,7 @@ mod tests {
             logmech: LogonMechanism::Td2,
             timeout: Duration::from_secs(30),
             query_timeout: None,
+            query_band: None,
         };
 
         state.update_connection(new_config, Some("newuser@newhost:2025/newdb".to_string()));

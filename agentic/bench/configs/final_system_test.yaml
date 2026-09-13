@@ -1,0 +1,44 @@
+# Final System Test Matrix
+# Evaluates Gemini and Claude Code with the updated skill, plus baselines without tq/skill
+
+name: "final-system-test-live-teradata"
+description: "Live evaluation of Gemini and Claude Code on complex multi-tier Data Product with baseline comparison"
+
+dataset: "tpch_order_fulfillment"
+
+runs:
+  # 1. Gemini 2.5 Flash (with updated skill)
+  - id: "gemini_2_5_flash_tq"
+    harness: "gemini"
+    model: "gemini-2.5-flash"
+    mode: "tq-with-skill"
+
+  # 2. Gemini 3.5 Flash Lite (with updated skill)
+  - id: "gemini_3_5_flash_lite_tq"
+    harness: "gemini"
+    model: "gemini-3.5-flash-lite"
+    mode: "tq-with-skill"
+
+  # 3. Claude Code Haiku 4.5 (with updated skill)
+  - id: "claude_haiku_4_5_tq"
+    harness: "claude-code"
+    model: "claude-haiku-4-5"
+    mode: "tq-with-skill"
+
+  # 4. Claude Code Sonnet (with updated skill)
+  - id: "claude_sonnet_tq"
+    harness: "claude-code"
+    model: "sonnet"
+    mode: "tq-with-skill"
+
+  # 5. Baseline: Gemini 3.5 Flash Lite (no skill, no tq)
+  - id: "baseline_gemini_3_5_flash_lite"
+    harness: "gemini"
+    model: "gemini-3.5-flash-lite"
+    mode: "baseline-python"
+
+  # 6. Baseline: Claude Code Sonnet (no skill, no tq)
+  - id: "baseline_claude_sonnet"
+    harness: "claude-code"
+    model: "sonnet"
+    mode: "baseline-python"

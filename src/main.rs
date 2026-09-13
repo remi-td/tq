@@ -751,12 +751,16 @@ fn build_connection_config(
     // Try to build from CLI --logon option first
     if let Some(ref logon) = global.logon {
         let timeout = parse_duration(&global.timeout)?;
-        return ConnectionConfig::from_connection_string(
+        let mut cfg = ConnectionConfig::from_connection_string(
             logon,
             global.logmech,
             timeout,
             password_override,
-        );
+        )?;
+        if global.query_band.is_some() {
+            cfg.query_band = global.query_band.clone();
+        }
+        return Ok(cfg);
     }
 
     // If --profile is specified, load from that profile
@@ -857,6 +861,11 @@ fn build_connection_from_profile(
     let timeout_str = profile.timeout.as_deref().unwrap_or(&global.timeout);
     let timeout = parse_duration(timeout_str)?;
 
+    let query_band = global
+        .query_band
+        .clone()
+        .or_else(|| profile.query_band.clone());
+
     Ok(ConnectionConfig {
         host,
         port,
@@ -868,6 +877,7 @@ fn build_connection_from_profile(
         // Query timeout is resolved centrally in run() (explicit flag or the
         // agent-safe default), then assigned onto the built config.
         query_timeout: None,
+        query_band,
     })
 }
 

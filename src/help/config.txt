@@ -66,6 +66,7 @@ PROFILE FIELDS
       logmech           Auth mechanism: TD2, LDAP, KRB5, TDNEGO (default: TD2)
       password_file     Path to password file
       timeout           Connection timeout (default: "30s")
+      query_band        Session QueryBand (e.g., "App=ETL;Workload=Daily;")
 
 EXAMPLES
     # Use a connection profile
@@ -73,6 +74,12 @@ EXAMPLES
 
     # Override profile database
     tq --profile dev --database staging query "SELECT 1"
+
+    # Set QueryBand via CLI flag
+    tq --profile dev --query-band "Workload=Analytics;RunId=42;" query "SELECT 1"
+
+    # Set QueryBand inside connection string
+    tq --logon "user:pass@host:1025/db?query_band=App=ETL;Job=Daily;" query "SELECT 1"
 
     # List available profiles
     tq profiles

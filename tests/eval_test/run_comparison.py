@@ -25,12 +25,11 @@ for s in scenarios:
     # Spawn MCP server in the background if running the MCP scenario
     server_proc = None
     if s["mode"] == "mcp":
-        import os
-        user = os.environ.get("TERADATA_USER", "demo_user")
-        password = os.environ.get("TERADATA_PASSWORD", "demo_user")
-        host = os.environ.get("TERADATA_HOST", "trial-vikzqtnd0db0nglk.env.trial.teradata.com")
-        db = os.environ.get("EVALS_DATABASE", "demo_user")
-        database_uri = f"teradata://{user}:{password}@{host}:1025/{db}"
+        user = os.environ.get("TERADATA_USER", "")
+        password = os.environ.get("TERADATA_PASSWORD", "")
+        host = os.environ.get("TERADATA_HOST", "")
+        db = os.environ.get("EVALS_DATABASE", "")
+        database_uri = os.environ.get("DATABASE_URI", f"teradata://{user}:{password}@{host}:1025/{db}" if host else "")
         
         env = os.environ.copy()
         env["DATABASE_URI"] = database_uri

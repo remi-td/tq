@@ -52,3 +52,7 @@ tests/eval_test/**/__pycache__/
 # Local documentation & point-of-view documents
 misc/
 
+# Benchmark workspaces & agent runs
+agentic/bench/workspaces/
+agentic/bench/.bench_bin/
+

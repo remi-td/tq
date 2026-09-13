@@ -78,10 +78,17 @@ pub struct Cli {
 /// Global options that apply to all commands
 #[derive(Parser, Debug, Clone)]
 pub struct GlobalOpts {
-    /// Connection string: user:password@host:port/database
+    /// Connection string: user:password@host:port/database[?query_band=...]
     ///
     /// If password is omitted, it will be read from --password-file,
     /// TQ_PASSWORD environment variable, or prompted interactively.
+    ///
+    /// Query parameters:
+    ///   ?query_band=Key=Value;   Set session QueryBand for workload tracking/telemetry
+    ///
+    /// Examples:
+    ///   --logon "alice:secret@teradata.corp:1025/finance"
+    ///   --logon "alice:secret@teradata.corp:1025/finance?query_band=App=ETL;Workload=Daily;"
     #[arg(short = 'l', long, env = "TQ_LOGON", global = true)]
     pub logon: Option<String>,
 
@@ -199,7 +206,7 @@ pub struct GlobalOpts {
     /// Examples:
     ///   --errorlevel 3120 3802 warning
     ///   --errorlevel 3523 error --errorlevel 3802 warning
-    #[arg(long, num_args = 2.., action = clap::ArgAction::Append, global = true, value_name = "ARGS")]
+    #[arg(long, num_args = 2, action = clap::ArgAction::Append, global = true, value_name = "CODE SEVERITY")]
     pub errorlevel: Vec<String>,
 
     /// YAML parameter file(s) for variable substitution in SQL
@@ -244,6 +251,20 @@ pub struct GlobalOpts {
     /// Shortcut for --format json across all subcommands
     #[arg(long, global = true)]
     pub json: bool,
+
+    /// Teradata QueryBand string to set for session queries
+    ///
+    /// Sets session-level key-value pairs for Teradata workload management (TASM)
+    /// and DBQL query telemetry tracking in DBC.QryLogV. Trailing semicolon is optional.
+    ///
+    /// Can also be passed via the TQ_QUERY_BAND environment variable, inside a
+    /// connection string (?query_band=...), or defined per profile in ~/.tq/config.toml.
+    ///
+    /// Examples:
+    ///   --query-band "App=DataPipeline;Job=NightlySync;"
+    ///   --query-band "Workload=bench;RunId=run_42"
+    #[arg(long, env = "TQ_QUERY_BAND", value_name = "STRING", global = true)]
+    pub query_band: Option<String>,
 }
 
 

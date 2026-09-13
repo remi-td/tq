@@ -68,6 +68,9 @@ pub struct ConnectionSettings {
 
     /// Path to password file (supports ~ for home directory)
     pub password_file: Option<PathBuf>,
+
+    /// Teradata QueryBand string to set for session queries
+    pub query_band: Option<String>,
 }
 
 impl Default for ConnectionSettings {
@@ -80,6 +83,7 @@ impl Default for ConnectionSettings {
             logmech: Some("TD2".to_string()),
             timeout: Some("30s".to_string()),
             password_file: None,
+            query_band: None,
         }
     }
 }
@@ -445,12 +449,16 @@ impl Config {
         // If logon string is provided, parse it directly
         if let Some(ref logon) = global.logon {
             let timeout = parse_duration(&global.timeout)?;
-            return ConnectionConfig::from_connection_string(
+            let mut cfg = ConnectionConfig::from_connection_string(
                 logon,
                 global.logmech,
                 timeout,
                 password_override,
-            );
+            )?;
+            if global.query_band.is_some() {
+                cfg.query_band = global.query_band.clone();
+            }
+            return Ok(cfg);
         }
 
         // Otherwise, build from config + CLI overrides
@@ -483,6 +491,10 @@ impl Config {
         let timeout = parse_duration(timeout_str)?;
 
         let password = password_override.map(secrecy::Secret::new);
+        let query_band = global
+            .query_band
+            .clone()
+            .or_else(|| conn.query_band.clone());
 
         Ok(ConnectionConfig {
             host,
@@ -495,6 +507,7 @@ impl Config {
             // Query timeout is resolved centrally in run() (explicit flag or
             // the agent-safe default), then assigned onto the built config.
             query_timeout: None,
+            query_band,
         })
     }
 }

@@ -76,7 +76,7 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
-| `--logon` | `-l` | string | `$TQ_LOGON` | Connection string: `user:password@host:port/database` |
+| `--logon` | `-l` | string | `$TQ_LOGON` | Connection string: `user:password@host:port/database[?query_band=...]` |
 | `--password-file` | - | path | - | Read password from file |
 | `--logmech` | - | enum | `TD2` | Authentication: `TD2`, `LDAP`, `KRB5`, `TDNEGO` |
 | `--driver-lib-dir` | - | path | see below | Override Teradata driver library search path |
@@ -88,6 +88,7 @@ tq [GLOBAL_OPTIONS] <COMMAND> [COMMAND_OPTIONS] [ARGS]
 | `--profile` | - | string | - | Select connection profile from config file |
 | `--agent-safe` | - | flag | false | Enforce agent-safe restrictions globally (env: `$TQ_AGENT_SAFE`) |
 | `--json` | - | flag | false | Direct boolean shortcut for `--format json` across all commands |
+| `--query-band` | - | string | `$TQ_QUERY_BAND` | Teradata session QueryBand for workload tracking and DBQL telemetry |
 | `--help` | `-h` | flag | - | Show help |
 | `--version` | `-V` | flag | - | Show version |
 

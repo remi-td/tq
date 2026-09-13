@@ -3008,6 +3008,7 @@ mod tests {
             logmech: LogonMechanism::Td2,
             timeout: Duration::from_secs(30),
             query_timeout: None,
+            query_band: None,
         }
     }
 

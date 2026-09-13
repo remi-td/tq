@@ -32,6 +32,8 @@ pub struct ConnectionConfig {
     /// (`request_timeout=0`). Maps onto the driver's `request_timeout`
     /// parameter (whole seconds). Distinct from `timeout`.
     pub query_timeout: Option<Duration>,
+    /// Optional Teradata QueryBand string to set for session queries
+    pub query_band: Option<String>,
 }
 
 impl std::fmt::Debug for ConnectionConfig {
@@ -45,6 +47,7 @@ impl std::fmt::Debug for ConnectionConfig {
             .field("logmech", &self.logmech)
             .field("timeout", &self.timeout)
             .field("query_timeout", &self.query_timeout)
+            .field("query_band", &self.query_band)
             .finish()
     }
 }
@@ -102,10 +105,31 @@ impl ConnectionConfig {
         })?;
 
         let host_port = &host_info[..slash_pos];
-        let database = host_info[slash_pos + 1..].to_string();
+        let db_and_params = &host_info[slash_pos + 1..];
+
+        // Parse optional query parameters (e.g. host:port/database?query_band=...)
+        let (database, query_band) = if let Some(q_pos) = db_and_params.find('?') {
+            let db = db_and_params[..q_pos].to_string();
+            let query_str = &db_and_params[q_pos + 1..];
+            let mut band = None;
+            for pair in query_str.split('&') {
+                if let Some(eq_pos) = pair.find('=') {
+                    let key = &pair[..eq_pos];
+                    let val = &pair[eq_pos + 1..];
+                    if key.eq_ignore_ascii_case("query_band") || key.eq_ignore_ascii_case("queryband") {
+                        band = Some(val.to_string());
+                    }
+                }
+            }
+            (db, band)
+        } else {
+            (db_and_params.to_string(), None)
+        };
 
         // Validate database name
         Self::validate_identifier(&database, "Database")?;
+
+        // query_band parsed from connection string query params, if present
 
         // Parse host and port
         let colon_pos = host_port.rfind(':').ok_or_else(|| {
@@ -128,6 +152,7 @@ impl ConnectionConfig {
             logmech,
             timeout,
             query_timeout: None,
+            query_band,
         })
     }
 
@@ -553,6 +578,7 @@ mod tests {
             logmech: LogonMechanism::Td2,
             timeout: Duration::from_millis(500),
             query_timeout: None,
+            query_band: None,
         };
         let parsed: serde_json::Value = serde_json::from_str(&config.to_json_string()).unwrap();
         assert_eq!(parsed["connect_timeout"], "500");
@@ -570,6 +596,7 @@ mod tests {
             logmech: LogonMechanism::Td2,
             timeout: Duration::from_secs(30),
             query_timeout: Some(Duration::from_secs(30)),
+            query_band: None,
         };
         let parsed: serde_json::Value = serde_json::from_str(&config.to_json_string()).unwrap();
         assert_eq!(parsed["request_timeout"], "30");
@@ -588,6 +615,7 @@ mod tests {
             logmech: LogonMechanism::Td2,
             timeout: Duration::from_secs(30),
             query_timeout: Some(Duration::from_millis(200)),
+            query_band: None,
         };
         let parsed: serde_json::Value = serde_json::from_str(&config.to_json_string()).unwrap();
         assert_eq!(parsed["request_timeout"], "1");
@@ -604,11 +632,29 @@ mod tests {
             logmech: LogonMechanism::Td2,
             timeout: Duration::from_secs(30),
             query_timeout: None,
+            query_band: None,
         };
         let json = config.to_json_string();
         // Must be valid JSON
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["password"], "pass\"word\\with\\special");
+    }
+
+    #[test]
+    fn test_parse_connection_string_with_query_band() {
+        let config = ConnectionConfig::from_connection_string(
+            "testuser:testpass@testhost:1025/testdb?query_band=Workload=bench;RunId=123;",
+            LogonMechanism::Td2,
+            Duration::from_secs(30),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(config.database, "testdb");
+        assert_eq!(
+            config.query_band,
+            Some("Workload=bench;RunId=123;".to_string())
+        );
     }
 
     /// Test that check_file_permissions rejects insecure permissions (Sprint 62)
@@ -633,6 +679,7 @@ mod tests {
             logmech: LogonMechanism::Td2,
             timeout: Duration::from_secs(30),
             query_timeout: None,
+            query_band: None,
         };
 
         let result = config.check_file_permissions(&path);
@@ -664,6 +711,7 @@ mod tests {
             logmech: LogonMechanism::Td2,
             timeout: Duration::from_secs(30),
             query_timeout: None,
+            query_band: None,
         };
 
         let result = config.check_file_permissions(&path);

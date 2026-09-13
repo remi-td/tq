@@ -113,6 +113,7 @@ impl DatabaseClient {
             logmech: crate::cli::LogonMechanism::Td2,
             timeout: std::time::Duration::from_secs(30),
             query_timeout: None,
+            query_band: None,
         };
         Self {
             config,
@@ -165,6 +166,39 @@ impl DatabaseClient {
         Ok(())
     }
 
+    /// Create raw connection without session configuration statements
+    fn create_raw_connection(&self) -> Result<(u64, u64)> {
+        let connection_string = self.config.to_json_string();
+        teradatarustapi::create_connection(&connection_string)
+            .map_err(|e| self.map_connection_error(&e))
+    }
+
+    /// Create connection and apply session QueryBand if configured
+    fn create_connection(&self) -> Result<(u64, u64)> {
+        let (u_log, conn_handle) = self.create_raw_connection()?;
+
+        if let Some(ref qb) = self.config.query_band {
+            let trimmed = qb.trim();
+            if !trimmed.is_empty() {
+                let normalized = if trimmed.ends_with(';') {
+                    trimmed.replace('\'', "''")
+                } else {
+                    format!("{};", trimmed.replace('\'', "''"))
+                };
+                let sql = format!("{{fn teradata_rpo(E)}}SET QUERY_BAND='{}' UPDATE FOR SESSION;", normalized);
+                log::debug!("Setting session query band");
+                let rows_handle = teradatarustapi::rustgo_create_rows_wrapper(u_log, conn_handle, &sql, "null")
+                    .map_err(|e| {
+                        let _ = teradatarustapi::go_close_connection_wrapper(u_log, conn_handle);
+                        self.map_query_error(&e, &sql)
+                    })?;
+                let _ = teradatarustapi::go_close_rows_wrapper(u_log, rows_handle);
+            }
+        }
+
+        Ok((u_log, conn_handle))
+    }
+
     /// Ping the database to test connectivity
     ///
     /// Returns the round-trip latency if successful.
@@ -177,10 +211,8 @@ impl DatabaseClient {
 
         let start = Instant::now();
 
-        // Create connection
-        let connection_string = self.config.to_json_string();
-        let (u_log, conn_handle) = teradatarustapi::create_connection(&connection_string)
-            .map_err(|e| self.map_connection_error(&e))?;
+        // Create raw connection (no session setup overhead)
+        let (u_log, conn_handle) = self.create_raw_connection()?;
 
         log::debug!("Connection established, executing ping query");
 
@@ -211,9 +243,7 @@ impl DatabaseClient {
         let start = Instant::now();
 
         // Create connection
-        let connection_string = self.config.to_json_string();
-        let (u_log, conn_handle) = teradatarustapi::create_connection(&connection_string)
-            .map_err(|e| self.map_connection_error(&e))?;
+        let (u_log, conn_handle) = self.create_connection()?;
 
         log::debug!("Connection established, executing query");
 
@@ -241,9 +271,7 @@ impl DatabaseClient {
         let start = Instant::now();
 
         // Create connection
-        let connection_string = self.config.to_json_string();
-        let (u_log, conn_handle) = teradatarustapi::create_connection(&connection_string)
-            .map_err(|e| self.map_connection_error(&e))?;
+        let (u_log, conn_handle) = self.create_connection()?;
 
         // Execute and fetch with limit
         let result = self.execute_and_fetch_limited(u_log, conn_handle, sql, limit, start);
@@ -657,9 +685,7 @@ impl DatabaseClient {
         log::info!("Starting FastLoad of {} into {}", csv_path.display(), target_table);
 
         // Establish connection
-        let connection_string = self.config.to_json_string();
-        let (u_log, conn_handle) = teradatarustapi::create_connection(&connection_string)
-            .map_err(|e| self.map_connection_error(&e))?;
+        let (u_log, conn_handle) = self.create_connection()?;
 
         // Disable autocommit
         if let Err(e) = teradatarustapi::set_autocommit(u_log, conn_handle, false) {
@@ -781,9 +807,7 @@ impl DatabaseClient {
         log::info!("Starting FastExport from {} to {}", source_table, target_path.display());
 
         // Establish connection
-        let connection_string = self.config.to_json_string();
-        let (u_log, conn_handle) = teradatarustapi::create_connection(&connection_string)
-            .map_err(|e| self.map_connection_error(&e))?;
+        let (u_log, conn_handle) = self.create_connection()?;
 
         // Prepend fastexport and write_csv escape functions to query
         let mut prefix = String::new();
@@ -1290,6 +1314,7 @@ mod tests {
             logmech: crate::cli::LogonMechanism::Td2,
             timeout: std::time::Duration::from_secs(30),
             query_timeout: None,
+            query_band: None,
         };
         // Skip driver loading for unit tests
         DatabaseClient {

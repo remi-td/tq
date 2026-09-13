@@ -285,3 +285,19 @@ Generate a concrete action list, save it in `docs/sprints/sprint-N-planning.md` 
 
 ### Step 7: Implementation
 Implement changes in agent prompts, skills or directly Claude.md for Critical and High Priority action items.
+
+### Step 8: Empirical Optimization Benchmarking (`agentic/bench/tq-bench`)
+
+When evaluating agent performance against Teradata workloads (e.g. comparing model performance, evaluating new skills or token compression mechanisms):
+1. **Run external matrix benchmark**:
+   ```bash
+   ./agentic/bench/tq-bench --matrix agentic/bench/configs/final_system_test.yaml --live-db
+   ```
+2. **Evaluate Total Effort Cost**:
+   $$\text{Total Cost} = \text{Tokens by Category} \times \text{Rates} + \text{Teradata Cloud Resource Cost (AMP CPU, IO, Spool)}$$
+3. **Compare Skill & Tooling Impact**:
+   - `tq-with-skill`: Agent equipped with `tq` CLI & Teradata skill
+   - `tq-no-skill`: Agent equipped with raw `tq` CLI
+   - `baseline-python`: Legacy Python DB-API / `teradatasql`
+4. **Review Automated Recommendations**: Check `docs/benchmarks/optimisation_report.md` for skew alerts, excessive token usage, or missing primary indexes.
+

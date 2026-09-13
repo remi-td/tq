@@ -1,0 +1,47 @@
+# Default benchmark execution matrix
+name: "tq-agentic-optimization-benchmark"
+description: "Cross-harness, cross-model, and cross-mode evaluation on live Teradata database"
+
+dataset: "tpch_order_fulfillment"
+scale_factor: 0.01
+
+runs:
+  # Gemini Flash (Fast / Low cost)
+  - id: "gemini_flash_tq_skill"
+    harness: "gemini"
+    model: "gemini-2.5-flash"
+    mode: "tq-with-skill"
+
+  - id: "gemini_flash_tq_no_skill"
+    harness: "gemini"
+    model: "gemini-2.5-flash"
+    mode: "tq-no-skill"
+
+  # Gemini Flash Lite
+  - id: "gemini_lite_tq_skill"
+    harness: "gemini"
+    model: "gemini-3.5-flash-lite"
+    mode: "tq-with-skill"
+
+  # Claude Code Haiku
+  - id: "claude_haiku_tq_skill"
+    harness: "claude-code"
+    model: "claude-haiku-4-5"
+    mode: "tq-with-skill"
+
+  - id: "claude_haiku_tq_no_skill"
+    harness: "claude-code"
+    model: "claude-haiku-4-5"
+    mode: "tq-no-skill"
+
+  # Claude Code Sonnet (Frontier)
+  - id: "claude_sonnet_tq_skill"
+    harness: "claude-code"
+    model: "sonnet"
+    mode: "tq-with-skill"
+
+  # Baseline Python comparison
+  - id: "baseline_python_claude_haiku"
+    harness: "claude-code"
+    model: "claude-haiku-4-5"
+    mode: "baseline-python"

@@ -1,0 +1,60 @@
+# Pricing configuration for LLM tokens and Teradata cloud compute
+# Rates in USD per 1,000,000 tokens (or per resource unit)
+
+models:
+  # Gemini Models
+  gemini-2.5-flash:
+    input_per_million: 0.075
+    output_per_million: 0.30
+    cache_read_per_million: 0.01875
+    cache_write_per_million: 0.075
+  gemini-3.5-flash-lite:
+    input_per_million: 0.075
+    output_per_million: 0.30
+    cache_read_per_million: 0.01875
+    cache_write_per_million: 0.075
+  gemini-2.5-pro:
+    input_per_million: 1.25
+    output_per_million: 5.00
+    cache_read_per_million: 0.3125
+    cache_write_per_million: 1.25
+  gemini-3.1-pro-preview:
+    input_per_million: 1.25
+    output_per_million: 5.00
+    cache_read_per_million: 0.3125
+    cache_write_per_million: 1.25
+
+  # Anthropic / Claude Code Models
+  claude-haiku-4-5:
+    input_per_million: 1.00
+    output_per_million: 5.00
+    cache_read_per_million: 0.10
+    cache_write_per_million: 1.25
+  sonnet:
+    input_per_million: 3.00
+    output_per_million: 15.00
+    cache_read_per_million: 0.30
+    cache_write_per_million: 3.75
+  claude-3-5-sonnet-20241022:
+    input_per_million: 3.00
+    output_per_million: 15.00
+    cache_read_per_million: 0.30
+    cache_write_per_million: 3.75
+  opus:
+    input_per_million: 15.00
+    output_per_million: 75.00
+    cache_read_per_million: 1.50
+    cache_write_per_million: 18.75
+
+  # Fallback default
+  default:
+    input_per_million: 2.00
+    output_per_million: 8.00
+    cache_read_per_million: 0.20
+    cache_write_per_million: 2.50
+
+database:
+  # Teradata Vantage Cloud consumption unit estimates
+  cost_per_amp_cpu_second: 0.0050
+  cost_per_thousand_io: 0.0001
+  cost_per_gb_spool_hour: 0.00005
