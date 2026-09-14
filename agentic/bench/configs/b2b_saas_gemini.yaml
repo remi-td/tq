@@ -1,0 +1,20 @@
+# Novel Dataset Benchmark Matrix: B2B SaaS Cloud Metered Billing & Margin Analytics
+# Evaluates Gemini 3.5 Flash Lite across tq-with-skill and baseline-python
+
+name: "novel-b2b-saas-billing-gemini"
+description: "Live Teradata evaluation of gemini-3.5-flash-lite on novel B2B SaaS billing dataset (tq-with-skill vs baseline-python)"
+
+dataset: "b2b_saas_billing"
+
+runs:
+  # 1. Gemini 3.5 Flash Lite with tq CLI and teradata-query skill
+  - id: "gemini_3_5_flash_lite_b2b_tq"
+    harness: "gemini"
+    model: "gemini-3.5-flash-lite"
+    mode: "tq-with-skill"
+
+  # 2. Baseline: Gemini 3.5 Flash Lite with pure Python and teradata-python skill
+  - id: "baseline_gemini_3_5_flash_lite_b2b_python"
+    harness: "gemini"
+    model: "gemini-3.5-flash-lite"
+    mode: "baseline-python"

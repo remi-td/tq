@@ -1,0 +1,84 @@
+{
+  "benchmark_id": "b2b_saas_billing",
+  "dataset_version": "1.0",
+  "description": "B2B SaaS Cloud Usage, Metered Billing & Margin Analytics Data Product",
+  "target_objects": {
+    "staging_tables": [
+      "stg_accounts",
+      "stg_plans",
+      "stg_features",
+      "stg_usage_events"
+    ],
+    "dimension_tables": [
+      "dim_accounts"
+    ],
+    "fact_tables": [
+      "fct_metered_usage"
+    ],
+    "aggregate_tables": [
+      "agg_monthly_billing"
+    ],
+    "views": [
+      "dim_account_usage_kpi"
+    ]
+  },
+  "assertions": [
+    {
+      "id": "stg_tables_exist",
+      "description": "All 4 staging tables exist in target schema",
+      "type": "staging_tables_check",
+      "expected_count": 4
+    },
+    {
+      "id": "dim_accounts_created",
+      "description": "Conformed dimension dim_accounts created",
+      "type": "table_exists",
+      "target": "dim_accounts"
+    },
+    {
+      "id": "fct_metered_usage_created",
+      "description": "Atomic fact table fct_metered_usage created",
+      "type": "table_exists",
+      "target": "fct_metered_usage"
+    },
+    {
+      "id": "agg_monthly_billing_created",
+      "description": "Periodic aggregate table agg_monthly_billing created",
+      "type": "table_exists",
+      "target": "agg_monthly_billing"
+    },
+    {
+      "id": "dim_account_usage_kpi_created",
+      "description": "Customer KPI summary table/view dim_account_usage_kpi created",
+      "type": "table_or_view_exists",
+      "target": "dim_account_usage_kpi"
+    },
+    {
+      "id": "gross_billed_checksum",
+      "description": "Fact table gross_billed_amount checksum matches gold standard within 0.1%",
+      "type": "metric_checksum",
+      "target_table": "fct_metered_usage",
+      "target_column": "gross_billed_amount",
+      "expected_value": 1852842.02,
+      "relative_tolerance": 0.001
+    },
+    {
+      "id": "net_margin_checksum",
+      "description": "Fact table net_margin checksum matches gold standard within 0.1%",
+      "type": "metric_checksum",
+      "target_table": "fct_metered_usage",
+      "target_column": "net_margin",
+      "expected_value": 1135498.25,
+      "relative_tolerance": 0.001
+    },
+    {
+      "id": "aggregate_reconciliation_checksum",
+      "description": "Aggregate table total_billed_amount reconciles with fact table",
+      "type": "metric_checksum",
+      "target_table": "agg_monthly_billing",
+      "target_column": "total_billed_amount",
+      "expected_value": 1852842.02,
+      "relative_tolerance": 0.001
+    }
+  ]
+}

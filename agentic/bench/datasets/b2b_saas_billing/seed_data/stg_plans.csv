@@ -1,0 +1,5 @@
+plan_id,pricing_tier,monthly_base_fee,included_units
+1,FREE,0.0,100
+2,STARTUP,99.0,1000
+3,SCALE,499.0,5000
+4,ENTERPRISE,2499.0,25000
