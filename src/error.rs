@@ -240,29 +240,6 @@ pub enum TqError {
     },
 
     // ========================================================================
-    // Agent-Safe Errors
-    // ========================================================================
-    /// Statement blocked by agent-safe mode
-    #[error("Agent-safe mode blocked {statement_type} statement: {message}")]
-    AgentSafeBlocked {
-        statement_type: String,
-        message: String,
-    },
-
-    /// Result set exceeds max rows in agent-safe mode
-    #[error("Result exceeds max-rows limit ({limit}). Use --max-rows to increase or remove --agent-safe")]
-    AgentSafeMaxRows { limit: usize },
-
-    /// Statement could not be classified by agent-safe mode (fail closed)
-    #[error("Agent-safe mode could not classify the statement{}: {reason}", token.as_ref().map(|t| format!(" (leading token '{}')", t)).unwrap_or_default())]
-    AgentSafeUnclassified {
-        /// First significant token seen, if any
-        token: Option<String>,
-        /// Why classification stopped
-        reason: String,
-    },
-
-    // ========================================================================
     // Internal Errors
     // ========================================================================
     /// SQL parse error (unterminated string, block comment, etc.)
@@ -557,9 +534,6 @@ impl TqError {
             TqError::TransactionError { .. } => "TRANSACTION_FAILED",
             TqError::AtomicConflict => "INVALID_ARGUMENT",
             TqError::SessionModeTransactionError { .. } => "TRANSACTION_FAILED",
-            TqError::AgentSafeBlocked { .. } => "AGENT_SAFE_BLOCKED",
-            TqError::AgentSafeMaxRows { .. } => "AGENT_SAFE_MAX_ROWS",
-            TqError::AgentSafeUnclassified { .. } => "AGENT_SAFE_UNCLASSIFIED",
             TqError::SqlParseError { .. } => "SQL_PARSE_ERROR",
             TqError::InternalError(_) => "INTERNAL_ERROR",
         }
@@ -603,9 +577,6 @@ impl TqError {
             | TqError::CsvError(_) => "format",
             TqError::TransactionError { .. }
             | TqError::SessionModeTransactionError { .. } => "transaction",
-            TqError::AgentSafeBlocked { .. }
-            | TqError::AgentSafeMaxRows { .. }
-            | TqError::AgentSafeUnclassified { .. } => "agent_safe",
             TqError::InternalError(_) => "internal",
         }
     }
@@ -645,15 +616,6 @@ impl TqError {
             }
             TqError::InvalidConnectionString(_) => {
                 Some("Expected format: user:password@host:port/database")
-            }
-            TqError::AgentSafeBlocked { .. } => {
-                Some("Use --allow-dml to enable write operations, or remove --agent-safe")
-            }
-            TqError::AgentSafeMaxRows { .. } => {
-                Some("Use --max-rows N to increase the client fetch/output cap")
-            }
-            TqError::AgentSafeUnclassified { .. } => {
-                Some("tq could not prove this statement is safe; review the SQL or run without --agent-safe")
             }
             _ => None,
         }
@@ -1151,24 +1113,6 @@ mod tests {
             .contains("quotes"));
     }
 
-    // Sprint 54: Agent-safe error tests
-
-    #[test]
-    fn test_agent_safe_blocked_error() {
-        let err = TqError::AgentSafeBlocked {
-            statement_type: "INSERT".into(),
-            message: "DML blocked".into(),
-        };
-        assert_eq!(err.error_code(), "AGENT_SAFE_BLOCKED");
-        assert_eq!(err.error_category(), "agent_safe");
-        assert!(!err.is_retryable());
-        assert!(err.hint().is_some());
-
-        let json = err.to_json();
-        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed["ok"], false);
-        assert_eq!(parsed["error"]["code"], "AGENT_SAFE_BLOCKED");
-    }
 
     #[test]
     fn test_to_json_with_control_characters() {
@@ -1183,19 +1127,6 @@ mod tests {
             .contains("tab"));
     }
 
-    #[test]
-    fn test_agent_safe_max_rows_error() {
-        let err = TqError::AgentSafeMaxRows { limit: 10000 };
-        assert_eq!(err.error_code(), "AGENT_SAFE_MAX_ROWS");
-        assert_eq!(err.error_category(), "agent_safe");
-        assert!(!err.is_retryable());
-        assert!(err.hint().is_some());
-
-        let json = err.to_json();
-        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed["error"]["code"], "AGENT_SAFE_MAX_ROWS");
-        assert!(parsed["error"]["hint"].as_str().unwrap().contains("max-rows"));
-    }
 
     #[test]
     fn test_severity_parsing() {

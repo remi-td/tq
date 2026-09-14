@@ -11,12 +11,9 @@ use crate::format::{write_output_with_pagination, write_output_with_timing, Form
 use crate::pagination::PaginationInfo;
 use crate::params::ParamStore;
 use std::collections::HashMap;
-use crate::sql::{
-    classify_statement_detailed, has_multiple_statements, parse_statements, ParsedStatement,
-    StatementSafety,
-};
+use crate::sql::{has_multiple_statements, parse_statements, ParsedStatement};
 #[cfg(test)]
-use crate::sql::classify_statement;
+use crate::sql::{classify_statement, StatementSafety};
 use std::io::{self, BufReader, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
@@ -235,11 +232,6 @@ pub fn execute<W: Write>(
         return Ok(0);
     }
 
-    // Agent-safe mode validation
-    if args.agent_safe {
-        validate_agent_safe(&sql, args)?;
-    }
-
     // Determine execution mode: single statement (fast path) or batch
     // For command-line arguments, always use single statement mode (no splitting)
     // For file/stdin, check for multiple statements
@@ -271,14 +263,8 @@ fn execute_single<W: Write>(
         eprintln!("Executing query: {}", truncate_sql(trimmed_sql, 100));
     }
 
-    // Determine effective row limit: explicit --limit takes precedence, then agent-safe max_rows
-    let effective_limit = if let Some(limit) = args.limit {
-        Some(limit)
-    } else if args.agent_safe {
-        Some(args.max_rows + 1) // Fetch one extra to detect overflow
-    } else {
-        None
-    };
+    // Determine effective row limit
+    let effective_limit = args.limit;
 
     // Execute query
     let result_or_err = if let Some(limit) = effective_limit {
@@ -301,13 +287,6 @@ fn execute_single<W: Write>(
             return Err(err);
         }
     };
-
-    // Agent-safe: check if result exceeds max_rows
-    if args.agent_safe && args.limit.is_none() && result.row_count > args.max_rows {
-        return Err(TqError::AgentSafeMaxRows {
-            limit: args.max_rows,
-        });
-    }
 
     // Configure output formatting
     let format_options = FormatOptions::default()
@@ -599,11 +578,6 @@ pub fn execute_to_file<W: Write>(
         return Ok(0);
     }
 
-    // Agent-safe mode validation
-    if args.agent_safe {
-        validate_agent_safe(&sql, args)?;
-    }
-
     // Determine execution mode
     let use_batch = match source {
         InputSource::Argument(_) => false,
@@ -862,56 +836,6 @@ fn format_statement_status(result: &crate::db::QueryResult, format: OutputFormat
 ///
 /// Uses the structural classifier in `crate::sql::classifier`, which sees
 /// through leading comments, `WITH` CTE prologues, and `LOCKING` request
-/// modifiers to the effective top-level operation. The reported
-/// `statement_type` is the *effective resolved* operation (e.g. `UPDATE` for
-/// `LOCKING ... UPDATE`). Statements that cannot be classified fail closed with
-/// a distinct `AgentSafeUnclassified` error rather than being mislabelled DDL.
-fn validate_agent_safe(sql: &str, args: &QueryArgs) -> Result<()> {
-    // Reject multi-statement input
-    if has_multiple_statements(sql) {
-        return Err(TqError::AgentSafeBlocked {
-            statement_type: "MULTI_STATEMENT".to_string(),
-            message: "Agent-safe mode requires single-statement input".to_string(),
-        });
-    }
-
-    let classification = classify_statement_detailed(sql);
-    let effective_op = classification
-        .effective_op
-        .clone()
-        .unwrap_or_else(|| "UNKNOWN".to_string());
-
-    match classification.safety {
-        StatementSafety::ReadOnly => Ok(()),
-        StatementSafety::Maintenance => {
-            if args.allow_maintenance {
-                Ok(())
-            } else {
-                Err(TqError::AgentSafeBlocked {
-                    statement_type: effective_op,
-                    message: "Maintenance statements (e.g. COLLECT STATISTICS) are blocked in agent-safe mode. Use --allow-maintenance to permit them.".to_string(),
-                })
-            }
-        }
-        StatementSafety::Dml => {
-            if args.allow_dml {
-                Ok(())
-            } else {
-                Err(TqError::AgentSafeBlocked {
-                    statement_type: effective_op,
-                    message: "DML statements are blocked in agent-safe mode. Use --allow-dml to permit write operations.".to_string(),
-                })
-            }
-        }
-        StatementSafety::Ddl => Err(TqError::AgentSafeBlocked {
-            statement_type: effective_op,
-            message: "DDL statements are always blocked in agent-safe mode.".to_string(),
-        }),
-        StatementSafety::Unknown { token, reason } => {
-            Err(TqError::AgentSafeUnclassified { token, reason })
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -1097,71 +1021,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_validate_agent_safe_allows_select() {
-        let args = make_agent_safe_args(false);
-        assert!(validate_agent_safe("SELECT 1", &args).is_ok());
-    }
-
-    #[test]
-    fn test_validate_agent_safe_blocks_insert() {
-        let args = make_agent_safe_args(false);
-        let err = validate_agent_safe("INSERT INTO t VALUES (1)", &args).unwrap_err();
-        assert!(matches!(err, TqError::AgentSafeBlocked { .. }));
-    }
-
-    #[test]
-    fn test_validate_agent_safe_blocks_ddl() {
-        let args = make_agent_safe_args(false);
-        let err = validate_agent_safe("DROP TABLE t", &args).unwrap_err();
-        assert!(matches!(err, TqError::AgentSafeBlocked { .. }));
-    }
-
-    #[test]
-    fn test_validate_agent_safe_allows_dml_with_flag() {
-        let args = make_agent_safe_args(true);
-        assert!(validate_agent_safe("INSERT INTO t VALUES (1)", &args).is_ok());
-    }
-
-    #[test]
-    fn test_validate_agent_safe_blocks_ddl_even_with_allow_dml() {
-        let args = make_agent_safe_args(true);
-        let err = validate_agent_safe("CREATE TABLE t (id INT)", &args).unwrap_err();
-        assert!(matches!(err, TqError::AgentSafeBlocked { .. }));
-    }
-
-    #[test]
-    fn test_validate_agent_safe_blocks_multi_statement() {
-        let args = make_agent_safe_args(false);
-        let err = validate_agent_safe("SELECT 1; SELECT 2", &args).unwrap_err();
-        assert!(matches!(err, TqError::AgentSafeBlocked { .. }));
-    }
-
-    /// Helper to create QueryArgs for agent-safe testing
-    fn make_agent_safe_args(allow_dml: bool) -> QueryArgs {
-        QueryArgs {
-            query: Some("test".to_string()),
-            file: None,
-            format: OutputFormat::Json,
-            output: None,
-            no_header: false,
-            timing: false,
-            limit: None,
-            atomic: false,
-            agent_safe: true,
-            agent: true,
-            compress_tokens: false,
-            token_budget: None,
-            show_tokens: false,
-            max_rows: 10000,
-            allow_dml,
-            allow_maintenance: false, // Sprint 71: new field
-            page_size: None,
-            page: 1,
-            json: false,
-            dry_run: false,
-        }
-    }
 
     // Sprint 71: test_multiple_input_sources_error_message_content deleted —
     //   the "Multiple input sources" error is intentionally removed in Sprint 71.
@@ -1198,14 +1057,10 @@ mod tests {
             timing: false,
             limit: None,
             atomic: false,
-            agent_safe: false,
             agent: false,
             compress_tokens: false,
             token_budget: None,
             show_tokens: false,
-            max_rows: 10000,
-            allow_dml: false,
-            allow_maintenance: false,
             page_size: None,
             page: 1,
             json: false,

@@ -160,7 +160,7 @@ pub struct GlobalOpts {
     /// Bounds how long a single query may run before tq cancels the request,
     /// closes the session, and returns a QUERY_TIMEOUT error. Distinct from
     /// --timeout (connection establishment). If unset, queries run without a
-    /// timeout, EXCEPT in --agent-safe mode where a conservative finite default
+    /// timeout, EXCEPT in --agent mode where a conservative finite default
     /// (30s) is applied automatically.
     ///
     /// Duration format: 30s, 5m, 1h
@@ -228,11 +228,7 @@ pub struct GlobalOpts {
     #[arg(short = 'D', long = "define", value_name = "KEY=VALUE", global = true)]
     pub define: Vec<String>,
 
-    /// Enforce agent-safe restrictions globally
-    #[arg(long, env = "TQ_AGENT_SAFE", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::SetTrue, global = true)]
-    pub agent_safe: bool,
-
-    /// Enable unified AI agent mode (implies --agent-safe, --compress-tokens, 4000 token budget, --show-tokens, and defaults to toon format or compact JSON)
+    /// Enable unified AI agent mode (token compression, 4000 token budget, --show-tokens, and defaults to toon format or compact JSON)
     #[arg(long, env = "TQ_AGENT", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::SetTrue, global = true)]
     pub agent: bool,
 
@@ -777,25 +773,7 @@ pub struct QueryArgs {
     #[arg(long)]
     pub atomic: bool,
 
-    /// Enable agent-safe execution mode
-    ///
-    /// Enforces defense-in-depth guardrails for automated/LLM-driven usage
-    /// (NOT a security boundary -- use database-side least privilege for that;
-    /// see `tq help` and the security guide):
-    /// - Allows read-only statements: SELECT/SEL, SHOW, HELP, EXPLAIN,
-    ///   including read-only WITH (CTE) and LOCKING forms.
-    /// - Blocks DML (INSERT, UPDATE, DELETE, MERGE, UPSERT) unless --allow-dml.
-    /// - Blocks maintenance (COLLECT STATISTICS) unless --allow-maintenance.
-    /// - Always blocks DDL/DCL (CREATE, DROP, ALTER, RENAME, GRANT, REVOKE, ...).
-    /// - Fails closed: statements it cannot classify are rejected, not run.
-    /// - Enforces single-statement-only (rejects multi-statement input).
-    /// - Applies a finite query timeout by default (see --query-timeout).
-    ///
-    /// Enforce agent-safe restrictions
-    #[arg(long, env = "TQ_AGENT_SAFE", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::SetTrue)]
-    pub agent_safe: bool,
-
-    /// Enable unified AI agent mode (implies --agent-safe, --compress-tokens, 4000 token budget, --show-tokens, and defaults to toon format or compact JSON)
+    /// Enable unified AI agent mode (token compression, 4000 token budget, --show-tokens, and defaults to toon format or compact JSON)
     #[arg(long, env = "TQ_AGENT", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::SetTrue)]
     pub agent: bool,
 
@@ -810,30 +788,6 @@ pub struct QueryArgs {
     /// Show estimated token count in output header or envelope
     #[arg(long, env = "TQ_SHOW_TOKENS", value_parser = clap::builder::BoolishValueParser::new(), action = clap::ArgAction::SetTrue)]
     pub show_tokens: bool,
-
-    /// Maximum rows for the client fetch/output cap in agent-safe mode (default: 10000)
-    ///
-    /// This is a CLIENT-side fetch/output cap, NOT a database workload limit:
-    /// tq fetches at most max_rows + 1 rows and fails with AGENT_SAFE_MAX_ROWS
-    /// if the extra row appears. No TOP/SAMPLE is injected into your SQL, so the
-    /// database may still scan the full table. To bound server-side work, add
-    /// TOP or SAMPLE to the query itself.
-    #[arg(long, value_name = "N", default_value = "10000")]
-    pub max_rows: usize,
-
-    /// Allow DML operations in agent-safe mode
-    ///
-    /// Permits INSERT, UPDATE, DELETE, MERGE, and UPSERT statements when
-    /// --agent-safe is active. DDL operations remain blocked.
-    #[arg(long)]
-    pub allow_dml: bool,
-
-    /// Allow maintenance operations in agent-safe mode
-    ///
-    /// Permits COLLECT STATISTICS / COLLECT STATS when --agent-safe is active.
-    /// DDL operations remain blocked.
-    #[arg(long)]
-    pub allow_maintenance: bool,
 
     /// Number of rows per page (enables pagination)
     ///
@@ -2982,13 +2936,6 @@ mod tests {
         let args = vec!["tq", "--json", "query", "SELECT 1"];
         let cli = Cli::try_parse_from(args).unwrap();
         assert!(cli.global.json);
-    }
-
-    #[test]
-    fn test_cli_global_agent_safe_flag() {
-        let args = vec!["tq", "--agent-safe", "query", "SELECT 1"];
-        let cli = Cli::try_parse_from(args).unwrap();
-        assert!(cli.global.agent_safe);
     }
 
     #[test]

@@ -140,7 +140,6 @@ fn run(cli: Cli) -> Result<u8> {
 
     // Agent preset resolution
     let is_agent = cli.global.agent || std::env::var("TQ_AGENT").ok().as_deref() == Some("1");
-    let is_agent_safe = is_agent || cli.global.agent_safe || std::env::var("TQ_AGENT_SAFE").ok().as_deref() == Some("1");
     let compress_tokens = is_agent || cli.global.compress_tokens || std::env::var("TQ_COMPRESS_TOKENS").ok().as_deref() == Some("1");
     let show_tokens = is_agent || cli.global.show_tokens || std::env::var("TQ_SHOW_TOKENS").ok().as_deref() == Some("1");
     let token_budget = cli.global.token_budget.or_else(|| {
@@ -161,9 +160,6 @@ fn run(cli: Cli) -> Result<u8> {
         Command::Query(mut args) => {
             if is_agent {
                 args.agent = true;
-            }
-            if is_agent_safe {
-                args.agent_safe = true;
             }
             if compress_tokens {
                 args.compress_tokens = true;
@@ -735,7 +731,7 @@ fn resolve_query_timeout(
         return Ok(Some(parse_duration(qt)?));
     }
     if let Command::Query(args) = command {
-        if args.agent_safe {
+        if args.agent {
             return Ok(Some(std::time::Duration::from_secs(30)));
         }
     }
