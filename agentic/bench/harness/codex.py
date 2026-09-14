@@ -50,7 +50,8 @@ class CodexHarness(AgentHarness):
 
         try:
             sub_env = os.environ.copy()
-            sub_env["TQ_QUERY_BAND"] = f"ApplicationName=tq_bench;RunId={run_tag};"
+            # Do not set queryband so comparison is strictly symmetrical
+            sub_env.pop("TQ_QUERY_BAND", None)
             proc = subprocess.run(
                 cmd,
                 stdin=subprocess.DEVNULL,
@@ -62,6 +63,7 @@ class CodexHarness(AgentHarness):
                 timeout=timeout_seconds
             )
             duration = round(time.time() - t0, 2)
+            end_ts = self.db_telemetry.record_end_timestamp()
 
             for line in proc.stdout.splitlines():
                 if not line.strip():
@@ -84,17 +86,20 @@ class CodexHarness(AgentHarness):
 
         except subprocess.TimeoutExpired:
             duration = round(time.time() - t0, 2)
+            end_ts = self.db_telemetry.record_end_timestamp()
             error_msg = f"Execution timed out after {timeout_seconds} seconds"
         except Exception as e:
             duration = round(time.time() - t0, 2)
+            end_ts = self.db_telemetry.record_end_timestamp()
             error_msg = str(e)
 
         token_usage.compute_total()
 
-        # Collect database resource consumption from DBQL via QueryBand
+        # Collect database resource consumption from DBQL across stream execution time span
         db_metrics = self.db_telemetry.collect_run_metrics(
-            table_prefix=table_prefix,
             start_ts=start_ts,
+            end_ts=end_ts,
+            table_prefix=table_prefix,
             run_tag=run_tag
         )
 

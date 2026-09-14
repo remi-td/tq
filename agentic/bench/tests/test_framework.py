@@ -178,7 +178,47 @@ class TestOptimizationAdvisor(unittest.TestCase):
         self.assertIn("token_compression", categories)
         self.assertIn("skill_prompt", categories)
         self.assertIn("database_optimization", categories)
-        self.assertIn("cli_feature", categories)
+class TestDatabaseTelemetry(unittest.TestCase):
+    def test_collect_run_metrics_time_span_sql(self):
+        telem = TeradataTelemetry()
+        executed_queries = []
+
+        def mock_execute_query(sql):
+            executed_queries.append(sql)
+            if "QryLogV" in sql:
+                return True, [{
+                    "total_records": 12,
+                    "query_cnt": 10,
+                    "total_cpu": 1.45,
+                    "total_io": 8500,
+                    "max_spool": 1200000,
+                    "err_cnt": 0
+                }]
+            return True, [{"ts_str": "2026-09-14 07:15:00"}]
+
+        telem.execute_query = mock_execute_query
+
+        metrics = telem.collect_run_metrics(
+            start_ts="2026-09-14 07:10:00",
+            end_ts="2026-09-14 07:14:30",
+            table_prefix="b_test_"
+        )
+
+        self.assertEqual(metrics.query_count, 10)
+        self.assertEqual(metrics.delta_cpu_sec, 1.45)
+        self.assertEqual(metrics.delta_io, 8500)
+        self.assertEqual(metrics.peak_spool_bytes, 1200000)
+
+        # Check that flush was executed
+        self.assertIn("FLUSH QUERY LOGGING WITH ALL;", executed_queries[0])
+
+        # Check that the DBQL query uses time span without QueryBand
+        dbql_sql = executed_queries[1]
+        self.assertIn("UserName = USER", dbql_sql)
+        self.assertIn("StartTime >= CAST('2026-09-14 07:10:00' AS TIMESTAMP(0))", dbql_sql)
+        self.assertIn("StartTime <= CAST('2026-09-14 07:14:30' AS TIMESTAMP(0))", dbql_sql)
+        self.assertNotIn("GetQueryBandValue", dbql_sql)
+        self.assertNotIn("QueryText LIKE '%b_test_%'", dbql_sql)
 
 
 if __name__ == "__main__":

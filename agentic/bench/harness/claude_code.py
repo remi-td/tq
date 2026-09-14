@@ -55,6 +55,9 @@ class ClaudeCodeHarness(AgentHarness):
 
         try:
             sub_env = os.environ.copy()
+            # Do not set queryband for either mode so tq is not disadvantaged and comparison is symmetrical
+            sub_env.pop("TQ_QUERY_BAND", None)
+
             if self.mode in ("baseline-python", "baseline-no-tq"):
                 claude_real = shutil.which("claude") or "/Users/remi.turpaud/.local/bin/claude"
                 workspace_bin = self.workspace_dir / ".bench_bin"
@@ -72,13 +75,7 @@ class ClaudeCodeHarness(AgentHarness):
                 ]
                 sub_env["PATH"] = ":".join(filtered_paths)
                 sub_env.pop("TQ_LOGON", None)
-                sub_env.pop("TQ_QUERY_BAND", None)
-                db_uri = sub_env.get("DATABASE_URI", "")
-                if db_uri and "query_band=" not in db_uri:
-                    sep = "&" if "?" in db_uri else "?"
-                    sub_env["DATABASE_URI"] = f"{db_uri}{sep}query_band=ApplicationName=tq_bench;RunId={run_tag};"
-            else:
-                sub_env["TQ_QUERY_BAND"] = f"ApplicationName=tq_bench;RunId={run_tag};"
+
             proc = subprocess.run(
                 cmd,
                 cwd=str(self.workspace_dir),
@@ -89,6 +86,7 @@ class ClaudeCodeHarness(AgentHarness):
                 timeout=timeout_seconds
             )
             duration = round(time.time() - t0, 2)
+            end_ts = self.db_telemetry.record_end_timestamp()
 
             if proc.stdout.strip():
                 try:
@@ -103,15 +101,18 @@ class ClaudeCodeHarness(AgentHarness):
 
         except subprocess.TimeoutExpired:
             duration = round(time.time() - t0, 2)
+            end_ts = self.db_telemetry.record_end_timestamp()
             error_msg = f"Execution timed out after {timeout_seconds} seconds"
         except Exception as e:
             duration = round(time.time() - t0, 2)
+            end_ts = self.db_telemetry.record_end_timestamp()
             error_msg = str(e)
 
-        # Collect database resource consumption from DBQL via QueryBand
+        # Collect database resource consumption from DBQL across stream execution time span
         db_metrics = self.db_telemetry.collect_run_metrics(
-            table_prefix=table_prefix,
             start_ts=start_ts,
+            end_ts=end_ts,
+            table_prefix=table_prefix,
             run_tag=run_tag
         )
 

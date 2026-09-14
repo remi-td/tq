@@ -147,17 +147,12 @@ class GeminiHarness(AgentHarness):
                     proc = None
                     try:
                         sub_env = os.environ.copy()
+                        # Do not set queryband so comparison is strictly symmetrical
+                        sub_env.pop("TQ_QUERY_BAND", None)
                         if self.mode in ("baseline-python", "baseline-no-tq"):
                             path_parts = sub_env.get("PATH", "").split(":")
                             sub_env["PATH"] = ":".join(p for p in path_parts if not p.endswith(".local/bin") and "target/release" not in p and "target/debug" not in p)
                             sub_env.pop("TQ_LOGON", None)
-                            sub_env.pop("TQ_QUERY_BAND", None)
-                            db_uri = sub_env.get("DATABASE_URI", "")
-                            if db_uri and "query_band=" not in db_uri:
-                                sep = "&" if "?" in db_uri else "?"
-                                sub_env["DATABASE_URI"] = f"{db_uri}{sep}query_band=ApplicationName=tq_bench;RunId={run_tag};"
-                        else:
-                            sub_env["TQ_QUERY_BAND"] = f"ApplicationName=tq_bench;RunId={run_tag};"
                         proc = subprocess.Popen(
                             cmd_str,
                             shell=True,
@@ -199,6 +194,7 @@ class GeminiHarness(AgentHarness):
                 })
 
         duration = round(time.time() - t0, 2)
+        end_ts = self.db_telemetry.record_end_timestamp()
         token_usage = TokenUsage(
             input_tokens=total_input_tokens,
             output_tokens=total_output_tokens,
@@ -206,10 +202,11 @@ class GeminiHarness(AgentHarness):
             total_tokens=total_input_tokens + total_output_tokens + total_cached_tokens
         )
 
-        # Collect database resource consumption from DBQL via QueryBand
+        # Collect database resource consumption from DBQL across stream execution time span
         db_metrics = self.db_telemetry.collect_run_metrics(
-            table_prefix=table_prefix,
             start_ts=start_ts,
+            end_ts=end_ts,
+            table_prefix=table_prefix,
             run_tag=run_tag
         )
         if db_metrics.query_count == 0 and commands_executed:

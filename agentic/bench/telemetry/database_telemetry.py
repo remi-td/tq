@@ -64,30 +64,48 @@ class TeradataTelemetry:
         import datetime
         return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
+    def record_server_timestamp(self) -> str:
+        """Fetch current Teradata server timestamp."""
+        return self.record_start_timestamp()
+
+    def record_end_timestamp(self) -> str:
+        """Fetch current Teradata server timestamp."""
+        return self.record_start_timestamp()
+
     def collect_run_metrics(
         self,
-        table_prefix: str,
         start_ts: str,
-        run_tag: str | None = None
+        end_ts: str | None = None,
+        table_prefix: str | None = None,
+        run_tag: str | None = None,
+        **kwargs: Any
     ) -> DatabaseMetrics:
-        """Flush DBQL in-memory buffer and query DBC.QryLogV for actual run resource consumption."""
-        tag = run_tag or table_prefix
+        """Flush DBQL in-memory buffer and query DBC.QryLogV for actual run resource consumption across the stream execution time span."""
+        # Handle backwards-compatibility if table_prefix was passed as first positional arg
+        if start_ts and ("-" not in str(start_ts) and ":" not in str(start_ts)):
+            table_prefix, start_ts = start_ts, end_ts
+            end_ts = kwargs.get("end_ts")
+
+        if not end_ts:
+            end_ts = self.record_server_timestamp()
+
         # 1. Force Teradata to flush memory buffers to DBC.QryLogV
         self.execute_query("FLUSH QUERY LOGGING WITH ALL;")
 
-        # 2. Query DBC.QryLogV for queries executed during this benchmark run
+        # 2. Query DBC.QryLogV for all queries executed by this user during the stream execution time span
+        # Filter out internal telemetry and buffer flush queries
         sql = (
             f"SELECT "
             f"  COUNT(*) AS total_records, "
-            f"  ZEROIFNULL(SUM(CASE WHEN QueryText NOT LIKE '%SET QUERY_BAND%' AND QueryText NOT LIKE '%FLUSH QUERY LOGGING%' THEN 1 ELSE 0 END)) AS query_cnt, "
-            f"  ZEROIFNULL(SUM(AMPCPUTime)) AS total_cpu, "
-            f"  ZEROIFNULL(SUM(TotalIOCount)) AS total_io, "
-            f"  ZEROIFNULL(MAX(SpoolUsage)) AS max_spool, "
-            f"  ZEROIFNULL(SUM(CASE WHEN ErrorCode <> 0 THEN 1 ELSE 0 END)) AS err_cnt "
+            f"  ZEROIFNULL(SUM(CASE WHEN QueryText NOT LIKE '%FLUSH QUERY LOGGING%' AND QueryText NOT LIKE '%DBC.QryLogV%' AND QueryText NOT LIKE '%ts_str%' THEN 1 ELSE 0 END)) AS query_cnt, "
+            f"  ZEROIFNULL(SUM(CASE WHEN QueryText NOT LIKE '%FLUSH QUERY LOGGING%' AND QueryText NOT LIKE '%DBC.QryLogV%' AND QueryText NOT LIKE '%ts_str%' THEN AMPCPUTime ELSE 0 END)) AS total_cpu, "
+            f"  ZEROIFNULL(SUM(CASE WHEN QueryText NOT LIKE '%FLUSH QUERY LOGGING%' AND QueryText NOT LIKE '%DBC.QryLogV%' AND QueryText NOT LIKE '%ts_str%' THEN TotalIOCount ELSE 0 END)) AS total_io, "
+            f"  ZEROIFNULL(MAX(CASE WHEN QueryText NOT LIKE '%FLUSH QUERY LOGGING%' AND QueryText NOT LIKE '%DBC.QryLogV%' AND QueryText NOT LIKE '%ts_str%' THEN SpoolUsage ELSE 0 END)) AS max_spool, "
+            f"  ZEROIFNULL(SUM(CASE WHEN QueryText NOT LIKE '%FLUSH QUERY LOGGING%' AND QueryText NOT LIKE '%DBC.QryLogV%' AND QueryText NOT LIKE '%ts_str%' AND ErrorCode <> 0 THEN 1 ELSE 0 END)) AS err_cnt "
             f"FROM DBC.QryLogV "
             f"WHERE UserName = USER "
-            f"  AND (GetQueryBandValue(QueryBand, 0, 'RunId') = '{tag}' OR GetQueryBandValue(QueryBand, 0, 'RunId') = '{table_prefix}') "
-            f"  AND StartTime >= CAST('{start_ts}' AS TIMESTAMP(0));"
+            f"  AND StartTime >= CAST('{start_ts}' AS TIMESTAMP(0)) "
+            f"  AND StartTime <= CAST('{end_ts}' AS TIMESTAMP(0));"
         )
         ok, res = self.execute_query(sql)
         if ok and isinstance(res, list) and res:
