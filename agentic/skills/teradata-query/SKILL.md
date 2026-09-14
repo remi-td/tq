@@ -204,19 +204,25 @@ tq query "SELECT * FROM dbc.dbcinfo"
 tq query --file path/to/script.sql
 ```
 
-### Multi-Step Pipeline & Batch Script Execution (`tq query --file`)
+### Batch Script Execution for Predictable Pipelines (`tq query --file`)
 
-For multi-step data pipelines (e.g. creating dimensions, facts, aggregations, and views), **do not invoke 20 individual turn-by-turn CLI queries**. Write a single SQL script (`pipeline.sql`) containing all statements separated by semicolons and execute the entire pipeline in one shot:
+While exploratory tasks (inspecting unknown schemas, sampling dirty data, checking column distributions) are naturally **interactive** using `tq schema`, `tq describe`, and `tq sample`, once the pipeline logic and data model are known:
+- **Do not invoke 20 individual turn-by-turn CLI queries** for **predictable multi-step data pipelines** (e.g. creating dimensions, facts, aggregations, and views).
+- Write a dedicated, descriptively named SQL script (e.g. `<feature_or_product_name>_pipeline.sql` or `order_fulfillment_pipeline.sql`) containing all statements separated by semicolons.
+- Execute the entire pipeline in one shot:
 
 ```bash
-tq query --file pipeline.sql --errorlevel 3807 warning
+tq query --file order_fulfillment_pipeline.sql --errorlevel 3807 warning
 ```
 
 **Why this is recommended for AI agents:**
 - **One-Shot Execution**: Eliminates 15–20 interactive CLI turns and tool round-trips, matching the efficiency of monolithic scripts while executing natively within Teradata.
 - **Sequential Execution**: `tq` parses the file into individual statements and executes each one sequentially across the connection.
 - **Idempotent DDL Support**: Passing `--errorlevel 3807 warning` ensures that initial `DROP TABLE` statements do not halt the script if tables do not yet exist on the first run.
-- **Atomic Transactions (Optional)**: Pass `--atomic` to automatically wrap DML statements in a transaction with rollback on failure.
+- **Transaction Management (`--atomic` vs DDL)**:
+  - `--atomic` wraps the entire batch in `BEGIN TRANSACTION ... COMMIT`. This **ONLY works if there is NO DDL** (`CREATE`, `DROP`, `ALTER`) in the script.
+  - In Teradata, DDL within an active transaction block causes error `3932: Only an ET or null statement is legal after a DDL Statement`. Therefore, **do NOT use `--atomic` on scripts containing DDL**.
+  - If you need atomic rollback for a specific set of DML statements inside a script that also contains DDL, explicitly surround only that DML block with `BT;` (Begin Transaction) and `ET;` (End Transaction) statements, keeping all DDL statements outside of `BT ... ET`.
 
 ### Batch Statements (multi-statement file or stdin)
 
@@ -245,7 +251,7 @@ tq fastload seed_data/stg_orders.tsv stg_orders --delimiter '\t'
 
 ### Teradata DDL & Primary Index Guidelines
 
-- **Batch Scripts (`--file`)**: Multi-statement DDL scripts are fully supported via `tq query --file script.sql`. Because `tq` parses statements client-side and dispatches them sequentially to Teradata, statements like `DROP TABLE`, `CREATE TABLE`, `INSERT INTO ... SELECT`, and `CREATE VIEW` run smoothly in sequence without session collisions.
+- **DDL Transaction Boundaries**: Teradata strictly prohibits DDL statements (`CREATE`, `DROP`, `ALTER`) inside active transaction blocks alongside DML. Never place DDL inside `BT; ... ET;` or run a script containing DDL with `--atomic`. Multi-statement scripts mixing DDL and DML execute cleanly without `--atomic` because `tq` dispatches each statement sequentially in auto-commit mode.
 - **Primary Index (PI) Selection**: Always specify a `PRIMARY INDEX (column)` with high cardinality (unique or primary key) to evenly hash rows across AMPs and prevent severe table skew. Validate distribution with `tq space <table_name>`.
 
 ### Output Formats & Token Optimization
@@ -626,4 +632,4 @@ In interactive REPL sessions, manage error level mappings dynamically:
 - **Use password files** (`--password-file` or profile `password_file`) rather than embedding passwords in `TQ_LOGON` or command-line args.
 - **Use `--file`** for executing SQL files rather than pasting long statements inline.
 - **Confirm environment** before executing against non-dev targets -- always confirm with the user before running against staging or production.
-- **Use `--atomic`** for multi-statement migrations that should be all-or-nothing.
+- **Use `--atomic`** for multi-statement DML migrations that should be all-or-nothing (do not use on scripts containing DDL statements).
