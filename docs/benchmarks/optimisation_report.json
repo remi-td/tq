@@ -1,142 +1,39 @@
 {
   "runs": [
     {
-      "run_id": "gemini_gemini-3.5-flash-lite_tq-with-skill_1789366794",
-      "harness": "gemini",
-      "model": "gemini-3.5-flash-lite",
-      "mode": "tq-with-skill",
-      "dataset": "tpch_order_fulfillment",
-      "table_prefix": "b_66794_ge_",
-      "duration_seconds": 51.49,
-      "token_usage": {
-        "input_tokens": 106924,
-        "output_tokens": 3825,
-        "cache_read_tokens": 0,
-        "cache_write_tokens": 0,
-        "reasoning_tokens": 0,
-        "total_tokens": 110749,
-        "raw_cost_usd": 0.0
-      },
-      "db_metrics": {
-        "start_cpu_sec": 0.0,
-        "end_cpu_sec": 3.996,
-        "delta_cpu_sec": 3.996,
-        "start_io": 0,
-        "end_io": 9972,
-        "delta_io": 9972,
-        "peak_spool_bytes": 10108928,
-        "avg_cpu_skew_pct": 0.0,
-        "avg_io_skew_pct": 0.0,
-        "query_count": 141,
-        "error_count": 16
-      },
-      "costs": {
-        "token_cost_usd": 0.009167,
-        "database_cost_usd": 0.020977,
-        "total_effort_cost_usd": 0.030144
-      },
-      "validation_score": 100.0,
-      "all_assertions_passed": true,
-      "validation_details": [
-        {
-          "assertion_id": "stg_tables_exist",
-          "description": "All 4 staging tables (stg_customers, stg_parts, stg_orders, stg_lineitem) created and populated",
-          "passed": true,
-          "details": "Found 4/4 staging tables: ['B_66794_GE_STG_CUSTOMERS', 'B_66794_GE_STG_PARTS', 'B_66794_GE_STG_ORDERS', 'B_66794_GE_STG_LINEITEM']"
-        },
-        {
-          "assertion_id": "dim_customers_created",
-          "description": "Conformed dimension table dim_customers created with cust_id Primary Index",
-          "passed": true,
-          "details": "Table B_66794_GE_DIM_CUSTOMERS exists: True"
-        },
-        {
-          "assertion_id": "fct_order_lineitem_created",
-          "description": "Atomic fact table fct_order_lineitem created with lineitem grain",
-          "passed": true,
-          "details": "Table B_66794_GE_FCT_ORDER_LINEITEM exists: True"
-        },
-        {
-          "assertion_id": "agg_monthly_performance_created",
-          "description": "Aggregate summary table agg_monthly_performance created at Year-Month-Segment grain",
-          "passed": true,
-          "details": "Table B_66794_GE_AGG_MONTHLY_PERFORMANCE exists: True"
-        },
-        {
-          "assertion_id": "dim_customer_profitability_created",
-          "description": "Customer profitability dimension or semantic view created",
-          "passed": true,
-          "details": "Table/View B_66794_GE_DIM_CUSTOMER_PROFITABILITY exists: True"
-        },
-        {
-          "assertion_id": "revenue_integrity_checksum",
-          "description": "Fact table net revenue checksum matches gold standard within 0.1%",
-          "passed": true,
-          "details": "Expected 54,249,318.93, got 54,249,333.28 (diff: 0.0000%)"
-        },
-        {
-          "assertion_id": "profit_integrity_checksum",
-          "description": "Fact table gross profit checksum matches gold standard within 0.1%",
-          "passed": true,
-          "details": "Expected 17,631,394.11, got 17,631,408.46 (diff: 0.0001%)"
-        },
-        {
-          "assertion_id": "aggregate_reconciliation_checksum",
-          "description": "Aggregate table total_net_revenue reconciles with fact net revenue",
-          "passed": true,
-          "details": "Expected 54,249,318.93, got 54,249,333.28 (diff: 0.0000%)"
-        }
-      ],
-      "commands_executed": [
-        "tq --version",
-        "tq --agent ping",
-        "tq --agent query \"SELECT TOP 5 * FROM dbc.dbcinfo\"",
-        "ls -la seed_data/",
-        "head -n 3 seed_data/stg_customers.csv seed_data/stg_parts.csv seed_data/stg_orders.csv seed_data/stg_lineitem.csv",
-        "tq --agent fastload seed_data/stg_customers.csv b_66794_ge_stg_customers\ntq --agent fastload seed_data/stg_parts.csv b_66794_ge_stg_parts\ntq --agent fastload seed_data/stg_orders.csv b_66794_ge_stg_orders\ntq --agent fastload seed_data/stg_lineitem.csv b_66794_ge_stg_lineitem\n",
-        "cat << 'EOF' > pipeline.sql\n-- Layer 1 Staging Cleanup & Proper Typing (Optional check, or we build directly on top of stg tables)\n-- Let's build Layer 2, 3, 4 objects.\n\n-- Cleanup existing objects if they exist\n--errorlevel 3807 warning\nDROP TABLE b_66794_ge_dim_customers;\nDROP TABLE b_66794_ge_fct_order_lineitem;\nDROP TABLE b_66794_ge_agg_monthly_performance;\nDROP TABLE b_66794_ge_dim_customer_profitability;\n\n-- Layer 2: Conformed Dimension: b_66794_ge_dim_customers\nCREATE TABLE b_66794_ge_dim_customers AS (\n    SELECT \n        CAST(cust_id AS INTEGER) AS cust_id,\n        CAST(cust_name AS VARCHAR(100)) AS cust_name,\n        CAST(mkt_segment AS VARCHAR(50)) AS mkt_segment,\n        CAST(nation_name AS VARCHAR(50)) AS nation_name\n    FROM b_66794_ge_stg_customers\n) WITH DATA PRIMARY INDEX (cust_id);\n\n-- Layer 2: Atomic Fact Table: b_66794_ge_fct_order_lineitem\nCREATE TABLE b_66794_ge_fct_order_lineitem AS (\n    SELECT\n        CAST(l.order_id AS INTEGER) AS order_id,\n        CAST(l.line_number AS INTEGER) AS line_number,\n        CAST(o.cust_id AS INTEGER) AS cust_id,\n        CAST(l.part_id AS INTEGER) AS part_id,\n        CAST(o.order_date AS DATE FORMAT 'YYYY-MM-DD') AS order_date,\n        CAST(l.ship_date AS DATE FORMAT 'YYYY-MM-DD') AS ship_date,\n        CAST(l.commit_date AS DATE FORMAT 'YYYY-MM-DD') AS commit_date,\n        CAST(o.order_status AS CHAR(1)) AS order_status,\n        CAST(o.order_priority AS VARCHAR(20)) AS order_priority,\n        CAST(l.quantity AS DECIMAL(18,2)) AS quantity,\n        CAST(l.extended_price AS DECIMAL(18,2)) AS extended_price,\n        CAST(l.discount AS DECIMAL(5,2)) AS discount,\n        CAST(l.tax AS DECIMAL(5,2)) AS tax,\n        CAST(ROUND(CAST(l.extended_price AS DECIMAL(18,4)) * (1 - CAST(l.discount AS DECIMAL(5,4))), 2) AS DECIMAL(18,2)) AS net_revenue,\n        CAST(ROUND(CAST(l.quantity AS DECIMAL(18,4)) * CAST(p.supply_cost AS DECIMAL(18,4)), 2) AS DECIMAL(18,2)) AS supply_cost,\n        CAST(ROUND((CAST(l.extended_price AS DECIMAL(18,4)) * (1 - CAST(l.discount AS DECIMAL(5,4)))) - (CAST(l.quantity AS DECIMAL(18,4)) * CAST(p.supply_cost AS DECIMAL(18,4))), 2) AS DECIMAL(18,2)) AS profit,\n        CAST((CAST(l.ship_date AS DATE FORMAT 'YYYY-MM-DD') - CAST(o.order_date AS DATE FORMAT 'YYYY-MM-DD')) AS INTEGER) AS shipping_delay_days\n    FROM b_66794_ge_stg_lineitem l\n    JOIN b_66794_ge_stg_orders o ON l.order_id = o.order_id\n    JOIN b_66794_ge_stg_parts p ON l.part_id = p.part_id\n) WITH DATA PRIMARY INDEX (order_id, line_number);\n\n-- Layer 3: Periodic Summary Aggregate Table: b_66794_ge_agg_monthly_performance\nCREATE TABLE b_66794_ge_agg_monthly_performance AS (\n    SELECT\n        EXTRACT(YEAR FROM f.order_date) AS order_year,\n        EXTRACT(MONTH FROM f.order_date) AS order_month,\n        c.mkt_segment,\n        COUNT(DISTINCT f.order_id) AS total_orders,\n        SUM(f.quantity) AS total_items,\n        SUM(f.net_revenue) AS total_net_revenue,\n        SUM(f.profit) AS total_profit,\n        AVG(CAST(f.shipping_delay_days AS DECIMAL(18,4))) AS avg_shipping_delay_days\n    FROM b_66794_ge_fct_order_lineitem f\n    JOIN b_66794_ge_dim_customers c ON f.cust_id = c.cust_id\n    GROUP BY 1, 2, 3\n) WITH DATA PRIMARY INDEX (order_year, order_month, mkt_segment);\n\n-- Layer 3: Customer Profitability Dimension Table: b_66794_ge_dim_customer_profitability\nCREATE TABLE b_66794_ge_dim_customer_profitability AS (\n    SELECT\n        c.cust_id,\n        c.cust_name,\n        c.mkt_segment,\n        c.nation_name,\n        COUNT(DISTINCT f.order_id) AS lifetime_orders,\n        SUM(f.quantity) AS lifetime_items,\n        SUM(f.net_revenue) AS lifetime_net_revenue,\n        SUM(f.profit) AS lifetime_profit,\n        CAST(ROUND((SUM(f.profit) / NULLIF(SUM(f.net_revenue), 0)) * 100, 2) AS DECIMAL(5,2)) AS profit_margin_pct\n    FROM b_66794_ge_dim_customers c\n    LEFT JOIN b_66794_ge_fct_order_lineitem f ON c.cust_id = f.cust_id\n    GROUP BY c.cust_id, c.cust_name, c.mkt_segment, c.nation_name\n) WITH DATA PRIMARY INDEX (cust_id);\nEOF\n",
-        "tq --agent query --file pipeline.sql --errorlevel 3807 warning",
-        "tq query --file pipeline.sql --errorlevel 3807 warning",
-        "cat << 'EOF' > audit.sql\nSELECT 'b_66794_ge_stg_customers' AS tbl, COUNT(*) AS cnt FROM b_66794_ge_stg_customers\nUNION ALL\nSELECT 'b_66794_ge_stg_parts', COUNT(*) FROM b_66794_ge_stg_parts\nUNION ALL\nSELECT 'b_66794_ge_stg_orders', COUNT(*) FROM b_66794_ge_stg_orders\nUNION ALL\nSELECT 'b_66794_ge_stg_lineitem', COUNT(*) FROM b_66794_ge_stg_lineitem\nUNION ALL\nSELECT 'b_66794_ge_dim_customers', COUNT(*) FROM b_66794_ge_dim_customers\nUNION ALL\nSELECT 'b_66794_ge_fct_order_lineitem', COUNT(*) FROM b_66794_ge_fct_order_lineitem\nUNION ALL\nSELECT 'b_66794_ge_agg_monthly_performance', COUNT(*) FROM b_66794_ge_agg_monthly_performance\nUNION ALL\nSELECT 'b_66794_ge_dim_customer_profitability', COUNT(*) FROM b_66794_ge_dim_customer_profitability;\n\nSELECT \n    SUM(net_revenue) AS total_net_revenue, \n    SUM(profit) AS total_profit \nFROM b_66794_ge_fct_order_lineitem;\n\nSELECT \n    SUM(total_net_revenue) AS agg_total_net_revenue \nFROM b_66794_ge_agg_monthly_performance;\n\nSELECT TOP 5 \n    cust_id, \n    cust_name, \n    mkt_segment, \n    nation_name, \n    lifetime_orders, \n    lifetime_net_revenue, \n    lifetime_profit, \n    profit_margin_pct \nFROM b_66794_ge_dim_customer_profitability \nORDER BY lifetime_profit DESC;\nEOF\n",
-        "tq query --file audit.sql"
-      ],
-      "agent_summary": "# Customer Order Fulfillment & Profitability Data Product \u2014 Execution Report\n\nI have successfully designed, built, verified, and audited the enterprise analytical Data Product on Teradata in accordance with all specifications and naming conventions (`b_66794_ge_`).\n\n---\n\n## Summary of Completed Objects\n\n| Layer | Object Name | Object Type | Primary Index (PI) | Description |\n| :--- | :--- | :--- | :--- | :--- |\n| **Layer 1** | `b_66794_ge_stg_customers` | Table | No PI (FastLoad) | Raw staging table loaded from `stg_customers.csv` (3,700 rows) |\n| **Layer 1** | `b_66794_ge_stg_parts` | Table | No PI (FastLoad) | Raw staging table loaded from `stg_parts.csv` (200 rows) |\n| **Layer 1** | `b_66794_ge_stg_orders` | Table | No PI (FastLoad) | Raw staging table loaded from `stg_orders.csv` (16,845 rows) |\n| **Layer 1** | `b_66794_ge_stg_lineitem` | Table | No PI (FastLoad) | Raw staging table loaded from `stg_lineitem.csv` (50,428 rows) |\n| **Layer 2** | `b_66794_ge_dim_customers` | Table | `(cust_id)` | Cleaned and typed conformed customer dimension (3,700 rows) |\n| **Layer 2** | `b_66794_ge_fct_order_lineitem` | Table | `(order_id, line_number)` | Atomic fact table joining lineitems, orders, and parts with calculated metrics (`net_revenue`, `supply_cost`, `profit`, `shipping_delay_days`) (50,428 rows) |\n| **Layer 3** | `b_66794_ge_agg_monthly_performance` | Table | `(order_year, order_month, mkt_segment)` | Periodic summary aggregate rolled up by Year, Month, and Market Segment (30 rows) |\n| **Layer 3** | `b_66794_ge_dim_customer_profitability` | Table | `(cust_id)` | Customer-level profitability dimension aggregating lifetime orders, revenue, profit, and margin (3,700 rows) |\n\n---\n\n## Verification & Audit Results\n\n### 1. Row Count Reconciliation\n- `b_66794_ge_stg_customers`: **3,700** rows \u2794 `b_66794_ge_dim_customers`: **3,700** rows\n- `b_66794_ge_stg_parts`: **200** rows\n- `b_66794_ge_stg_orders`: **16,845** rows\n- `b_66794_ge_stg_lineitem`: **50,428** rows \u2794 `b_66794_ge_fct_order_lineitem`: **50,428** rows\n- `b_66794_ge_agg_monthly_performance`: **30** rows (spanning historical order months across market segments)\n- `b_66794_ge_dim_customer_profitability`: **3,700** rows\n\n### 2. Financial Metrics Reconciliation (Fact vs. Aggregate)\n- **Total Net Revenue (`b_66794_ge_fct_order_lineitem`)**: `54,249,333.28`\n- **Total Profit (`b_66794_ge_fct_order_lineitem`)**: `17,631,408.46`\n- **Total Net Revenue (`b_66794_ge_agg_monthly_performance`)**: `54,249,333.28`\n> **Reconciliation Status:** **100% Exact Match** (Fact table metrics perfectly reconcile with the periodic monthly aggregate rollup).\n\n### 3. Top 5 Customers by Lifetime Profit\nQuerying `b_66794_ge_dim_customer_profitability`:\n\n| `cust_id` | `cust_name` | `mkt_segment` | `nation_name` | `lifetime_orders` | `lifetime_net_revenue` | `lifetime_profit` | `profit_margin_pct` |\n| :---: | :--- | :--- | :--- | :---: | :---: | :---: | :---: |\n| **1187** | Customer#001187 | HOUSEHOLD | FRANCE | 7 | 43,303.31 | 16,182.88 | 37.00% |\n| **722** | Customer#000722 | MACHINERY | UNITED KINGDOM | 7 | 47,918.24 | 16,170.83 | 34.00% |\n| **405** | Customer#000405 | HOUSEHOLD | BRAZIL | 8 | 46,767.72 | 15,822.52 | 34.00% |\n| **1244** | Customer#001244 | FURNITURE | GERMANY | 8 | 42,579.21 | 14,311.72 | 34.00% |\n| **2402** | Customer#002402 | HOUSEHOLD | JAPAN | 8 | 46,223.54 | 14,266.86 | 31.00% |\n\n---\n\n## Conclusion\nThe Customer Order Fulfillment & Profitability Data Product has been fully deployed, verified, and optimized with robust Primary Index definitions and precision-cast numeric types. All audit checks passed successfully.",
-      "error_message": null
-    },
-    {
-      "run_id": "gemini_gemini-3.5-flash-lite_baseline-python_1789366860",
+      "run_id": "gemini_gemini-3.5-flash-lite_baseline-python_1789366944",
       "harness": "gemini",
       "model": "gemini-3.5-flash-lite",
       "mode": "baseline-python",
       "dataset": "tpch_order_fulfillment",
-      "table_prefix": "b_66860_ge_",
-      "duration_seconds": 38.44,
+      "table_prefix": "b_66944_ge_",
+      "duration_seconds": 39.8,
       "token_usage": {
-        "input_tokens": 28560,
-        "output_tokens": 4666,
+        "input_tokens": 35436,
+        "output_tokens": 5159,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
         "reasoning_tokens": 0,
-        "total_tokens": 33226,
+        "total_tokens": 40595,
         "raw_cost_usd": 0.0
       },
       "db_metrics": {
         "start_cpu_sec": 0.0,
-        "end_cpu_sec": 3.256,
-        "delta_cpu_sec": 3.256,
+        "end_cpu_sec": 0.82,
+        "delta_cpu_sec": 0.82,
         "start_io": 0,
-        "end_io": 9536,
-        "delta_io": 9536,
-        "peak_spool_bytes": 13111296,
+        "end_io": 9486,
+        "delta_io": 9486,
+        "peak_spool_bytes": 262144,
         "avg_cpu_skew_pct": 0.0,
         "avg_io_skew_pct": 0.0,
         "query_count": 113,
         "error_count": 16
       },
       "costs": {
-        "token_cost_usd": 0.003542,
-        "database_cost_usd": 0.017234,
-        "total_effort_cost_usd": 0.020776
+        "token_cost_usd": 0.004205,
+        "database_cost_usd": 0.005049,
+        "total_effort_cost_usd": 0.009254
       },
       "validation_score": 100.0,
       "all_assertions_passed": true,
@@ -145,111 +42,95 @@
           "assertion_id": "stg_tables_exist",
           "description": "All 4 staging tables (stg_customers, stg_parts, stg_orders, stg_lineitem) created and populated",
           "passed": true,
-          "details": "Found 4/4 staging tables: ['B_66860_GE_STG_CUSTOMERS', 'B_66860_GE_STG_PARTS', 'B_66860_GE_STG_ORDERS', 'B_66860_GE_STG_LINEITEM']"
+          "details": "Found 4/4 staging tables: ['B_66944_GE_STG_CUSTOMERS', 'B_66944_GE_STG_PARTS', 'B_66944_GE_STG_ORDERS', 'B_66944_GE_STG_LINEITEM']"
         },
         {
           "assertion_id": "dim_customers_created",
           "description": "Conformed dimension table dim_customers created with cust_id Primary Index",
           "passed": true,
-          "details": "Table B_66860_GE_DIM_CUSTOMERS exists: True"
+          "details": "Table B_66944_GE_DIM_CUSTOMERS exists: True"
         },
         {
           "assertion_id": "fct_order_lineitem_created",
           "description": "Atomic fact table fct_order_lineitem created with lineitem grain",
           "passed": true,
-          "details": "Table B_66860_GE_FCT_ORDER_LINEITEM exists: True"
+          "details": "Table B_66944_GE_FCT_ORDER_LINEITEM exists: True"
         },
         {
           "assertion_id": "agg_monthly_performance_created",
           "description": "Aggregate summary table agg_monthly_performance created at Year-Month-Segment grain",
           "passed": true,
-          "details": "Table B_66860_GE_AGG_MONTHLY_PERFORMANCE exists: True"
+          "details": "Table B_66944_GE_AGG_MONTHLY_PERFORMANCE exists: True"
         },
         {
           "assertion_id": "dim_customer_profitability_created",
           "description": "Customer profitability dimension or semantic view created",
           "passed": true,
-          "details": "Table/View B_66860_GE_DIM_CUSTOMER_PROFITABILITY exists: True"
+          "details": "Table/View B_66944_GE_DIM_CUSTOMER_PROFITABILITY exists: True"
         },
         {
           "assertion_id": "revenue_integrity_checksum",
           "description": "Fact table net revenue checksum matches gold standard within 0.1%",
           "passed": true,
-          "details": "Expected 54,249,318.93, got 54,249,333.28 (diff: 0.0000%)"
+          "details": "Expected 276,154.38, got 276,154.44 (diff: 0.0000%)"
         },
         {
           "assertion_id": "profit_integrity_checksum",
           "description": "Fact table gross profit checksum matches gold standard within 0.1%",
           "passed": true,
-          "details": "Expected 17,631,394.11, got 17,631,408.46 (diff: 0.0001%)"
+          "details": "Expected 87,612.47, got 87,612.53 (diff: 0.0001%)"
         },
         {
           "assertion_id": "aggregate_reconciliation_checksum",
           "description": "Aggregate table total_net_revenue reconciles with fact net revenue",
           "passed": true,
-          "details": "Expected 54,249,318.93, got 54,249,333.28 (diff: 0.0000%)"
+          "details": "Expected 276,154.38, got 276,154.44 (diff: 0.0000%)"
         }
       ],
       "commands_executed": [
-        "python3 -c \"import teradatasql; print('teradatasql version:', teradatasql.__version__)\"",
-        "ls -la seed_data/",
-        "python3 -c \"\nimport pandas as pd\nfor name in ['stg_customers', 'stg_parts', 'stg_orders', 'stg_lineitem']:\n    df = pd.read_csv(f'seed_data/{name}.csv', nrows=5)\n    print(f'=== {name} ===')\n    print(df.dtypes)\n    print(df.head(2))\n\"",
-        "cat << 'EOF' > run_pipeline.py\nimport os\nimport urllib.parse\nimport teradatasql\nimport pandas as pd\n\ndef get_teradata_connection():\n    uri_str = os.environ.get(\"DATABASE_URI\") or os.environ.get(\"TQ_LOGON\", \"\")\n    if uri_str:\n        if not uri_str.startswith(\"teradata://\") and \"://\" not in uri_str:\n            uri_str = \"teradata://\" + uri_str\n        base_uri = uri_str.split(\"?\")[0]\n        u = urllib.parse.urlparse(base_uri)\n        host = u.hostname or \"localhost\"\n        port = u.port or 1025\n        user = u.username or os.environ.get(\"USER\", \"\")\n        password = u.password or \"\"\n        database = u.path.lstrip(\"/\") or user\n    else:\n        host = os.environ.get(\"TERADATA_HOST\", \"localhost\")\n        port = int(os.environ.get(\"TERADATA_PORT\", 1025))\n        user = os.environ.get(\"TERADATA_USER\", \"demo_user\")\n        password = os.environ.get(\"TERADATA_PASSWORD\", \"\")\n        database = os.environ.get(\"TERADATA_DATABASE\", user)\n\n    conn = teradatasql.connect(\n        host=host,\n        dbs_port=port,\n        user=user,\n        password=password,\n        database=database,\n        logmech=os.environ.get(\"TERADATA_LOGMECH\", \"TD2\")\n    )\n    return conn\n\ndef safe_drop(cursor, name, obj_type=\"TABLE\"):\n    try:\n        cursor.execute(f\"DROP {obj_type} {name}\")\n        print(f\"Dropped existing {obj_type.lower()} {name}\")\n    except teradatasql.DatabaseError as e:\n        if \"3807\" not in str(e):\n            raise\n\ndef fastload_csv(conn, table_name: str, csv_path: str, date_cols: list[str] = None):\n    df = pd.read_csv(csv_path)\n    if date_cols:\n        for col in date_cols:\n            if col in df.columns:\n                df[col] = pd.to_datetime(df[col]).dt.strftime('%Y-%m-%d')\n    df = df.where(pd.notnull(df), None)\n    \n    cols = list(df.columns)\n    placeholders = \", \".join([\"?\" for _ in cols])\n    col_names = \", \".join(cols)\n\n    sql = f\"{{fn teradata_try_fastload}}INSERT INTO {table_name} ({col_names}) VALUES ({placeholders})\"\n    data = [tuple(x) for x in df.to_numpy()]\n    \n    cursor = conn.cursor()\n    cursor.executemany(sql, data)\n    conn.commit()\n    print(f\"Fastloaded {len(data):,} rows into {table_name}\")\n\ndef main():\n    conn = get_teradata_connection()\n    cursor = conn.cursor()\n    prefix = \"b_66860_ge_\"\n    \n    print(\"=== Step 1: Dropping existing objects ===\")\n    objects_to_drop = [\n        f\"{prefix}dim_customer_profitability\",\n        f\"{prefix}agg_monthly_performance\",\n        f\"{prefix}fct_order_lineitem\",\n        f\"{prefix}dim_customers\",\n        f\"{prefix}stg_lineitem\",\n        f\"{prefix}stg_orders\",\n        f\"{prefix}stg_parts\",\n        f\"{prefix}stg_customers\"\n    ]\n    for obj in objects_to_drop:\n        safe_drop(cursor, obj)\n\n    print(\"\\n=== Step 2: Creating Staging Tables ===\")\n    cursor.execute(f\"\"\"\n    CREATE TABLE {prefix}stg_customers (\n        cust_id INTEGER NOT NULL,\n        cust_name VARCHAR(100),\n        mkt_segment VARCHAR(50),\n        nation_name VARCHAR(50)\n    ) PRIMARY INDEX (cust_id);\n    \"\"\")\n\n    cursor.execute(f\"\"\"\n    CREATE TABLE {prefix}stg_parts (\n        part_id INTEGER NOT NULL,\n        part_name VARCHAR(100),\n        mfgr VARCHAR(50),\n        category VARCHAR(50),\n        supply_cost DECIMAL(18,2)\n    ) PRIMARY INDEX (part_id);\n    \"\"\")\n\n    cursor.execute(f\"\"\"\n    CREATE TABLE {prefix}stg_orders (\n        order_id INTEGER NOT NULL,\n        cust_id INTEGER,\n        order_status CHAR(1),\n        total_price DECIMAL(18,2),\n        order_date DATE FORMAT 'YYYY-MM-DD',\n        order_priority VARCHAR(20)\n    ) PRIMARY INDEX (order_id);\n    \"\"\")\n\n    cursor.execute(f\"\"\"\n    CREATE TABLE {prefix}stg_lineitem (\n        order_id INTEGER NOT NULL,\n        line_number INTEGER NOT NULL,\n        part_id INTEGER,\n        quantity INTEGER,\n        extended_price DECIMAL(18,2),\n        discount DECIMAL(5,2),\n        tax DECIMAL(5,2),\n        return_flag CHAR(1),\n        line_status CHAR(1),\n        ship_date DATE FORMAT 'YYYY-MM-DD',\n        commit_date DATE FORMAT 'YYYY-MM-DD'\n    ) PRIMARY INDEX (order_id, line_number);\n    \"\"\")\n    conn.commit()\n    print(\"Staging tables created successfully.\")\n\n    print(\"\\n=== Step 3: Loading Seed Data via FastLoad ===\")\n    fastload_csv(conn, f\"{prefix}stg_customers\", \"seed_data/stg_customers.csv\")\n    fastload_csv(conn, f\"{prefix}stg_parts\", \"seed_data/stg_parts.csv\")\n    fastload_csv(conn, f\"{prefix}stg_orders\", \"seed_data/stg_orders.csv\", date_cols=[\"order_date\"])\n    fastload_csv(conn, f\"{prefix}stg_lineitem\", \"seed_data/stg_lineitem.csv\", date_cols=[\"ship_date\", \"commit_date\"])\n\n    print(\"\\n=== Step 4: Building Layer 2 (Dimensions & Atomic Facts) ===\")\n    \n    # 4.1 Conformed Dimension: dim_customers\n    cursor.execute(f\"\"\"\n    CREATE TABLE {prefix}dim_customers AS (\n        SELECT DISTINCT\n            cust_id,\n            cust_name,\n            mkt_segment,\n            nation_name\n        FROM {prefix}stg_customers\n    ) WITH DATA\n    PRIMARY INDEX (cust_id);\n    \"\"\")\n    print(f\"Created {prefix}dim_customers\")\n\n    # 4.2 Atomic Fact Table: fct_order_lineitem\n    cursor.execute(f\"\"\"\n    CREATE TABLE {prefix}fct_order_lineitem AS (\n        SELECT\n            l.order_id,\n            l.line_number,\n            o.cust_id,\n            l.part_id,\n            o.order_date,\n            l.ship_date,\n            l.commit_date,\n            o.order_status,\n            o.order_priority,\n            l.quantity,\n            l.extended_price,\n            l.discount,\n            l.tax,\n            ROUND(l.extended_price * (1 - l.discount), 2) AS net_revenue,\n            ROUND(l.quantity * p.supply_cost, 2) AS supply_cost,\n            ROUND(ROUND(l.extended_price * (1 - l.discount), 2) - ROUND(l.quantity * p.supply_cost, 2), 2) AS profit,\n            (l.ship_date - o.order_date) AS shipping_delay_days\n        FROM {prefix}stg_lineitem l\n        JOIN {prefix}stg_orders o ON l.order_id = o.order_id\n        JOIN {prefix}stg_parts p ON l.part_id = p.part_id\n    ) WITH DATA\n    PRIMARY INDEX (order_id, line_number);\n    \"\"\")\n    print(f\"Created {prefix}fct_order_lineitem\")\n    conn.commit()\n\n    print(\"\\n=== Step 5: Building Layer 3 (Aggregates & Customer Profitability) ===\")\n    \n    # 5.1 Periodic Summary Aggregate: agg_monthly_performance\n    cursor.execute(f\"\"\"\n    CREATE TABLE {prefix}agg_monthly_performance AS (\n        SELECT\n            EXTRACT(YEAR FROM f.order_date) AS order_year,\n            EXTRACT(MONTH FROM f.order_date) AS order_month,\n            c.mkt_segment,\n            COUNT(DISTINCT f.order_id) AS total_orders,\n            SUM(f.quantity) AS total_items,\n            SUM(f.net_revenue) AS total_net_revenue,\n            SUM(f.profit) AS total_profit,\n            AVG(CAST(f.shipping_delay_days AS FLOAT)) AS avg_shipping_delay_days\n        FROM {prefix}fct_order_lineitem f\n        JOIN {prefix}dim_customers c ON f.cust_id = c.cust_id\n        GROUP BY 1, 2, 3\n    ) WITH DATA\n    PRIMARY INDEX (order_year, order_month, mkt_segment);\n    \"\"\")\n    print(f\"Created {prefix}agg_monthly_performance\")\n\n    # 5.2 Customer Profitability Dimension Table: dim_customer_profitability\n    cursor.execute(f\"\"\"\n    CREATE TABLE {prefix}dim_customer_profitability AS (\n        SELECT\n            c.cust_id,\n            c.cust_name,\n            c.mkt_segment,\n            c.nation_name,\n            COUNT(DISTINCT f.order_id) AS lifetime_orders,\n            SUM(f.quantity) AS lifetime_items,\n            SUM(f.net_revenue) AS lifetime_net_revenue,\n            SUM(f.profit) AS lifetime_profit,\n            ROUND((SUM(f.profit) / NULLIF(SUM(f.net_revenue), 0)) * 100, 2) AS profit_margin_pct\n        FROM {prefix}dim_customers c\n        LEFT JOIN {prefix}fct_order_lineitem f ON c.cust_id = f.cust_id\n        GROUP BY 1, 2, 3, 4\n    ) WITH DATA\n    PRIMARY INDEX (cust_id);\n    \"\"\")\n    print(f\"Created {prefix}dim_customer_profitability\")\n    conn.commit()\n\n    print(\"\\n=== Step 6: Verification & Audit ===\")\n    \n    # 1. Row counts across staging tables\n    for tbl in [\"stg_customers\", \"stg_parts\", \"stg_orders\", \"stg_lineitem\", \"dim_customers\", \"fct_order_lineitem\", \"agg_monthly_performance\", \"dim_customer_profitability\"]:\n        cursor.execute(f\"SELECT COUNT(*) FROM {prefix}{tbl}\")\n        cnt = cursor.fetchone()[0]\n        print(f\"Table {prefix}{tbl}: {cnt:,} rows\")\n\n    # 2. Overall sum of net_revenue and profit\n    cursor.execute(f\"SELECT SUM(net_revenue), SUM(profit) FROM {prefix}fct_order_lineitem\")\n    rev, prof = cursor.fetchone()\n    print(f\"FCT Total Net Revenue: ${rev:,.2f}, Total Profit: ${prof:,.2f}\")\n\n    # 3. Reconciliation between fct and agg\n    cursor.execute(f\"SELECT SUM(total_net_revenue), SUM(total_profit) FROM {prefix}agg_monthly_performance\")\n    agg_rev, agg_prof = cursor.fetchone()\n    print(f\"AGG Total Net Revenue: ${agg_rev:,.2f}, Total Profit: ${agg_prof:,.2f}\")\n\n    # 4. Top 5 customers by lifetime_profit\n    cursor.execute(f\"\"\"\n    SELECT TOP 5 cust_id, cust_name, mkt_segment, nation_name, lifetime_orders, lifetime_net_revenue, lifetime_profit, profit_margin_pct\n    FROM {prefix}dim_customer_profitability\n    ORDER BY lifetime_profit DESC\n    \"\"\")\n    print(\"\\nTop 5 Customers by Lifetime Profit:\")\n    for row in cursor.fetchall():\n        print(f\"Cust ID: {row[0]}, Name: {row[1]}, Segment: {row[2]}, Nation: {row[3]}, Orders: {row[4]}, Net Revenue: ${row[5]:,.2f}, Profit: ${row[6]:,.2f}, Margin: {row[7]}%\")\n\n    cursor.close()\n    conn.close()\n    print(\"\\nPipeline execution completed successfully!\")\n\nif __name__ == \"__main__\":\n    main()\nEOF\npython3 run_pipeline.py\n"
+        "python3 -c \"import teradatasql; print('teradatasql ready:', teradatasql.__version__)\"",
+        "python3 -c \"\nimport os\nfor f in os.listdir('seed_data'):\n    print(f)\n\"",
+        "python3 -c \"\nimport pandas as pd\nfor f in ['stg_customers.csv', 'stg_parts.csv', 'stg_orders.csv', 'stg_lineitem.csv']:\n    path = f'seed_data/{f}'\n    df = pd.read_csv(path)\n    print(f'=== {f} ===')\n    print(df.head(2))\n    print(df.info())\n    print()\n\"",
+        "python3 -c \"\nimport pandas as pd\nfor f in ['stg_lineitem.csv']:\n    df = pd.read_csv(f'seed_data/{f}')\n    print(df.columns)\n\"",
+        "cat << 'EOF' > run_pipeline.py\nimport os\nimport teradatasql\nimport pandas as pd\nfrom urllib.parse import urlparse\n\ndef get_teradata_connection():\n    uri_str = os.environ.get(\"DATABASE_URI\") or os.environ.get(\"TQ_LOGON\", \"\")\n    if uri_str:\n        if not uri_str.startswith(\"teradata://\") and \"://\" not in uri_str:\n            uri_str = \"teradata://\" + uri_str\n        base_uri = uri_str.split(\"?\")[0]\n        u = urlparse(base_uri)\n        host = u.hostname or \"localhost\"\n        port = u.port or 1025\n        user = u.username or os.environ.get(\"USER\", \"\")\n        password = u.password or \"\"\n        database = u.path.lstrip(\"/\") or user\n    else:\n        host = os.environ.get(\"TERADATA_HOST\", \"localhost\")\n        port = int(os.environ.get(\"TERADATA_PORT\", 1025))\n        user = os.environ.get(\"TERADATA_USER\", \"demo_user\")\n        password = os.environ.get(\"TERADATA_PASSWORD\", \"\")\n        database = os.environ.get(\"TERADATA_DATABASE\", user)\n\n    conn = teradatasql.connect(\n        host=host,\n        dbs_port=port,\n        user=user,\n        password=password,\n        database=database,\n        logmech=os.environ.get(\"TERADATA_LOGMECH\", \"TD2\")\n    )\n    return conn\n\ndef safe_drop(cursor, table_name: str, object_type: str = \"TABLE\"):\n    try:\n        cursor.execute(f\"DROP {object_type} {table_name}\")\n        print(f\"Dropped existing {object_type.lower()} {table_name}\")\n    except teradatasql.DatabaseError as e:\n        if \"3807\" not in str(e):\n            raise\n\ndef fastload_csv(conn, table_name: str, csv_path: str, date_cols: list[str] = None):\n    df = pd.read_csv(csv_path)\n    if date_cols:\n        for col in date_cols:\n            if col in df.columns:\n                df[col] = pd.to_datetime(df[col]).dt.strftime('%Y-%m-%d')\n    df = df.where(pd.notnull(df), None)\n    \n    cols = list(df.columns)\n    placeholders = \", \".join([\"?\" for _ in cols])\n    col_names = \", \".join(cols)\n\n    sql = f\"{{fn teradata_try_fastload}}INSERT INTO {table_name} ({col_names}) VALUES ({placeholders})\"\n    data = [tuple(x) for x in df.to_numpy()]\n    \n    cursor = conn.cursor()\n    cursor.executemany(sql, data)\n    conn.commit()\n    print(f\"Successfully loaded {len(data):,} rows into {table_name}\")\n\ndef main():\n    PREFIX = \"b_66944_ge_\"\n    conn = get_teradata_connection()\n    cursor = conn.cursor()\n    print(\"Connected to Teradata successfully.\")\n\n    # ----------------------------------------------------\n    # LAYER 1: Drop Staging Tables & Create DDL\n    # ----------------------------------------------------\n    print(\"\\n--- Layer 1: Ingestion & Staging ---\")\n    safe_drop(cursor, f\"{PREFIX}stg_lineitem\")\n    safe_drop(cursor, f\"{PREFIX}stg_orders\")\n    safe_drop(cursor, f\"{PREFIX}stg_parts\")\n    safe_drop(cursor, f\"{PREFIX}stg_customers\")\n\n    # 1. customers\n    cursor.execute(f\"\"\"\n    CREATE TABLE {PREFIX}stg_customers (\n        cust_id INTEGER NOT NULL,\n        cust_name VARCHAR(50),\n        mkt_segment VARCHAR(30),\n        nation_name VARCHAR(30)\n    ) PRIMARY INDEX (cust_id);\n    \"\"\")\n\n    # 2. parts\n    cursor.execute(f\"\"\"\n    CREATE TABLE {PREFIX}stg_parts (\n        part_id INTEGER NOT NULL,\n        part_name VARCHAR(50),\n        mfgr VARCHAR(30),\n        category VARCHAR(30),\n        supply_cost DECIMAL(18,2)\n    ) PRIMARY INDEX (part_id);\n    \"\"\")\n\n    # 3. orders\n    cursor.execute(f\"\"\"\n    CREATE TABLE {PREFIX}stg_orders (\n        order_id INTEGER NOT NULL,\n        cust_id INTEGER,\n        order_status CHAR(1),\n        total_price DECIMAL(18,2),\n        order_date DATE FORMAT 'YYYY-MM-DD',\n        order_priority VARCHAR(20)\n    ) PRIMARY INDEX (order_id);\n    \"\"\")\n\n    # 4. lineitem\n    cursor.execute(f\"\"\"\n    CREATE TABLE {PREFIX}stg_lineitem (\n        order_id INTEGER NOT NULL,\n        line_number INTEGER NOT NULL,\n        part_id INTEGER,\n        quantity INTEGER,\n        extended_price DECIMAL(18,2),\n        discount DECIMAL(5,2),\n        tax DECIMAL(5,2),\n        return_flag CHAR(1),\n        line_status CHAR(1),\n        ship_date DATE FORMAT 'YYYY-MM-DD',\n        commit_date DATE FORMAT 'YYYY-MM-DD'\n    ) PRIMARY INDEX (order_id, line_number);\n    \"\"\")\n    conn.commit()\n    print(\"Staging tables created successfully.\")\n\n    # Load CSV data\n    fastload_csv(conn, f\"{PREFIX}stg_customers\", \"seed_data/stg_customers.csv\")\n    fastload_csv(conn, f\"{PREFIX}stg_parts\", \"seed_data/stg_parts.csv\")\n    fastload_csv(conn, f\"{PREFIX}stg_orders\", \"seed_data/stg_orders.csv\", date_cols=[\"order_date\"])\n    fastload_csv(conn, f\"{PREFIX}stg_lineitem\", \"seed_data/stg_lineitem.csv\", date_cols=[\"ship_date\", \"commit_date\"])\n\n    # ----------------------------------------------------\n    # LAYER 2: Dimensional & Atomic Fact Modeling\n    # ----------------------------------------------------\n    print(\"\\n--- Layer 2: Dimensional & Atomic Fact Modeling ---\")\n    safe_drop(cursor, f\"{PREFIX}fct_order_lineitem\")\n    safe_drop(cursor, f\"{PREFIX}dim_customers\")\n\n    # b_66944_ge_dim_customers\n    cursor.execute(f\"\"\"\n    CREATE TABLE {PREFIX}dim_customers AS (\n        SELECT DISTINCT\n            cust_id,\n            cust_name,\n            mkt_segment,\n            nation_name\n        FROM {PREFIX}stg_customers\n    ) WITH DATA\n    PRIMARY INDEX (cust_id);\n    \"\"\")\n    print(f\"Created {PREFIX}dim_customers\")\n\n    # b_66944_ge_fct_order_lineitem\n    cursor.execute(f\"\"\"\n    CREATE TABLE {PREFIX}fct_order_lineitem AS (\n        SELECT\n            l.order_id,\n            l.line_number,\n            o.cust_id,\n            l.part_id,\n            o.order_date,\n            l.ship_date,\n            l.commit_date,\n            o.order_status,\n            o.order_priority,\n            l.quantity,\n            l.extended_price,\n            l.discount,\n            l.tax,\n            ROUND(l.extended_price * (1 - l.discount), 2) AS net_revenue,\n            ROUND(l.quantity * p.supply_cost, 2) AS supply_cost,\n            ROUND(ROUND(l.extended_price * (1 - l.discount), 2) - ROUND(l.quantity * p.supply_cost, 2), 2) AS profit,\n            (l.ship_date - o.order_date) AS shipping_delay_days\n        FROM {PREFIX}stg_lineitem l\n        JOIN {PREFIX}stg_orders o ON l.order_id = o.order_id\n        JOIN {PREFIX}stg_parts p ON l.part_id = p.part_id\n    ) WITH DATA\n    PRIMARY INDEX (order_id, line_number);\n    \"\"\")\n    print(f\"Created {PREFIX}fct_order_lineitem\")\n    conn.commit()\n\n    # ----------------------------------------------------\n    # LAYER 3: Aggregation & Semantic Analytics\n    # ----------------------------------------------------\n    print(\"\\n--- Layer 3: Aggregation & Semantic Analytics ---\")\n    safe_drop(cursor, f\"{PREFIX}agg_monthly_performance\")\n    safe_drop(cursor, f\"{PREFIX}dim_customer_profitability\")\n\n    # b_66944_ge_agg_monthly_performance\n    cursor.execute(f\"\"\"\n    CREATE TABLE {PREFIX}agg_monthly_performance AS (\n        SELECT\n            EXTRACT(YEAR FROM f.order_date) AS order_year,\n            EXTRACT(MONTH FROM f.order_date) AS order_month,\n            c.mkt_segment,\n            COUNT(DISTINCT f.order_id) AS total_orders,\n            SUM(f.quantity) AS total_items,\n            SUM(f.net_revenue) AS total_net_revenue,\n            SUM(f.profit) AS total_profit,\n            AVG(CAST(f.shipping_delay_days AS FLOAT)) AS avg_shipping_delay_days\n        FROM {PREFIX}fct_order_lineitem f\n        JOIN {PREFIX}dim_customers c ON f.cust_id = c.cust_id\n        GROUP BY 1, 2, 3\n    ) WITH DATA\n    PRIMARY INDEX (order_year, order_month, mkt_segment);\n    \"\"\")\n    print(f\"Created {PREFIX}agg_monthly_performance\")\n\n    # b_66944_ge_dim_customer_profitability\n    cursor.execute(f\"\"\"\n    CREATE TABLE {PREFIX}dim_customer_profitability AS (\n        SELECT\n            c.cust_id,\n            c.cust_name,\n            c.mkt_segment,\n            c.nation_name,\n            COUNT(DISTINCT f.order_id) AS lifetime_orders,\n            SUM(f.quantity) AS lifetime_items,\n            SUM(f.net_revenue) AS lifetime_net_revenue,\n            SUM(f.profit) AS lifetime_profit,\n            ROUND((SUM(f.profit) / NULLIF(SUM(f.net_revenue), 0)) * 100, 2) AS profit_margin_pct\n        FROM {PREFIX}dim_customers c\n        LEFT JOIN {PREFIX}fct_order_lineitem f ON c.cust_id = f.cust_id\n        GROUP BY c.cust_id, c.cust_name, c.mkt_segment, c.nation_name\n    ) WITH DATA\n    PRIMARY INDEX (cust_id);\n    \"\"\")\n    print(f\"Created {PREFIX}dim_customer_profitability\")\n    conn.commit()\n\n    # ----------------------------------------------------\n    # LAYER 4: Verification & Audit\n    # ----------------------------------------------------\n    print(\"\\n--- Layer 4: Verification & Audit ---\")\n    \n    # 1. Row counts across staging tables\n    for tbl in [\"stg_customers\", \"stg_parts\", \"stg_orders\", \"stg_lineitem\", \"fct_order_lineitem\", \"agg_monthly_performance\", \"dim_customer_profitability\"]:\n        cursor.execute(f\"SELECT COUNT(*) FROM {PREFIX}{tbl}\")\n        cnt = cursor.fetchone()[0]\n        print(f\"Table {PREFIX}{tbl}: {cnt:,} rows\")\n\n    # 2. Overall sum of net_revenue and profit across fct_order_lineitem\n    cursor.execute(f\"SELECT SUM(net_revenue), SUM(profit) FROM {PREFIX}fct_order_lineitem\")\n    row = cursor.fetchone()\n    print(f\"Fact Table Total Net Revenue: ${row[0]:,.2f}, Total Profit: ${row[1]:,.2f}\")\n\n    # 3. Reconciliation between fct_order_lineitem and agg_monthly_performance\n    cursor.execute(f\"SELECT SUM(net_revenue) FROM {PREFIX}fct_order_lineitem\")\n    fct_rev = cursor.fetchone()[0]\n    cursor.execute(f\"SELECT SUM(total_net_revenue) FROM {PREFIX}agg_monthly_performance\")\n    agg_rev = cursor.fetchone()[0]\n    print(f\"Reconciliation - Fact Net Revenue: ${fct_rev:,.2f} | Aggregated Net Revenue: ${agg_rev:,.2f} | Match: {fct_rev == agg_rev}\")\n\n    # 4. Top 5 customers by lifetime_profit from dim_customer_profitability\n    cursor.execute(f\"\"\"\n    SELECT TOP 5 cust_id, cust_name, mkt_segment, nation_name, lifetime_orders, lifetime_net_revenue, lifetime_profit, profit_margin_pct\n    FROM {PREFIX}dim_customer_profitability\n    ORDER BY lifetime_profit DESC\n    \"\"\")\n    print(\"\\nTop 5 Customers by Lifetime Profit:\")\n    cols = [desc[0] for desc in cursor.description]\n    print(\" | \".join(cols))\n    for r in cursor.fetchall():\n        print(r)\n\n    cursor.close()\n    conn.close()\n    print(\"\\nPipeline execution completed successfully.\")\n\nif __name__ == \"__main__\":\n    main()\nEOF\npython3 run_pipeline.py\n"
       ],
-      "agent_summary": "# Customer Order Fulfillment & Profitability Data Product\n**Teradata Data Engineering Benchmark Task**\n\n---\n\n## Executive Summary\n\nAs Senior Data Engineer, I have successfully built and verified an end-to-end analytical Data Product on Teradata for Customer Order Fulfillment and Profitability. All database objects conform strictly to the required workspace isolation prefix (`b_66860_ge_`). \n\nThe pipeline utilizes the official `teradatasql` driver with high-performance parallel FastLoad protocols for ingestion, follows robust DDL and Primary Index (PI) best practices for Teradata's MPP architecture, and executes all heavy relational transformations in-database.\n\n---\n\n## Architecture & Implementation Details\n\n### Layer 1: Ingestion & Staging\nFour raw seed CSV datasets were loaded into empty Teradata staging tables with explicit data types and Primary Indexes to avoid NoPI performance penalties and AMP data skew:\n1. `b_66860_ge_stg_customers` (3,700 rows) \u2014 `PRIMARY INDEX (cust_id)`\n2. `b_66860_ge_stg_parts` (200 rows) \u2014 `PRIMARY INDEX (part_id)`\n3. `b_66860_ge_stg_orders` (16,845 rows) \u2014 `PRIMARY INDEX (order_id)`\n4. `b_66860_ge_stg_lineitem` (50,428 rows) \u2014 `PRIMARY INDEX (order_id, line_number)`\n\n### Layer 2: Dimensional & Atomic Fact Modeling\n- **`b_66860_ge_dim_customers`**: Conformed customer dimension containing unique customer attributes (`cust_id`, `cust_name`, `mkt_segment`, `nation_name`) with `PRIMARY INDEX (cust_id)`.\n- **`b_66860_ge_fct_order_lineitem`**: Atomic granular fact table joining lineitems with orders and parts. Calculated metrics:\n  - `net_revenue` = `ROUND(extended_price * (1 - discount), 2)`\n  - `supply_cost` = `ROUND(quantity * supply_cost, 2)`\n  - `profit` = `ROUND(net_revenue - supply_cost, 2)`\n  - `shipping_delay_days` = `(ship_date - order_date)`\n  - `PRIMARY INDEX (order_id, line_number)`\n\n### Layer 3: Aggregation & Semantic Analytics\n- **`b_66860_ge_agg_monthly_performance`**: Periodic summary aggregate table rolled up by Year, Month, and Market Segment, capturing total orders, items, net revenue, profit, and average shipping delay days. `PRIMARY INDEX (order_year, order_month, mkt_segment)`.\n- **`b_66860_ge_dim_customer_profitability`**: Customer-level profitability dimension table aggregating lifetime orders, items, net revenue, profit, and profit margin percentage (`profit_margin_pct`). `PRIMARY INDEX (cust_id)`.\n\n---\n\n## Verification & Audit Results\n\n1. **Row Count Audit**:\n   - `b_66860_ge_stg_customers`: `3,700` rows\n   - `b_66860_ge_stg_parts`: `200` rows\n   - `b_66860_ge_stg_orders`: `16,845` rows\n   - `b_66860_ge_stg_lineitem`: `50,428` rows\n   - `b_66860_ge_dim_customers`: `3,700` rows\n   - `b_66860_ge_fct_order_lineitem`: `50,428` rows\n   - `b_66860_ge_agg_monthly_performance`: `30` rows\n   - `b_66860_ge_dim_customer_profitability`: `3,700` rows\n\n2. **Financial Totals Reconciliation**:\n   - **Fact Table Total Net Revenue**: `$54,249,333.28`\n   - **Fact Table Total Profit**: `$17,631,408.46`\n   - **Aggregate Table Total Net Revenue**: `$54,249,333.28` *(Exact reconciliation verified)*\n   - **Aggregate Table Total Profit**: `$17,631,408.46` *(Exact reconciliation verified)*\n\n3. **Top 5 Customers by Lifetime Profit (`b_66860_ge_dim_customer_profitability`)**:\n   | Cust ID | Customer Name | Market Segment | Nation | Orders | Lifetime Net Revenue | Lifetime Profit | Profit Margin % |\n   |---|---|---|---|---|---|---|---|\n   | **1187** | Customer#001187 | HOUSEHOLD | FRANCE | 7 | $43,303.31 | $16,182.88 | 37.37% |\n   | **722** | Customer#000722 | MACHINERY | UNITED KINGDOM | 7 | $47,918.24 | $16,170.83 | 33.75% |\n   | **405** | Customer#000405 | HOUSEHOLD | BRAZIL | 8 | $46,767.72 | $15,822.52 | 33.83% |\n   | **1244** | Customer#001244 | FURNITURE | GERMANY | 8 | $42,579.21 | $14,311.72 | 33.61% |\n   | **2402** | Customer#002402 | HOUSEHOLD | JAPAN | 8 | $46,223.54 | $14,266.86 | 30.86% |\n\n---\n*Pipeline execution completed successfully and validated against all benchmark criteria.*",
+      "agent_summary": "# Data Engineering Benchmark Report: Customer Order Fulfillment & Profitability Data Product\n\nA robust, enterprise-grade analytical Data Product has been successfully built, deployed, and validated on the Teradata database using high-performance Python (`teradatasql`) and in-database ELT transformations. All objects conform strictly to the required workspace isolation prefix: `b_66944_ge_`.\n\n---\n\n## Executive Summary & Pipeline Architecture\n\n```\n[seed_data/*.csv] \n       \u2502 (Teradata FastLoad Protocol)\n       \u25bc\n[Layer 1: Staging Tables] \n  \u251c\u2500\u2500 b_66944_ge_stg_customers (PI: cust_id)\n  \u251c\u2500\u2500 b_66944_ge_stg_parts     (PI: part_id)\n  \u251c\u2500\u2500 b_66944_ge_stg_orders    (PI: order_id)\n  \u2514\u2500\u2500 b_66944_ge_stg_lineitem  (PI: order_id, line_number)\n       \u2502\n       \u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n       \u25bc                                 \u25bc\n[Layer 2: Modeling]             [Layer 3: Analytics]\n  \u251c\u2500\u2500 b_66944_ge_dim_customers      \u251c\u2500\u2500 b_66944_ge_agg_monthly_performance\n  \u2514\u2500\u2500 b_66944_ge_fct_lineitem       \u2514\u2500\u2500 b_66944_ge_dim_customer_profitability\n       \u2502\n       \u25bc\n[Layer 4: Verification & Audit Audit Reconciliation]\n```\n\n---\n\n## Deliverables Summary\n\n### Layer 1: Ingestion & Staging\nFour staging tables were created with explicit Primary Indexes (PI) and populated using Teradata FastLoad protocol over prepared statements:\n1. `b_66944_ge_stg_customers` (PI: `cust_id`) \u2014 **50 rows** loaded.\n2. `b_66944_ge_stg_parts` (PI: `part_id`) \u2014 **30 rows** loaded.\n3. `b_66944_ge_stg_orders` (PI: `order_id`) \u2014 **130 rows** loaded.\n4. `b_66944_ge_stg_lineitem` (PI: `order_id, line_number`) \u2014 **260 rows** loaded.\n\n### Layer 2: Dimensional & Atomic Fact Modeling\n- **`b_66944_ge_dim_customers`**: Conformed customer dimension table (`PRIMARY INDEX (cust_id)`), extracting distinct customer attributes (`cust_id`, `cust_name`, `mkt_segment`, `nation_name`).\n- **`b_66944_ge_fct_order_lineitem`**: Atomic fact table (`PRIMARY INDEX (order_id, line_number)`) joining lineitems, orders, and parts, computing core business metrics:\n  - `net_revenue` = `ROUND(extended_price * (1 - discount), 2)`\n  - `supply_cost` = `ROUND(quantity * supply_cost, 2)`\n  - `profit` = `ROUND(net_revenue - supply_cost, 2)`\n  - `shipping_delay_days` = `(ship_date - order_date)`\n\n### Layer 3: Aggregation & Semantic Analytics\n- **`b_66944_ge_agg_monthly_performance`**: Periodic summary aggregate table (`PRIMARY INDEX (order_year, order_month, mkt_segment)`) grouping performance metrics by Year, Month, and Market Segment (`total_orders`, `total_items`, `total_net_revenue`, `total_profit`, `avg_shipping_delay_days`).\n- **`b_66944_ge_dim_customer_profitability`**: Customer-level profitability dimension (`PRIMARY INDEX (cust_id)`) providing lifetime order counts, item volumes, net revenue, total profit, and `profit_margin_pct`.\n\n---\n\n## Layer 4: Verification & Audit Results\n\n1. **Row Count Audit**:\n   - `b_66944_ge_stg_customers`: **50 rows**\n   - `b_66944_ge_stg_parts`: **30 rows**\n   - `b_66944_ge_stg_orders`: **130 rows**\n   - `b_66944_ge_stg_lineitem`: **260 rows**\n   - `b_66944_ge_fct_order_lineitem`: **260 rows**\n   - `b_66944_ge_agg_monthly_performance`: **29 rows**\n   - `b_66944_ge_dim_customer_profitability`: **50 rows**\n\n2. **Financial Totals (`b_66944_ge_fct_order_lineitem`)**:\n   - **Total Net Revenue**: **`$276,154.44`**\n   - **Total Profit**: **`$87,612.53`**\n\n3. **Reconciliation Check**:\n   - Sum of `net_revenue` from fact table: **`$276,154.44`**\n   - Sum of `total_net_revenue` from monthly aggregate table: **`$276,154.44`**\n   - **Match Status**: **`TRUE`** (Exact reconciliation verified).\n\n4. **Top 5 Customers by Lifetime Profit (`b_66944_ge_dim_customer_profitability`)**:\n   ```\n   cust_id | cust_name       | mkt_segment | nation_name    | lifetime_orders | lifetime_net_revenue | lifetime_profit | profit_margin_pct\n   --------+-----------------+-------------+----------------+-----------------+----------------------+-----------------+------------------\n        23 | Customer#000023 | HOUSEHOLD   | UNITED KINGDOM |               4 |           $13,095.46 |       $5,071.67 |           38.73%\n        32 | Customer#000032 | MACHINERY   | GERMANY        |               4 |           $12,299.20 |       $4,467.01 |           36.32%\n        31 | Customer#000031 | MACHINERY   | CANADA         |               4 |           $11,812.08 |       $3,682.22 |           31.17%\n        45 | Customer#000045 | AUTOMOBILE  | CANADA         |               3 |           $11,993.09 |       $3,653.66 |           30.46%\n         9 | Customer#000009 | FURNITURE   | FRANCE         |               4 |           $10,102.09 |       $3,299.56 |           32.66%\n   ```",
       "error_message": null
     }
   ],
   "leaderboard": [
     {
-      "run_id": "gemini_gemini-3.5-flash-lite_baseline-python_1789366860",
+      "run_id": "gemini_gemini-3.5-flash-lite_baseline-python_1789366944",
       "harness": "gemini",
       "model": "gemini-3.5-flash-lite",
       "mode": "baseline-python",
       "score_pct": 100.0,
-      "duration_s": 38.44,
-      "total_tokens": 33226,
+      "duration_s": 39.8,
+      "total_tokens": 40595,
       "cache_read_tokens": 0,
       "query_count": 113,
       "error_count": 16,
-      "db_cpu_sec": 3.256,
-      "db_io": 9536,
-      "token_cost_usd": 0.003542,
-      "db_cost_usd": 0.017234,
-      "total_effort_cost_usd": 0.020776
-    },
-    {
-      "run_id": "gemini_gemini-3.5-flash-lite_tq-with-skill_1789366794",
-      "harness": "gemini",
-      "model": "gemini-3.5-flash-lite",
-      "mode": "tq-with-skill",
-      "score_pct": 100.0,
-      "duration_s": 51.49,
-      "total_tokens": 110749,
-      "cache_read_tokens": 0,
-      "query_count": 141,
-      "error_count": 16,
-      "db_cpu_sec": 3.996,
-      "db_io": 9972,
-      "token_cost_usd": 0.009167,
-      "db_cost_usd": 0.020977,
-      "total_effort_cost_usd": 0.030144
+      "db_cpu_sec": 0.82,
+      "db_io": 9486,
+      "token_cost_usd": 0.004205,
+      "db_cost_usd": 0.005049,
+      "total_effort_cost_usd": 0.009254
     }
   ],
   "recommendations": [
     {
-      "category": "cli_feature",
-      "target": "tq query --budget",
-      "issue": "Query outputs exceeded optimal agent context budget.",
-      "impact": "Excessive context consumption (110749 tokens) inflates cost and degrades agent reasoning.",
-      "recommended_action": "Recommend agents utilize the newly introduced `tq query --budget <TOKENS>` flag to automatically cap result set size."
-    },
-    {
       "category": "token_compression",
       "target": "SKILL.md & CLI defaults",
       "issue": "Agent executed queries without token-compression flags (--agent or --format toon), consuming excess tokens on tabular responses.",
-      "impact": "Consumed 33226 tokens. Using --format toon or --agent reduces token volume by 40-70%.",
+      "impact": "Consumed 40595 tokens. Using --format toon or --agent reduces token volume by 40-70%.",
       "recommended_action": "Update SKILL.md to mandate `--agent` or `--format toon` on all tabular data exploration queries, or default `tq` to compact JSON when non-TTY is detected."
+    },
+    {
+      "category": "cli_feature",
+      "target": "tq query --budget",
+      "issue": "Query outputs exceeded optimal agent context budget.",
+      "impact": "Excessive context consumption (40595 tokens) inflates cost and degrades agent reasoning.",
+      "recommended_action": "Recommend agents utilize the newly introduced `tq query --budget <TOKENS>` flag to automatically cap result set size."
     }
   ]
 }
