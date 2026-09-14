@@ -31,13 +31,13 @@ class ReportGenerator:
             f"# {title}",
             "",
             "> **Executive Summary:** This report benchmarks autonomous coding agents executing an end-to-end",
-            "> Data Product pipeline on Teradata. It accounts for all expense items: LLM token consumption by",
-            "> category (input, output, cache-read, reasoning) and induced database resource consumption (AMP CPU, I/O, Spool).",
+            "> Data Product pipeline on Teradata. It tracks LLM token consumption and cost along with",
+            "> database execution performance telemetry (AMP CPU, I/O, Spool).",
             "",
             "## 1. Executive Leaderboard",
             "",
-            "| Harness | Model | Mode | Score | Duration | Total Tokens | Cache Read % | Queries | DB CPU (s) | DB I/O | Token Cost ($) | DB Cost ($) | **Total Effort Cost ($)** |",
-            "| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |"
+            "| Harness | Model | Mode | Score | Duration | Total Tokens | Cache Read % | Queries | DB CPU (s) | DB I/O | **Token Cost ($)** |",
+            "| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |"
         ]
 
         for r in leaderboard:
@@ -46,7 +46,7 @@ class ReportGenerator:
                 cache_pct = round((r["cache_read_tokens"] / float(r["total_tokens"])) * 100.0, 1)
 
             lines.append(
-                f"| `{r['harness']}` | `{r['model']}` | `{r['mode']}` | {r['score_pct']}% | {r['duration_s']}s | {r['total_tokens']:,} | {cache_pct}% | {r.get('query_count', 0)} | {r['db_cpu_sec']:.3f} | {r.get('db_io', 0):,} | ${r['token_cost_usd']:.4f} | ${r['db_cost_usd']:.4f} | **${r['total_effort_cost_usd']:.4f}** |"
+                f"| `{r['harness']}` | `{r['model']}` | `{r['mode']}` | {r['score_pct']}% | {r['duration_s']}s | {r['total_tokens']:,} | {cache_pct}% | {r.get('query_count', 0)} | {r['db_cpu_sec']:.3f} | {r.get('db_io', 0):,} | **${r['token_cost_usd']:.4f}** |"
             )
 
         lines.extend([
@@ -68,7 +68,7 @@ class ReportGenerator:
         if skill_pairs:
             lines.append("### A. Skill Impact (`tq-with-skill` vs `tq-no-skill`)")
             lines.append("")
-            lines.append("| Model | Token Savings % | Total Effort Cost Savings % | DB CPU Savings % | Accuracy Delta | Advantage |")
+            lines.append("| Model | Token Savings % | Token Cost Savings % | DB CPU Savings % | Accuracy Delta | Advantage |")
             lines.append("| :--- | :---: | :---: | :---: | :---: | :---: |")
             for r_s, r_n in skill_pairs:
                 cmp = compare_skill_impact(r_s, r_n)
@@ -88,7 +88,7 @@ class ReportGenerator:
         if tool_pairs:
             lines.append("### B. Tool Acceleration (`tq` vs `baseline-python`)")
             lines.append("")
-            lines.append("| Model | Token Savings % | Cost Savings % | Speedup Ratio | `tq` Score | Baseline Score |")
+            lines.append("| Model | Token Savings % | Token Cost Savings % | Speedup Ratio | `tq` Score | Baseline Score |")
             lines.append("| :--- | :---: | :---: | :---: | :---: | :---: |")
             for r_t, r_p in tool_pairs:
                 cmp = compare_tool_impact(r_t, r_p)
@@ -129,7 +129,7 @@ class ReportGenerator:
             lines.append(f"- **Duration:** {r.duration_seconds}s | **Score:** {r.validation_score}%")
             lines.append(f"- **Tokens:** {r.token_usage.total_tokens:,} (Input: {r.token_usage.input_tokens:,}, Output: {r.token_usage.output_tokens:,}, Cache Read: {r.token_usage.cache_read_tokens:,})")
             lines.append(f"- **Database Telemetry (DBQL):** Queries: {r.db_metrics.query_count}, Errors: {r.db_metrics.error_count}, AMP CPU: {r.db_metrics.delta_cpu_sec:.3f}s, I/O: {r.db_metrics.delta_io:,}, Peak Spool: {r.db_metrics.peak_spool_bytes:,} bytes")
-            lines.append(f"- **Total Effort Cost:** **${r.costs.get('total_effort_cost_usd', 0.0):.4f}**")
+            lines.append(f"- **Token Cost:** **${r.costs.get('token_cost_usd', 0.0):.4f}**")
             lines.append("- **Assertion Details:**")
             for a in r.validation_details:
                 status = "✅ PASS" if a.get("passed") else "❌ FAIL"

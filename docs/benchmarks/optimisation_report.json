@@ -32,8 +32,8 @@
       },
       "costs": {
         "token_cost_usd": 0.01388,
-        "database_cost_usd": 0.01556,
-        "total_effort_cost_usd": 0.02944
+        "database_cost_usd": 0.0,
+        "total_effort_cost_usd": 0.01388
       },
       "validation_score": 100.0,
       "all_assertions_passed": true,
@@ -140,8 +140,8 @@
       },
       "costs": {
         "token_cost_usd": 0.004959,
-        "database_cost_usd": 0.034864,
-        "total_effort_cost_usd": 0.039823
+        "database_cost_usd": 0.0,
+        "total_effort_cost_usd": 0.004959
       },
       "validation_score": 100.0,
       "all_assertions_passed": true,
@@ -206,23 +206,6 @@
   ],
   "leaderboard": [
     {
-      "run_id": "gemini_gemini-3.5-flash-lite_tq-with-skill_1789367482",
-      "harness": "gemini",
-      "model": "gemini-3.5-flash-lite",
-      "mode": "tq-with-skill",
-      "score_pct": 100.0,
-      "duration_s": 75.45,
-      "total_tokens": 167914,
-      "cache_read_tokens": 0,
-      "query_count": 203,
-      "error_count": 22,
-      "db_cpu_sec": 2.864,
-      "db_io": 12405,
-      "token_cost_usd": 0.01388,
-      "db_cost_usd": 0.01556,
-      "total_effort_cost_usd": 0.02944
-    },
-    {
       "run_id": "gemini_gemini-3.5-flash-lite_baseline-python_1789367572",
       "harness": "gemini",
       "model": "gemini-3.5-flash-lite",
@@ -236,8 +219,25 @@
       "db_cpu_sec": 6.372,
       "db_io": 30041,
       "token_cost_usd": 0.004959,
-      "db_cost_usd": 0.034864,
-      "total_effort_cost_usd": 0.039823
+      "db_cost_usd": 0.0,
+      "total_effort_cost_usd": 0.004959
+    },
+    {
+      "run_id": "gemini_gemini-3.5-flash-lite_tq-with-skill_1789367482",
+      "harness": "gemini",
+      "model": "gemini-3.5-flash-lite",
+      "mode": "tq-with-skill",
+      "score_pct": 100.0,
+      "duration_s": 75.45,
+      "total_tokens": 167914,
+      "cache_read_tokens": 0,
+      "query_count": 203,
+      "error_count": 22,
+      "db_cpu_sec": 2.864,
+      "db_io": 12405,
+      "token_cost_usd": 0.01388,
+      "db_cost_usd": 0.0,
+      "total_effort_cost_usd": 0.01388
     }
   ],
   "recommendations": [

@@ -77,13 +77,15 @@ class CostCalculator:
         amp_io: int = 0,
         req_spool: int = 0
     ) -> dict[str, float]:
-        """Combine LLM token cost and database consumption cost into total effort cost."""
+        """Combine LLM token cost and database metrics into effort summary.
+        
+        LLM token cost is the primary financial expense.
+        Database CPU and I/O are telemetry metrics (not billed dollars).
+        """
         token_cost = self.calculate_token_cost(model_id, token_usage)
-        db_cost = self.calculate_database_cost(amp_cpu_sec, amp_io, req_spool)
-        total_effort_cost = round(token_cost + db_cost, 6)
 
         return {
             "token_cost_usd": token_cost,
-            "database_cost_usd": db_cost,
-            "total_effort_cost_usd": total_effort_cost,
+            "database_cost_usd": 0.0,
+            "total_effort_cost_usd": token_cost,
         }

@@ -81,6 +81,6 @@ def compute_model_leaderboard(results: list[RunResult]) -> list[dict[str, Any]]:
             "total_effort_cost_usd": r.costs.get("total_effort_cost_usd", 0.0),
         })
 
-    # Sort by score descending, then total effort cost ascending
-    rows.sort(key=lambda x: (-x["score_pct"], x["total_effort_cost_usd"]))
+    # Sort by score descending, then token cost ascending
+    rows.sort(key=lambda x: (-x["score_pct"], x["token_cost_usd"]))
     return rows

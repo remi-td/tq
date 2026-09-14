@@ -76,12 +76,8 @@ class TestCostCalculator(unittest.TestCase):
         costs = self.calc.calculate_total_effort_cost("gemini-2.5-flash", usage, amp_cpu_sec=2.0, amp_io=10_000)
 
         self.assertGreater(costs["token_cost_usd"], 0.05)
-        self.assertGreater(costs["database_cost_usd"], 0.0)
-        self.assertAlmostEqual(
-            costs["total_effort_cost_usd"],
-            costs["token_cost_usd"] + costs["database_cost_usd"],
-            places=4
-        )
+        self.assertEqual(costs["database_cost_usd"], 0.0)
+        self.assertEqual(costs["total_effort_cost_usd"], costs["token_cost_usd"])
 
 
 class TestComparativeAnalytics(unittest.TestCase):
