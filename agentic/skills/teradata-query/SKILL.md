@@ -15,176 +15,6 @@ tq is a lightweight, Rust-powered CLI client for Teradata databases. It provides
 
 Repository: https://github.com/remi-td/tq/
 
-## Readiness Checklist
-
-> **Agent Fast Path**: In automated agent harnesses or benchmark environments, `tq` and database credentials (`TQ_LOGON` / `DATABASE_URI`) are pre-configured. Do NOT spend initial turns running `tq --version` or `tq ping`. Proceed directly to schema inspection or pipeline execution.
-
-Before running any query in an interactive setup, verify prerequisites:
-
-**If missing**, follow the **tq Installation** section below.
-
-### 2. Connection Configuration
-
-tq needs a connection to the Teradata database. Check in this order:
-
-**Option A: Environment variable (simplest)**
-
-```bash
-echo $TQ_LOGON
-```
-
-If set, tq is ready. Verify with `tq ping`.
-
-**Option B: Connection profile**
-
-```bash
-tq profiles
-```
-
-If profiles exist, use `tq --profile <name> ping` to test.
-
-**Option C: Project config file**
-
-Check if `.tq.toml` exists in the project root with connection profiles.
-
-**If nothing is configured**, guide the user through setup (see **Connection Setup** below).
-
-**If connection is ready**, skip to **Running Queries**.
-
----
-
-## tq Installation
-
-Install the pre-built binary using the official installer:
-
-```bash
-curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh -s -- --accept-license
-```
-
-The `--accept-license` flag is required for non-interactive installs (the Teradata driver is bundled and requires license acceptance).
-
-This downloads the correct binary for your platform (macOS/Linux, Intel/ARM), verifies the checksum, and installs to `~/.local/bin/tq`.
-
-To install to a custom location:
-
-```bash
-TQ_INSTALL_DIR=/path/to/bin curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh -s -- --accept-license
-```
-
-**Verify:**
-
-```bash
-tq --version
-```
-
----
-
-## Connection Setup
-
-tq supports multiple connection methods. Choose the one that fits the project.
-
-### Method 1: Environment Variable
-
-The simplest approach -- set `TQ_LOGON` for the session:
-
-```bash
-export TQ_LOGON="user:password@host:1025/database"
-```
-
-For security, omit the password and use a password file instead:
-
-```bash
-export TQ_LOGON="user@host:1025/database"
-```
-
-### Method 2: Connection Profiles (recommended)
-
-Profiles are stored in `~/.tq/config.toml` (user-level) or `.tq.toml` (project-level).
-
-**Create a profile interactively:**
-
-```bash
-tq profile add dev
-```
-
-**Or create the config file manually.** Ask the user for:
-- **Host** -- Teradata server hostname (e.g., `dev-td.company.com`)
-- **Port** -- usually `1025`
-- **Database** -- default database
-- **Username**
-- **Auth mechanism** -- TD2 (default), LDAP, KRB5, or TDNEGO
-
-Then write `~/.tq/config.toml`:
-
-```toml
-[profiles.dev]
-host = "dev-td.company.com"
-port = 1025
-database = "dev_db"
-user = "my_user"
-logmech = "TD2"
-password_file = "~/.tq/passwords/dev"
-```
-
-**Set up the password file (secure):**
-
-```bash
-mkdir -p ~/.tq/passwords
-echo "the_password" > ~/.tq/passwords/dev
-chmod 0600 ~/.tq/passwords/dev
-```
-
-**Test the profile:**
-
-```bash
-tq --profile dev ping
-```
-
-### Method 3: Project Config (.tq.toml)
-
-For team-shared profiles, create `.tq.toml` in the project root:
-
-```toml
-[profiles.dev]
-host = "dev-td.company.com"
-database = "dev_db"
-user = "shared_dev_user"
-password_file = "~/.tq/passwords/dev"
-
-[profiles.prod]
-host = "prod-td.company.com"
-database = "prod_db"
-logmech = "LDAP"
-password_file = "~/.tq/passwords/prod"
-```
-
-**Important:** Never store passwords in `.tq.toml`. Always use `password_file` pointing to a chmod 0600 file.
-
-### Configuration Precedence
-
-tq resolves configuration in this order (later overrides earlier):
-1. Built-in defaults
-2. User config (`~/.tq/config.toml`)
-3. Project config (`.tq.toml`)
-4. Environment variables (`TQ_LOGON`, `TQ_LOGMECH`, `TQ_QUERY_BAND`, etc.)
-5. Command-line arguments (`--logon`, `--profile`, `--query-band`)
-
-### Teradata QueryBand (Workload & Telemetry Tagging)
-
-Tag session queries for Teradata workload management (TASM) and DBQL (`DBC.QryLogV`) auditing:
-
-```bash
-# Via CLI flag:
-tq --query-band "App=DataPipeline;Job=DailySync;" query "SELECT 1"
-
-# Inside connection string:
-tq --logon "user:pass@host:1025/db?query_band=App=DataPipeline;Job=DailySync;" query "SELECT 1"
-
-# Via environment variable:
-export TQ_QUERY_BAND="App=DataPipeline;Job=DailySync;"
-```
-
----
 
 ## Running Queries
 
@@ -565,10 +395,60 @@ tq repl --enhanced-timing        # Detailed timing breakdown
 
 ---
 
-## Connection Check
+## Troubleshooting & Installation Setup
+
+> **Note**: In automated agent harnesses or benchmark environments, `tq` and database credentials (`TQ_LOGON` / `DATABASE_URI`) are already pre-configured. Use this section **reactively** only if a command fails with a missing executable or connection error.
+
+### 1. Connection Diagnostics
+
+If a query fails with connection errors:
 
 ```bash
 tq ping
+```
+
+### 2. If `tq` is Not Installed
+
+Install the pre-built binary using the official installer:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/remi-td/tq/master/install.sh | sh -s -- --accept-license
+```
+
+Verify installation:
+```bash
+tq --version
+```
+
+### 3. Connection Configuration
+
+tq resolves credentials in this order (later overrides earlier):
+1. Command-line arguments (`--logon`, `--profile`, `--query-band`)
+2. Environment variables (`TQ_LOGON`, `TQ_LOGMECH`, `TQ_QUERY_BAND`, etc.)
+3. Project config (`.tq.toml`)
+4. User config (`~/.tq/config.toml`)
+
+**Option A: Environment variable (simplest)**
+```bash
+export TQ_LOGON="user:password@host:1025/database"
+```
+
+**Option B: Connection profile**
+Profiles are stored in `~/.tq/config.toml` (user) or `.tq.toml` (project):
+```toml
+[profiles.dev]
+host = "dev-td.company.com"
+port = 1025
+database = "dev_db"
+user = "my_user"
+logmech = "TD2"
+password_file = "~/.tq/passwords/dev"
+```
+Test with: `tq --profile dev ping`
+
+**QueryBand Tagging (TASM / DBQL Telemetry):**
+```bash
+export TQ_QUERY_BAND="App=DataPipeline;Job=DailySync;"
 ```
 
 ---
