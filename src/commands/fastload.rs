@@ -55,6 +55,7 @@ pub fn execute(client: &DatabaseClient, args: &FastloadArgs) -> Result<()> {
     let table_exists = match client.execute(&check_query) {
         Ok(_) => true,
         Err(TqError::TableNotFound { .. }) => false,
+        Err(ref e) if e.teradata_error_code() == Some(3807) => false,
         Err(e) => {
             // Any other error (like permission denied or connection error)
             return Err(e);
