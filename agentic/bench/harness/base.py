@@ -20,6 +20,30 @@ from ..telemetry.cost_calculator import CostCalculator
 BENCH_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = BENCH_DIR.parent.parent
 SKILL_FILE = REPO_ROOT / "agentic" / "skills" / "teradata-query" / "SKILL.md"
+PYTHON_SKILL_FILE = REPO_ROOT / "agentic" / "skills" / "teradata-python" / "SKILL.md"
+
+
+def resolve_database_uri() -> str:
+    """Resolve database connection string from env, TQ_LOGON, or ~/.bash_profile."""
+    uri = os.environ.get("DATABASE_URI", "")
+    if uri:
+        return uri
+    logon = os.environ.get("TQ_LOGON", "")
+    if logon:
+        return f"teradata://{logon}" if "://" not in logon else logon
+    bash_profile = Path.home() / ".bash_profile"
+    if bash_profile.exists():
+        for line in bash_profile.read_text().splitlines():
+            line = line.strip()
+            if line.startswith("export DATABASE_URI="):
+                val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                if val:
+                    return val
+            elif line.startswith("export TQ_LOGON="):
+                val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                if val:
+                    return f"teradata://{val}" if "://" not in val else val
+    return ""
 
 
 @dataclass
@@ -88,7 +112,13 @@ class AgentHarness(ABC):
                 skill_text = SKILL_FILE.read_text()
             return f"{base_prompt}\n\nAvailable Skill:\n{skill_text}"
 
-        elif self.mode in ("tq-no-skill", "baseline-python", "baseline-no-tq"):
+        elif self.mode in ("baseline-python", "python-with-skill"):
+            skill_text = ""
+            if PYTHON_SKILL_FILE.exists():
+                skill_text = PYTHON_SKILL_FILE.read_text()
+            return f"{base_prompt}\n\nAvailable Skill:\n{skill_text}"
+
+        elif self.mode in ("tq-no-skill", "baseline-no-skill", "baseline-no-tq"):
             return base_prompt
 
         return base_prompt

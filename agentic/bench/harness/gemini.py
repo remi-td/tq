@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .base import AgentHarness, RunResult
+from .base import AgentHarness, RunResult, resolve_database_uri
 from ..telemetry.token_telemetry import parse_gemini_token_usage, TokenUsage
 from ..telemetry.database_telemetry import DatabaseMetrics
 
@@ -149,6 +149,9 @@ class GeminiHarness(AgentHarness):
                         sub_env = os.environ.copy()
                         # Do not set queryband so comparison is strictly symmetrical
                         sub_env.pop("TQ_QUERY_BAND", None)
+                        db_uri = resolve_database_uri()
+                        if db_uri:
+                            sub_env["DATABASE_URI"] = db_uri
                         if self.mode in ("baseline-python", "baseline-no-tq"):
                             path_parts = sub_env.get("PATH", "").split(":")
                             sub_env["PATH"] = ":".join(p for p in path_parts if not p.endswith(".local/bin") and "target/release" not in p and "target/debug" not in p)

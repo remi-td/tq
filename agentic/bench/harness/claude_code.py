@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .base import AgentHarness, RunResult
+from .base import AgentHarness, RunResult, resolve_database_uri
 from ..telemetry.token_telemetry import parse_claude_token_usage, TokenUsage
 from ..telemetry.database_telemetry import DatabaseMetrics
 
@@ -57,6 +57,9 @@ class ClaudeCodeHarness(AgentHarness):
             sub_env = os.environ.copy()
             # Do not set queryband for either mode so tq is not disadvantaged and comparison is symmetrical
             sub_env.pop("TQ_QUERY_BAND", None)
+            db_uri = resolve_database_uri()
+            if db_uri:
+                sub_env["DATABASE_URI"] = db_uri
 
             if self.mode in ("baseline-python", "baseline-no-tq"):
                 claude_real = shutil.which("claude") or "/Users/remi.turpaud/.local/bin/claude"
