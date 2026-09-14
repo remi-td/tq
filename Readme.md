@@ -75,20 +75,26 @@ In evaluations against 10 happy-path query tasks (using `gemini-2.5-flash`), the
 | **tq CLI (On-Demand Skill)** (`tq-cli`) | 8/10 | 29,693 | 1,729 | 31,422 | $0.00275 | 146.6s | 214.3/s |
 | **Teradata MCP Server CE (Base)** (`mcp`) | **10/10** | 97,190 | 2,227 | 99,417 | $0.00796 | **55.6s** | **1,789.7/s** |
 
-### 🚀 Enterprise Data Product Benchmark (`tq` vs Baseline)
-In live end-to-end benchmarks constructing a complete multi-tier analytical Data Product on Teradata Vantage (4 staging tables, atomic lineitem fact table, monthly aggregate rollups, customer lifetime profitability dimension, and financial checksum reconciliation):
+### 🚀 Enterprise Data Product Benchmark (`tq` vs Plain Python)
+Live end-to-end evaluation constructing a multi-tier analytical Data Product on Teradata Vantage Cloud (4 FastLoad staging tables, atomic lineitem fact table, monthly aggregate rollups, customer lifetime profitability dimension, and financial checksum reconciliation):
 
-| Scenario | Model | Completion | Total Tokens | Duration | Total Effort Cost |
-| :--- | :--- | :---: | :---: | :---: | :---: |
-| **`tq` CLI + Skill** | `gemini-2.5-flash` | **100%** (8/8) | 190,422 | 189.8s | **$0.0148** |
-| **`tq` CLI + Skill** | `gemini-3.5-flash-lite` | **100%** (8/8) | 185,892 | 88.4s | **$0.0244** |
-| **`tq` CLI + Skill** | `claude-haiku-4-5` | **100%** (8/8) | 1,559,632 | 183.0s | **$0.2741** |
-| **`tq` CLI + Skill** | `claude-sonnet` | **100%** (8/8) | 1,021,577 | 131.3s | **$0.4023** |
-| **Baseline (Python / no tq)** | `gemini-3.5-flash-lite` | **100%** (8/8) | 48,248 | 29.2s | **$0.0073** |
-| **Baseline (Python / no tq)** | `claude-sonnet` | **100%** (8/8) | 799,428 | 109.2s | **$0.3622** |
+| Harness | Model | Mode | Pass Rate | Duration | Total Tokens | Token Cost (USD) |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: |
+| **Claude Code** | `sonnet` | **`tq` CLI + Skill** | **100%** (8/8) | 67.9s | **303,885** | **$0.2728** |
+| Claude Code | `sonnet` | Plain Python | **100%** (8/8) | **59.0s** | 385,533 | $0.2772 |
+| **OpenAI Codex** | `gpt-5.6-luna` | **`tq` CLI + Skill** | **100%** (8/8) | 204.2s | 615,466 | $0.0300 |
+| OpenAI Codex | `gpt-5.6-luna` | Plain Python | **100%** (8/8) | **154.6s** | **263,886** | **$0.0188** |
+| **OpenAI Codex** | `gpt-5.6-terra` | **`tq` CLI + Skill** | **100%** (8/8) | 182.2s | 475,377 | $0.2417 |
+| OpenAI Codex | `gpt-5.6-terra` | Plain Python | **100%** (8/8) | **150.3s** | **301,869** | **$0.1908** |
+| **Google Gemini** | `gemini-3.5-flash-lite` | **`tq` CLI + Skill** | **100%** (8/8) | 44.1s | 32,525 | $0.0031 |
+| Google Gemini | `gemini-3.5-flash-lite` | Plain Python | **100%** (8/8) | **36.2s** | **27,211** | **$0.0030** |
+| **Google Gemini** | `gemini-2.5-flash` | **`tq` CLI + Skill** | **100%** (8/8) | 70.9s | 104,769 | **$0.0049** |
+| Google Gemini | `gemini-2.5-flash` | Plain Python | 0% (0/8) | 20.5s | 4,366 | Failed (missing tools) |
 
-> **Why is `tq` so effective for autonomous coding agents?**
-> Coding agents equipped with `tq` autonomously discover and leverage native Teradata features (such as parallel AMP `tq fastload`, session QueryBanding for TASM telemetry, and `--agent` token-compressed TOON outputs) without needing to write, debug, and execute fragile Python connection scripts or manage stateful drivers. Agents achieve 100% data product verification cleanly and natively from the command line.
+> **Key Observations:**
+> - **Frontier Efficiency (Sonnet)**: `tq` CLI delivers **-21.2% token savings** (303k vs 385k) and lower cost ($0.2728 vs $0.2772) compared to plain Python.
+> - **Codex High Accuracy**: Both Codex Luna and Terra achieve **100% validation** across all data tiers, with Luna delivering full pipeline generation at just **~$0.02 - $0.03**.
+> - **Reliability Scaffolding**: On `gemini-2.5-flash`, `tq` CLI with skill is the **only mode that succeeds** (100% vs 0%), eliminating driver configuration and shell errors.
 > 
 > Detailed reports, DBQL telemetry & analysis: [docs/benchmarks/optimisation_report.md](docs/benchmarks/optimisation_report.md)
 

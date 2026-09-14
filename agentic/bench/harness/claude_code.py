@@ -81,6 +81,7 @@ class ClaudeCodeHarness(AgentHarness):
 
             proc = subprocess.run(
                 cmd,
+                stdin=subprocess.DEVNULL,
                 cwd=str(self.workspace_dir),
                 env=sub_env,
                 stdout=subprocess.PIPE,

@@ -72,11 +72,11 @@ def execute_single_run(
 
     task_prompt = harness.build_task_prompt(template_path, table_prefix)
 
-    print(f"\n=======================================================")
-    print(f"🚀 Launching Run: [{harness_type}] {model_id} ({mode})")
-    print(f"📁 Workspace: {run_dir}")
-    print(f"🏷️ Table Prefix: {table_prefix}")
-    print(f"=======================================================")
+    print(f"\n=======================================================", flush=True)
+    print(f"🚀 Launching Run: [{harness_type}] {model_id} ({mode})", flush=True)
+    print(f"📁 Workspace: {run_dir}", flush=True)
+    print(f"🏷️ Table Prefix: {table_prefix}", flush=True)
+    print(f"=======================================================", flush=True)
 
     result = harness.execute(
         task_prompt=task_prompt,
@@ -85,12 +85,12 @@ def execute_single_run(
         timeout_seconds=timeout_seconds
     )
 
-    print(f"✅ Completed: Duration={result.duration_seconds}s, Score={result.validation_score}%, Tokens={result.token_usage.total_tokens:,}, Cost=${result.costs.get('total_effort_cost_usd', 0.0):.4f}")
+    print(f"✅ Completed: Duration={result.duration_seconds}s, Score={result.validation_score}%, Tokens={result.token_usage.total_tokens:,}, Cost=${result.costs.get('total_effort_cost_usd', 0.0):.4f}", flush=True)
 
     if cleanup and live_db:
         cleaned = TeradataTelemetry().cleanup_benchmark_objects(table_prefix)
         if cleaned:
-            print(f"🧹 Cleaned up {len(cleaned)} benchmark table(s): {cleaned}")
+            print(f"🧹 Cleaned up {len(cleaned)} benchmark table(s): {cleaned}", flush=True)
 
     return result
 
@@ -122,7 +122,7 @@ def main() -> None:
 
         runs = cfg.get("runs", [])
         dataset = cfg.get("dataset", args.dataset)
-        print(f"Loaded matrix '{cfg.get('name')}' with {len(runs)} run scenario(s).")
+        print(f"Loaded matrix '{cfg.get('name')}' with {len(runs)} run scenario(s).", flush=True)
 
         for r_cfg in runs:
             res = execute_single_run(

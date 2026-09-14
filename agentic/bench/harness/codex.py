@@ -7,14 +7,27 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
 from typing import Any
 
-from .base import AgentHarness, RunResult
+from .base import AgentHarness, RunResult, resolve_database_uri
 from ..telemetry.token_telemetry import TokenUsage
 from ..telemetry.database_telemetry import DatabaseMetrics
+
+
+def map_codex_model(model_id: str) -> str:
+    """Map friendly model names to official Codex model slugs."""
+    lower = model_id.lower()
+    if lower in ("terra", "gpt-5.6-terra"):
+        return "gpt-5.6-terra"
+    elif lower in ("luna", "gpt-5.6-luna"):
+        return "gpt-5.6-luna"
+    elif lower in ("sol", "gpt-5.6-sol"):
+        return "gpt-5.6-sol"
+    return model_id
 
 
 class CodexHarness(AgentHarness):
@@ -35,10 +48,15 @@ class CodexHarness(AgentHarness):
         start_ts = self.db_telemetry.record_start_timestamp()
         t0 = time.time()
 
+        codex_model = map_codex_model(self.model_id)
+
         cmd = [
             "codex", "exec",
+            "--ignore-user-config",
             "--dangerously-bypass-approvals-and-sandbox",
             "--json",
+            "--ephemeral",
+            "-m", codex_model,
             "-C", str(self.workspace_dir),
             full_prompt
         ]
@@ -52,6 +70,29 @@ class CodexHarness(AgentHarness):
             sub_env = os.environ.copy()
             # Do not set queryband so comparison is strictly symmetrical
             sub_env.pop("TQ_QUERY_BAND", None)
+
+            db_uri = resolve_database_uri()
+            if db_uri:
+                sub_env["DATABASE_URI"] = db_uri
+
+            if self.mode in ("baseline-python", "baseline-no-tq"):
+                codex_real = shutil.which("codex") or "/Applications/ChatGPT.app/Contents/Resources/codex"
+                workspace_bin = self.workspace_dir / ".bench_bin"
+                workspace_bin.mkdir(exist_ok=True)
+                codex_link = workspace_bin / "codex"
+                if not codex_link.exists() and os.path.exists(codex_real):
+                    try:
+                        codex_link.symlink_to(codex_real)
+                    except Exception:
+                        pass
+                path_parts = sub_env.get("PATH", "").split(":")
+                filtered_paths = [str(workspace_bin)] + [
+                    p for p in path_parts
+                    if not p.endswith(".local/bin") and "target/release" not in p and "target/debug" not in p
+                ]
+                sub_env["PATH"] = ":".join(filtered_paths)
+                sub_env.pop("TQ_LOGON", None)
+
             proc = subprocess.run(
                 cmd,
                 stdin=subprocess.DEVNULL,
@@ -70,19 +111,44 @@ class CodexHarness(AgentHarness):
                     continue
                 try:
                     event = json.loads(line)
-                    # Extract tokens from codex json stream if present
-                    if event.get("type") == "token.usage":
+                    event_type = event.get("type")
+
+                    if event_type == "turn.completed":
+                        usage = event.get("usage", {})
+                        inp = usage.get("input_tokens", 0)
+                        cached_inp = usage.get("cached_input_tokens", 0)
+                        cache_write = usage.get("cache_write_input_tokens", 0)
+                        out = usage.get("output_tokens", 0)
+                        reasoning = usage.get("reasoning_output_tokens", 0)
+                        pure_inp = max(0, inp - cached_inp)
+
+                        token_usage.input_tokens += pure_inp
+                        token_usage.cache_read_tokens += cached_inp
+                        token_usage.cache_write_tokens += cache_write
+                        token_usage.output_tokens += out
+                        token_usage.reasoning_tokens += reasoning
+
+                    elif event_type == "item.completed":
+                        item = event.get("item", {})
+                        item_type = item.get("type")
+                        if item_type == "agent_message":
+                            agent_summary = item.get("text", "")
+                        elif item_type == "command_execution":
+                            cmd_str = item.get("command", "")
+                            if cmd_str:
+                                commands_executed.append(cmd_str)
+
+                    elif event_type == "token.usage":
                         token_usage.input_tokens += event.get("input_tokens", 0)
                         token_usage.output_tokens += event.get("output_tokens", 0)
-                    elif event.get("type") == "item.completed":
-                        item = event.get("item", {})
-                        if item.get("type") == "message":
-                            agent_summary = item.get("text", "")
+
                 except Exception:
                     pass
 
             if proc.returncode != 0 and not error_msg:
                 error_msg = f"Codex exited with code {proc.returncode}"
+                if proc.stderr:
+                    error_msg += f": {proc.stderr[:200]}"
 
         except subprocess.TimeoutExpired:
             duration = round(time.time() - t0, 2)
@@ -117,7 +183,7 @@ class CodexHarness(AgentHarness):
             harness="codex",
             model=self.model_id,
             mode=self.mode,
-            dataset="tpch_order_fulfillment",
+            dataset=validation_spec.get("dataset", "tpch_order_fulfillment"),
             table_prefix=table_prefix,
             duration_seconds=duration,
             token_usage=token_usage,
@@ -130,3 +196,4 @@ class CodexHarness(AgentHarness):
             agent_summary=agent_summary,
             error_message=error_msg,
         )
+

@@ -1,0 +1,97 @@
+# Comprehensive Multi-Harness Multi-Model Benchmark Matrix
+# Evaluates Gemini, Claude Code, and OpenAI Codex across tq-with-skill and baseline-python
+# Dataset: tpch_order_fulfillment (Live Teradata Vantage Cloud)
+
+name: "comprehensive-multi-agent-benchmark"
+description: "Cross-harness (Gemini, Claude Code, Codex) evaluation across models and modes (tq vs python)"
+
+dataset: "tpch_order_fulfillment"
+
+runs:
+  # ===========================================================================
+  # 1. Gemini 3.5 Flash Lite
+  # ===========================================================================
+  - id: "gemini_3_5_flash_lite_tq"
+    harness: "gemini"
+    model: "gemini-3.5-flash-lite"
+    mode: "tq-with-skill"
+
+  - id: "gemini_3_5_flash_lite_python"
+    harness: "gemini"
+    model: "gemini-3.5-flash-lite"
+    mode: "baseline-python"
+
+  # ===========================================================================
+  # 2. Gemini 2.5 Flash
+  # ===========================================================================
+  - id: "gemini_2_5_flash_tq"
+    harness: "gemini"
+    model: "gemini-2.5-flash"
+    mode: "tq-with-skill"
+
+  - id: "gemini_2_5_flash_python"
+    harness: "gemini"
+    model: "gemini-2.5-flash"
+    mode: "baseline-python"
+
+  - id: "gemini_2_5_flash_tq_no_skill"
+    harness: "gemini"
+    model: "gemini-2.5-flash"
+    mode: "tq-no-skill"
+
+  # ===========================================================================
+  # 3. Claude Code Haiku 4.5
+  # ===========================================================================
+  - id: "claude_haiku_4_5_tq"
+    harness: "claude-code"
+    model: "claude-haiku-4-5"
+    mode: "tq-with-skill"
+
+  - id: "claude_haiku_4_5_python"
+    harness: "claude-code"
+    model: "claude-haiku-4-5"
+    mode: "baseline-python"
+
+  - id: "claude_haiku_4_5_tq_no_skill"
+    harness: "claude-code"
+    model: "claude-haiku-4-5"
+    mode: "tq-no-skill"
+
+  # ===========================================================================
+  # 4. Claude Code Sonnet (Frontier)
+  # ===========================================================================
+  - id: "claude_sonnet_tq"
+    harness: "claude-code"
+    model: "sonnet"
+    mode: "tq-with-skill"
+
+  - id: "claude_sonnet_python"
+    harness: "claude-code"
+    model: "sonnet"
+    mode: "baseline-python"
+
+  # ===========================================================================
+  # 5. Codex Luna (Lightweight / Fast Reasoning)
+  # ===========================================================================
+  - id: "codex_luna_tq"
+    harness: "codex"
+    model: "luna"
+    mode: "tq-with-skill"
+
+  - id: "codex_luna_python"
+    harness: "codex"
+    model: "luna"
+    mode: "baseline-python"
+
+  # ===========================================================================
+  # 6. Codex Terra (Balanced / Workhorse Reasoning)
+  # ===========================================================================
+  - id: "codex_terra_tq"
+    harness: "codex"
+    model: "terra"
+    mode: "tq-with-skill"
+
+  - id: "codex_terra_python"
+    harness: "codex"
+    model: "terra"
+    mode: "baseline-python"

@@ -45,6 +45,37 @@ models:
     output_per_million: 75.00
     cache_read_per_million: 1.50
     cache_write_per_million: 18.75
+  # OpenAI / GPT-5.6 Models
+  gpt-5.6-terra:
+    input_per_million: 2.00
+    output_per_million: 12.00
+    cache_read_per_million: 0.20
+    cache_write_per_million: 2.50
+  terra:
+    input_per_million: 2.00
+    output_per_million: 12.00
+    cache_read_per_million: 0.20
+    cache_write_per_million: 2.50
+  gpt-5.6-luna:
+    input_per_million: 0.20
+    output_per_million: 1.20
+    cache_read_per_million: 0.02
+    cache_write_per_million: 0.25
+  luna:
+    input_per_million: 0.20
+    output_per_million: 1.20
+    cache_read_per_million: 0.02
+    cache_write_per_million: 0.25
+  gpt-5.6-sol:
+    input_per_million: 5.00
+    output_per_million: 20.00
+    cache_read_per_million: 0.50
+    cache_write_per_million: 5.00
+  sol:
+    input_per_million: 5.00
+    output_per_million: 20.00
+    cache_read_per_million: 0.50
+    cache_write_per_million: 5.00
 
   # Fallback default
   default:
