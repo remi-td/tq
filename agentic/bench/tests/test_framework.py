@@ -212,11 +212,12 @@ class TestDatabaseTelemetry(unittest.TestCase):
         # Check that flush was executed
         self.assertIn("FLUSH QUERY LOGGING WITH ALL;", executed_queries[0])
 
-        # Check that the DBQL query uses time span without QueryBand
+        # Check that the DBQL query uses time span without QueryBand and filters probes in WHERE
         dbql_sql = executed_queries[1]
         self.assertIn("UserName = USER", dbql_sql)
         self.assertIn("StartTime >= CAST('2026-09-14 07:10:00' AS TIMESTAMP(0))", dbql_sql)
         self.assertIn("StartTime <= CAST('2026-09-14 07:14:30' AS TIMESTAMP(0))", dbql_sql)
+        self.assertIn("QueryText NOT LIKE '%FLUSH QUERY LOGGING%'", dbql_sql)
         self.assertNotIn("GetQueryBandValue", dbql_sql)
         self.assertNotIn("QueryText LIKE '%b_test_%'", dbql_sql)
 

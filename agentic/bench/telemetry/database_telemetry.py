@@ -93,19 +93,20 @@ class TeradataTelemetry:
         self.execute_query("FLUSH QUERY LOGGING WITH ALL;")
 
         # 2. Query DBC.QryLogV for all queries executed by this user during the stream execution time span
-        # Filter out internal telemetry and buffer flush queries
         sql = (
             f"SELECT "
-            f"  COUNT(*) AS total_records, "
-            f"  ZEROIFNULL(SUM(CASE WHEN QueryText NOT LIKE '%FLUSH QUERY LOGGING%' AND QueryText NOT LIKE '%DBC.QryLogV%' AND QueryText NOT LIKE '%ts_str%' THEN 1 ELSE 0 END)) AS query_cnt, "
-            f"  ZEROIFNULL(SUM(CASE WHEN QueryText NOT LIKE '%FLUSH QUERY LOGGING%' AND QueryText NOT LIKE '%DBC.QryLogV%' AND QueryText NOT LIKE '%ts_str%' THEN AMPCPUTime ELSE 0 END)) AS total_cpu, "
-            f"  ZEROIFNULL(SUM(CASE WHEN QueryText NOT LIKE '%FLUSH QUERY LOGGING%' AND QueryText NOT LIKE '%DBC.QryLogV%' AND QueryText NOT LIKE '%ts_str%' THEN TotalIOCount ELSE 0 END)) AS total_io, "
-            f"  ZEROIFNULL(MAX(CASE WHEN QueryText NOT LIKE '%FLUSH QUERY LOGGING%' AND QueryText NOT LIKE '%DBC.QryLogV%' AND QueryText NOT LIKE '%ts_str%' THEN SpoolUsage ELSE 0 END)) AS max_spool, "
-            f"  ZEROIFNULL(SUM(CASE WHEN QueryText NOT LIKE '%FLUSH QUERY LOGGING%' AND QueryText NOT LIKE '%DBC.QryLogV%' AND QueryText NOT LIKE '%ts_str%' AND ErrorCode <> 0 THEN 1 ELSE 0 END)) AS err_cnt "
+            f"  COUNT(*) AS query_cnt, "
+            f"  ZEROIFNULL(SUM(AMPCPUTime)) AS total_cpu, "
+            f"  ZEROIFNULL(SUM(TotalIOCount)) AS total_io, "
+            f"  ZEROIFNULL(MAX(SpoolUsage)) AS max_spool, "
+            f"  ZEROIFNULL(SUM(CASE WHEN ErrorCode <> 0 THEN 1 ELSE 0 END)) AS err_cnt "
             f"FROM DBC.QryLogV "
             f"WHERE UserName = USER "
             f"  AND StartTime >= CAST('{start_ts}' AS TIMESTAMP(0)) "
-            f"  AND StartTime <= CAST('{end_ts}' AS TIMESTAMP(0));"
+            f"  AND StartTime <= CAST('{end_ts}' AS TIMESTAMP(0)) "
+            f"  AND QueryText NOT LIKE '%FLUSH QUERY LOGGING%' "
+            f"  AND QueryText NOT LIKE '%DBC.QryLogV%' "
+            f"  AND QueryText NOT LIKE '%ts_str%';"
         )
         ok, res = self.execute_query(sql)
         if ok and isinstance(res, list) and res:
