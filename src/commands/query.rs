@@ -823,15 +823,6 @@ fn format_statement_status(result: &crate::db::QueryResult, format: OutputFormat
     }
 }
 
-// ============================================================================
-// Agent-Safe Mode
-// ============================================================================
-
-/// Validate SQL against agent-safe mode restrictions.
-///
-/// Uses the structural classifier in `crate::sql::classifier`, which sees
-/// through leading comments, `WITH` CTE prologues, and `LOCKING` request
-
 #[cfg(test)]
 mod tests {
     use super::*;
