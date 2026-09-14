@@ -204,6 +204,20 @@ tq query "SELECT * FROM dbc.dbcinfo"
 tq query --file path/to/script.sql
 ```
 
+### Multi-Step Pipeline & Batch Script Execution (`tq query --file`)
+
+For multi-step data pipelines (e.g. creating dimensions, facts, aggregations, and views), **do not invoke 20 individual turn-by-turn CLI queries**. Write a single SQL script (`pipeline.sql`) containing all statements separated by semicolons and execute the entire pipeline in one shot:
+
+```bash
+tq query --file pipeline.sql --errorlevel 3807 warning
+```
+
+**Why this is recommended for AI agents:**
+- **One-Shot Execution**: Eliminates 15–20 interactive CLI turns and tool round-trips, matching the efficiency of monolithic scripts while executing natively within Teradata.
+- **Sequential Execution**: `tq` parses the file into individual statements and executes each one sequentially across the connection.
+- **Idempotent DDL Support**: Passing `--errorlevel 3807 warning` ensures that initial `DROP TABLE` statements do not halt the script if tables do not yet exist on the first run.
+- **Atomic Transactions (Optional)**: Pass `--atomic` to automatically wrap DML statements in a transaction with rollback on failure.
+
 ### Batch Statements (multi-statement file or stdin)
 
 ```bash
@@ -215,14 +229,6 @@ tq query <<'EOF'
 SELECT CURRENT_DATE;
 SELECT DATABASE;
 EOF
-```
-
-### Atomic Transactions
-
-Wrap multi-statement execution in a transaction (rollback on failure):
-
-```bash
-tq query --file migration.sql --atomic
 ```
 
 ### High-Performance Bulk Ingestion (`tq fastload`)
@@ -237,16 +243,10 @@ tq fastload seed_data/stg_customers.csv stg_customers
 tq fastload seed_data/stg_orders.tsv stg_orders --delimiter '\t'
 ```
 
-### Teradata DDL & Batch Separation Rules
+### Teradata DDL & Primary Index Guidelines
 
-Teradata enforces strict transaction boundaries around Data Definition Language (DDL):
-- **Never mix DDL statements (CREATE, DROP, ALTER) in a multi-statement request** or batch file with other queries. Teradata will fail with error `3932: Only an ET or null statement is legal after a DDL Statement`.
-- **Always execute each DDL statement individually** as its own separate `tq query "..."` command:
-  ```bash
-  tq query "DROP TABLE stg_customers;"
-  tq query "CREATE TABLE stg_customers (cust_id INT, cust_name VARCHAR(50)) PRIMARY INDEX (cust_id);"
-  ```
-- **Primary Index (PI) Selection**: Always specify a `PRIMARY INDEX (column)` with high cardinality (unique or primary key) to evenly hash rows across AMPs and prevent severe table skew.
+- **Batch Scripts (`--file`)**: Multi-statement DDL scripts are fully supported via `tq query --file script.sql`. Because `tq` parses statements client-side and dispatches them sequentially to Teradata, statements like `DROP TABLE`, `CREATE TABLE`, `INSERT INTO ... SELECT`, and `CREATE VIEW` run smoothly in sequence without session collisions.
+- **Primary Index (PI) Selection**: Always specify a `PRIMARY INDEX (column)` with high cardinality (unique or primary key) to evenly hash rows across AMPs and prevent severe table skew. Validate distribution with `tq space <table_name>`.
 
 ### Output Formats & Token Optimization
 
@@ -374,6 +374,23 @@ tq --profile prod query "SELECT COUNT(*) FROM orders"
 ---
 
 ## Schema Exploration
+
+### One-Shot Topological Schema Graph (`tq schema`)
+
+Instead of running multiple turn-by-turn discovery queries (`list tables`, `inspect`, `show-indexes`) across different tables, use `tq schema` to extract the complete topological map, foreign key relationships, primary indexes, and candidate join paths in **one single command**:
+
+```bash
+# Extract complete schema graph for current database
+tq schema
+
+# Target specific database or filter with pattern
+tq schema my_database "order*"
+
+# Output in compact format for AI agents (minimal tokens)
+tq schema --format compact
+```
+
+This provides immediate relational understanding of all tables and join paths in a single shot.
 
 ### List Objects
 

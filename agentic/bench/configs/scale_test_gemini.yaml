@@ -1,0 +1,20 @@
+# Scale Test Matrix: 50k Rows
+# Evaluates Gemini 3.5 Flash Lite on the scaled dataset: tq-with-skill vs baseline-python
+
+name: "scale-test-50k-gemini"
+description: "Evaluation of gemini-3.5-flash-lite on 50k row dataset (tq-with-skill vs baseline-python)"
+
+dataset: "tpch_50k"
+
+runs:
+  # 1. Gemini 3.5 Flash Lite (with updated skill recommending batch scripts and one-shot schema)
+  - id: "gemini_3_5_flash_lite_tq_50k"
+    harness: "gemini"
+    model: "gemini-3.5-flash-lite"
+    mode: "tq-with-skill"
+
+  # 2. Baseline: Gemini 3.5 Flash Lite (no skill, no tq - pure Python)
+  - id: "baseline_gemini_3_5_flash_lite_50k"
+    harness: "gemini"
+    model: "gemini-3.5-flash-lite"
+    mode: "baseline-python"

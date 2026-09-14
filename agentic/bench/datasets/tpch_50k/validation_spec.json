@@ -1,0 +1,96 @@
+{
+  "dataset_name": "tpch_order_fulfillment",
+  "counts": {
+    "customers": 3700,
+    "parts": 200,
+    "orders": 16845,
+    "lineitems": 50428,
+    "fulfilled_orders": 5622,
+    "agg_monthly_rows": 30
+  },
+  "gold_metrics": {
+    "total_net_revenue": 54249318.93,
+    "total_supply_cost": 36617924.82,
+    "total_profit": 17631394.11,
+    "avg_shipping_delay_days": 7.98,
+    "total_shipped_lines": 16786
+  },
+  "target_objects": {
+    "staging_tables": [
+      "stg_customers",
+      "stg_parts",
+      "stg_orders",
+      "stg_lineitem"
+    ],
+    "dimension_tables": [
+      "dim_customers"
+    ],
+    "fact_tables": [
+      "fct_order_lineitem"
+    ],
+    "aggregate_tables": [
+      "agg_monthly_performance"
+    ],
+    "analytics_views_or_tables": [
+      "dim_customer_profitability"
+    ]
+  },
+  "assertions": [
+    {
+      "id": "stg_tables_exist",
+      "description": "All 4 staging tables (stg_customers, stg_parts, stg_orders, stg_lineitem) created and populated",
+      "type": "staging_tables_check"
+    },
+    {
+      "id": "dim_customers_created",
+      "description": "Conformed dimension table dim_customers created with cust_id Primary Index",
+      "type": "table_exists",
+      "target": "dim_customers"
+    },
+    {
+      "id": "fct_order_lineitem_created",
+      "description": "Atomic fact table fct_order_lineitem created with lineitem grain",
+      "type": "table_exists",
+      "target": "fct_order_lineitem"
+    },
+    {
+      "id": "agg_monthly_performance_created",
+      "description": "Aggregate summary table agg_monthly_performance created at Year-Month-Segment grain",
+      "type": "table_exists",
+      "target": "agg_monthly_performance"
+    },
+    {
+      "id": "dim_customer_profitability_created",
+      "description": "Customer profitability dimension or semantic view created",
+      "type": "table_or_view_exists",
+      "target": "dim_customer_profitability"
+    },
+    {
+      "id": "revenue_integrity_checksum",
+      "description": "Fact table net revenue checksum matches gold standard within 0.1%",
+      "type": "metric_checksum",
+      "target_table": "fct_order_lineitem",
+      "target_column": "net_revenue",
+      "expected_value": 54249318.93,
+      "relative_tolerance": 0.001
+    },
+    {
+      "id": "profit_integrity_checksum",
+      "description": "Fact table gross profit checksum matches gold standard within 0.1%",
+      "type": "metric_checksum",
+      "target_table": "fct_order_lineitem",
+      "target_column": "profit",
+      "expected_value": 17631394.11,
+      "relative_tolerance": 0.001
+    },
+    {
+      "id": "aggregate_reconciliation_checksum",
+      "description": "Aggregate table total_net_revenue reconciles with fact net revenue",
+      "type": "metric_checksum",
+      "target_table": "agg_monthly_performance",
+      "target_column": "total_net_revenue",
+      "expected_value": 54249318.93,
+      "relative_tolerance": 0.001
+    }
+  ]
+}
