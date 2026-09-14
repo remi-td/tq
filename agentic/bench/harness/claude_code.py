@@ -73,6 +73,10 @@ class ClaudeCodeHarness(AgentHarness):
                 sub_env["PATH"] = ":".join(filtered_paths)
                 sub_env.pop("TQ_LOGON", None)
                 sub_env.pop("TQ_QUERY_BAND", None)
+                db_uri = sub_env.get("DATABASE_URI", "")
+                if db_uri and "query_band=" not in db_uri:
+                    sep = "&" if "?" in db_uri else "?"
+                    sub_env["DATABASE_URI"] = f"{db_uri}{sep}query_band=ApplicationName=tq_bench;RunId={run_tag};"
             else:
                 sub_env["TQ_QUERY_BAND"] = f"ApplicationName=tq_bench;RunId={run_tag};"
             proc = subprocess.run(

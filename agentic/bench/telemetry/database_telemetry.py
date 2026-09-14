@@ -86,7 +86,7 @@ class TeradataTelemetry:
             f"  ZEROIFNULL(SUM(CASE WHEN ErrorCode <> 0 THEN 1 ELSE 0 END)) AS err_cnt "
             f"FROM DBC.QryLogV "
             f"WHERE UserName = USER "
-            f"  AND (QueryBand LIKE '%{tag}%' OR QueryText LIKE '%{table_prefix}%') "
+            f"  AND (GetQueryBandValue(QueryBand, 0, 'RunId') = '{tag}' OR GetQueryBandValue(QueryBand, 0, 'RunId') = '{table_prefix}') "
             f"  AND StartTime >= CAST('{start_ts}' AS TIMESTAMP(0));"
         )
         ok, res = self.execute_query(sql)
