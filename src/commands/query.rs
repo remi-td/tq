@@ -233,12 +233,7 @@ pub fn execute<W: Write>(
     }
 
     // Determine execution mode: single statement (fast path) or batch
-    // For command-line arguments, always use single statement mode (no splitting)
-    // For file/stdin, check for multiple statements
-    let use_batch = match source {
-        InputSource::Argument(_) => false, // Never split argument SQL
-        _ => has_multiple_statements(&sql),
-    };
+    let use_batch = has_multiple_statements(&sql);
 
     if use_batch {
         execute_batch(client, &sql, args, writer, use_color, verbose, error_levels)

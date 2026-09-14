@@ -172,6 +172,10 @@ class GeminiHarness(AgentHarness):
                             output += "\nSTDERR:\n" + stderr
                         if not output.strip():
                             output = "(Command executed successfully with no output)"
+                        if proc.returncode != 0:
+                            print(f"      ❌ Exit {proc.returncode}: {output[:200].strip()}", flush=True)
+                        else:
+                            print(f"      ✅ OK ({len(output.splitlines())} lines output)", flush=True)
                     except subprocess.TimeoutExpired:
                         if proc:
                             try:

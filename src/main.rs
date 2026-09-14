@@ -176,7 +176,7 @@ fn run(cli: Cli) -> Result<u8> {
                 args.format = OutputFormat::Compact;
                 args.json = false;
             }
-            if args.output.is_some() {
+            let code = if args.output.is_some() {
                 // Write to file
                 let mut stderr = io::stderr();
                 commands::query::execute_to_file(
@@ -188,6 +188,11 @@ fn run(cli: Cli) -> Result<u8> {
                 commands::query::execute(
                     &client, &args, Some(&param_store), &mut stdout, use_color, verbose, &error_levels,
                 )?
+            };
+            if code <= 4 {
+                0
+            } else {
+                code
             }
         }
         Command::Repl(args) => {
