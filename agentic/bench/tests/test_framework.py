@@ -55,6 +55,38 @@ class TestTokenTelemetry(unittest.TestCase):
         self.assertEqual(t.cache_read_tokens, 4000)
         self.assertEqual(t.total_tokens, 5600)
 
+    def test_pi_session_file_parsing(self):
+        import tempfile
+        import json
+        from agentic.bench.telemetry.token_telemetry import parse_pi_session_file
+
+        with tempfile.NamedTemporaryFile("w+", delete=False, suffix=".jsonl") as f:
+            f.write(json.dumps({
+                "type": "message",
+                "message": {
+                    "role": "assistant",
+                    "usage": {"input": 1500, "output": 250, "cacheRead": 500, "cacheWrite": 100, "reasoning": 50, "cost": {"total": 0.005}},
+                    "content": [
+                        {"type": "toolCall", "name": "bash", "arguments": {"command": "tq query 'SELECT 1'"}},
+                        {"type": "text", "text": "Pipeline completed successfully"}
+                    ]
+                }
+            }) + "\n")
+            temp_path = f.name
+
+        try:
+            tokens, cmds, summary = parse_pi_session_file(temp_path)
+            self.assertEqual(tokens.input_tokens, 1500)
+            self.assertEqual(tokens.output_tokens, 250)
+            self.assertEqual(tokens.cache_read_tokens, 500)
+            self.assertEqual(tokens.cache_write_tokens, 100)
+            self.assertEqual(tokens.reasoning_tokens, 50)
+            self.assertEqual(tokens.raw_cost_usd, 0.005)
+            self.assertEqual(cmds, ["tq query 'SELECT 1'"])
+            self.assertEqual(summary, "Pipeline completed successfully")
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
+
 
 class TestCostCalculator(unittest.TestCase):
     def setUp(self):

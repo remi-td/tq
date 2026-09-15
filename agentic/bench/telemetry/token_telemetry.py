@@ -99,3 +99,69 @@ def parse_gemini_token_usage(resp_usage: Any) -> TokenUsage:
     )
     t.compute_total()
     return t
+
+
+def parse_pi_session_file(session_file_path: str) -> tuple[TokenUsage, list[str], str]:
+    """Extract TokenUsage, executed bash commands, and final summary from a Pi session JSONL file."""
+    import json
+    from pathlib import Path
+
+    path = Path(session_file_path)
+    if not path.exists():
+        return TokenUsage(), [], ""
+
+    total_input = 0
+    total_output = 0
+    total_cache_read = 0
+    total_cache_write = 0
+    total_reasoning = 0
+    total_cost = 0.0
+    commands_executed: list[str] = []
+    final_summary = ""
+
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+
+        if entry.get("type") == "message":
+            msg = entry.get("message", {})
+            role = msg.get("role")
+            if role == "assistant":
+                usage = msg.get("usage", {})
+                if usage:
+                    total_input += usage.get("input", 0)
+                    total_output += usage.get("output", 0)
+                    total_cache_read += usage.get("cacheRead", 0)
+                    total_cache_write += usage.get("cacheWrite", 0)
+                    total_reasoning += usage.get("reasoning", 0)
+                    cost = usage.get("cost", {})
+                    total_cost += float(cost.get("total", 0.0))
+
+                content = msg.get("content", [])
+                if isinstance(content, list):
+                    for item in content:
+                        if item.get("type") == "toolCall" and item.get("name") == "bash":
+                            args = item.get("arguments", {})
+                            cmd = args.get("command", "")
+                            if cmd:
+                                commands_executed.append(cmd)
+                        elif item.get("type") == "text":
+                            final_summary = item.get("text", "")
+                elif isinstance(content, str):
+                    final_summary = content
+
+    token_usage = TokenUsage(
+        input_tokens=total_input,
+        output_tokens=total_output,
+        cache_read_tokens=total_cache_read,
+        cache_write_tokens=total_cache_write,
+        reasoning_tokens=total_reasoning,
+        total_tokens=total_input + total_output + total_cache_read + total_cache_write,
+        raw_cost_usd=round(total_cost, 6)
+    )
+    return token_usage, commands_executed, final_summary
+

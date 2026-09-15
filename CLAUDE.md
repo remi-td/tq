@@ -25,6 +25,7 @@ Use the following skills when working with code in this repository:
 ### Framework Development Skills
 - **skill-builder**: Guides the creation of effective Claude skills following the Agent Skills Standard
 - **subagent-builder**: Creates specialized Claude subagents through interactive interviews and configuration guidance
+- **agentic-bench**: Evaluates agentic token efficiency, database resource consumption, and companion skills using `./agentic/bench/tq-bench`
 
 ## Development methodology
 
@@ -92,7 +93,7 @@ Each sprint produces two key documents:
 
 These documents provide shared context for all agents and track sprint progress.
 
-See the sprint-coordinator skill for complete details on Phase 6: Framework Optimization, which implements continuous improvement through sprint retrospective analysis and optional token metrics.
+See the sprint-coordinator skill for complete details on Phase 6: Framework Optimization, which implements continuous improvement through sprint retrospective analysis, optional token metrics, and optional agentic benchmark runs (`./agentic/bench/tq-bench`) to quantify token efficiency deltas.
 
 #### GitHub Issues Integration
 

@@ -1,0 +1,20 @@
+# Python Baseline Matrix on Next-Gen Enterprise Data Platform 360
+# Evaluates pure Python with the enriched, lean teradata-python skill
+
+name: "python-baseline-enterprise"
+description: "Rerun of pure Python baseline streams on enterprise_data_platform_360 with enriched teradata-python skill"
+
+dataset: "enterprise_data_platform_360"
+
+runs:
+  # 1. Gemini 3.5 Flash Lite (pure Python baseline)
+  - id: "baseline_gemini_3_5_flash_lite"
+    harness: "gemini"
+    model: "gemini-3.5-flash-lite"
+    mode: "baseline-python"
+
+  # 2. Claude Code Sonnet (pure Python baseline)
+  - id: "baseline_claude_sonnet"
+    harness: "claude-code"
+    model: "sonnet"
+    mode: "baseline-python"

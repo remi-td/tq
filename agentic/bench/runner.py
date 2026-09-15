@@ -26,6 +26,7 @@ from agentic.bench.harness.base import AgentHarness, RunResult
 from agentic.bench.harness.claude_code import ClaudeCodeHarness
 from agentic.bench.harness.gemini import GeminiHarness
 from agentic.bench.harness.codex import CodexHarness
+from agentic.bench.harness.pi import PiHarness
 from agentic.bench.analytics.report_generator import ReportGenerator
 from agentic.bench.telemetry.database_telemetry import TeradataTelemetry
 
@@ -41,6 +42,8 @@ def get_harness(harness_type: str, model_id: str, mode: str, workspace_dir: Path
         return GeminiHarness(model_id, mode, workspace_dir)
     elif harness_type == "codex":
         return CodexHarness(model_id, mode, workspace_dir)
+    elif harness_type == "pi":
+        return PiHarness(model_id, mode, workspace_dir)
     else:
         raise ValueError(f"Unsupported harness type: {harness_type}")
 
@@ -98,7 +101,7 @@ def execute_single_run(
 def main() -> None:
     parser = argparse.ArgumentParser(description="tq Agentic Optimization & Evaluation Benchmark Runner")
     parser.add_argument("--matrix", help="Path to matrix YAML configuration file")
-    parser.add_argument("--harness", choices=["claude-code", "gemini", "codex"], help="Harness to run")
+    parser.add_argument("--harness", choices=["claude-code", "gemini", "codex", "pi"], help="Harness to run")
     parser.add_argument("--model", help="Model ID")
     parser.add_argument("--mode", choices=["tq-with-skill", "tq-no-skill", "baseline-python"], default="tq-with-skill")
     parser.add_argument("--dataset", default="tpch_order_fulfillment", help="Dataset name")

@@ -42,3 +42,10 @@ runs:
     harness: "claude-code"
     model: "sonnet"
     mode: "baseline-python"
+
+  # 7. Pi Agent: Gemini 2.5 Flash (tq-with-skill)
+  - id: "pi_gemini_2_5_flash_tq"
+    harness: "pi"
+    model: "gemini-2.5-flash"
+    mode: "tq-with-skill"
+

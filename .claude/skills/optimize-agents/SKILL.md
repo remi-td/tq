@@ -30,7 +30,8 @@ Rapid analysis of sprint metrics and subagent execution to identify workflow fri
 
 1. **Scans Sprint Execution:** Quickly checks metrics for unusual token spikes, tool failures, or redundant operations.
 2. **Executes Direct Action:** If friction or waste is found, immediately updates the relevant `.agents/skills/*`, sub-agent prompt, script, or codebase file.
-3. **Exits Fast:** If no friction occurred, logs a 3-line status and exits immediately without generating unnecessary artifacts.
+3. **Optional Empirical Verification:** Run `./agentic/bench/tq-bench` to measure token deltas before/after skill edits.
+4. **Exits Fast:** If no friction occurred, logs a 3-line status and exits immediately without generating unnecessary artifacts.
 
 ## Workflow
 

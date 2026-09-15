@@ -1,0 +1,126 @@
+{
+  "dataset_name": "enterprise_data_platform_360",
+  "description": "Next-Gen Enterprise Omnichannel Retail Data Platform with DQ remediation, MPP modeling, and semantic layer",
+  "total_source_lineitems_raw": 20290,
+  "total_valid_lineitems_deduped": 20190,
+  "total_orders": 4000,
+  "total_customers_unique": 1000,
+  "total_products": 250,
+  "total_channels": 5,
+  "ground_truth_metrics": {
+    "total_gross_sales": 96603141.79,
+    "total_discount_amount": 12078787.25,
+    "total_net_revenue": 84524354.54,
+    "total_cogs": 60424255.54,
+    "total_gross_profit": 24100099.0,
+    "net_margin_pct": 28.51,
+    "otif_rate_pct": 42.68,
+    "avg_shipping_delay_days": 5.53
+  },
+  "target_objects": {
+    "staging_tables": [
+      "stg_channels",
+      "stg_products",
+      "stg_customers",
+      "stg_orders",
+      "stg_order_lineitems"
+    ],
+    "dimension_tables": [
+      "dim_customers",
+      "dim_products",
+      "dim_channels"
+    ],
+    "fact_tables": [
+      "fct_orders",
+      "fct_order_lineitems"
+    ],
+    "semantic_views": [
+      "v_sem_order_fulfillment",
+      "v_sem_customer_rfm_kpis",
+      "v_sem_channel_performance"
+    ]
+  },
+  "assertions": [
+    {
+      "id": "staging_tables_loaded",
+      "description": "All 5 raw staging tables successfully created and loaded",
+      "type": "table_exists",
+      "targets": [
+        "stg_channels",
+        "stg_products",
+        "stg_customers",
+        "stg_orders",
+        "stg_order_lineitems"
+      ]
+    },
+    {
+      "id": "raw_lineitem_count_matches",
+      "description": "Staging lineitems table matches source CSV row count exactly (~20k+ rows)",
+      "type": "row_count_exact",
+      "target": "stg_order_lineitems",
+      "expected": 20290
+    },
+    {
+      "id": "dim_customers_deduplicated",
+      "description": "Customer dimension successfully cleaned of duplicate sync records",
+      "type": "row_count_exact",
+      "target": "dim_customers",
+      "expected": 1000
+    },
+    {
+      "id": "dim_customers_primary_index",
+      "description": "Customer dimension has explicit Primary Index on customer_id",
+      "type": "primary_index_column",
+      "target": "dim_customers",
+      "column": "customer_id"
+    },
+    {
+      "id": "fct_lineitems_deduplicated",
+      "description": "Fact table deduplicated CDC lines and matches valid unique lineitems",
+      "type": "row_count_exact",
+      "target": "fct_order_lineitems",
+      "expected": 20190
+    },
+    {
+      "id": "fct_lineitems_primary_index",
+      "description": "Lineitems fact table has Primary Index on order_id to prevent join redistribution",
+      "type": "primary_index_column",
+      "target": "fct_order_lineitems",
+      "column": "order_id"
+    },
+    {
+      "id": "semantic_layer_views_created",
+      "description": "All 3 reusable semantic views created in database",
+      "type": "view_exists",
+      "targets": [
+        "v_sem_order_fulfillment",
+        "v_sem_customer_rfm_kpis",
+        "v_sem_channel_performance"
+      ]
+    },
+    {
+      "id": "semantic_net_revenue_exact",
+      "description": "Semantic view v_sem_order_fulfillment computes exact ground truth Net Revenue",
+      "type": "scalar_sum_match",
+      "target": "v_sem_order_fulfillment",
+      "column": "net_revenue_usd",
+      "expected": 84524354.54,
+      "tolerance": 1.0
+    },
+    {
+      "id": "semantic_gross_profit_exact",
+      "description": "Semantic view v_sem_order_fulfillment computes exact ground truth Gross Profit",
+      "type": "scalar_sum_match",
+      "target": "v_sem_order_fulfillment",
+      "column": "gross_profit_usd",
+      "expected": 24100099.0,
+      "tolerance": 1.0
+    },
+    {
+      "id": "executive_insights_artifact",
+      "description": "Agent produced DATA_PRODUCT_INSIGHTS.md answering business questions via semantic layer",
+      "type": "file_exists",
+      "filename": "DATA_PRODUCT_INSIGHTS.md"
+    }
+  ]
+}

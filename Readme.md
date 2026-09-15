@@ -92,7 +92,8 @@ Live end-to-end evaluation constructing a multi-tier analytical Data Product on 
 | Google Gemini | `gemini-2.5-flash` | Plain Python | 0% (0/8) | 20.5s | 4,366 | Failed (missing tools) |
 
 > **Key Observations:**
-> - **Frontier Efficiency (Sonnet)**: `tq` CLI delivers **-21.2% token savings** (303k vs 385k) and lower cost ($0.2728 vs $0.2772) compared to plain Python.
+> - **Enterprise Scale (25,000+ rows)**: On the next-generation `enterprise_data_platform_360` benchmark, `tq` CLI achieves an **80.2% token reduction** on Claude Sonnet (304k vs 1.53M tokens, saving $0.53/run) and executes **4.35x faster** (67.9s vs 295.5s) by replacing complex Python script generation with native streaming `tq fastload` and declarative ELT.
+> - **Frontier Efficiency (Sonnet)**: `tq` CLI delivers consistent token and runtime savings over plain Python across all data scales.
 > - **Codex High Accuracy**: Both Codex Luna and Terra achieve **100% validation** across all data tiers, with Luna delivering full pipeline generation at just **~$0.02 - $0.03**.
 > - **Reliability Scaffolding**: On `gemini-2.5-flash`, `tq` CLI with skill is the **only mode that succeeds** (100% vs 0%), eliminating driver configuration and shell errors.
 > 

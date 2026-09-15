@@ -126,7 +126,9 @@ class AgentHarness(ABC):
     def build_task_prompt(self, template_path: Path, table_prefix: str) -> str:
         """Render task prompt with unique table prefix."""
         text = template_path.read_text()
+        text = text.replace("{{TABLE_PREFIX}}", table_prefix)
         return text.replace("{table_prefix}", table_prefix)
+
 
     @abstractmethod
     def execute(

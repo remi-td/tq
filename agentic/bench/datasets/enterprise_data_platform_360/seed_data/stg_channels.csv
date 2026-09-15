@@ -1,0 +1,6 @@
+channel_id,channel_code,channel_name,cost_overhead_pct
+1,ONLINE_WEB,E-Commerce Web Portal,0.05
+2,MOBILE_APP,Mobile Application,0.04
+3,RETAIL_STORE,Flagship Retail Store,0.12
+4,B2B_WHOLESALE,B2B Wholesale Accounts,0.02
+5,MARKETPLACE,Third-Party Marketplace,0.15
